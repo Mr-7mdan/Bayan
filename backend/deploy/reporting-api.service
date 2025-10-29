@@ -1,0 +1,25 @@
+[Unit]
+Description=Reporting API (FastAPI via Waitress)
+After=network.target
+
+[Service]
+Type=simple
+# Change to the absolute path of your backend directory
+WorkingDirectory=/CHANGE/ME/absolute/path/to/backend
+# Ensure run_prod_waitress.sh is executable
+ExecStart=/CHANGE/ME/absolute/path/to/backend/run_prod_waitress.sh
+# Optionally override environment here or in an EnvironmentFile
+Environment=RUN_SCHEDULER=1
+Environment=HOST=127.0.0.1
+Environment=PORT=8000
+# Run as a non-root service account
+User=www-data
+Group=www-data
+# Restart policy
+Restart=always
+RestartSec=5
+# Increase file descriptor limit for high concurrency
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

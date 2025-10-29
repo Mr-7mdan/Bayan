@@ -1,0 +1,24 @@
+node_modules/
+errors/
+docs/
+frontend/node_modules/
+frontend/node_modules
+backend/venv/
+venv/
+.venv/
+
+.next/
+frontend/.next/
+dist/
+frontend/dist/
+backend/dist/
+backend/.data/
+scripts/out/
+.windsurf
+.vscode
+.DS_Store
+
+# Local data and editor config
+backend/.data/
+.vscode/
+.windsurf/

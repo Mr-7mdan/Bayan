@@ -1,0 +1,27 @@
+How to run locally (smoke test)
+Ensure executable:
+bash
+chmod +x backend/run_prod_gunicorn.sh
+Install deps:
+bash
+python3 -m venv backend/venv
+./backend/venv/bin/pip install -r backend/requirements.txt
+Run (ASGI):
+bash
+HOST=127.0.0.1 PORT=8000 ./backend/run_prod_gunicorn.sh
+# Open http://127.0.0.1:8000/api/healthz
+Production: switch systemd to ASGI
+Edit service file 
+backend/deploy/reporting-api-gunicorn.service
+:
+Set WorkingDirectory=/abs/path/to/backend
+Set ExecStart=/abs/path/to/backend/run_prod_gunicorn.sh
+Optionally set EnvironmentFile=/etc/reporting/reporting-api.env
+Ensure RUN_SCHEDULER=0 here if you run a separate scheduler leader (only one instance should have it on).
+Replace current service and reload:
+bash
+sudo cp backend/deploy/reporting-api-gunicorn.service /etc/systemd/system/reporting-api.service
+sudo systemctl daemon-reload
+sudo systemctl enable reporting-api
+sudo systemctl restart reporting-api
+sudo systemctl status reporting-api -n 100
