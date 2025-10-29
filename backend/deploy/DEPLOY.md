@@ -1,4 +1,4 @@
-# Deploying the Reporting API (FastAPI) behind Nginx + systemd
+# Deploying the Bayan API (FastAPI) behind Nginx + systemd
 
 This guide provides two production setups:
 

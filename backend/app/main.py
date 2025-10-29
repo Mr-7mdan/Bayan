@@ -15,10 +15,12 @@ from .schemas import (
     DetectResponse,
 )
 from pathlib import Path
+from uuid import uuid4
 import json
 from .db import get_engine_from_dsn, test_engine_connection
 from .db import init_duck_shared, close_duck_shared, open_duck_native
-from .models import init_db
+from .models import init_db, SessionLocal, User
+from .security import hash_password
 from .routers import datasources as ds_router
 from .routers import query as query_router
 from .routers import dashboards as dashboards_router
@@ -73,6 +75,25 @@ async def _metrics_mw(request: Request, call_next):
 @app.on_event("startup")
 async def _startup():
     init_db()
+    try:
+        email = (settings.admin_email or "").strip().lower()
+        password = (settings.admin_password or "").strip()
+        name = (settings.admin_name or "") or (email.split("@")[0] if email else "")
+        if email and password:
+            db = SessionLocal()
+            try:
+                has_admin = db.query(User).filter((User.role == "admin")).first()
+                if not has_admin:
+                    existing = db.query(User).filter(User.email == email).first()
+                    if existing is None:
+                        u = User(id=str(uuid4()), name=name or email, email=email, password_hash=hash_password(password), role="admin", active=True)
+                        db.add(u)
+                        db.commit()
+                        db.refresh(u)
+            finally:
+                db.close()
+    except Exception:
+        pass
     # Initialize a single shared DuckDB connection (Option A)
     try:
         init_duck_shared()

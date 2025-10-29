@@ -65,15 +65,26 @@ _DATA_DIR = Path(settings.metadata_db_path).resolve().parent
 _FRONTEND_VERSION_FILE = _DATA_DIR / "frontend_version.txt"
 
 
+def _read_or_seed_frontend_version() -> Optional[str]:
+    try:
+        if _FRONTEND_VERSION_FILE.exists():
+            v = _FRONTEND_VERSION_FILE.read_text(encoding="utf-8").strip()
+            return v or None
+        # Seed from env if provided
+        if settings.frontend_version_env:
+            _FRONTEND_VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            val = str(settings.frontend_version_env).strip()
+            _FRONTEND_VERSION_FILE.write_text(val, encoding="utf-8")
+            return val or None
+    except Exception:
+        return None
+    return None
+
+
 @router.get("/version", response_model=VersionOut)
 async def get_version() -> VersionOut:
     backend_v = settings.app_version
-    frontend_v = None
-    try:
-        if _FRONTEND_VERSION_FILE.exists():
-            frontend_v = _FRONTEND_VERSION_FILE.read_text(encoding="utf-8").strip() or None
-    except Exception:
-        frontend_v = None
+    frontend_v = _read_or_seed_frontend_version()
     return VersionOut(backend=backend_v, frontend=frontend_v)
 
 
@@ -131,12 +142,7 @@ async def _download_manifest_for_release(release: Dict[str, Any]) -> tuple[Updat
 async def check_updates(component: str = Query(default="backend", pattern=r"^(backend|frontend|both)$")) -> UpdateCheckOut:
     enabled = bool(settings.updates_enabled and settings.update_repo_owner and settings.update_repo_name)
     current_backend = settings.app_version or None
-    current_frontend = None
-    try:
-        if _FRONTEND_VERSION_FILE.exists():
-            current_frontend = _FRONTEND_VERSION_FILE.read_text(encoding="utf-8").strip() or None
-    except Exception:
-        current_frontend = None
+    current_frontend = _read_or_seed_frontend_version()
     if not enabled:
         return UpdateCheckOut(enabled=False, component=component, currentVersion=(current_backend if component != "frontend" else current_frontend))
     release = await _github_latest_release()
@@ -220,4 +226,11 @@ async def apply_update(
         # Non-fatal
         pass
 
+    # Persist applied frontend version for display
+    if component == "frontend":
+        try:
+            _FRONTEND_VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _FRONTEND_VERSION_FILE.write_text(str(mf.version).strip(), encoding="utf-8")
+        except Exception:
+            pass
     return ApplyResult(ok=True, component=component, version=mf.version, stagedPath=str(sd), requiresRestart=True)

@@ -1,5 +1,5 @@
 [Unit]
-Description=Reporting API (FastAPI via Gunicorn+Uvicorn)
+Description=Bayan API (FastAPI via Gunicorn+Uvicorn)
 After=network.target
 
 [Service]

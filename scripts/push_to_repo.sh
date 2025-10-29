@@ -61,6 +61,13 @@ if ! git rev-parse HEAD >/dev/null 2>&1; then
   git commit -m "chore: initial commit" || true
 fi
 
+CHANGES="$(git status --porcelain || true)"
+if [ -n "$CHANGES" ]; then
+  echo "[push] Committing pending changes"
+  git add -A
+  git commit -m "chore: release ${VER} - include pending changes" || true
+fi
+
 REWROTE=false
 # Preflight: detect tracked banned paths and handle first-commit rewrite safely
 BAN_REGEX='(^|/)node_modules/|(^|/)\.next/|^scripts/out/|(^|/)dist/'
@@ -94,8 +101,20 @@ if [ -n "${TRACKED_BANNED}" ]; then
 fi
 
 # Push main branch (handles empty remote)
+if git ls-remote --heads origin main >/dev/null 2>&1; then
+  echo "[push] Syncing with remote main (rebase)"
+  git pull --rebase origin main || { echo "[push] Pull --rebase failed; please resolve conflicts and retry." >&2; exit 1; }
+fi
 echo "[push] Pushing main branch to origin"
-git push -u origin main || true
+if ! git push -u origin main; then
+  if [ "${GIT_FORCE_PUSH:-0}" = "1" ] || [ "${GIT_FORCE_PUSH:-}" = "true" ] || [ "${GIT_FORCE_PUSH:-}" = "yes" ] || [ "${GIT_FORCE_PUSH:-}" = "on" ]; then
+    echo "[push] Force pushing main (with lease)"
+    git push -u --force-with-lease origin main || { echo "[push] Force push failed" >&2; exit 1; }
+  else
+    echo "[push] Push rejected. Run 'git pull --rebase origin main' or set GIT_FORCE_PUSH=1 to override." >&2
+    exit 1
+  fi
+fi
 
 # Create/retag to current HEAD if we rewrote initial commit
 if [ "$REWROTE" = true ]; then

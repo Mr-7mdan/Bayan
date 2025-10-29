@@ -3,14 +3,14 @@
 import { Card, Title, Text } from '@tremor/react'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Api } from '@/lib/api'
 
 export default function LoginPage() {
   const { login } = useAuth()
   const router = useRouter()
-  const [email, setEmail] = useState('user@example.com')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -29,12 +29,36 @@ export default function LoginPage() {
   const [rpBusy, setRpBusy] = useState(false)
   const [rpMsg, setRpMsg] = useState<string | null>(null)
 
+  // Load remembered email if enabled
+  useEffect(() => {
+    try {
+      const flag = localStorage.getItem('remember_me')
+      if (flag === '1' || flag === 'true') {
+        setRemember(true)
+        const saved = localStorage.getItem('saved_email') || ''
+        if (saved) setEmail(saved)
+      } else if (flag === '0' || flag === 'false') {
+        setRemember(false)
+      }
+    } catch {}
+  }, [])
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
     try {
       await login(email, password, remember)
+      // Persist or clear remembered email
+      try {
+        if (remember) {
+          localStorage.setItem('remember_me', '1')
+          localStorage.setItem('saved_email', email)
+        } else {
+          localStorage.removeItem('remember_me')
+          localStorage.removeItem('saved_email')
+        }
+      } catch {}
       router.replace('/home')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to login')

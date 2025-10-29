@@ -1,4 +1,4 @@
-# Deploying the Reporting API on Windows (Service + Reverse Proxy)
+# Deploying the Bayan API on Windows (Service + Reverse Proxy)
 
 This guide shows two supported Windows setups and how to run them as a Windows Service using NSSM, plus IIS reverse proxy.
 
@@ -30,8 +30,8 @@ APP_ENV=prod
 CORS_ORIGINS=https://app.example.com
 SECRET_KEY=change-me
 
-DUCKDB_PATH=C:\reporting\data\local.duckdb
-METADATA_DB_PATH=C:\reporting\data\meta.sqlite
+DUCKDB_PATH=C:\Bayan\data\local.duckdb
+METADATA_DB_PATH=C:\Bayan\data\meta.sqlite
 
 FRONTEND_BASE_URL=https://app.example.com
 BACKEND_BASE_URL=https://api.example.com/api
@@ -47,10 +47,10 @@ AI_TIMEOUT_SECONDS=30
 Create data directory:
 
 ```powershell
-New-Item -ItemType Directory -Force C:\reporting\data | Out-Null
+New-Item -ItemType Directory -Force C:\Bayan\data | Out-Null
 ```
 
-Avoid spaces in deployment path; e.g., `C:\Reporting\backend`.
+Avoid spaces in deployment path; e.g., `C:\Bayan\backend`.
 
 ## 3) Option A — Waitress (Recommended)
 
@@ -81,11 +81,11 @@ run_prod_waitress_windows.bat
 2) Create the service (CLI example):
 
 ```powershell
-nssm install ReportingAPIWaitress "C:\Windows\System32\cmd.exe" /c "C:\Reporting\backend\run_prod_waitress_windows.bat"
-nssm set ReportingAPIWaitress AppDirectory C:\Reporting\backend
+nssm install ReportingAPIWaitress "C:\Windows\System32\cmd.exe" /c "C:\Bayan\backend\run_prod_waitress_windows.bat"
+nssm set ReportingAPIWaitress AppDirectory C:\Bayan\backend
 # Optional logging
-nssm set ReportingAPIWaitress AppStdout C:\reporting\logs\reporting-api.out.log
-nssm set ReportingAPIWaitress AppStderr C:\reporting\logs\reporting-api.err.log
+nssm set ReportingAPIWaitress AppStdout C:\Bayan\logs\reporting-api.out.log
+nssm set ReportingAPIWaitress AppStderr C:\Bayan\logs\reporting-api.err.log
 nssm start ReportingAPIWaitress
 ```
 
@@ -116,8 +116,8 @@ run_prod_uvicorn_windows.bat
 ### Windows Service with NSSM
 
 ```powershell
-nssm install ReportingAPIUvicorn "C:\Windows\System32\cmd.exe" /c "C:\Reporting\backend\run_prod_uvicorn_windows.bat"
-nssm set ReportingAPIUvicorn AppDirectory C:\Reporting\backend
+nssm install ReportingAPIUvicorn "C:\Windows\System32\cmd.exe" /c "C:\Bayan\backend\run_prod_uvicorn_windows.bat"
+nssm set ReportingAPIUvicorn AppDirectory C:\Bayan\backend
 # Optionally set env in NSSM (Environment tab): WORKERS, RUN_SCHEDULER, HOST, PORT, AI_CONCURRENCY, AI_TIMEOUT_SECONDS
 nssm start ReportingAPIUvicorn
 ```
@@ -148,14 +148,14 @@ Invoke-WebRequest http://127.0.0.1:8000/api/healthz -UseBasicParsing
 http://127.0.0.1:8000/api/metrics
 ```
 
-- Logs: if configured in NSSM (`AppStdout`/`AppStderr`), view the files under `C:\reporting\logs`. Otherwise, check Windows Event Viewer.
+- Logs: if configured in NSSM (`AppStdout`/`AppStderr`), view the files under `C:\Bayan\logs`. Otherwise, check Windows Event Viewer.
 
 ## 7) Troubleshooting
 
 - Port in use: change `PORT` in `.env` and in IIS reverse proxy.
 - `.env` not applied: ensure service `AppDirectory` is `backend\` so `.env` is discovered.
 - Scheduler duplication: only one process should run with `RUN_SCHEDULER=1`.
-- Permissions: ensure the service account can read the repo and write to `C:\reporting\data`.
+- Permissions: ensure the service account can read the repo and write to `C:\Bayan\data`.
 - Missing packages: reinstall with `backend\venv\Scripts\pip install -r backend\requirements.txt`.
 
 ## 8) Quick reference (service control)

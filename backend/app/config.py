@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "Reporting Webapp API"
+    app_name: str = "Bayan WebApp API"
     environment: str = Field(default="dev", validation_alias=AliasChoices("APP_ENV", "ENVIRONMENT"))
 
     # CORS (comma-separated string)
@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     update_channel: str = Field(default="stable")
     github_token: Optional[str] = Field(default=None, validation_alias=AliasChoices("GITHUB_TOKEN"))
     update_manifest_name: str = Field(default="bayan-manifest.json")
+    # Optional seed for frontend current version when file is missing
+    frontend_version_env: Optional[str] = Field(default=None, validation_alias=AliasChoices("FRONTEND_VERSION"))
+
+    # Admin bootstrap on startup
+    admin_email: Optional[str] = Field(default=None, validation_alias=AliasChoices("ADMIN_EMAIL"))
+    admin_password: Optional[str] = Field(default=None, validation_alias=AliasChoices("ADMIN_PASSWORD"))
+    admin_name: Optional[str] = Field(default=None, validation_alias=AliasChoices("ADMIN_NAME"))
 
     # Prefer routing queries to local DuckDB when available
     prefer_local_duckdb: bool = Field(default=False, validation_alias=AliasChoices("PREFER_LOCAL_DUCKDB"))

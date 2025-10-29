@@ -1,5 +1,5 @@
 [Unit]
-Description=Reporting API (FastAPI via Waitress)
+Description=Bayan API (FastAPI via Waitress)
 After=network.target
 
 [Service]
