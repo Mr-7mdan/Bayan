@@ -1,0 +1,105 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0598CC;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#011419;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="chartGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#7DD3F3;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#29B5E8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#024158;stop-opacity:1" />
+    </linearGradient>
+    <filter id="softShadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- Rounded Square Background -->
+  <rect x="10" y="10" width="180" height="180" rx="35" fill="url(#bgGrad)" filter="url(#softShadow)"/>
+  
+  <!-- Inner Container -->
+  <rect x="30" y="30" width="140" height="140" rx="20" fill="white" opacity="0.1"/>
+  
+  <!-- Main Data Visualization -->
+  <g transform="translate(100, 100)">
+    
+    <!-- Rising Bar Chart -->
+    <g fill="white" opacity="0.95">
+      <rect x="-45" y="10" width="14" height="25" rx="3">
+        <animate attributeName="height" values="25;30;25" dur="2s" repeatCount="indefinite"/>
+      </rect>
+      <rect x="-23" y="-5" width="14" height="40" rx="3">
+        <animate attributeName="height" values="40;45;40" dur="2s" begin="0.2s" repeatCount="indefinite"/>
+      </rect>
+      <rect x="-1" y="-25" width="14" height="60" rx="3">
+        <animate attributeName="height" values="60;65;60" dur="2s" begin="0.4s" repeatCount="indefinite"/>
+      </rect>
+      <rect x="21" y="-40" width="14" height="75" rx="3">
+        <animate attributeName="height" values="75;80;75" dur="2s" begin="0.6s" repeatCount="indefinite"/>
+      </rect>
+    </g>
+    
+    <!-- Trend Line -->
+    <path d="M -48,20 L -16,5 L 6,-15 L 28,-30" 
+          stroke="url(#chartGrad)" 
+          stroke-width="4" 
+          fill="none" 
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          opacity="0.9">
+      <animate attributeName="stroke-dasharray" from="0,200" to="200,0" dur="3s" repeatCount="indefinite"/>
+    </path>
+    
+    <!-- Glow Points -->
+    <g>
+      <circle cx="-48" cy="20" r="5" fill="url(#chartGrad)">
+        <animate attributeName="r" values="5;7;5" dur="2s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="-16" cy="5" r="5" fill="url(#chartGrad)">
+        <animate attributeName="r" values="5;7;5" dur="2s" begin="0.3s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="6" cy="-15" r="5" fill="url(#chartGrad)">
+        <animate attributeName="r" values="5;7;5" dur="2s" begin="0.6s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="28" cy="-30" r="5" fill="url(#chartGrad)">
+        <animate attributeName="r" values="5;7;5" dur="2s" begin="0.9s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+    
+    <!-- Dashboard Grid -->
+    <g stroke="white" stroke-width="0.5" opacity="0.2">
+      <line x1="-55" y1="-20" x2="45" y2="-20"/>
+      <line x1="-55" y1="0" x2="45" y2="0"/>
+      <line x1="-55" y1="20" x2="45" y2="20"/>
+    </g>
+    
+    <!-- Pie Chart Accent (Bottom Right) -->
+    <g transform="translate(45, 25)" opacity="0.85">
+      <circle cx="0" cy="0" r="15" fill="white" opacity="0.15"/>
+      <path d="M 0,-15 A 15,15 0 0,1 13,-7.5 L 0,0 Z" fill="white" opacity="0.9"/>
+      <path d="M 13,-7.5 A 15,15 0 0,1 13,7.5 L 0,0 Z" fill="white" opacity="0.7"/>
+      <path d="M 13,7.5 A 15,15 0 0,1 0,15 L 0,0 Z" fill="white" opacity="0.5"/>
+    </g>
+    
+    <!-- Modern Corner Brackets -->
+    <g stroke="white" stroke-width="2" opacity="0.3" stroke-linecap="round">
+      <path d="M -55,-45 L -55,-55 L -45,-55"/>
+      <path d="M 45,-45 L 45,-55 L 55,-55"/>
+      <path d="M -55,45 L -55,55 L -45,55"/>
+      <path d="M 45,45 L 45,55 L 55,55"/>
+    </g>
+  </g>
+  
+  <!-- Subtle Sparkle Effects -->
+  <g fill="white" opacity="0.6">
+    <circle cx="50" cy="50" r="2">
+      <animate attributeName="opacity" values="0.3;1;0.3" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="150" cy="60" r="2">
+      <animate attributeName="opacity" values="0.3;1;0.3" dur="3s" begin="1s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="160" cy="140" r="2">
+      <animate attributeName="opacity" values="0.3;1;0.3" dur="3s" begin="2s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>

@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover
     _duckdb = None
 
 from ..models import SessionLocal, Datasource, init_db, create_datasource, NewDatasourceInput, User, SyncTask, SyncState, SyncRun, SyncLock
-from ..db import get_duckdb_engine, get_engine_from_dsn, run_sequence_sync, run_snapshot_sync, open_duck_native
+from ..db import get_duckdb_engine, get_engine_from_dsn, run_sequence_sync, run_snapshot_sync, open_duck_native, get_active_duck_path
 from ..api_ingest import run_api_sync
 from ..db import dispose_engine_by_key, dispose_all_engines, dispose_duck_engine
 from ..schemas import (
@@ -523,6 +523,8 @@ def run_sync_now(
     if running >= maxc:
         return {"ok": False, "message": f"Max concurrent syncs reached ({running}/{maxc}). Try later."}
     duck_engine = get_duckdb_engine()
+    # Resolve the current active DuckDB path at start of this run
+    curr_duck_path = get_active_duck_path()
     source_engine = None
     is_api = str(ds.type or '').lower() == 'api'
     try:
@@ -670,6 +672,7 @@ def run_sync_now(
                 st.last_row_count = res.get("row_count")
                 st.last_run_at = datetime.utcnow()
                 st.error = None
+                st.last_duck_path = curr_duck_path
                 run.row_count = st.last_row_count
                 run.finished_at = st.last_run_at
                 try:
@@ -706,6 +709,7 @@ def run_sync_now(
                 st.last_row_count = res.get("row_count")
                 st.last_run_at = datetime.utcnow()
                 st.error = None
+                st.last_duck_path = curr_duck_path
                 # update run log
                 run.row_count = st.last_row_count
                 run.finished_at = st.last_run_at
@@ -732,6 +736,7 @@ def run_sync_now(
                 st.last_row_count = res.get("row_count")
                 st.last_run_at = datetime.utcnow()
                 st.error = None
+                st.last_duck_path = curr_duck_path
                 run.row_count = st.last_row_count
                 run.finished_at = st.last_run_at
                 results.append({"taskId": t.id, "mode": t.mode, "rowCount": st.last_row_count})
@@ -741,7 +746,7 @@ def run_sync_now(
                     def _q_duck(name: str) -> str:
                         return '"' + str(name).replace('"', '""') + '"'
                     if _duckdb is not None:
-                        con = open_duck_native(settings.duckdb_path)
+                        con = open_duck_native(curr_duck_path)
                         try:
                             for sq in seq_tasks:
                                 if not sq.sequence_column:
@@ -865,6 +870,30 @@ def list_sync_logs(ds_id: str, taskId: str | None = Query(default=None), limit: 
     ]
 
 
+@router.delete("/{ds_id}/sync/logs")
+def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if not _is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if ds.user_id and ds.user_id != actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    q = db.query(SyncRun).filter(SyncRun.datasource_id == ds_id)
+    if taskId:
+        q = q.filter(SyncRun.task_id == taskId)
+    deleted = 0
+    try:
+        deleted = int(q.delete(synchronize_session=False) or 0)
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return {"deleted": deleted}
+
+
 @router.patch("/{ds_id}/sync-tasks/{task_id}", response_model=SyncTaskOut)
 def update_sync_task(ds_id: str, task_id: str, payload: SyncTaskCreate, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
     t = db.get(SyncTask, task_id)
@@ -919,39 +948,55 @@ def local_stats(ds_id: str, db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    duck_path = settings.duckdb_path
+    # Determine per-task DuckDB paths (last used), defaulting to current active
+    tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).all()
+    states_by_task: dict[str, SyncState | None] = { t.id: db.query(SyncState).filter(SyncState.task_id == t.id).first() for t in tasks }
+    paths = []
+    for t in tasks:
+        st = states_by_task.get(t.id)
+        p = (st.last_duck_path if st and st.last_duck_path else None)
+        if not p:
+            p = get_active_duck_path()
+        paths.append(p)
+    # Prefer a single representative path for header fields when consistent
+    header_path = None
     try:
-        file_size = os.path.getsize(duck_path)
+        uniq = sorted({p for p in paths if p})
+        header_path = (uniq[0] if len(uniq) == 1 else get_active_duck_path())
+    except Exception:
+        header_path = get_active_duck_path()
+    try:
+        file_size = os.path.getsize(header_path) if header_path else 0
     except Exception:
         file_size = 0
-    tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).all()
     out: list[LocalTableStat] = []
-    # Use native duckdb directly to avoid duckdb_engine incompatibilities
     if _duckdb is None:
         raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
     try:
         def _q_duck(name: str) -> str:
             return '"' + str(name).replace('"', '""') + '"'
-        with open_duck_native(duck_path) as conn:
-            for t in tasks:
-                row_count = None
-                try:
+        # Query row counts per task using its recorded path
+        for t in tasks:
+            st = states_by_task.get(t.id)
+            p = (st.last_duck_path if st and st.last_duck_path else None) or get_active_duck_path()
+            row_count = None
+            try:
+                with open_duck_native(p) as conn:
                     row = conn.execute(f"SELECT COUNT(*) FROM {_q_duck(t.dest_table_name)}").fetchone()
                     row_count = int(row[0]) if row else 0
-                except Exception:
-                    row_count = None
-                st = db.query(SyncState).filter(SyncState.task_id == t.id).first()
-                out.append(
-                    LocalTableStat(
-                        table=t.dest_table_name,
-                        rowCount=row_count,
-                        lastSyncAt=(st.last_run_at if st else None),
-                        datasourceId=t.datasource_id,
-                        sourceSchema=t.source_schema,
-                        sourceTable=t.source_table,
-                    )
+            except Exception:
+                row_count = None
+            out.append(
+                LocalTableStat(
+                    table=t.dest_table_name,
+                    rowCount=row_count,
+                    lastSyncAt=(st.last_run_at if st else None),
+                    datasourceId=t.datasource_id,
+                    sourceSchema=t.source_schema,
+                    sourceTable=t.source_table,
                 )
-        return LocalStatsResponse(enginePath=duck_path, fileSize=int(file_size), tables=out)
+            )
+        return LocalStatsResponse(enginePath=header_path or get_active_duck_path(), fileSize=int(file_size), tables=out)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Local stats failed: {e}")
 

@@ -1,0 +1,77 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad1Dark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7DD3F3;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#29B5E8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0598CC;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad2Dark" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#B8E8F5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7DD3F3;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glowDark">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Outer Ring -->
+  <circle cx="100" cy="100" r="90" fill="none" stroke="url(#grad1Dark)" stroke-width="2" opacity="0.4"/>
+  
+  <!-- Main Container -->
+  <g transform="translate(100, 100)">
+    <!-- Central Hexagon Base -->
+    <path d="M 0,-50 L 43.3,-25 L 43.3,25 L 0,50 L -43.3,25 L -43.3,-25 Z" 
+          fill="url(#grad1Dark)" opacity="0.95" filter="url(#glowDark)"/>
+    
+    <!-- Inner Hexagon -->
+    <path d="M 0,-35 L 30.3,-17.5 L 30.3,17.5 L 0,35 L -30.3,17.5 L -30.3,-17.5 Z" 
+          fill="#011419" opacity="0.2"/>
+    
+    <!-- Rising Data Bars -->
+    <g fill="#011419" opacity="0.95">
+      <rect x="-25" y="5" width="8" height="20" rx="1.5"/>
+      <rect x="-12" y="-5" width="8" height="30" rx="1.5"/>
+      <rect x="1" y="-15" width="8" height="40" rx="1.5"/>
+      <rect x="14" y="-25" width="8" height="50" rx="1.5"/>
+    </g>
+    
+    <!-- Analytics Curve -->
+    <path d="M -28,15 Q -15,0 0,-10 T 25,-20" 
+          stroke="url(#grad2Dark)" 
+          stroke-width="2.5" 
+          fill="none" 
+          stroke-linecap="round"
+          opacity="0.9"/>
+    
+    <!-- Data Points -->
+    <g fill="#B8E8F5">
+      <circle cx="-28" cy="15" r="3"/>
+      <circle cx="0" cy="-10" r="3"/>
+      <circle cx="25" cy="-20" r="3"/>
+    </g>
+    
+    <!-- Dashboard Grid Lines -->
+    <g stroke="#011419" stroke-width="1" opacity="0.3">
+      <line x1="-35" y1="-10" x2="35" y2="-10"/>
+      <line x1="-35" y1="0" x2="35" y2="0"/>
+      <line x1="-35" y1="10" x2="35" y2="10"/>
+    </g>
+    
+    <!-- Corner Accent Dots -->
+    <g fill="url(#grad2Dark)" opacity="0.8">
+      <circle cx="-40" cy="-40" r="3"/>
+      <circle cx="40" cy="-40" r="3"/>
+      <circle cx="40" cy="40" r="3"/>
+      <circle cx="-40" cy="40" r="3"/>
+    </g>
+  </g>
+  
+  <!-- Orbital Rings -->
+  <g stroke="url(#grad2Dark)" stroke-width="1.5" fill="none" opacity="0.5">
+    <circle cx="100" cy="100" r="70" stroke-dasharray="5,5"/>
+  </g>
+</svg>

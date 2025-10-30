@@ -7,7 +7,7 @@ export default function AboutPage() {
     <div className="mx-auto max-w-3xl p-6 space-y-6">
       <header>
         <div className="flex items-center gap-4">
-          <img src="/bayan.svg" alt="Bayan" className="h-16 w-auto md:h-20" />
+          <img src="/bayan-logo-square.svg" alt="Bayan" className="h-16 w-auto md:h-20" />
           <div>
             <h1 className="text-2xl font-semibold">About Bayan</h1>
             <p className="mt-0.5 text-sm text-muted-foreground">Dashboard & Analytics</p>

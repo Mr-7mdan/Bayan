@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bayan Logo Variations</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #0598CC 0%, #011419 100%);
+            padding: 40px 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 50px;
+            font-size: 3rem;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .logo-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .logo-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 50px rgba(0,0,0,0.3);
+        }
+        
+        .logo-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .logo-display {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 250px;
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+        
+        .logo-display img {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .logo-info {
+            font-size: 0.9rem;
+            color: #64748b;
+            text-align: center;
+            line-height: 1.6;
+        }
+        
+        .dark-bg {
+            background: #1e293b;
+        }
+        
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        
+        .download-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #29B5E8 0%, #011419 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-top: 10px;
+            transition: opacity 0.3s ease;
+        }
+        
+        .download-btn:hover {
+            opacity: 0.9;
+        }
+        
+        .color-palette {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        
+        .color-swatch {
+            width: 60px;
+            height: 60px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .color-code {
+            font-size: 0.7rem;
+            color: white;
+            font-weight: 600;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Bayan Analytics Platform Logos</h1>
+        
+        <div style="text-align: center; margin-bottom: 30px;">
+            <button onclick="toggleTheme()" style="padding: 12px 24px; background: linear-gradient(135deg, #29B5E8 0%, #011419 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 16px;">
+                🌓 Toggle Light/Dark Mode Preview
+            </button>
+        </div>
+        
+        <div class="grid">
+            <div class="logo-card">
+                <div class="logo-title">Primary Logo - Light Mode</div>
+                <div class="logo-display">
+                    <img src="bayan-logo.svg" alt="Bayan Primary Logo">
+                </div>
+                <div class="logo-info">
+                    Classic circular design with data visualization elements. Best for splash screens and about pages.
+                </div>
+                <center><a href="bayan-logo.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Primary Logo - Dark Mode</div>
+                <div class="logo-display dark-bg">
+                    <img src="bayan-logo-dark.svg" alt="Bayan Primary Logo Dark">
+                </div>
+                <div class="logo-info">
+                    Optimized for dark backgrounds with bright teal gradients and high contrast.
+                </div>
+                <center><a href="bayan-logo-dark.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Hexagon Logo - Light Mode</div>
+                <div class="logo-display dark-bg">
+                    <img src="bayan-logo-alt.svg" alt="Bayan Hexagon Logo">
+                </div>
+                <div class="logo-info">
+                    Geometric hexagon with animated elements. Perfect for loading screens and tech-forward branding.
+                </div>
+                <center><a href="bayan-logo-alt.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Hexagon Logo - Dark Mode</div>
+                <div class="logo-display dark-bg">
+                    <img src="bayan-logo-alt-dark.svg" alt="Bayan Hexagon Logo Dark">
+                </div>
+                <div class="logo-info">
+                    Bright hexagon design for dark backgrounds with enhanced glow effects.
+                </div>
+                <center><a href="bayan-logo-alt-dark.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Square Logo - Light Mode</div>
+                <div class="logo-display">
+                    <img src="bayan-logo-square.svg" alt="Bayan Square Logo">
+                </div>
+                <div class="logo-info">
+                    Animated square design with subtle effects. Ideal for app icons, favicons, and social media.
+                </div>
+                <center><a href="bayan-logo-square.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Square Logo - Dark Mode</div>
+                <div class="logo-display dark-bg">
+                    <img src="bayan-logo-square-dark.svg" alt="Bayan Square Logo Dark">
+                </div>
+                <div class="logo-info">
+                    Bright animated square for dark themes. Perfect for dark-themed apps and interfaces.
+                </div>
+                <center><a href="bayan-logo-square-dark.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card full-width">
+                <div class="logo-title">Horizontal Logo - Light Mode</div>
+                <div class="logo-display">
+                    <img src="bayan-logo-minimal.svg" alt="Bayan Horizontal Logo" style="max-height: 100px;">
+                </div>
+                <div class="logo-info">
+                    Clean horizontal layout with text. Perfect for navigation bars, headers, and email signatures.
+                </div>
+                <center><a href="bayan-logo-minimal.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card full-width">
+                <div class="logo-title">Horizontal Logo - Dark Mode</div>
+                <div class="logo-display dark-bg">
+                    <img src="bayan-logo-minimal-dark.svg" alt="Bayan Horizontal Logo Dark" style="max-height: 100px;">
+                </div>
+                <div class="logo-info">
+                    Bright horizontal design for dark headers and navigation bars. High contrast text for readability.
+                </div>
+                <center><a href="bayan-logo-minimal-dark.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Favicon 32x32 - Light Mode</div>
+                <div class="logo-display" style="background: #f1f5f9;">
+                    <div style="display: flex; gap: 30px; align-items: center;">
+                        <img src="favicon.svg" alt="Bayan Favicon 32px" style="width: 32px; height: 32px;">
+                        <img src="favicon.svg" alt="Bayan Favicon 64px" style="width: 64px; height: 64px;">
+                        <img src="favicon.svg" alt="Bayan Favicon 128px" style="width: 128px; height: 128px;">
+                    </div>
+                </div>
+                <div class="logo-info">
+                    Optimized for browser tabs and bookmarks. Scalable for various sizes (32px, 64px, 128px).
+                </div>
+                <center><a href="favicon.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Favicon 32x32 - Dark Mode</div>
+                <div class="logo-display dark-bg">
+                    <div style="display: flex; gap: 30px; align-items: center;">
+                        <img src="favicon-dark.svg" alt="Bayan Favicon Dark 32px" style="width: 32px; height: 32px;">
+                        <img src="favicon-dark.svg" alt="Bayan Favicon Dark 64px" style="width: 64px; height: 64px;">
+                        <img src="favicon-dark.svg" alt="Bayan Favicon Dark 128px" style="width: 128px; height: 128px;">
+                    </div>
+                </div>
+                <div class="logo-info">
+                    Bright favicon for dark browser themes. Perfect for users with dark mode enabled.
+                </div>
+                <center><a href="favicon-dark.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Favicon 16x16 - Light Mode</div>
+                <div class="logo-display" style="background: #f1f5f9;">
+                    <div style="display: flex; gap: 30px; align-items: center;">
+                        <img src="favicon-16x16.svg" alt="Bayan Favicon 16px" style="width: 16px; height: 16px; image-rendering: pixelated;">
+                        <img src="favicon-16x16.svg" alt="Bayan Favicon 32px" style="width: 32px; height: 32px;">
+                        <img src="favicon-16x16.svg" alt="Bayan Favicon 64px" style="width: 64px; height: 64px;">
+                    </div>
+                </div>
+                <div class="logo-info">
+                    Ultra-simplified version for tiny displays. Extra clean at 16px for maximum clarity.
+                </div>
+                <center><a href="favicon-16x16.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+            
+            <div class="logo-card">
+                <div class="logo-title">Favicon 16x16 - Dark Mode</div>
+                <div class="logo-display dark-bg">
+                    <div style="display: flex; gap: 30px; align-items: center;">
+                        <img src="favicon-16x16-dark.svg" alt="Bayan Favicon Dark 16px" style="width: 16px; height: 16px; image-rendering: pixelated;">
+                        <img src="favicon-16x16-dark.svg" alt="Bayan Favicon Dark 32px" style="width: 32px; height: 32px;">
+                        <img src="favicon-16x16-dark.svg" alt="Bayan Favicon Dark 64px" style="width: 64px; height: 64px;">
+                    </div>
+                </div>
+                <div class="logo-info">
+                    Bright, ultra-simplified favicon for dark themes at tiny sizes.
+                </div>
+                <center><a href="favicon-16x16-dark.svg" download class="download-btn">Download SVG</a></center>
+            </div>
+        </div>
+        
+        <div class="logo-card">
+            <div class="logo-title">Color Palette</div>
+            <div class="color-palette">
+                <div class="color-swatch" style="background: #011419;">
+                    <span class="color-code">#011419</span>
+                </div>
+                <div class="color-swatch" style="background: #012633;">
+                    <span class="color-code">#012633</span>
+                </div>
+                <div class="color-swatch" style="background: #024158;">
+                    <span class="color-code">#024158</span>
+                </div>
+                <div class="color-swatch" style="background: #0598CC;">
+                    <span class="color-code">#0598CC</span>
+                </div>
+                <div class="color-swatch" style="background: #29B5E8;">
+                    <span class="color-code">#29B5E8</span>
+                </div>
+                <div class="color-swatch" style="background: #7DD3F3;">
+                    <span class="color-code">#7DD3F3</span>
+                </div>
+            </div>
+            <div class="logo-info" style="margin-top: 20px;">
+                Deep teal palette based on HSL(199, 98.5%, 8.1%) - sophisticated, modern, and data-focused.<br>
+                Range from dark base (#011419) to bright accent (#7DD3F3).
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function toggleTheme() {
+            const displays = document.querySelectorAll('.logo-display');
+            displays.forEach(display => {
+                if (display.classList.contains('dark-bg')) {
+                    display.classList.remove('dark-bg');
+                    display.style.background = '#f8fafc';
+                } else if (display.style.background === 'rgb(248, 250, 252)' || display.style.background === '#f8fafc' || display.style.background === 'rgb(241, 245, 249)' || display.style.background === '#f1f5f9') {
+                    display.classList.add('dark-bg');
+                    display.style.background = '';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

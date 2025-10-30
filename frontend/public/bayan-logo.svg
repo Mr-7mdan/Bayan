@@ -1,0 +1,62 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="primaryGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#29B5E8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#011419;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7DD3F3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0598CC;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.2"/>
+      </feComponentTransfer>
+      <feMerge> 
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/> 
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background Circle -->
+  <circle cx="100" cy="100" r="95" fill="url(#primaryGradient)" filter="url(#shadow)"/>
+  
+  <!-- Dashboard Grid Base -->
+  <rect x="50" y="60" width="100" height="80" rx="8" fill="white" fill-opacity="0.15"/>
+  
+  <!-- Data Bars - Rising Chart -->
+  <g opacity="0.9">
+    <rect x="65" y="105" width="12" height="25" rx="2" fill="white"/>
+    <rect x="82" y="95" width="12" height="35" rx="2" fill="white"/>
+    <rect x="99" y="85" width="12" height="45" rx="2" fill="white"/>
+    <rect x="116" y="75" width="12" height="55" rx="2" fill="white"/>
+  </g>
+  
+  <!-- Analytics Line Graph Overlay -->
+  <g stroke="url(#accentGradient)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.8">
+    <path d="M 60 120 Q 75 110, 88 100 T 116 75 T 140 65" />
+  </g>
+  
+  <!-- Data Points on Line -->
+  <circle cx="60" cy="120" r="4" fill="#29B5E8"/>
+  <circle cx="88" cy="100" r="4" fill="#29B5E8"/>
+  <circle cx="116" cy="75" r="4" fill="#29B5E8"/>
+  <circle cx="140" cy="65" r="4" fill="#29B5E8"/>
+  
+  <!-- Pie Chart Accent -->
+  <g transform="translate(130, 105)">
+    <circle cx="0" cy="0" r="18" fill="white" opacity="0.2"/>
+    <path d="M 0,-18 A 18,18 0 0,1 15.59,-9 L 0,0 Z" fill="white" opacity="0.9"/>
+    <path d="M 15.59,-9 A 18,18 0 0,1 0,18 L 0,0 Z" fill="white" opacity="0.6"/>
+  </g>
+  
+  <!-- Modern Geometric Accent Lines -->
+  <g stroke="white" stroke-width="2" opacity="0.3" stroke-linecap="round">
+    <line x1="55" y1="50" x2="75" y2="50"/>
+    <line x1="125" y1="50" x2="145" y2="50"/>
+    <line x1="55" y1="150" x2="75" y2="150"/>
+  </g>
+</svg>

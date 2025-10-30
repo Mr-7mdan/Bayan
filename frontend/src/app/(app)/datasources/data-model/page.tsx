@@ -6,7 +6,7 @@ import { useAuth } from '@/components/providers/AuthProvider'
 import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
 import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
 import type { IntrospectResponse as IR } from '@/lib/api'
-import { Select, SelectItem } from '@tremor/react'
+import { Select, SelectItem, Card, TextInput } from '@tremor/react'
 
 type Row = {
   table: string
@@ -23,16 +23,39 @@ export default function DataModelPage() {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [datasources, setDatasources] = useState<DatasourceOut[]>([])
   const [rows, setRows] = useState<Row[]>([])
   const [filter, setFilter] = useState('')
   const [columnsByTable, setColumnsByTable] = useState<Record<string, Array<{ name: string; type?: string | null }>>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [tasksByDs, setTasksByDs] = useState<Record<string, SyncTaskOut[]>>({})
-  const [preview, setPreview] = useState<{ open: boolean; table?: string }>({ open: false })
+  const [preview, setPreview] = useState<{ open: boolean; dsId?: string; table?: string }>({ open: false })
   const [adv, setAdv] = useState<{ open: boolean; dsId?: string; dsType?: string; source?: string; schema?: IR }>(() => ({ open: false }))
   const [dropping, setDropping] = useState<string | null>(null)
   const [pageSize, setPageSize] = useState(8)
   const [page, setPage] = useState(0)
+  // Local DuckDB management
+  const [defaultDsId, setDefaultDsId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newName, setNewName] = useState('Local DuckDB')
+  const [activeDuckPath, setActiveDuckPath] = useState<string | null>(null)
+
+  // Keep defaultDsId in sync with localStorage and custom events
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const read = () => { try { setDefaultDsId(localStorage.getItem('default_ds_id')) } catch { setDefaultDsId(null) } }
+        read()
+        const onStorage = (e: StorageEvent) => { if (e.key === 'default_ds_id') read() }
+        const onCustom = () => read()
+        window.addEventListener('storage', onStorage as EventListener)
+        window.addEventListener('default-ds-change', onCustom as EventListener)
+        return () => { window.removeEventListener('storage', onStorage as EventListener); window.removeEventListener('default-ds-change', onCustom as EventListener) }
+      }
+    } catch {}
+    return () => {}
+  }, [])
 
   useEffect(() => {
     let stop = false
@@ -40,18 +63,20 @@ export default function DataModelPage() {
       setLoading(true); setError(null)
       try {
         const isAdmin = (user?.role === 'admin')
-        const datasources = await Api.listDatasources(isAdmin ? undefined : user?.id, user?.id)
+        const dsList = await Api.listDatasources(isAdmin ? undefined : user?.id, user?.id)
         if (stop) return
+        setDatasources(dsList)
         const dsMap: Record<string, DatasourceOut> = {}
-        datasources.forEach((d) => { dsMap[d.id] = d })
-        const statsList = await Promise.all(datasources.map(async (d) => {
+        dsList.forEach((d) => { dsMap[d.id] = d })
+        const duckOnly = dsList.filter((d) => String(d.type||'').toLowerCase().includes('duckdb'))
+        const statsList = await Promise.all(duckOnly.map(async (d) => {
           try { return await Api.getLocalStats(d.id) } catch { return null as unknown as LocalStatsResponse | null }
         }))
         if (stop) return
         const agg: Row[] = []
         statsList.forEach((ls, i) => {
           if (!ls) return
-          const ds = datasources[i]
+          const ds = duckOnly[i]
           for (const t of (ls.tables || [])) {
             agg.push({
               table: t.table,
@@ -66,23 +91,20 @@ export default function DataModelPage() {
           }
         })
         setRows(agg)
-        try {
-          const schemaLocal = await Api.introspectLocal()
-          if (!stop && schemaLocal) {
-            const map: Record<string, Array<{ name: string; type?: string | null }>> = {}
-            ;(schemaLocal.schemas || []).forEach((s) => {
-              ;(s.tables || []).forEach((t) => { map[t.name] = t.columns || [] })
-            })
-            setColumnsByTable(map)
-          }
-        } catch {}
-        const taskLists = await Promise.all(datasources.map(async (d) => {
+        const taskLists = await Promise.all(duckOnly.map(async (d) => {
           try { return await Api.getSyncStatus(d.id, user?.id) } catch { return [] as SyncTaskOut[] }
         }))
         if (stop) return
         const tmap: Record<string, SyncTaskOut[]> = {}
-        datasources.forEach((d, i) => { tmap[d.id] = taskLists[i] || [] })
+        duckOnly.forEach((d, i) => { tmap[d.id] = taskLists[i] || [] })
         setTasksByDs(tmap)
+        // Load default ds id from localStorage (initial)
+        try { if (typeof window !== 'undefined') setDefaultDsId((prev)=> prev ?? localStorage.getItem('default_ds_id')) } catch {}
+        // Fetch current global active DuckDB path (admin-only)
+        try {
+          const res = await Api.duckActiveGet(user?.id)
+          setActiveDuckPath((res as any)?.path || null)
+        } catch {}
       } catch (e: any) {
         if (!stop) setError(String(e?.message || 'Failed to load Data Model'))
       } finally {
@@ -92,15 +114,47 @@ export default function DataModelPage() {
     return () => { stop = true }
   }, [user?.id])
 
+  // Determine which DuckDB is selected for the grid: default id if valid, else first DuckDB
+  const selectedDuckId = useMemo(() => {
+    const ducks = datasources.filter((d) => String(d.type||'').toLowerCase().includes('duckdb'))
+    if (defaultDsId && ducks.some((d) => d.id === defaultDsId)) return defaultDsId
+    return (ducks[0]?.id || null)
+  }, [defaultDsId, datasources])
+
+  // Keep columns listing in sync with selected DuckDB
+  useEffect(() => {
+    let stop = false
+    ;(async () => {
+      try {
+        setColumnsByTable({})
+        if (!selectedDuckId) return
+        const schemaSel = await Api.introspect(selectedDuckId)
+        if (stop) return
+        const map: Record<string, Array<{ name: string; type?: string | null }>> = {}
+        ;(schemaSel.schemas || []).forEach((s) => {
+          ;(s.tables || []).forEach((t) => { map[t.name] = t.columns || [] })
+        })
+        setColumnsByTable(map)
+      } catch {}
+    })()
+    return () => { stop = true }
+  }, [selectedDuckId])
+
+  // Base rows filtered by selected DuckDB
+  const baseRows = useMemo(() => {
+    if (!selectedDuckId) return rows
+    return rows.filter((r) => r.datasourceId === selectedDuckId)
+  }, [rows, selectedDuckId])
+
   const filtered = useMemo(() => {
     const q = (filter || '').trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((r) => (
+    if (!q) return baseRows
+    return baseRows.filter((r) => (
       r.table.toLowerCase().includes(q) ||
       r.datasourceName.toLowerCase().includes(q) ||
       (r.sourceTable || '').toLowerCase().includes(q)
     ))
-  }, [rows, filter])
+  }, [baseRows, filter])
   const totalPages = Math.max(1, Math.ceil((filtered.length || 0) / pageSize))
   const visible = useMemo(() => filtered.slice(page * pageSize, page * pageSize + pageSize), [filtered, page, pageSize])
   useEffect(() => { setPage(0) }, [filter, pageSize])
@@ -110,6 +164,80 @@ export default function DataModelPage() {
       <div>
         <h1 className="text-base font-medium">Data Model</h1>
         <div className="text-xs text-muted-foreground">Manage local DuckDB tables, view columns, preview data, and delete tables. Create custom columns and joins via SQL Advanced.</div>
+      </div>
+
+      {/* Local DuckDBs management */}
+      <div className="rounded-xl border-2 border-[hsl(var(--border))] p-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium">Local DuckDBs</div>
+            <div className="text-xs text-muted-foreground">Create a new local DuckDB file, set default for new widgets, or delete old entries.</div>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              className="px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
+              onClick={() => setCreateOpen(true)}
+            >Create New DuckDB</button>
+          </div>
+        </div>
+        <div className="mt-2 text-[11px] text-muted-foreground">
+          <span>Active DuckDB for scheduled syncs:</span>
+          <code className="ml-1 px-1 py-0.5 rounded bg-[hsl(var(--card))] border">{activeDuckPath || '-'}</code>
+        </div>
+        <div className="mt-2 overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="text-left border-b border-[hsl(var(--border))]">
+                <th className="px-2 py-1">Name</th>
+                <th className="px-2 py-1">Type</th>
+                <th className="px-2 py-1">Default (UI)</th>
+                <th className="px-2 py-1">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {datasources.filter(d=>String(d.type||'').toLowerCase().includes('duckdb')).map((d)=>{
+                const isDefault = defaultDsId && d.id === defaultDsId
+                return (
+                  <tr key={d.id} className="border-b border-[hsl(var(--border))]">
+                    <td className="px-2 py-1">{d.name}</td>
+                    <td className="px-2 py-1">{d.type}</td>
+                    <td className="px-2 py-1">{isDefault ? 'Yes' : 'No'}</td>
+                    <td className="px-2 py-1">
+                      <div className="flex items-center gap-2">
+                        {!isDefault && (
+                          <button className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]" onClick={()=>{
+                            try { if (typeof window !== 'undefined') { localStorage.setItem('default_ds_id', d.id); window.dispatchEvent(new CustomEvent('default-ds-change')); setDefaultDsId(d.id) } } catch {}
+                          }}>Make Default</button>
+                        )}
+                        <button
+                          className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
+                          title="Use this database for scheduled sync tasks (admin only)"
+                          onClick={async () => {
+                            try {
+                              const res = await Api.duckActiveSet({ datasourceId: d.id }, user?.id)
+                              setActiveDuckPath((res as any)?.path || null)
+                            } catch (e) {
+                              console.error('Set active failed', e)
+                            }
+                          }}
+                        >Set Active (Sync)</button>
+                        <button className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" onClick={async()=>{
+                          try {
+                            await Api.deleteDatasource(d.id)
+                            setDatasources((prev)=>prev.filter(x=>x.id!==d.id))
+                            if (defaultDsId === d.id && typeof window !== 'undefined') {
+                              localStorage.removeItem('default_ds_id'); setDefaultDsId(null); try { window.dispatchEvent(new CustomEvent('default-ds-change')) } catch {}
+                            }
+                          } catch {}
+                        }}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="flex items-center py-2 gap-2">
@@ -176,7 +304,7 @@ export default function DataModelPage() {
                     <td className="px-3 py-2">{nextSync ? nextSync : '—'}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
-                        <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setPreview({ open: true, table: r.table })}>View</button>
+                        <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setPreview({ open: true, dsId: r.datasourceId, table: r.table })}>View</button>
                         <button
                           className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
                           onClick={() => {
@@ -244,12 +372,54 @@ export default function DataModelPage() {
       )}
 
       {preview.open && preview.table && (
-        <TablePreviewDialog open={preview.open} onOpenChangeAction={(o) => setPreview({ open: o })} table={preview.table} limit={100} />
+        <TablePreviewDialog open={preview.open} onOpenChangeAction={(o) => setPreview({ open: o })} datasourceId={preview.dsId} table={preview.table} limit={100} />
       )}
 
       {adv.open && adv.dsId && (
         <AdvancedSqlDialog open={adv.open} onCloseAction={() => setAdv({ open: false })} datasourceId={adv.dsId} dsType={adv.dsType} source={adv.source} schema={adv.schema}
         />
+      )}
+
+      {/* Create New DuckDB Dialog */}
+      {createOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40" onClick={() => setCreateOpen(false)}>
+          <Card className="w-[440px] p-0" onClick={(e:any)=>e.stopPropagation()}>
+            <div className="px-4 py-3 border-b">
+              <div className="text-sm font-semibold">Create Local DuckDB</div>
+            </div>
+            <div className="p-4 space-y-3">
+              <label className="text-xs">Name
+                <TextInput className="mt-1" value={newName} onChange={(e:any)=>setNewName(e.target.value)} placeholder="Local DuckDB" />
+              </label>
+            </div>
+            <div className="px-4 py-3 border-t flex items-center justify-end gap-2">
+              <button type="button" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={()=>{ setCreateOpen(false) }}>Cancel</button>
+              <button
+                type="button"
+                className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
+                disabled={creating || !(newName||'').trim()}
+                onClick={async ()=>{
+                  setCreating(true)
+                  try {
+                    const ts = new Date(); const y=ts.getFullYear(); const m=String(ts.getMonth()+1).padStart(2,'0'); const d=String(ts.getDate()).padStart(2,'0')
+                    const hh=String(ts.getHours()).padStart(2,'0'); const mm=String(ts.getMinutes()).padStart(2,'0')
+                    const safe = (newName||'Local DuckDB').replace(/[^A-Za-z0-9_.-]+/g,'-').slice(0,48)
+                    const relPath = `.data/${safe.toLowerCase()}-${y}${m}${d}-${hh}${mm}.duckdb`
+                    const dsn = `duckdb:///${relPath}`
+                    const created = await Api.createDatasource({ name: (newName||'Local DuckDB').trim(), type: 'duckdb', connectionUri: dsn, userId: user?.id })
+                    setDatasources((prev)=>[...prev, created])
+                    setCreateOpen(false)
+                    setNewName('Local DuckDB')
+                  } catch (e) {
+                    console.error('Create DS failed', e)
+                  } finally {
+                    setCreating(false)
+                  }
+                }}
+              >{creating ? 'Creating…' : 'Create'}</button>
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   )

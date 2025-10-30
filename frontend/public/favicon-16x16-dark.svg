@@ -1,0 +1,26 @@
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgDark16" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7DD3F3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#29B5E8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background Circle -->
+  <circle cx="8" cy="8" r="8" fill="url(#bgDark16)"/>
+  
+  <!-- Simplified Rising Bars (cleaner at 16px) -->
+  <g fill="#011419" opacity="0.95">
+    <rect x="3.5" y="9" width="2" height="4" rx="0.3"/>
+    <rect x="6.5" y="7" width="2" height="6" rx="0.3"/>
+    <rect x="9.5" y="5" width="2" height="8" rx="0.3"/>
+  </g>
+  
+  <!-- Simple Trend Line -->
+  <path d="M 3 10 L 7.5 7.5 L 10.5 5.5" 
+        stroke="#B8E8F5" 
+        stroke-width="1.5" 
+        fill="none" 
+        stroke-linecap="round"
+        opacity="0.95"/>
+</svg>

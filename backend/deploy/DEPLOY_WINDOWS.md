@@ -81,12 +81,12 @@ run_prod_waitress_windows.bat
 2) Create the service (CLI example):
 
 ```powershell
-nssm install ReportingAPIWaitress "C:\Windows\System32\cmd.exe" /c "C:\Bayan\backend\run_prod_waitress_windows.bat"
-nssm set ReportingAPIWaitress AppDirectory C:\Bayan\backend
+nssm install BayanAPIWaitress "C:\Windows\System32\cmd.exe" /c "C:\Bayan\backend\run_prod_waitress_windows.bat"
+nssm set BayanAPIWaitress AppDirectory C:\Bayan\backend
 # Optional logging
-nssm set ReportingAPIWaitress AppStdout C:\Bayan\logs\reporting-api.out.log
-nssm set ReportingAPIWaitress AppStderr C:\Bayan\logs\reporting-api.err.log
-nssm start ReportingAPIWaitress
+nssm set BayanAPIWaitress AppStdout C:\Bayan\logs\reporting-api.out.log
+nssm set BayanAPIWaitress AppStderr C:\Bayan\logs\reporting-api.err.log
+nssm start BayanAPIWaitress
 ```
 
 3) Alternatively use the NSSM GUI to set the same fields. If not using `.env`, set environment keys on the Environment tab.
@@ -116,10 +116,10 @@ run_prod_uvicorn_windows.bat
 ### Windows Service with NSSM
 
 ```powershell
-nssm install ReportingAPIUvicorn "C:\Windows\System32\cmd.exe" /c "C:\Bayan\backend\run_prod_uvicorn_windows.bat"
-nssm set ReportingAPIUvicorn AppDirectory C:\Bayan\backend
+nssm install BayanAPIUvicorn "C:\Windows\System32\cmd.exe" /c "C:\Bayan\backend\run_prod_uvicorn_windows.bat"
+nssm set BayanAPIUvicorn AppDirectory C:\Bayan\backend
 # Optionally set env in NSSM (Environment tab): WORKERS, RUN_SCHEDULER, HOST, PORT, AI_CONCURRENCY, AI_TIMEOUT_SECONDS
-nssm start ReportingAPIUvicorn
+nssm start BayanAPIUvicorn
 ```
 
 ## 5) Reverse proxy with IIS + ARR
@@ -161,10 +161,10 @@ http://127.0.0.1:8000/api/metrics
 ## 8) Quick reference (service control)
 
 ```powershell
-nssm start  ReportingAPIWaitress
-nssm stop   ReportingAPIWaitress
-nssm edit   ReportingAPIWaitress
-nssm start  ReportingAPIUvicorn
-nssm stop   ReportingAPIUvicorn
-nssm edit   ReportingAPIUvicorn
+nssm start  BayanAPIWaitress
+nssm stop   BayanAPIWaitress
+nssm edit   BayanAPIWaitress
+nssm start  BayanAPIUvicorn
+nssm stop   BayanAPIUvicorn
+nssm edit   BayanAPIUvicorn
 ```

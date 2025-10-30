@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bayan - Dark Mode Logo Implementation Guide</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f8fafc;
+            line-height: 1.6;
+        }
+        
+        h1 {
+            color: #011419;
+            border-bottom: 3px solid #29B5E8;
+            padding-bottom: 10px;
+        }
+        
+        h2 {
+            color: #024158;
+            margin-top: 30px;
+        }
+        
+        .code-block {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+        }
+        
+        .code-block code {
+            color: #7DD3F3;
+        }
+        
+        .note {
+            background: #e0f2fe;
+            border-left: 4px solid #0598CC;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .warning {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .preview {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin: 20px 0;
+        }
+        
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .theme-demo {
+            padding: 30px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .theme-demo.light {
+            background: #ffffff;
+            border: 2px solid #e5e7eb;
+        }
+        
+        .theme-demo.dark {
+            background: #1e293b;
+            border: 2px solid #334155;
+        }
+        
+        .theme-label {
+            font-weight: 600;
+            margin-bottom: 15px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .theme-demo.light .theme-label {
+            color: #011419;
+        }
+        
+        .theme-demo.dark .theme-label {
+            color: #7DD3F3;
+        }
+    </style>
+</head>
+<body>
+    <h1>🌓 Dark Mode Logo Implementation Guide</h1>
+    
+    <div class="note">
+        <strong>What's New:</strong> All Bayan logos now include optimized dark mode variants with bright teal gradients designed for dark backgrounds and interfaces.
+    </div>
+    
+    <h2>📱 Automatic Theme Detection</h2>
+    <p>Use CSS media queries to automatically serve the correct logo based on user's system preference:</p>
+    
+    <div class="code-block">
+<code>&lt;!-- In your HTML --&gt;
+&lt;picture&gt;
+  &lt;source srcset="/bayan-logo-dark.svg" media="(prefers-color-scheme: dark)"&gt;
+  &lt;img src="/bayan-logo.svg" alt="Bayan Logo"&gt;
+&lt;/picture&gt;</code>
+    </div>
+    
+    <h2>⚛️ React/Next.js Implementation</h2>
+    <p>Dynamic theme switching with React hooks:</p>
+    
+    <div class="code-block">
+<code>import { useTheme } from 'next-themes';
+import Image from 'next/image';
+
+export function Logo() {
+  const { theme } = useTheme();
+  
+  return (
+    &lt;Image
+      src={theme === 'dark' ? '/bayan-logo-dark.svg' : '/bayan-logo.svg'}
+      alt="Bayan Analytics"
+      width={200}
+      height={200}
+    /&gt;
+  );
+}</code>
+    </div>
+    
+    <h2>🎨 CSS-Only Solution</h2>
+    <p>If you prefer CSS without JavaScript:</p>
+    
+    <div class="code-block">
+<code>.logo-light {
+  display: block;
+}
+
+.logo-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .logo-light {
+    display: none;
+  }
+  
+  .logo-dark {
+    display: block;
+  }
+}
+
+&lt;!-- HTML --&gt;
+&lt;img src="/bayan-logo.svg" alt="Bayan" class="logo-light"&gt;
+&lt;img src="/bayan-logo-dark.svg" alt="Bayan" class="logo-dark"&gt;</code>
+    </div>
+    
+    <h2>🔖 Dark Mode Favicon</h2>
+    <p>Modern browsers support theme-aware favicons using the SVG favicon with media queries:</p>
+    
+    <div class="code-block">
+<code>&lt;!-- Light mode favicon --&gt;
+&lt;link rel="icon" href="/favicon.svg" type="image/svg+xml" 
+      media="(prefers-color-scheme: light)"&gt;
+
+&lt;!-- Dark mode favicon --&gt;
+&lt;link rel="icon" href="/favicon-dark.svg" type="image/svg+xml" 
+      media="(prefers-color-scheme: dark)"&gt;
+
+&lt;!-- Fallback --&gt;
+&lt;link rel="icon" href="/favicon.svg" type="image/svg+xml"&gt;</code>
+    </div>
+    
+    <h2>📊 Visual Comparison</h2>
+    <div class="comparison">
+        <div class="theme-demo light">
+            <div class="theme-label">Light Mode</div>
+            <img src="bayan-logo-square.svg" width="120" height="120" alt="Light mode logo">
+            <p style="margin-top: 15px; color: #64748b; font-size: 14px;">Dark gradients on light backgrounds</p>
+        </div>
+        
+        <div class="theme-demo dark">
+            <div class="theme-label">Dark Mode</div>
+            <img src="bayan-logo-square-dark.svg" width="120" height="120" alt="Dark mode logo">
+            <p style="margin-top: 15px; color: #94a3b8; font-size: 14px;">Bright gradients on dark backgrounds</p>
+        </div>
+    </div>
+    
+    <h2>📁 Available Dark Mode Files</h2>
+    <div class="preview">
+        <ul style="list-style: none; padding: 0;">
+            <li>✅ <code>bayan-logo-dark.svg</code> - Primary circular logo</li>
+            <li>✅ <code>bayan-logo-alt-dark.svg</code> - Hexagon variant</li>
+            <li>✅ <code>bayan-logo-square-dark.svg</code> - Square app icon</li>
+            <li>✅ <code>bayan-logo-minimal-dark.svg</code> - Horizontal wordmark</li>
+            <li>✅ <code>favicon-dark.svg</code> - 32x32 favicon</li>
+            <li>✅ <code>favicon-16x16-dark.svg</code> - 16x16 favicon</li>
+        </ul>
+    </div>
+    
+    <h2>🎨 Dark Mode Color Palette</h2>
+    <div class="preview">
+        <p><strong>Bright teal gradients for dark backgrounds:</strong></p>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
+            <div style="background: #7DD3F3; width: 100px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #011419; font-size: 11px; font-weight: 600; text-align: center; padding: 5px;">
+                #7DD3F3<br>Light Accent
+            </div>
+            <div style="background: #29B5E8; width: 100px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 600; text-align: center; padding: 5px;">
+                #29B5E8<br>Bright
+            </div>
+            <div style="background: #0598CC; width: 100px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 600; text-align: center; padding: 5px;">
+                #0598CC<br>Medium
+            </div>
+            <div style="background: #B8E8F5; width: 100px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #011419; font-size: 11px; font-weight: 600; text-align: center; padding: 5px;">
+                #B8E8F5<br>Very Light
+            </div>
+        </div>
+    </div>
+    
+    <div class="warning">
+        <strong>⚠️ Browser Support:</strong> The <code>prefers-color-scheme</code> media query is supported in all modern browsers (Chrome 76+, Firefox 67+, Safari 12.1+). For older browsers, the default (light mode) logo will be used.
+    </div>
+    
+    <h2>🚀 Quick Start</h2>
+    <div class="preview">
+        <p><strong>For immediate dark mode support, add this to your app:</strong></p>
+        <ol>
+            <li>Copy all <code>*-dark.svg</code> files to your <code>/public</code> folder</li>
+            <li>Use the <code>&lt;picture&gt;</code> element with media queries (shown above)</li>
+            <li>Test in your browser by enabling dark mode in system preferences</li>
+        </ol>
+    </div>
+    
+    <div class="note">
+        <strong>💡 Pro Tip:</strong> For the best user experience, combine automatic detection with a manual theme toggle. This gives users control while respecting their system preferences by default.
+    </div>
+</body>
+</html>

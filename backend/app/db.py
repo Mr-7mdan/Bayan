@@ -137,6 +137,13 @@ from .config import settings
 
 _DATA_DIR = Path(settings.duckdb_path).resolve().parent
 _DATA_DIR.mkdir(parents=True, exist_ok=True)
+# Use metadata DB directory for app-scoped files
+_APP_DATA_DIR = Path(settings.metadata_db_path).resolve().parent
+try:
+    _APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+_ACTIVE_DUCK_FILE = _APP_DATA_DIR / "duckdb.active"
 
 # --- SQL helpers (dialect + quoting) ---
 def _dialect_name(engine: Engine) -> str:
@@ -286,28 +293,44 @@ def _get_duck_shared(db_path: str | None = None):
 
 
 def open_duck_native(db_path: str | None = None):
-    """Return a context manager yielding a duckdb.Cursor from the shared connection.
-    The cursor is closed on exit; the shared connection remains open.
+    """Return a context manager yielding a duckdb.Cursor.
+    - If db_path is None or equals the shared connection path, use the shared connection.
+    - If db_path differs, open a temporary native connection to that path and close it on exit.
     """
     if _duckdb is None:
         raise RuntimeError("duckdb module not available")
-    con = _get_duck_shared(db_path)
+    target = _normalize_duck_path(db_path or (_DUCK_SHARED_PATH or settings.duckdb_path))
+    use_shared = (_DUCK_SHARED_CONN is not None and _normalize_duck_path(_DUCK_SHARED_PATH or '') == target)
+    if use_shared:
+        con = _get_duck_shared(target)
+        cur = con.cursor()
+        class _CursorWrap:
+            def __init__(self, c): self._c = c
+            def __getattr__(self, name): return getattr(self._c, name)
+            def __enter__(self): return self._c
+            def __exit__(self, exc_type, exc, tb):
+                try: self._c.close()
+                except Exception: pass
+                return False
+        return _CursorWrap(cur)
+    # Open an ephemeral connection to the requested path
+    con = _duckdb.connect(target)
+    try:
+        _apply_duck_pragmas(con)
+    except Exception:
+        pass
     cur = con.cursor()
-    class _CursorWrap:
-        def __init__(self, c):
-            self._c = c
-        def __getattr__(self, name):
-            return getattr(self._c, name)
-        def __enter__(self):
-            return self._c
+    class _TmpCursorWrap:
+        def __init__(self, c, conn): self._c = c; self._conn = conn
+        def __getattr__(self, name): return getattr(self._c, name)
+        def __enter__(self): return self._c
         def __exit__(self, exc_type, exc, tb):
-            try:
-                self._c.close()
-            except Exception:
-                pass
-            # Do not close or dispose the shared connection here
+            try: self._c.close()
+            except Exception: pass
+            try: self._conn.close()
+            except Exception: pass
             return False
-    return _CursorWrap(cur)
+    return _TmpCursorWrap(cur, con)
 
 
 def close_duck_shared() -> None:
@@ -320,6 +343,97 @@ def close_duck_shared() -> None:
         pass
     _DUCK_SHARED_CONN = None
     _DUCK_SHARED_PATH = None
+
+
+def get_active_duck_path() -> str:
+    """Return the normalized path of the currently active DuckDB store.
+    Prefers the shared connection target when initialized; otherwise falls back to settings.duckdb_path.
+    """
+    # Reconcile with persisted active path across processes
+    try:
+        if _ACTIVE_DUCK_FILE.exists():
+            try:
+                persisted = _ACTIVE_DUCK_FILE.read_text(encoding="utf-8").strip()
+            except Exception:
+                persisted = ""
+            if persisted:
+                target = _normalize_duck_path(persisted)
+                cur = _normalize_duck_path(_DUCK_SHARED_PATH or "") if _DUCK_SHARED_PATH else None
+                # If no shared conn or mismatch, reinitialize to the persisted target
+                if (cur is None) or (cur != target):
+                    try:
+                        init_duck_shared(target)
+                    except Exception:
+                        pass
+                return target
+        p = _DUCK_SHARED_PATH or _normalize_duck_path(settings.duckdb_path)
+    except Exception:
+        p = settings.duckdb_path
+    try:
+        return _normalize_duck_path(p)
+    except Exception:
+        return (p or ":memory:")
+
+
+def set_active_duck_path(new_path: str) -> str:
+    """Switch the global active DuckDB store to new_path at runtime.
+    This updates settings.duckdb_path, reinitializes the shared native connection,
+    and disposes the cached SQLAlchemy engine so subsequent calls use the new path.
+    Returns the normalized path actually set.
+    """
+    raw = (new_path or settings.duckdb_path or '').strip()
+    # Accept DSN formats like duckdb:///path or duckdb:////abs, and extract the path
+    low = raw.lower()
+    if low.startswith('duckdb:////'):
+        pth = '/' + raw[len('duckdb:////'):]
+    elif low.startswith('duckdb:///'):
+        pth = raw[len('duckdb:///'):]
+    elif low.startswith('duckdb://'):
+        pth = raw[len('duckdb://'):]
+    elif low.startswith('duckdb:'):
+        pth = raw[len('duckdb:'):]
+    else:
+        pth = raw
+    p = _normalize_duck_path(pth or settings.duckdb_path)
+    # Update settings and reload shared connection
+    try:
+        settings.duckdb_path = p  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    try:
+        # Dispose previous engine before re-init
+        dispose_duck_engine()
+    except Exception:
+        pass
+    try:
+        init_duck_shared(p)
+    except Exception:
+        # Best-effort: if shared cannot reinit, leave path updated; engine will re-create on demand
+        pass
+    # Persist selection so it survives reloads
+    try:
+        _ACTIVE_DUCK_FILE.write_text(p, encoding="utf-8")
+    except Exception:
+        pass
+    return p
+
+
+# Bootstrap: if an active path was persisted previously, ensure settings/shared reflect it on import
+try:
+    if _ACTIVE_DUCK_FILE.exists():
+        _persisted = _ACTIVE_DUCK_FILE.read_text(encoding="utf-8").strip()
+        if _persisted:
+            _p = _normalize_duck_path(_persisted)
+            try:
+                settings.duckdb_path = _p  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            try:
+                init_duck_shared(_p)
+            except Exception:
+                pass
+except Exception:
+    pass
 
 
 def _apply_duck_pragmas(conn) -> None:

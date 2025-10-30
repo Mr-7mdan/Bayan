@@ -465,6 +465,11 @@ export const Api = {
   deleteSyncTask: (id: string, taskId: string, actorId?: string) => http<void>(`/datasources/${id}/sync-tasks/${taskId}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'DELETE' }),
   runSyncNow: (id: string, taskId?: string, actorId?: string) => http<{ ok: boolean; count?: number; results?: any[]; message?: string }>(`/datasources/${id}/sync/run${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}${(!taskId && actorId) ? `?actorId=${encodeURIComponent(actorId)}` : (taskId && actorId) ? `&actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST' }),
   getSyncLogs: (id: string, taskId?: string, limit: number = 50, actorId?: string) => http<SyncRunOut[]>(`/datasources/${id}/sync/logs${taskId ? `?taskId=${encodeURIComponent(taskId)}&limit=${limit}` : `?limit=${limit}`}${actorId ? `${taskId ? '&' : '&'}actorId=${encodeURIComponent(actorId)}` : ''}`),
+  clearSyncLogs: (id: string, taskId?: string, actorId?: string) =>
+    http<{ deleted: number }>(
+      `/datasources/${id}/sync/logs${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}${actorId ? `${taskId ? '&' : '?' }actorId=${encodeURIComponent(actorId)}` : ''}`,
+      { method: 'DELETE' }
+    ),
   dropLocalTable: (id: string, table: string, actorId?: string) => http<{ ok: boolean; dropped: number }>(`/datasources/${id}/local/drop-table${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST', body: JSON.stringify({ table }) }),
   // Export / Import: Datasources
   exportDatasources: (opts?: { ids?: string[]; includeSyncTasks?: boolean; actorId?: string }) => {
@@ -587,6 +592,10 @@ export const Api = {
   // Engine pool disposal
   disposeDatasourceEngine: (id: string) => http<{ disposed: boolean; target: string; message?: string }>(`/datasources/${encodeURIComponent(id)}/engine/dispose`, { method: 'POST' }),
   disposeAllEngines: () => http<{ disposed: number }>(`/datasources/engines/dispose-all`, { method: 'POST' }),
+  // Admin: global active DuckDB for sync
+  duckActiveGet: (actorId?: string) => http<{ path: string }>(`/admin/duckdb/active${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`),
+  duckActiveSet: (payload: { datasourceId?: string; path?: string }, actorId?: string) =>
+    http<{ path: string }>(`/admin/duckdb/active${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST', body: JSON.stringify(payload) }),
   getNotifications: (userId: string) => http<NotificationOut[]>(`/users/${encodeURIComponent(userId)}/notifications`),
   listCollectionItems: (userId: string) => http<CollectionItemOut[]>(`/users/${encodeURIComponent(userId)}/collections/items`),
   // Datasource-level transforms (Advanced SQL Mode)

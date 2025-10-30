@@ -85,7 +85,24 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
   const [deltaPreviewError, setDeltaPreviewError] = useState<string | undefined>(undefined)
   const dsQ = useQuery({ queryKey: ['datasources'], queryFn: () => Api.listDatasources(undefined, user?.id) })
 
-  const dsId = local?.datasourceId
+  // Default datasource selection (per-user, saved in localStorage by Data Model page)
+  const [defaultDsId, setDefaultDsId] = useState<string | null>(null)
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const read = () => { try { setDefaultDsId(localStorage.getItem('default_ds_id')) } catch { setDefaultDsId(null) } }
+        read()
+        const onStorage = (e: StorageEvent) => { if (e.key === 'default_ds_id') read() }
+        const onCustom = () => read()
+        window.addEventListener('storage', onStorage as EventListener)
+        window.addEventListener('default-ds-change', onCustom as EventListener)
+        return () => { window.removeEventListener('storage', onStorage as EventListener); window.removeEventListener('default-ds-change', onCustom as EventListener) }
+      }
+    } catch {}
+    return () => {}
+  }, [])
+
+  const dsId = (local?.datasourceId as string | undefined) ?? (defaultDsId || undefined)
   const initialSchema = dsId ? (SchemaCache.get(dsId) || undefined) : undefined
   const schemaQ = useQuery({
     queryKey: ['ds-schema', dsId ?? '_local'],
@@ -544,7 +561,7 @@ function FilterDetailsTabs({ kind, selField, local, setLocal, updateConfig }: { 
           <FilterEditor
             field={selField}
             source={local.querySpec?.source || ''}
-            datasourceId={local.datasourceId}
+            datasourceId={dsId}
             values={(local.querySpec?.where as any)?.[selField] as any[]}
             where={(local.querySpec?.where as any)}
             onChange={(vals) => {

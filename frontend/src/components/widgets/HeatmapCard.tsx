@@ -278,8 +278,9 @@ export default function HeatmapCard({
   const filtersKey = useMemo(() => JSON.stringify(filters || {}), [filters])
   const debSpecKey = useDebounced(specKey, 350)
   const debFiltersKey = useDebounced(filtersKey, 350)
+  const presetKeyForQuery = useMemo(() => String(((options as any)?.heatmap?.preset) || 'calendarMonthly'), [ (options as any)?.heatmap?.preset ])
   const q = useQuery({
-    queryKey: ['heatmap', title, sql, datasourceId, options, queryMode, debSpecKey, debFiltersKey, breakSeq],
+    queryKey: ['heatmap', title, sql, datasourceId, presetKeyForQuery, queryMode, debSpecKey, debFiltersKey, breakSeq],
     placeholderData: (prev) => prev as any,
     queryFn: async () => {
       if (queryMode === 'spec' && querySpec) {
@@ -299,7 +300,11 @@ export default function HeatmapCard({
         if (preset === 'calendarMonthly' || preset === 'calendarAnnual') {
           const seriesArr: any[] = Array.isArray(base.series) ? base.series as any[] : []
           const s0 = seriesArr.find((s)=>s?.x) || null
-          const x = base.x || s0?.x
+          let x: any = base.x || s0?.x
+          try {
+            const m = String(x || '').match(/^(.*)\s\((Year|Quarter|Month(?: Name| Short)?|Week|Day(?: Name| Short)?)\)$/)
+            if (m) x = m[1]
+          } catch {}
           const addRange = (start: string, end: string) => { if (x) { (where as any)[`${x}__gte`] = start; (where as any)[`${x}__lt`] = end } }
           if (preset === 'calendarMonthly' && options?.heatmap?.calendarMonthly?.month) {
             const m = String(options.heatmap.calendarMonthly.month)
@@ -313,6 +318,20 @@ export default function HeatmapCard({
             const start = `${yStr}-01-01`
             const end = `${String(Number(yStr)+1)}-01-01`
             addRange(start, end)
+          }
+          // Prefer RAW rows for calendar presets so we can aggregate by day client-side
+          if (base?.source) {
+            try {
+              let tField: any = options?.heatmap?.calendarMonthly?.dateField || base.x || (Array.isArray(base.x) ? base.x[0] : undefined)
+              try {
+                const m = String(tField || '').match(/^(.*)\s\((Year|Quarter|Month(?: Name| Short)?|Week|Day(?: Name| Short)?)\)$/)
+                if (m) tField = m[1]
+              } catch {}
+              const yField = resolveYField(base, options, 'calendar')
+              const select = [tField, yField].filter(Boolean) as string[]
+              const rawSpec: any = { source: base.source, select: (select.length ? select : [tField]), where: Object.keys(where||{}).length ? where : undefined, limit: 200000, offset: 0 }
+              return QueryApi.querySpec({ spec: rawSpec, datasourceId, limit: 200000, offset: 0, includeTotal: false })
+            } catch { /* fall through to default path */ }
           }
         }
         // Weekday × Hour: try server pre-bucketing with SQL when source/x/y exist
@@ -474,34 +493,116 @@ export default function HeatmapCard({
   // Data shapers per preset
   const monthlyData = useMemo(() => {
     if (preset !== 'calendarMonthly') return null
-    // Fast path: backend provided canonical x/value columns
+    // Fast path: only if x is day-level date; normalize to YYYY-MM-DD
     if (columns.includes('x') && columns.includes('value') && Array.isArray(rows) && rows.length) {
       const idxX = columns.indexOf('x')
       const idxV = columns.indexOf('value')
-      return (rows as any[])
-        .map((arr: any[]) => [String(arr[idxX]), Number(arr[idxV])])
-        .filter((p) => !!p[0] && Number.isFinite(p[1])) as Array<[string, number]>
+      const looksDay = (s: any) => {
+        const str = String(s || '')
+        if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(str)) return true
+        if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(str)) return true
+        const d = parseDateLoose(str); return !!d && (str.split('-').length >= 3 || str.includes('/'))
+      }
+      const sample = (rows as any[]).slice(0, 24).map(r => r[idxX])
+      const isDay = sample.some(looksDay)
+      if (isDay) {
+        const toIso = (x: any) => { const d = parseDateLoose(x); if (!d) return null; const pad=(n:number)=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}` }
+        return (rows as any[])
+          .map((arr: any[]) => [toIso(arr[idxX]), Number(arr[idxV])])
+          .filter((p) => !!p[0] && Number.isFinite(p[1])) as Array<[string, number]>
+      }
+      // else: fall through to client aggregation
     }
-    // Fallback: aggregate by day from named rows
+    // Fallback: aggregate by day from named rows with selected aggregation
     const dateField = options?.heatmap?.calendarMonthly?.dateField || (querySpec as any)?.x || columns[0]
-    const valueField = options?.heatmap?.calendarMonthly?.valueField || (querySpec as any)?.y || 'value'
-    const acc = new Map<string, number>()
+    const agg = resolveAgg(querySpec, options, 'calendar')
+    let valueField = options?.heatmap?.calendarMonthly?.valueField || resolveYField(querySpec, options, 'calendar') || 'value'
+    // If aggregation needs a numeric column but valueField is missing/non-numeric, infer one
+    try {
+      const aggLower = String(agg || 'sum').toLowerCase()
+      const needsNumeric = (aggLower === 'sum' || aggLower === 'avg' || aggLower === 'min' || aggLower === 'max' || aggLower === 'none')
+      if (needsNumeric) {
+        const isNumericFor = (c: string) => {
+          const limit = Math.min(50, namedRows.length)
+          let seenFinite = false
+          for (let i = 0; i < limit; i++) { const r = namedRows[i]; const v = Number((r as any)?.[c]); if (Number.isFinite(v)) { seenFinite = true; break } }
+          return seenFinite
+        }
+        if (!valueField || !isNumericFor(valueField)) {
+          const ignore = new Set<string>([String(dateField||''), 'x', 'date', 'hour', 'weekday', 'value'])
+          const cand = (columns || []).find((c) => !ignore.has(c) && isNumericFor(c))
+          if (cand) valueField = cand
+        }
+      }
+    } catch {}
+    const isNumericFor = (c: string) => {
+      try {
+        const limit = Math.min(50, namedRows.length)
+        let seenFinite = false
+        for (let i = 0; i < limit; i++) { const r = namedRows[i]; const v = Number((r as any)?.[c]); if (Number.isFinite(v)) { seenFinite = true; break } }
+        return seenFinite
+      } catch { return false }
+    }
+    const countAsSum = (String(agg || 'sum').toLowerCase() === 'count') && !!valueField && isNumericFor(valueField)
+    const acc = new Map<string, { s: number; c: number; min: number; max: number; set?: Set<string> }>()
     namedRows.forEach((r) => {
-      const d = r?.[dateField!]
-      const v = num(r?.[valueField!])
-      if (d == null) return
+      let dv: any = r?.[dateField!]
+      let dt = parseDateLoose(dv)
+      if (!dt) {
+        const cands = [ (r as any)?.x, (r as any)?.X, (r as any)?.date, (r as any)?.Date ]
+        for (const c of cands) { dt = parseDateLoose(c); if (dt) break }
+      }
+      if (!dt) {
+        try { for (const k of Object.keys(r || {})) { dt = parseDateLoose((r as any)[k]); if (dt) break } } catch {}
+      }
+      if (!dt) return
       const key = (() => {
         try {
-          const dt = new Date(String(d))
-          const yy = dt.getFullYear()
-          const mm = String(dt.getMonth() + 1).padStart(2, '0')
-          const dd = String(dt.getDate()).padStart(2, '0')
+          const yy = dt!.getFullYear()
+          const mm = String(dt!.getMonth() + 1).padStart(2, '0')
+          const dd = String(dt!.getDate()).padStart(2, '0')
           return `${yy}-${mm}-${dd}`
-        } catch { return String(d) }
+        } catch { return null as any }
       })()
-      acc.set(key, (acc.get(key) || 0) + v)
+      if (!key) return
+      const node = acc.get(key) || { s: 0, c: 0, min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }
+      if (String(agg||'sum').toLowerCase() === 'count') {
+        if (countAsSum) {
+          const v = num(r?.[valueField!])
+          node.s += v
+          node.c += 1
+          if (v < node.min) node.min = v
+          if (v > node.max) node.max = v
+        } else {
+          node.c += 1
+        }
+      } else if (agg === 'distinct') {
+        const dk = (r?.[valueField!] != null) ? String(r?.[valueField!]) : undefined
+        if (dk !== undefined) { if (!node.set) node.set = new Set<string>(); node.set.add(dk) }
+        node.c += 1
+      } else {
+        const v = num(r?.[valueField!])
+        node.s += v
+        node.c += 1
+        if (v < node.min) node.min = v
+        if (v > node.max) node.max = v
+      }
+      acc.set(key, node)
     })
-    return Array.from(acc.entries()) as Array<[string, number]>
+    const out: Array<[string, number]> = []
+    acc.forEach((node, key) => {
+      const aggCalc = (agg === 'none') ? 'sum' : agg
+      const val = (
+        aggCalc === 'avg' ? (node.c ? node.s / node.c : 0) :
+        aggCalc === 'min' ? (Number.isFinite(node.min) ? node.min : 0) :
+        aggCalc === 'max' ? (Number.isFinite(node.max) ? node.max : 0) :
+        aggCalc === 'count' ? (countAsSum ? node.s : node.c) :
+        aggCalc === 'distinct' ? ((node.set && node.set.size) ? node.set.size : 0) :
+        /* sum + none -> sum */ node.s
+      )
+      out.push([key, val])
+    })
+    return out
   }, [preset, rows, columns, namedRows, options?.heatmap?.calendarMonthly, querySpec])
 
   const annualData = useMemo(() => {
@@ -514,11 +615,28 @@ export default function HeatmapCard({
         .filter((p) => !!p[0] && Number.isFinite(p[1])) as Array<[string, number]>
     }
     const dateField = options?.heatmap?.calendarAnnual?.dateField || (querySpec as any)?.x || columns[0]
-    const valueField = options?.heatmap?.calendarAnnual?.valueField || (querySpec as any)?.y || 'value'
-    const acc = new Map<string, number>()
+    const agg = resolveAgg(querySpec, options, 'calendar')
+    let valueField = options?.heatmap?.calendarAnnual?.valueField || resolveYField(querySpec, options, 'calendar') || 'value'
+    try {
+      const aggLower = String(agg || 'sum').toLowerCase()
+      const needsNumeric = (aggLower === 'sum' || aggLower === 'avg' || aggLower === 'min' || aggLower === 'max' || aggLower === 'none')
+      if (needsNumeric) {
+        const isNumericFor = (c: string) => {
+          const limit = Math.min(50, namedRows.length)
+          let seenFinite = false
+          for (let i = 0; i < limit; i++) { const r = namedRows[i]; const v = Number((r as any)?.[c]); if (Number.isFinite(v)) { seenFinite = true; break } }
+          return seenFinite
+        }
+        if (!valueField || !isNumericFor(valueField)) {
+          const ignore = new Set<string>([String(dateField||''), 'x', 'date', 'hour', 'weekday', 'value'])
+          const cand = (columns || []).find((c) => !ignore.has(c) && isNumericFor(c))
+          if (cand) valueField = cand
+        }
+      }
+    } catch {}
+    const acc = new Map<string, { s: number; c: number; min: number; max: number; set?: Set<string> }>()
     namedRows.forEach((r) => {
       const d = r?.[dateField!]
-      const v = num(r?.[valueField!])
       if (d == null) return
       const key = (() => {
         try {
@@ -529,9 +647,36 @@ export default function HeatmapCard({
           return `${yy}-${mm}-${dd}`
         } catch { return String(d) }
       })()
-      acc.set(key, (acc.get(key) || 0) + v)
+      const node = acc.get(key) || { s: 0, c: 0, min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }
+      if (agg === 'count') {
+        node.c += 1
+      } else if (agg === 'distinct') {
+        const dk = (r?.[valueField!] != null) ? String(r?.[valueField!]) : undefined
+        if (dk !== undefined) { if (!node.set) node.set = new Set<string>(); node.set.add(dk) }
+        node.c += 1
+      } else {
+        const v = num(r?.[valueField!])
+        node.s += v
+        node.c += 1
+        if (v < node.min) node.min = v
+        if (v > node.max) node.max = v
+      }
+      acc.set(key, node)
     })
-    return Array.from(acc.entries()) as Array<[string, number]>
+    const out: Array<[string, number]> = []
+    acc.forEach((node, key) => {
+      const aggCalc = (agg === 'none') ? 'sum' : agg
+      const val = (
+        aggCalc === 'avg' ? (node.c ? node.s / node.c : 0) :
+        aggCalc === 'min' ? (Number.isFinite(node.min) ? node.min : 0) :
+        aggCalc === 'max' ? (Number.isFinite(node.max) ? node.max : 0) :
+        aggCalc === 'count' ? node.c :
+        aggCalc === 'distinct' ? ((node.set && node.set.size) ? node.set.size : 0) :
+        /* sum + none -> sum */ node.s
+      )
+      out.push([key, val])
+    })
+    return out
   }, [preset, rows, columns, namedRows, options?.heatmap?.calendarAnnual, querySpec])
 
   const weekdayHourData = useMemo(() => {
@@ -687,12 +832,17 @@ export default function HeatmapCard({
   }
 
   if (preset === 'calendarMonthly') {
-    const pairs = (monthlyData || []) as Array<[string, number]>
+    const allPairs = (monthlyData || []) as Array<[string, number]>
+    const month = options?.heatmap?.calendarMonthly?.month || (allPairs[0]?.[0] ? allPairs[0][0].slice(0,7) : new Date().toISOString().slice(0,7))
+    const pairs = allPairs.filter(([d]) => typeof d === 'string' && d.startsWith(`${month}-`))
     const vals = pairs.map(([, v]) => Number(v)).filter(Number.isFinite)
-    let min = 0; let max = Math.max(...vals)
-    if (!isFinite(max)) max = 1
-    if (!isFinite(max) || max === min) max = min === 0 ? 1 : min * 2
-    const month = options?.heatmap?.calendarMonthly?.month || (pairs[0]?.[0] ? pairs[0][0].slice(0,7) : new Date().toISOString().slice(0,7))
+    const sorted = vals.slice().sort((a,b)=>a-b)
+    const idx = Math.max(0, Math.min(sorted.length-1, Math.floor(sorted.length * 0.99)))
+    const p99 = sorted.length ? sorted[idx] : 1
+    let min = (sorted.length ? sorted[0] : 0); let max = (sorted.length ? Math.max(1, p99) : 1)
+    if (!isFinite(min)) min = 0
+    if (!isFinite(max)) max = min === 0 ? 1 : min
+    if (min === max) { if (max === 0) max = 1; else min = 0 }
     const grad = gradientFromOptions(options)
     const legendPos = (options?.legendPosition || 'bottom')
     const preview = !!options?.heatmap?.preview
@@ -715,6 +865,8 @@ export default function HeatmapCard({
         show: preview ? false : (options?.showLegend ?? true),
         min, max, calculable: true, orient: 'horizontal' as const,
         left: 'center', top: (legendPos==='top'? 6 : undefined), bottom: (legendPos==='bottom'? 6 : undefined),
+        dimension: 1,
+        seriesIndex: 0,
         inRange: { color: grad, opacity: [0.2, 1] },
         outOfRange: { color: isDark() ? 'rgba(255,255,255,0.06)' : '#f8fafc', opacity: 0.25 },
         textStyle: { color: isDark() ? 'rgba(226,232,240,0.85)' : '#334155' },
@@ -734,23 +886,28 @@ export default function HeatmapCard({
         monthLabel: { show: !preview, color: isDark() ? 'rgba(226,232,240,0.7)' : '#475569' },
         yearLabel: { show: false },
       },
-      series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: pairs }],
+      series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: pairs, encode: { value: 1 } }],
     }
     return (
       <ErrorBoundary name="HeatmapCard@Monthly">
-        <div className="absolute inset-0" ref={containerRef}>
+        <div key={keyBase} className="relative h-full w-full" ref={containerRef}>
           <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
         </div>
       </ErrorBoundary>
     )
   }
   if (preset === 'calendarAnnual') {
-    const pairs = (annualData || []) as Array<[string, number]>
+    const allPairs = (annualData || []) as Array<[string, number]>
+    const year = options?.heatmap?.calendarAnnual?.year || (allPairs[0]?.[0] ? allPairs[0][0].slice(0,4) : String(new Date().getFullYear()))
+    const pairs = allPairs.filter(([d]) => typeof d === 'string' && d.startsWith(`${year}-`))
     const vals = pairs.map(([, v]) => Number(v)).filter(Number.isFinite)
-    let min = 0; let max = Math.max(...vals)
-    if (!isFinite(max)) max = 1
-    if (!isFinite(max) || max === min) max = min === 0 ? 1 : min * 2
-    const year = options?.heatmap?.calendarAnnual?.year || (pairs[0]?.[0] ? pairs[0][0].slice(0,4) : String(new Date().getFullYear()))
+    const sorted = vals.slice().sort((a,b)=>a-b)
+    const idx = Math.max(0, Math.min(sorted.length-1, Math.floor(sorted.length * 0.99)))
+    const p99 = sorted.length ? sorted[idx] : 1
+    let min = (sorted.length ? sorted[0] : 0); let max = (sorted.length ? Math.max(1, p99) : 1)
+    if (!isFinite(min)) min = 0
+    if (!isFinite(max)) max = min === 0 ? 1 : min
+    if (min === max) { if (max === 0) max = 1; else min = 0 }
     const grad = gradientFromOptions(options)
     const legendPos = (options?.legendPosition || 'bottom')
     const preview = !!options?.heatmap?.preview
@@ -769,6 +926,8 @@ export default function HeatmapCard({
       visualMap: {
         show: preview ? false : (options?.showLegend ?? true), min, max, calculable: true, orient: 'horizontal' as const,
         left: 'center', top: (legendPos==='top'? 6 : undefined), bottom: (legendPos==='bottom'? 6 : undefined),
+        dimension: 1,
+        seriesIndex: 0,
         inRange: { color: grad, opacity: [0.2, 1] },
         outOfRange: { color: isDark() ? 'rgba(255,255,255,0.06)' : '#f8fafc', opacity: 0.25 },
         textStyle: { color: isDark() ? 'rgba(226,232,240,0.85)' : '#334155' },
@@ -788,11 +947,11 @@ export default function HeatmapCard({
         monthLabel: { show: !preview, color: isDark() ? 'rgba(226,232,240,0.7)' : '#475569' },
         yearLabel: { show: !preview, color: isDark() ? 'rgba(226,232,240,0.7)' : '#475569' },
       },
-      series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: pairs }],
+      series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: pairs, encode: { value: 1 } }],
     }
     return (
       <ErrorBoundary name="HeatmapCard@Annual">
-        <div className="absolute inset-0" ref={containerRef}>
+        <div key={keyBase} className="relative h-full w-full" ref={containerRef}>
           <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
         </div>
       </ErrorBoundary>
@@ -809,6 +968,16 @@ export default function HeatmapCard({
     let min = 0; let max = Math.max(...vals)
     if (!isFinite(max)) max = 1
     if (!isFinite(max) || max === min) max = min === 0 ? 1 : min * 2
+    const nzSorted = vals.filter(v=>v>0).sort((a,b)=>a-b)
+    const nonZeroMin = nzSorted.length ? nzSorted[0] : 1
+    const skew = max / Math.max(1, nonZeroMin)
+    let dataForSeries: Array<[number, number, number]|[number, number, number, number]> = complete
+    let visualDim = 2
+    if (skew >= 500) {
+      const denom = Math.log(1 + max)
+      dataForSeries = complete.map(([h,d,v]) => [h, d, v, (Math.log(1 + Math.max(0, v)) / (denom || 1)) * max])
+      visualDim = 3
+    }
     const grad = gradientFromOptions(options)
     const legendPos = (options?.legendPosition || 'bottom') as 'top'|'bottom'|'none'
     const preview = !!options?.heatmap?.preview
@@ -839,16 +1008,18 @@ export default function HeatmapCard({
         left: 'center',
         top: (legendPos==='top'?'top':undefined),
         bottom: (legendPos==='bottom'? 6 : undefined),
+        dimension: visualDim,
+        seriesIndex: 0,
         inRange: { color: grad, opacity: [0.2, 1] },
         outOfRange: { color: isDark() ? 'rgba(255,255,255,0.06)' : '#f8fafc', opacity: 0.25 },
         textStyle: { color: isDark() ? 'rgba(226,232,240,0.85)' : '#334155' },
         formatter: (val: number) => formatHeat(val, heatValueFmt, options?.valueCurrency),
       },
-      series: [{ type: 'heatmap', data: complete, label: { show: false } }],
+      series: [{ type: 'heatmap', data: dataForSeries as any, label: { show: false }, encode: { x: 0, y: 1, value: visualDim } }],
     }
     return (
       <ErrorBoundary name="HeatmapCard@WeekdayHour">
-        <div className="absolute inset-0" ref={containerRef}>
+        <div key={keyBase} className="relative h-full w-full" ref={containerRef}>
           <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
         </div>
       </ErrorBoundary>

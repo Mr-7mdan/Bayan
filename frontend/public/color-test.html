@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Color Palette Test</title>
+    <style>
+        body { padding: 40px; background: #f0f0f0; }
+        .swatch { 
+            width: 200px; 
+            height: 100px; 
+            margin: 10px; 
+            display: inline-block;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            position: relative;
+        }
+        .label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            font-weight: bold;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <h1>Color Palette Based on HSL(199, 98.5%, 8.1%)</h1>
+    
+    <!-- Base Color -->
+    <div class="swatch" style="background: hsl(199, 98.5%, 8.1%);">
+        <div class="label">Base: HSL(199, 98.5%, 8.1%)</div>
+    </div>
+    
+    <!-- Lighter Variants -->
+    <div class="swatch" style="background: hsl(199, 98.5%, 15%);">
+        <div class="label">Variant 1: HSL(199, 98.5%, 15%)</div>
+    </div>
+    
+    <div class="swatch" style="background: hsl(199, 98.5%, 25%);">
+        <div class="label">Variant 2: HSL(199, 98.5%, 25%)</div>
+    </div>
+    
+    <div class="swatch" style="background: hsl(199, 95%, 40%);">
+        <div class="label">Variant 3: HSL(199, 95%, 40%)</div>
+    </div>
+    
+    <div class="swatch" style="background: hsl(199, 90%, 55%);">
+        <div class="label">Variant 4: HSL(199, 90%, 55%)</div>
+    </div>
+    
+    <div class="swatch" style="background: hsl(199, 85%, 70%);">
+        <div class="label">Variant 5: HSL(199, 85%, 70%)</div>
+    </div>
+    
+    <!-- Converted to Hex -->
+    <h2>Hex Equivalents</h2>
+    <div class="swatch" style="background: #011419;">
+        <div class="label">#011419 (Base)</div>
+    </div>
+    
+    <div class="swatch" style="background: #012633;">
+        <div class="label">#012633 (Dark)</div>
+    </div>
+    
+    <div class="swatch" style="background: #024158;">
+        <div class="label">#024158 (Medium Dark)</div>
+    </div>
+    
+    <div class="swatch" style="background: #0598CC;">
+        <div class="label">#0598CC (Medium)</div>
+    </div>
+    
+    <div class="swatch" style="background: #29B5E8;">
+        <div class="label">#29B5E8 (Light)</div>
+    </div>
+    
+    <div class="swatch" style="background: #7DD3F3;">
+        <div class="label">#7DD3F3 (Very Light)</div>
+    </div>
+</body>
+</html>

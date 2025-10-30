@@ -6,12 +6,16 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 import json
 
-from ..models import SessionLocal, User
+from ..models import SessionLocal, User, Datasource
 from ..schemas import BrandingUpdateIn, BrandingOut
 from ..config import settings
 from ..scheduler import list_jobs, schedule_all_jobs
 from ..metrics import snapshot as metrics_snapshot
 from ..metrics_state import get_recent_actors, get_open_dashboards
+from ..db import get_active_duck_path, set_active_duck_path
+from ..security import decrypt_text
+from pydantic import BaseModel
+import re
 
 router = APIRouter(prefix="/admin", tags=["admin"]) 
 
@@ -139,6 +143,51 @@ async def metrics_live(actorId: str | None = Query(default=None), db: Session = 
         },
         "raw": snap,
     }
+
+
+class _SetDuckActivePayload(BaseModel):
+    datasourceId: str | None = None
+    path: str | None = None
+
+
+@router.get("/duckdb/active")
+async def duckdb_active(actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    if not _is_admin(db, actorId):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return { "path": get_active_duck_path() }
+
+
+@router.post("/duckdb/active")
+async def duckdb_set_active(payload: _SetDuckActivePayload, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    if not _is_admin(db, actorId):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    # Prefer datasourceId if provided
+    if payload.datasourceId:
+        ds = db.get(Datasource, payload.datasourceId)
+        if not ds:
+            raise HTTPException(status_code=404, detail="Datasource not found")
+        t = (ds.type or '').lower()
+        if 'duckdb' not in t:
+            raise HTTPException(status_code=400, detail="Datasource is not of type duckdb")
+        # Resolve DSN from encrypted secret and set path
+        dsn = decrypt_text(ds.connection_encrypted or "") if ds.connection_encrypted else None
+        if dsn:
+            path_set = set_active_duck_path(dsn)
+            return { "path": path_set }
+        # Fallback: derive a local DuckDB path from datasource name/id
+        base = (ds.name or ds.id or "duckdb").strip() or "duckdb"
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", base)
+        if not safe.lower().endswith(".duckdb"):
+            safe = safe + ".duckdb"
+        # Relative path under app data dir; set_active_duck_path will normalize
+        derived = f".data/{safe}"
+        path_set = set_active_duck_path(derived)
+        return { "path": path_set }
+    # Or accept a direct path string
+    if payload.path and str(payload.path).strip():
+        path_set = set_active_duck_path(str(payload.path).strip())
+        return { "path": path_set }
+    raise HTTPException(status_code=400, detail="datasourceId or path is required")
 
 
 @router.put("/branding", response_model=BrandingOut)

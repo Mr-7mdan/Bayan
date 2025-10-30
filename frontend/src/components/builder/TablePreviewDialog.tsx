@@ -44,7 +44,7 @@ export default function TablePreviewDialog({
         for (const form of forms) {
           try {
             const sql = `SELECT * FROM ${form}`
-            const res = await Api.query({ sql, limit: max, offset, includeTotal: true, preferLocalDuck: true, preferLocalTable: table })
+            const res = await Api.query({ sql, datasourceId, limit: max, offset, includeTotal: true, preferLocalDuck: true, preferLocalTable: table })
             if (cancelled) return
             const cols = (res.columns || []) as string[]
             const rows = (res.rows || []) as any[][]
@@ -66,7 +66,7 @@ export default function TablePreviewDialog({
           // Fallback to /query/spec path
           try {
             const spec = { source: table, select: ['*'], limit: max, offset } as any
-            const res2 = await QueryApi.querySpec({ spec, limit: max, offset, includeTotal: true, preferLocalDuck: true })
+            const res2 = await QueryApi.querySpec({ spec, datasourceId, limit: max, offset, includeTotal: true, preferLocalDuck: true })
             if (cancelled) return
             setColumns((res2.columns || []) as string[])
             setRows((res2.rows || []) as any[][])

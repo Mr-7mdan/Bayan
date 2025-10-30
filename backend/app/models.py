@@ -200,6 +200,8 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE sync_states ADD COLUMN progress_current INTEGER"))
             if "progress_total" not in cols_sync:
                 conn.execute(text("ALTER TABLE sync_states ADD COLUMN progress_total INTEGER"))
+            if "last_duck_path" not in cols_sync:
+                conn.execute(text("ALTER TABLE sync_states ADD COLUMN last_duck_path TEXT"))
             # ensure sync_runs table exists
             conn.execute(text(
                 """
@@ -715,6 +717,8 @@ class SyncState(Base):
     # Optional live progress for long-running jobs (e.g., snapshots)
     progress_current: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     progress_total: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The DuckDB file path used during the last successful run (for accurate local stats)
+    last_duck_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class SyncLock(Base):

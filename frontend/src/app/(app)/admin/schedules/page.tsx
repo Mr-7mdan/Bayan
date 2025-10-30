@@ -177,6 +177,18 @@ function AdminSchedulesInner() {
     onError: (e: any) => show('Sync', e?.message || 'Failed to start'),
   })
 
+  const clearLogs = useMutation({
+    mutationFn: async () => {
+      if (!selectedId) return { deleted: 0 }
+      return await Api.clearSyncLogs(selectedId as string, undefined, user?.id)
+    },
+    onSuccess: async (res) => {
+      show('Logs', `Cleared ${res?.deleted ?? 0} entries`)
+      await qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
+    },
+    onError: (e: any) => show('Logs', e?.message || 'Failed to clear logs'),
+  })
+
   const runningCount = useMemo(() => (tasksQ.data || []).filter((t) => t.inProgress).length, [tasksQ.data])
   const scheduledCount = useMemo(() => (tasksQ.data || []).filter((t) => !!t.scheduleCron).length, [tasksQ.data])
 
@@ -553,6 +565,16 @@ function AdminSchedulesInner() {
                   <div className="px-3 py-2 border-b text-sm font-medium flex items-center justify-between">
                     <span>Logs</span>
                     <div className="flex items-center gap-2 text-xs">
+                      <button
+                        className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={!selectedId || (logsData.length === 0) || clearLogs.isPending}
+                        onClick={() => {
+                          if (!selectedId) return
+                          const ok = window.confirm('Clear logs for this datasource? This will permanently delete the shown run entries.')
+                          if (!ok) return
+                          clearLogs.mutate()
+                        }}
+                      >Clear logs</button>
                       <span className="min-w-[140px] whitespace-nowrap">Rows per page</span>
                       <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                         [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none

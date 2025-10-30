@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bayan - Favicon Implementation Guide</title>
+    
+    <!-- Add these lines to your HTML <head> section -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="icon" type="image/svg+xml" sizes="16x16" href="favicon-16x16.svg">
+    <link rel="icon" type="image/svg+xml" sizes="32x32" href="favicon.svg">
+    <link rel="apple-touch-icon" sizes="180x180" href="bayan-logo-square.svg">
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f8fafc;
+            line-height: 1.6;
+        }
+        
+        h1 {
+            color: #011419;
+            border-bottom: 3px solid #29B5E8;
+            padding-bottom: 10px;
+        }
+        
+        h2 {
+            color: #024158;
+            margin-top: 30px;
+        }
+        
+        .code-block {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+        }
+        
+        .code-block code {
+            color: #7DD3F3;
+        }
+        
+        .note {
+            background: #e0f2fe;
+            border-left: 4px solid #0598CC;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .preview {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin: 20px 0;
+        }
+        
+        .favicon-demo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin: 10px 0;
+            padding: 10px;
+            background: #f1f5f9;
+            border-radius: 6px;
+        }
+        
+        .favicon-demo img {
+            border: 1px solid #cbd5e1;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎨 Bayan Favicon Implementation Guide</h1>
+    
+    <div class="note">
+        <strong>Note:</strong> This page demonstrates the favicon in action! Check your browser tab to see the Bayan logo.
+    </div>
+    
+    <h2>📋 Basic HTML Implementation</h2>
+    <p>Add these lines to the <code>&lt;head&gt;</code> section of your HTML:</p>
+    
+    <div class="code-block">
+<code>&lt;!-- Standard favicon --&gt;
+&lt;link rel="icon" type="image/svg+xml" href="/favicon.svg"&gt;
+
+&lt;!-- For older browsers that don't support SVG --&gt;
+&lt;link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png"&gt;
+&lt;link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png"&gt;
+
+&lt;!-- Apple Touch Icon (for iOS home screen) --&gt;
+&lt;link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"&gt;</code>
+    </div>
+    
+    <h2>⚛️ React/Next.js Implementation</h2>
+    <p>In your <code>app/layout.tsx</code> or <code>pages/_app.tsx</code>:</p>
+    
+    <div class="code-block">
+<code>import Head from 'next/head';
+
+export default function RootLayout({ children }) {
+  return (
+    &lt;html&gt;
+      &lt;Head&gt;
+        &lt;link rel="icon" type="image/svg+xml" href="/favicon.svg" /&gt;
+        &lt;link rel="apple-touch-icon" href="/apple-touch-icon.png" /&gt;
+      &lt;/Head&gt;
+      &lt;body&gt;{children}&lt;/body&gt;
+    &lt;/html&gt;
+  );
+}</code>
+    </div>
+    
+    <h2>🖼️ Favicon Preview</h2>
+    <div class="preview">
+        <p><strong>How your favicon appears at different sizes:</strong></p>
+        
+        <div class="favicon-demo">
+            <img src="favicon-16x16.svg" width="16" height="16" alt="16px">
+            <span>16×16 - Browser tab (small)</span>
+        </div>
+        
+        <div class="favicon-demo">
+            <img src="favicon.svg" width="32" height="32" alt="32px">
+            <span>32×32 - Browser tab (standard)</span>
+        </div>
+        
+        <div class="favicon-demo">
+            <img src="favicon.svg" width="48" height="48" alt="48px">
+            <span>48×48 - Windows taskbar</span>
+        </div>
+        
+        <div class="favicon-demo">
+            <img src="bayan-logo-square.svg" width="180" height="180" alt="180px">
+            <span>180×180 - Apple Touch Icon</span>
+        </div>
+    </div>
+    
+    <h2>📁 File Checklist</h2>
+    <div class="preview">
+        <p>Make sure these files are in your <code>/public</code> folder:</p>
+        <ul>
+            <li>✅ <code>favicon.svg</code> - Main SVG favicon (32x32 optimized)</li>
+            <li>✅ <code>favicon-16x16.svg</code> - Simplified 16x16 version</li>
+            <li>✅ <code>bayan-logo-square.svg</code> - For Apple devices</li>
+            <li>⚠️ <code>favicon.ico</code> - Optional, for legacy browser support</li>
+        </ul>
+    </div>
+    
+    <h2>🎨 Color Palette Reference</h2>
+    <div class="preview">
+        <p>Your favicon uses the Bayan color scheme:</p>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <div style="background: #011419; width: 80px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; text-align: center;">#011419<br>Base</div>
+            <div style="background: #0598CC; width: 80px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; text-align: center;">#0598CC<br>Medium</div>
+            <div style="background: #29B5E8; width: 80px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; text-align: center;">#29B5E8<br>Bright</div>
+            <div style="background: #7DD3F3; width: 80px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #011419; font-size: 10px; text-align: center;">#7DD3F3<br>Light</div>
+        </div>
+    </div>
+    
+    <div class="note">
+        <strong>💡 Pro Tip:</strong> SVG favicons are supported by all modern browsers and scale perfectly at any size. For maximum compatibility, you can also generate PNG versions from the SVG files.
+    </div>
+</body>
+</html>

@@ -1,20 +1,20 @@
 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#29B5E8;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#011419;stop-opacity:1" />
-    </linearGradient>
-    <linearGradient id="lineGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+    <linearGradient id="bgGradDark32" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#7DD3F3;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#0598CC;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#29B5E8;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="lineGradDark32" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#B8E8F5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7DD3F3;stop-opacity:1" />
     </linearGradient>
   </defs>
   
   <!-- Background Circle -->
-  <circle cx="16" cy="16" r="16" fill="url(#bgGrad)"/>
+  <circle cx="16" cy="16" r="16" fill="url(#bgGradDark32)"/>
   
   <!-- Rising Data Bars -->
-  <g fill="white" opacity="0.95">
+  <g fill="#011419" opacity="0.95">
     <rect x="7" y="18" width="3" height="6" rx="0.5"/>
     <rect x="11.5" y="15" width="3" height="9" rx="0.5"/>
     <rect x="16" y="12" width="3" height="12" rx="0.5"/>
@@ -23,15 +23,15 @@
   
   <!-- Trend Line -->
   <path d="M 6 20 L 13 16 L 17.5 13 L 22 10" 
-        stroke="url(#lineGrad)" 
+        stroke="url(#lineGradDark32)" 
         stroke-width="2" 
         fill="none" 
         stroke-linecap="round"
         stroke-linejoin="round"
-        opacity="0.8"/>
+        opacity="0.9"/>
   
   <!-- Data Points -->
-  <g fill="#7DD3F3">
+  <g fill="#B8E8F5">
     <circle cx="6" cy="20" r="1.5"/>
     <circle cx="13" cy="16" r="1.5"/>
     <circle cx="17.5" cy="13" r="1.5"/>

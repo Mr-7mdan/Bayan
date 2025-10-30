@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     cors_origins: str = Field(default="http://localhost:3000,http://127.0.0.1:3000")
 
     # Secrets
-    secret_key: str = Field(default="please-change-me")
+    secret_key: str = Field(default="BayanSecretKey")
 
     # Local analytical store (DuckDB)
     duckdb_path: str = Field(default=".data/local.duckdb")

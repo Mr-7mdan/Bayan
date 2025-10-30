@@ -71,7 +71,7 @@ export function renderCalendarHeatmapMonthlyDays({ chartInstanceKey, data, month
   const option = {
     title: title ? { left: 'center', text: title } : undefined,
     tooltip: { position: 'top' as const, formatter: (p: any) => `${p?.value?.[0]}: ${formatValue(Number(p?.value?.[1]||0), valueFormat, currency)}` },
-    visualMap: { min, max, calculable: true, orient: vmOrient, left: (vmPos==='left'?'left':'center'), top: (vmPos==='top'?0:undefined), right: (vmPos==='right'?0:undefined), bottom: (vmPos==='bottom'?0:undefined), formatter: (val: number) => formatValue(val, valueFormat, currency) },
+    visualMap: { min, max, calculable: true, orient: vmOrient, left: (vmPos==='left'?'left':'center'), top: (vmPos==='top'?0:undefined), right: (vmPos==='right'?0:undefined), bottom: (vmPos==='bottom'?0:undefined), dimension: 1, seriesIndex: 0, formatter: (val: number) => formatValue(val, valueFormat, currency) },
     calendar: {
       top: 40,
       left: 20,
@@ -82,7 +82,7 @@ export function renderCalendarHeatmapMonthlyDays({ chartInstanceKey, data, month
       splitLine: { lineStyle: { color: 'rgba(148,163,184,.4)', width: 1 } },
     },
     series: [
-      { type: 'heatmap', coordinateSystem: 'calendar', data: rows },
+      { type: 'heatmap', coordinateSystem: 'calendar', data: rows, encode: { value: 1 } },
     ],
   }
   return (
@@ -122,13 +122,14 @@ export function renderHeatmapWeekdayByHour({ chartInstanceKey, data, title, valu
     grid: { left: 60, right: 40, top: 40, bottom: 40 },
     xAxis: { type: 'category' as const, data: hours.map(h => `${h}:00`), splitArea: { show: true } },
     yAxis: { type: 'category' as const, data: days, splitArea: { show: true } },
-    visualMap: { min, max, calculable: true, orient: vmOrient, left: (vmPos==='left'?'left':'right'), top: (vmPos==='top'?'top':'center'), bottom: (vmPos==='bottom'?0:undefined), formatter: (val: number) => formatValue(val, valueFormat, currency) },
+    visualMap: { min, max, calculable: true, orient: vmOrient, left: (vmPos==='left'?'left':'right'), top: (vmPos==='top'?'top':'center'), bottom: (vmPos==='bottom'?0:undefined), dimension: 2, seriesIndex: 0, formatter: (val: number) => formatValue(val, valueFormat, currency) },
     series: [
       {
         name: 'Intensity',
         type: 'heatmap',
         data: triples,
         label: { show: false },
+        encode: { x: 0, y: 1, value: 2 },
         emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
       },
     ],

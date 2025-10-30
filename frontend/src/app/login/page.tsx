@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Api } from '@/lib/api'
+import { useTheme } from '@/components/providers/ThemeProvider'
+import ThemeToggle from '@/components/ui/ThemeToggle'
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -15,6 +17,9 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Versions for footer
+  const [backendVer, setBackendVer] = useState<string | null>(null)
+  const [frontendVer, setFrontendVer] = useState<string | null>(null)
   // Signup dialog state
   const [signupOpen, setSignupOpen] = useState(false)
   const [suName, setSuName] = useState('')
@@ -28,6 +33,9 @@ export default function LoginPage() {
   const [rpNew, setRpNew] = useState('')
   const [rpBusy, setRpBusy] = useState(false)
   const [rpMsg, setRpMsg] = useState<string | null>(null)
+  const { resolved, darkVariant, setDarkVariant } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
 
   // Load remembered email if enabled
   useEffect(() => {
@@ -41,6 +49,19 @@ export default function LoginPage() {
         setRemember(false)
       }
     } catch {}
+  }, [])
+  // Load versions (best-effort)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const v = await Api.updatesVersion()
+        if (cancelled) return
+        setBackendVer((v?.backend || '') || null)
+        setFrontendVer((v?.frontend || '') || null)
+      } catch {}
+    })()
+    return () => { cancelled = true }
   }, [])
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -61,7 +82,21 @@ export default function LoginPage() {
       } catch {}
       router.replace('/home')
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to login')
+      // Friendly error messages for common auth failures
+      let msg = 'Could not sign in. Please check your email and password.'
+      try {
+        const m = (err instanceof Error ? err.message : String(err || '')).toLowerCase()
+        if (m.includes('http 401') || m.includes('invalid credentials')) {
+          msg = 'Invalid email or password.'
+        } else if (m.includes('http 429')) {
+          msg = 'Too many attempts. Please wait a moment and try again.'
+        } else if (m.includes('http 5')) {
+          msg = 'Server error. Please try again later.'
+        } else if (m.includes('timed out')) {
+          msg = 'Request timed out. Check your connection and try again.'
+        }
+      } catch {}
+      setError(msg)
     } finally { setLoading(false) }
   }
 
@@ -69,6 +104,31 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center p-6 bg-[hsl(var(--background))]">
       <Card className="w-full max-w-md p-0 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))]">
         <div className="px-5 py-6">
+          {mounted && (
+            <div className="flex items-center justify-end gap-2">
+              {resolved === 'dark' && (
+                <div className="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Bluish dark theme"
+                    onClick={() => setDarkVariant('bluish')}
+                    className={`h-6 w-8 rounded-md border ${darkVariant==='bluish' ? 'ring-1 ring-[hsl(var(--ring))]' : 'border-[hsl(var(--border))]'}`}
+                    style={{ background: 'linear-gradient(135deg, #0E2F3F 0%, #143245 100%)' }}
+                    title="Bluish"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Blackish dark theme"
+                    onClick={() => setDarkVariant('blackish')}
+                    className={`h-6 w-8 rounded-md border ${darkVariant==='blackish' ? 'ring-1 ring-[hsl(var(--ring))]' : 'border-[hsl(var(--border))]'}`}
+                    style={{ background: 'linear-gradient(135deg, #0b0f15 0%, #111827 100%)' }}
+                    title="Blackish"
+                  />
+                </div>
+              )}
+              <ThemeToggle />
+            </div>
+          )}
           <div className="flex flex-col items-center gap-2">
             <img src="/logo.svg" alt="Bayan" className="h-10 w-auto block dark:hidden" />
             <img src="/logo-dark.svg" alt="Bayan" className="h-10 w-auto hidden dark:block" />
@@ -178,6 +238,16 @@ export default function LoginPage() {
             </Dialog.Content>
           </Dialog.Portal>
         </Dialog.Root>
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+          <div className="mx-auto flex items-center justify-center gap-2">
+            <img src="/bayan-logo.svg" alt="Bayan" className="h-7 w-auto opacity-80 dark:opacity-90 self-center" />
+            <div className="text-[11px] text-muted-foreground leading-tight">
+              <div>All rights reserved to Bayan © {new Date().getFullYear()}</div>
+              <div className="mt-0.5">Frontend {frontendVer || '-'} · Backend {backendVer || '-'}</div>
+            </div>
+          </div>
+        </div>
       </Card>
     </div>
   )
