@@ -109,7 +109,7 @@ if (-not $existingSecret) {
   else { $content += "`nSECRET_KEY=$secret" }
 }
 # CORS origins
-if ($content -notmatch '^CORS_ORIGINS=') { $content += "`nCORS_ORIGINS=http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort" }
+if ($content -notmatch '^CORS_ORIGINS=') { $content += "`nCORS_ORIGINS=http://localhost:${FrontendPort},http://127.0.0.1:${FrontendPort}" }
 # Admin bootstrap
 if ($content -notmatch '^ADMIN_EMAIL=') { $content += "`nADMIN_EMAIL=$AdminEmail" } else { $content = ($content -replace '^ADMIN_EMAIL=.*', "ADMIN_EMAIL=$AdminEmail") }
 if ($content -notmatch '^ADMIN_PASSWORD=') { $content += "`nADMIN_PASSWORD=$AdminPassword" } else { $content = ($content -replace '^ADMIN_PASSWORD=.*', "ADMIN_PASSWORD=$AdminPassword") }
@@ -177,7 +177,7 @@ if (-not $exists2) {
 & $nssm set $frontendSvc AppStdout (Join-Path $InstallDir 'logs\frontend.out.log')
 & $nssm set $frontendSvc AppStderr (Join-Path $InstallDir 'logs\frontend.err.log')
 # Optionally set env overrides for the service (uncomment to customize)
-# & $nssm set $frontendSvc AppEnvironmentExtra "PORT=$FrontendPort`nHOST=0.0.0.0`nNODE_ENV=production`nNEXT_PUBLIC_API_BASE_URL=http://$BackendHost:$BackendPort/api"
+# & $nssm set $frontendSvc AppEnvironmentExtra "PORT=${FrontendPort}`nHOST=0.0.0.0`nNODE_ENV=production`nNEXT_PUBLIC_API_BASE_URL=http://${BackendHost}:${BackendPort}/api"
 try { & $nssm stop $frontendSvc | Out-Null } catch {}
 & $nssm start $frontendSvc | Out-Null
 
@@ -208,6 +208,6 @@ if ($caddyExe) {
 }
 
 Write-Heading "Done"
-Write-Host "Backend: http://$BackendHost:$BackendPort/api/healthz"
-Write-Host "Frontend (Next.js upstream): http://127.0.0.1:$FrontendPort"
+Write-Host "Backend: http://${BackendHost}:${BackendPort}/api/healthz"
+Write-Host "Frontend (Next.js upstream): http://127.0.0.1:${FrontendPort}"
 Write-Host "Reverse proxy (Caddy): http(s)://<your-domain>  (serving / -> Next.js, /api -> FastAPI)"
