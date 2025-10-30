@@ -232,4 +232,4 @@ if ($caddyExe) {
 Write-Heading "Done"
 Write-Host "Backend: http://${BackendHost}:${BackendPort}/api/healthz"
 Write-Host "Frontend (Next.js upstream): http://127.0.0.1:${FrontendPort}"
-Write-Host "Reverse proxy (Caddy): http(s)://<your-domain>  (serving / -> Next.js, /api -> FastAPI)"
+Write-Host "Reverse proxy (Caddy): http(s)://bayan.aman.ps  (serving / -> Next.js, /api -> FastAPI)"
