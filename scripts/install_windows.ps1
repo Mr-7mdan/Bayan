@@ -149,12 +149,23 @@ npm run build
 Pop-Location
 
 Write-Heading "Configuring reverse proxy (Caddy)"
-$proxyScript = Join-Path $InstallDir 'scripts\setup_reverse_proxy_windows.ps1'
-if (Test-Path $proxyScript) {
-  # Run the proxy setup (prompts for domain and upstreams). This may register a Caddy service which we'll replace with NSSM for consistency.
-  & powershell -ExecutionPolicy Bypass -File $proxyScript
+# Check if winget is available for Caddy installation
+if (-not (Ensure-Command winget)) {
+  Write-Warning "winget not found. Caddy installation requires winget (App Installer)."
+  Write-Host "Options:"
+  Write-Host "  1. Install winget: powershell -ExecutionPolicy Bypass -File '$InstallDir\scripts\install_winget.ps1'"
+  Write-Host "  2. Install Caddy manually from https://caddyserver.com/download"
+  Write-Host "  3. Skip and run setup_reverse_proxy_windows.ps1 later"
+  $response = Read-Host "Continue without Caddy? [Y/n]"
+  if ($response -match '^(?i:n|no)$') { exit 1 }
 } else {
-  Write-Host "Proxy script not found at $proxyScript. Skipping reverse proxy setup."
+  $proxyScript = Join-Path $InstallDir 'scripts\setup_reverse_proxy_windows.ps1'
+  if (Test-Path $proxyScript) {
+    # Run the proxy setup (prompts for domain and upstreams). This may register a Caddy service which we'll replace with NSSM for consistency.
+    & powershell -ExecutionPolicy Bypass -File $proxyScript
+  } else {
+    Write-Host "Proxy script not found at $proxyScript. Skipping reverse proxy setup."
+  }
 }
 
 Write-Heading "Creating and starting services with NSSM"
