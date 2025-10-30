@@ -119,7 +119,8 @@ caddy start-service
 
 Write-Host "`nCaddy is configured and running as a Windows service."
 Write-Host "- Config: $caddyfile"
-Write-Host ("- Site:   {0}" -f ([string]::IsNullOrWhiteSpace($domain) ? ':80' : $domain))
+$siteDisplay = if ([string]::IsNullOrWhiteSpace($domain)) { ':80' } else { $domain }
+Write-Host ("- Site:   {0}" -f $siteDisplay)
 Write-Host "- Upstreams:"
 Write-Host "  * Next.js -> http://$webUp"
 Write-Host "  * FastAPI -> http://$apiUp"

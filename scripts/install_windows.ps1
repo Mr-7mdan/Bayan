@@ -25,7 +25,10 @@ $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';'
 function Ensure-Dir($path){ if (-not (Test-Path $path)) { New-Item -ItemType Directory -Force -Path $path | Out-Null } }
 function Ensure-Command($name){ return (Get-Command $name -ErrorAction SilentlyContinue) -ne $null }
 function Install-WithWinget($id){
-  if (-not (Ensure-Command winget)) { return $false }
+  if (-not (Ensure-Command winget)) {
+    Write-Warning "winget not found. Please install App Installer from Microsoft Store or run scripts/install_winget.ps1"
+    return $false
+  }
   try {
     Write-Host "Installing $id via winget..."
     winget install --id $id -e --accept-package-agreements --accept-source-agreements --silent | Out-Null
@@ -129,7 +132,15 @@ Pop-Location
 
 Write-Heading "Setting up frontend (install and build)"
 Push-Location $frontendDir
-if (-not (Test-Path (Join-Path $frontendDir 'node_modules'))) { npm ci } else { npm install }
+# Try npm ci first; fallback to npm install if lock file is out of sync
+$npmOk = $false
+if (-not (Test-Path (Join-Path $frontendDir 'node_modules'))) {
+  try { npm ci 2>&1 | Out-Null; $npmOk = $true } catch {}
+}
+if (-not $npmOk) {
+  Write-Host "Running npm install (lock file may be stale)..."
+  npm install
+}
 $env:NODE_ENV = 'production'
 # Use same-origin API behind the reverse proxy
 $env:NEXT_PUBLIC_API_BASE_URL = "/api"
