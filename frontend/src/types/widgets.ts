@@ -415,6 +415,7 @@ export type WidgetConfig = {
       components: CompositionComponent[]
       columns?: 6 | 8 | 12 // grid columns for layout (default 12)
       gap?: number // tailwind spacing scale, e.g., 2
+      layout?: 'grid' | 'stack' // grid = side-by-side per span; stack = vertical order
       innerInteractive?: boolean // enable inner selection/interaction mode
     }
     // Spacer card options

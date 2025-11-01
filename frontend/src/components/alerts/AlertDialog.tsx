@@ -266,17 +266,17 @@ function ValuesFilterPicker({ field, datasourceId, source, where, onApply }: { f
   )
 }
 
-export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, alert, widget, parentDashboardId }: { open: boolean; mode: 'create'|'edit'; onCloseAction: () => void; onSavedAction: (a: AlertOut) => void; alert?: AlertOut | null; widget?: WidgetConfig | null; parentDashboardId?: string | null }) {
+export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, alert, widget, parentDashboardId, defaultKind, defaultTemplate }: { open: boolean; mode: 'create'|'edit'; onCloseAction: () => void; onSavedAction: (a: AlertOut) => void; alert?: AlertOut | null; widget?: WidgetConfig | null; parentDashboardId?: string | null; defaultKind?: 'alert'|'notification'; defaultTemplate?: string }) {
   const { user } = useAuth()
   const { resolved } = useTheme()
   const tabBase = resolved === 'dark' ? 'sidebar-item-dark' : 'sidebar-item-light'
   const tabActive = resolved === 'dark' ? 'sidebar-item-active-dark' : 'sidebar-item-active-light'
   const [name, setName] = useState('')
-  const [kind, setKind] = useState<'alert'|'notification'>('alert')
+  const [kind, setKind] = useState<'alert'|'notification'>(defaultKind ?? 'alert')
   const [enabled, setEnabled] = useState(true)
   const [emailTo, setEmailTo] = useState('')
   const [smsTo, setSmsTo] = useState('')
-  const [template, setTemplate] = useState('Current KPI value: {{kpi}}')
+  const [template, setTemplate] = useState(defaultTemplate ?? 'Current KPI value: {{kpi}}')
   const [templateSms, setTemplateSms] = useState('KPI: {{kpi}}')
   const [customPlaceholders, setCustomPlaceholders] = useState<Array<{ name: string; html: string }>>([])
   const phAreaRefs = React.useRef<Array<HTMLTextAreaElement | null>>([])
@@ -296,7 +296,93 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   const [renderMode, setRenderMode] = useState<'kpi'|'table'|'chart'>('kpi')
   const [snapWidth, setSnapWidth] = useState<number>(1000)
   const [snapHeight, setSnapHeight] = useState<number>(280)
-  const [snapTheme, setSnapTheme] = useState<'light'|'dark'>('dark')
+  type RecipientToken = { kind: 'contact'|'email'|'phone'|'tag'; label: string; value: string; email?: string; phone?: string; id?: string; name?: string; tag?: string }
+  const [recipTokens, setRecipTokens] = useState<RecipientToken[]>([])
+  const [recipInput, setRecipInput] = useState<string>('')
+  const [recipSuggestions, setRecipSuggestions] = useState<Array<(
+    { type: 'contact'; id: string; name: string; email: string; phone: string; label: string } |
+    { type: 'tag'; tag: string; label: string }
+  )>>([])
+  const [recipSugOpen, setRecipSugOpen] = useState<boolean>(false)
+  const [recipSel, setRecipSel] = useState<Set<string>>(new Set())
+  const recipKey = (s: { type: 'contact'; id: string } | { type: 'tag'; tag: string }) => (s.type === 'contact' ? `c:${(s.id||'').toLowerCase()}` : `t:${(s.tag||'').toLowerCase()}`)
+  function toggleRecipSel(s: { type: 'contact'; id: string } | { type: 'tag'; tag: string }) { const k=recipKey(s); setRecipSel(prev=>{ const n=new Set(prev); if(n.has(k)) n.delete(k); else n.add(k); return n }) }
+  function isValidEmail(s: string): boolean { const v=(s||'').trim(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) }
+  function isValidPhone(s: string): boolean { const v=(s||'').trim(); return /^[+]?[-(). \d]{6,}$/.test(v) }
+  function addRecipToken(t: RecipientToken) {
+    const key = t.kind === 'contact' ? (`contact:${(t.id||'').toLowerCase()}`) : (`${t.kind}:${t.value.toLowerCase()}`)
+    setRecipTokens(prev => prev.some(x => (x.kind === 'contact' ? (`contact:${(x.id||'').toLowerCase()}`) : (`${x.kind}:${x.value.toLowerCase()}`)) === key) ? prev : [...prev, t])
+  }
+  function addSelectedRecipients() {
+    const selected = new Set(recipSel)
+    recipSuggestions.forEach(s => {
+      const k = recipKey(s as any)
+      if (!selected.has(k)) return
+      if (s.type === 'contact') {
+        addRecipToken({ kind:'contact', id: s.id, name: s.name, label: s.name || s.label, value: s.name || s.label, email: (s.email||'').trim(), phone: (s.phone||'').trim() })
+      } else if (s.type === 'tag') {
+        const tg = (s.tag||'').trim()
+        if (tg) addRecipToken({ kind:'tag', tag: tg, label: `#${tg}`, value: tg })
+      }
+    })
+    setRecipSel(new Set()); setRecipSugOpen(false); setRecipInput('')
+  }
+  function tryCommitRecipInput() {
+    const raw = (recipInput || '').trim().replace(/[;,]+$/,'')
+    if (!raw) return
+    if (raw.startsWith('#')) { const tg = raw.replace(/^#+/, ''); if (tg) addRecipToken({ kind:'tag', tag: tg, label: `#${tg}`, value: tg }) }
+    else if (isValidEmail(raw)) addRecipToken({ kind:'email', label: raw, value: raw })
+    else if (isValidPhone(raw)) addRecipToken({ kind:'phone', label: raw, value: raw })
+    setRecipInput(''); setRecipSugOpen(false)
+  }
+  useEffect(() => {
+    const q = (recipInput || '').trim()
+    if (!q) { setRecipSuggestions([]); return }
+    const h = setTimeout(async () => {
+      try {
+        const res: any = await Api.listContacts({ search: q, active: true, page: 1, pageSize: 100 })
+        const contacts: Array<{ type:'contact'; id: string; name: string; email: string; phone: string; label: string }> = []
+        const tagSet = new Set<string>()
+        ;(res.items || []).forEach((c: any) => {
+          const name = String(c.name||'').trim()
+          const em = String(c.email||'').trim()
+          const ph = String(c.phone||'').trim()
+          const label = `${name}${em?` <${em}>`:''}${ph?` · ${ph}`:''}`
+          contacts.push({ type:'contact', id: String(c.id||''), name, email: em, phone: ph, label })
+          try { (Array.isArray(c.tags) ? c.tags : []).forEach((t: string) => { const tg = String(t||'').trim(); if (tg.toLowerCase().includes(q.toLowerCase())) tagSet.add(tg) }) } catch {}
+        })
+        const tagItems: Array<{ type:'tag'; tag: string; label: string }> = Array.from(tagSet).slice(0,50).map(tg => ({ type:'tag', tag: tg, label: `#${tg}` }))
+        setRecipSuggestions([ ...tagItems, ...contacts ].slice(0, 100)); setRecipSugOpen(true)
+      } catch { setRecipSuggestions([]) }
+    }, 150)
+    return () => clearTimeout(h)
+  }, [recipInput])
+
+  // Expand selected tag tokens to contacts for buildPayload
+  const [tagExpansions, setTagExpansions] = useState<Record<string, { emails: string[]; phones: string[] }>>({})
+  useEffect(() => {
+    const tags = Array.from(new Set(recipTokens.filter(t => t.kind==='tag').map(t => (t.tag||t.value||'').trim()).filter(Boolean)))
+    tags.forEach(async (tg) => {
+      if (!tg) return
+      // Skip if already expanded
+      if (tagExpansions[tg]) return
+      try {
+        const res: any = await Api.listContacts({ search: tg, active: true, page: 1, pageSize: 500 })
+        const emails: string[] = []
+        const phones: string[] = []
+        ;(res.items || []).forEach((c: any) => {
+          try {
+            if ((Array.isArray(c.tags) ? c.tags: []).some((x: string) => String(x||'').trim().toLowerCase() === tg.toLowerCase())) {
+              const em = String(c.email||'').trim(); if (em) emails.push(em)
+              const ph = String(c.phone||'').trim(); if (ph) phones.push(ph)
+            }
+          } catch {}
+        })
+        setTagExpansions(prev => ({ ...prev, [tg]: { emails: Array.from(new Set(emails)), phones: Array.from(new Set(phones)) } }))
+      } catch {}
+    })
+  }, [JSON.stringify(recipTokens.filter(t => t.kind==='tag').map(t => t.tag||t.value))])
+  
   // When enabled and a widget reference is selected, compute height from widget's layout aspect ratio
   const [useWidgetAspect, setUseWidgetAspect] = useState<boolean>(false)
   const [refLayout, setRefLayout] = useState<{ w: number; h: number } | null>(null)
@@ -367,8 +453,18 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   const [testContext, setTestContext] = useState<any | null>(null)
   const [testSummary, setTestSummary] = useState<string | null>(null)
   const [testActiveTab, setTestActiveTab] = useState<'email'|'sms'|'context'|'raw'>('email')
+  const [testEvaluating, setTestEvaluating] = useState<boolean>(false)
   const [showPayload, setShowPayload] = useState(false)
   const [lastPayload, setLastPayload] = useState<AlertCreate | null>(null)
+
+  // Ensure defaults apply in create mode each time the dialog opens
+  useEffect(() => {
+    if (!open) return
+    if (mode === 'create') {
+      if (defaultKind) setKind(defaultKind)
+      if (defaultTemplate != null) setTemplate(defaultTemplate)
+    }
+  }, [open, mode, defaultKind, defaultTemplate])
 
   const spec: any = (widget as any)?.querySpec || {}
   const wrapSelAt = React.useCallback((idx: number, before: string, after: string) => {
@@ -440,14 +536,26 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       const sms = acts.find((a: any) => String(a?.type) === 'sms') || {}
       setEmailTo(Array.isArray(email.to) ? (email.to as string[]).join(',') : '')
       setSmsTo(Array.isArray(sms.to) ? (sms.to as string[]).join(',') : '')
-      setChanEmail(Array.isArray(email.to) ? email.to.length > 0 : false)
-      setChanSms(Array.isArray(sms.to) ? sms.to.length > 0 : false)
+      setChanEmail(Array.isArray(email.to) ? email.to.length > 0 : (Object.prototype.hasOwnProperty.call(email, 'type')))
+      // Persist toggle if an SMS action exists, even if it has empty 'to'
+      const hasSmsAction = (acts || []).some((a: any) => String(a?.type) === 'sms')
+      setChanSms(hasSmsAction ? true : (Array.isArray(sms.to) ? sms.to.length > 0 : false))
+      try {
+        const emailsArr = (Array.isArray(email.to)? (email.to as string[]): []).map((v)=> String(v||'').trim()).filter(Boolean)
+        const phonesArr = (Array.isArray(sms.to)? (sms.to as string[]): []).map((v)=> String(v||'').trim()).filter(Boolean)
+        const uniqE = Array.from(new Set(emailsArr))
+        const uniqP = Array.from(new Set(phonesArr))
+        setRecipTokens([
+          ...uniqE.map((v) => ({ kind: 'email', label: v, value: v } as RecipientToken)),
+          ...uniqP.map((v) => ({ kind: 'phone', label: v, value: v } as RecipientToken)),
+        ])
+      } catch {}
       setTemplate(String(cfg.template || 'Current KPI value: {{kpi}}'))
       const r = cfg.render || { mode: 'kpi' }
       setRenderMode((r.mode || 'kpi') as any)
       try { setSnapWidth(Number((r as any).width || (String((r as any).mode||'kpi')==='kpi'?1000:1000))) } catch {}
       try { setSnapHeight(Number((r as any).height || (String((r as any).mode||'kpi')==='kpi'?280:360))) } catch {}
-      try { const th = String((r as any).theme || 'dark'); setSnapTheme((th==='light'?'light':'dark') as any) } catch {}
+      
       try {
         const wref = (r as any)?.widgetRef
         if (wref && wref.dashboardId && wref.widgetId) {
@@ -587,6 +695,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       setEnabled(true)
       setEmailTo('')
       setSmsTo('')
+      setRecipTokens([])
       setTemplate('Current KPI value: {{kpi}}')
       setTemplateSms('KPI: {{kpi}}')
       setCustomPlaceholders([])
@@ -1147,10 +1256,64 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     }
 
     const actions: any[] = []
-    const emails = emailTo.split(',').map((s)=>s.trim()).filter(Boolean)
-    const phones = smsTo.split(',').map((s)=>s.trim()).filter(Boolean)
-    if (chanEmail && emails.length) actions.push({ type: 'email', to: emails, subject: name })
-    if (chanSms && phones.length) actions.push({ type: 'sms', to: phones, message: (templateSms && templateSms.trim()) ? templateSms : (template || name) })
+    // Build recipients from unified tokens and pending input; filter by selected channels
+    const emailSet = new Set<string>()
+    const phoneSet = new Set<string>()
+    recipTokens.forEach((t) => {
+      if (t.kind === 'email') { const v=(t.value||'').trim(); if (v) emailSet.add(v) }
+      else if (t.kind === 'phone') { const v=(t.value||'').trim(); if (v) phoneSet.add(v) }
+      else if (t.kind === 'contact') {
+        const em = (t.email||'').trim(); if (em) emailSet.add(em)
+        const ph = (t.phone||'').trim(); if (ph) phoneSet.add(ph)
+      }
+    })
+    // Expand selected tags
+    recipTokens.filter(t => t.kind==='tag').forEach(t => {
+      const tg = (t.tag || t.value || '').trim()
+      if (!tg) return
+      const exp = tagExpansions[tg]
+      if (exp) {
+        (exp.emails || []).forEach((em: string) => { const v=String(em||'').trim(); if (v) emailSet.add(v) });
+        (exp.phones || []).forEach((ph: string) => { const v=String(ph||'').trim(); if (v) phoneSet.add(v) });
+      }
+    });
+    const pending = (recipInput || '').trim()
+    if (pending) {
+      if (isValidEmail(pending)) emailSet.add(pending)
+      else if (isValidPhone(pending)) phoneSet.add(pending)
+    }
+    // Also include currently selected suggestions that haven't been added as tokens yet
+    try {
+      const selected = new Set(recipSel)
+      recipSuggestions.forEach((s: any) => {
+        const k = recipKey(s)
+        if (!selected.has(k)) return
+        if (s.type === 'contact') {
+          const em = String(s.email||'').trim(); if (em) emailSet.add(em)
+          const ph = String(s.phone||'').trim(); if (ph) phoneSet.add(ph)
+        } else if (s.type === 'tag') {
+          const tg = String(s.tag||'').trim()
+          if (!tg) return
+          const exp = tagExpansions[tg]
+          if (exp) {
+            (exp.emails || []).forEach((em: string) => { const v=String(em||'').trim(); if (v) emailSet.add(v) });
+            (exp.phones || []).forEach((ph: string) => { const v=String(ph||'').trim(); if (v) phoneSet.add(v) });
+          }
+        }
+      })
+    } catch {}
+    // Also include direct inputs from Email To / SMS To fields
+    try {
+      const splitList = (s: string) => (s||'').split(/[;\,\s]+/).map(x=>x.trim()).filter(Boolean)
+      splitList(emailTo).forEach((em) => { if (isValidEmail(em)) emailSet.add(em) })
+      splitList(smsTo).forEach((ph) => { if (isValidPhone(ph)) phoneSet.add(ph) })
+    } catch {}
+    const emails = Array.from(emailSet)
+    const phones = Array.from(phoneSet)
+    // Persist Email action even when no emails yet; backend/UI can allow editing later
+    if (chanEmail) actions.push({ type: 'email', to: emails, subject: name })
+    // Persist SMS action even when no phones yet; backend/UI can allow editing later
+    if (chanSms) actions.push({ type: 'sms', to: phones, message: (templateSms && templateSms.trim()) ? templateSms : (template || name) })
 
     // Provide a concrete KPI QuerySpec so backend can compute {{kpi}} reliably
     const kpiSource = (advOpen ? (advSource || spec?.source) : (spec?.source)) || ''
@@ -1174,11 +1337,11 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         refLabel = (pickWidgets.find(w => w.id === pickWidgetId)?.title || name)
       }
       if (renderMode === 'table') {
-        render = { mode: 'table', querySpec: refSpec || spec, width: snapWidth, height: snapHeight, theme: snapTheme }
+        render = { mode: 'table', querySpec: refSpec || spec, width: snapWidth, height: snapHeight }
       } else if (renderMode === 'chart') {
-        render = { mode: 'chart', querySpec: refSpec || spec, width: snapWidth, height: snapHeight, theme: snapTheme }
+        render = { mode: 'chart', querySpec: refSpec || spec, width: snapWidth, height: snapHeight }
       } else {
-        render = { mode: 'kpi', label: refLabel, querySpec: refSpec || kpiSpec, width: snapWidth, height: snapHeight, theme: snapTheme }
+        render = { mode: 'kpi', label: refLabel, querySpec: refSpec || kpiSpec, width: snapWidth, height: snapHeight }
       }
       if (rendererUseCarried && widget && (widget as any)?.id) {
         (render as any).widgetRef = { dashboardId: ((widget as any)?.dashboardId || parentDashboardId || ''), widgetId: (widget as any)?.id }
@@ -1186,7 +1349,12 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         (render as any).widgetRef = { dashboardId: pickDashId, widgetId: pickWidgetId }
       }
     } else {
-      render = { mode: 'kpi', label: (widget as any)?.title || name, querySpec: kpiSpec, width: snapWidth, height: snapHeight, theme: snapTheme }
+      render = { mode: 'kpi', label: (widget as any)?.title || name, querySpec: kpiSpec, width: snapWidth, height: snapHeight }
+      if (rendererUseCarried && widget && (widget as any)?.id) {
+        (render as any).widgetRef = { dashboardId: ((widget as any)?.dashboardId || parentDashboardId || ''), widgetId: (widget as any)?.id }
+      } else if (!rendererUseCarried && pickDashId && pickWidgetId) {
+        (render as any).widgetRef = { dashboardId: pickDashId, widgetId: pickWidgetId }
+      }
     }
     // Back-compat: include top-level fields many backends expect
     const cfgAny: any = { datasourceId: cfgDsId, triggers, actions, render, template, source: kpiSource, where: kpiWhere, agg: kpiAgg }
@@ -1252,6 +1420,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
 
   const onTestEvaluate = async () => {
     try {
+      setTestEvaluating(true)
       setTestHtml('')
       setTestEmailHtml('')
       setTestSmsText('')
@@ -1267,11 +1436,13 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       setTestContext(res2?.context || null)
       setTestSummary(res2?.humanSummary || null)
       setTestActiveTab('email')
+      setTestEvaluating(false)
     } catch (e: any) {
       const msg = (e && (e.message || String(e))) || 'Failed to evaluate alert'
       setTestEmailHtml(`<div style="color:#ef4444">${msg}</div>`)
       setTestContext({ error: msg })
       setTestActiveTab('context')
+      setTestEvaluating(false)
     }
   }
 
@@ -1378,12 +1549,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                           title={useWidgetAspect && refLayout ? 'Height derived from widget aspect ratio' : undefined}
                         />
                       </label>
-                      <label className="text-sm">Snapshot theme
-                        <select className="mt-1 w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)]" value={snapTheme} onChange={(e)=> setSnapTheme((e.target.value as any))}>
-                          <option value="dark">Dark</option>
-                          <option value="light">Light</option>
-                        </select>
-                      </label>
+                      
                     </div>
                   </div>
                 )}
@@ -1391,9 +1557,55 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
             )}
 
             {uiSection === 'recipients' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <label className="text-sm md:col-span-2">Email to (comma-separated)<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder="user@org.com,another@org.com" value={emailTo} onChange={(e)=>setEmailTo(e.target.value)} disabled={!chanEmail} /></label>
-                <label className="text-sm">SMS to (comma-separated)<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder="059xxxxxxx,056xxxxxxx" value={smsTo} onChange={(e)=>setSmsTo(e.target.value)} disabled={!chanSms} /></label>
+              <div className="space-y-2 text-sm">
+                <div className="mb-1">Recipients</div>
+                <div className="relative">
+                  <div className="min-h-9 rounded-md border bg-[hsl(var(--secondary)/0.6)] p-1 flex flex-wrap gap-1 items-center">
+                    {recipTokens.map((t, i) => {
+                      const disp = (t.kind === 'contact') ? (t.name || t.label || t.value) : (t.kind==='tag' ? (`#${t.tag || t.value}`) : (t.value || ''))
+                      const warnMissing = (t.kind==='contact') && (((chanEmail && !(t.email||'').trim())) || ((chanSms && !(t.phone||'').trim())))
+                      const title = warnMissing ? ((chanEmail && !(t.email||'').trim()) && (chanSms && !(t.phone||'').trim()) ? 'Missing email and phone for enabled channels' : (chanEmail && !(t.email||'').trim()) ? 'Missing email for Email channel' : 'Missing phone for SMS channel') : undefined
+                      return (
+                        <span key={(t.kind==='contact'?`contact:${t.id}`:`${t.kind}:${t.value}`)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs bg-[hsl(var(--background))]" title={title}>
+                          <span>{disp}</span>
+                          {warnMissing && (<span className="text-[10px] text-amber-600" aria-label="Missing contact info">⚠</span>)}
+                          <button type="button" className="opacity-70 hover:opacity-100" onClick={()=> setRecipTokens(prev => prev.filter((_, idx)=> idx!==i))}>✕</button>
+                        </span>
+                      )
+                    })}
+                    <input
+                      className="flex-1 min-w-[200px] h-7 bg-transparent outline-none text-xs px-2"
+                      placeholder="Type name, email, or phone; press Enter"
+                      value={recipInput}
+                      onChange={(e)=> setRecipInput(e.target.value)}
+                      onFocus={()=> setRecipSugOpen(true)}
+                      onKeyDown={(e)=> { if (e.key==='Enter' || e.key==='Tab' || e.key===',' || e.key===';') { e.preventDefault(); tryCommitRecipInput() } if (e.key==='Backspace' && !recipInput) { setRecipTokens(prev => prev.slice(0,-1)) } }}
+                      onBlur={()=> setTimeout(()=> setRecipSugOpen(false), 120)}
+                    />
+                  </div>
+                  {recipSugOpen && recipSuggestions.length>0 && (
+                    <div className="absolute z-[1001] mt-1 w-full max-h-56 overflow-auto rounded-md border bg-[hsl(var(--card))] shadow">
+                      <div className="sticky top-0 z-10 flex items-center justify-between px-2 py-1 border-b bg-[hsl(var(--card))] text-[11px]">
+                        <div>{Array.from(recipSel).length} selected</div>
+                        <div className="flex items-center gap-2">
+                          <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={addSelectedRecipients}>Add selected</button>
+                          <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={()=> setRecipSel(new Set())}>Clear</button>
+                        </div>
+                      </div>
+                      {recipSuggestions.map((s, idx) => {
+                        const key = (s.type==='contact') ? `c:${(s.id||'').toLowerCase()}` : `t:${(s.tag||'').toLowerCase()}`
+                        const checked = recipSel.has(recipKey(s))
+                        return (
+                          <button key={key || String(idx)} className="w-full text-left text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleRecipSel(s)}>
+                            <input type="checkbox" readOnly checked={checked} className="h-3 w-3" />
+                            <span>{s.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div className="text-[11px] text-muted-foreground">Selected channels determine which contact fields are used (email for Email channel, phone for SMS).</div>
               </div>
             )}
 
@@ -1979,7 +2191,16 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm font-medium">Inline Test</div>
-            <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onTestEvaluate}>Test evaluate</button>
+            <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onTestEvaluate} disabled={testEvaluating}>
+              {testEvaluating ? (
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-3 w-3 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>
+                  <span>Testing…</span>
+                </span>
+              ) : (
+                'Test evaluate'
+              )}
+            </button>
           </div>
           {advOpen && (
             <div className="mb-2 text-xs text-muted-foreground">
@@ -2101,7 +2322,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
             </div>
           )}
           {testActiveTab==='email' && (
-            <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-auto" style={{ minHeight: 120 }}>
+            <div className="rounded-md border border-[hsl(var(--border))] bg-white overflow-auto" style={{ minHeight: 120 }}>
               {testEmailHtml
                 ? <iframe title="alert-inline-email" className="w-full h-[260px]" srcDoc={testEmailHtml} />
                 : <div className="p-2 text-xs text-muted-foreground">No HTML returned for Email.</div>}

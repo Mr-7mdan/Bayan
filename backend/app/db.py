@@ -429,7 +429,8 @@ try:
             except Exception:
                 pass
             try:
-                init_duck_shared(_p)
+                if str(os.getenv("BAYAN_INIT_DUCK_ON_IMPORT", "0")).strip().lower() in ("1", "true", "yes", "on"):
+                    init_duck_shared(_p)
             except Exception:
                 pass
 except Exception:

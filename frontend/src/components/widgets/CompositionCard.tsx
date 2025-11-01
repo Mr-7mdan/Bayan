@@ -16,6 +16,7 @@ export default function CompositionCard({ title, options, widgets, interactive =
   const cardClass = `${autoFit ? '' : 'h-full'} !border-0 shadow-none rounded-lg ${cardFill === 'transparent' ? 'bg-transparent' : 'bg-card'}`
 
   const comp = options?.composition
+  const layout: 'grid' | 'stack' = (comp?.layout === 'stack' ? 'stack' : 'grid')
   const cols = comp?.columns || 12
   const colClass = cols === 6 ? 'grid-cols-6' : cols === 8 ? 'grid-cols-8' : 'grid-cols-12'
   const gap = typeof comp?.gap === 'number' ? comp!.gap : 2
@@ -82,7 +83,7 @@ export default function CompositionCard({ title, options, widgets, interactive =
         {(!comp || !Array.isArray(comp.components) || comp.components.length === 0) ? (
           <div className="text-xs text-muted-foreground">Composition layout empty. Use the builder to add components.</div>
         ) : (
-          <div ref={gridRef} className={`grid ${colClass} ${gapClass}`}>
+          <div ref={gridRef} className={`${layout === 'grid' ? `grid ${colClass}` : 'flex flex-col'} ${gapClass}`}>
             {components.map((c, idx) => {
               const span = Math.min(cols, Math.max(1, c.span || cols))
               const spanClass = spanClassFor(span)
@@ -104,7 +105,7 @@ export default function CompositionCard({ title, options, widgets, interactive =
                 },
                 'aria-grabbed': activeIdx === idx ? 'true' : 'false',
               } : {}
-              const wrapClass = `${spanClass} relative overflow-visible ${interactive ? 'group' : ''} ${interactive && activeIdx === idx ? 'ring-2 ring-[hsl(var(--primary))] ring-offset-1 ring-offset-[hsl(var(--card))] rounded-md' : ''}`
+              const wrapClass = `${layout === 'grid' ? spanClass : 'w-full'} relative overflow-visible ${interactive ? 'group' : ''} ${interactive && activeIdx === idx ? 'ring-2 ring-[hsl(var(--primary))] ring-offset-1 ring-offset-[hsl(var(--card))] rounded-md' : ''}`
               if (c.kind === 'title') {
                 return (
                   <div
@@ -116,25 +117,35 @@ export default function CompositionCard({ title, options, widgets, interactive =
                   >
                     {c.text || ''}
                     {interactive && (
-                      <div className={`absolute right-0 top-0 h-full ${glyphBoxW} pointer-events-none`}>
-                        <div
-                          className={`absolute left-0 top-0 h-full ${glyphW} cursor-ew-resize border-l border-dashed ${activeIdx === idx ? 'border-[hsl(var(--primary))]' : 'border-[hsl(var(--muted-foreground))]/40'} ${activeIdx === idx ? 'bg-[hsl(var(--primary))]/10' : 'bg-transparent'} hover:bg-[hsl(var(--primary))]/15 ${glyphRadius} pointer-events-auto`}
-                          onMouseDown={(e) => startResize(idx, e)}
-                          role="separator"
-                          aria-orientation="horizontal"
-                          aria-label="Resize"
-                          title="Drag right edge to resize"
-                        />
-                        {activeIdx === idx && (
-                          <button
-                            type="button"
-                            className="absolute top-1 right-1 text-[10px] leading-none px-1.5 py-0.5 rounded border bg-[hsl(var(--btn1))] text-black shadow-sm pointer-events-auto"
-                            onClick={(e) => { e.stopPropagation(); onEditComponent(idx) }}
-                            title="Edit text"
-                            aria-label="Edit text"
-                          >✎</button>
-                        )}
-                      </div>
+                      <>
+                        <button
+                          className="absolute top-1 left-1 text-[10px] leading-none px-1.5 py-0.5 rounded border bg-muted text-foreground cursor-grab active:cursor-grabbing"
+                          draggable
+                          onDragStart={(e) => { e.dataTransfer.setData('text/plain', String(idx)); e.dataTransfer.effectAllowed = 'move' }}
+                          title="Drag to reorder"
+                          aria-label="Drag to reorder"
+                          onClick={(e) => { e.stopPropagation(); setActiveIdx(idx) }}
+                        >≡</button>
+                        <div className={`absolute right-0 top-0 h-full ${glyphBoxW} pointer-events-none`}>
+                          <div
+                            className={`absolute left-0 top-0 h-full ${glyphW} cursor-ew-resize border-l border-dashed ${activeIdx === idx ? 'border-[hsl(var(--primary))]' : 'border-[hsl(var(--muted-foreground))]/40'} ${activeIdx === idx ? 'bg-[hsl(var(--primary))]/10' : 'bg-transparent'} hover:bg-[hsl(var(--primary))]/15 ${glyphRadius} pointer-events-auto`}
+                            onMouseDown={(e) => startResize(idx, e)}
+                            role="separator"
+                            aria-orientation="horizontal"
+                            aria-label="Resize"
+                            title="Drag right edge to resize"
+                          />
+                          {activeIdx === idx && (
+                            <button
+                              type="button"
+                              className="absolute top-1 right-1 text-[10px] leading-none px-1.5 py-0.5 rounded border bg-[hsl(var(--btn1))] text-black shadow-sm pointer-events-auto"
+                              onClick={(e) => { e.stopPropagation(); onEditComponent(idx) }}
+                              title="Edit text"
+                              aria-label="Edit text"
+                            >✎</button>
+                          )}
+                        </div>
+                      </>
                     )}
                   </div>
                 )
@@ -189,6 +200,16 @@ export default function CompositionCard({ title, options, widgets, interactive =
                       {(c as any).label && (
                         <div className="text-[11px] text-muted-foreground mb-1">{(c as any).label}</div>
                       )}
+                      {interactive && (
+                        <button
+                          className="absolute top-1 left-1 text-[10px] leading-none px-1.5 py-0.5 rounded border bg-muted text-foreground cursor-grab active:cursor-grabbing"
+                          draggable
+                          onDragStart={(e) => { e.dataTransfer.setData('text/plain', String(idx)); e.dataTransfer.effectAllowed = 'move' }}
+                          title="Drag to reorder"
+                          aria-label="Drag to reorder"
+                          onClick={(e) => { e.stopPropagation(); setActiveIdx(idx) }}
+                        >≡</button>
+                      )}
                       <ErrorBoundary name="KpiCard@Composition">
                         <KpiCard
                           title={ref.title}
@@ -226,6 +247,16 @@ export default function CompositionCard({ title, options, widgets, interactive =
                     >
                       {(c as any).label && (
                         <div className="text-[11px] text-muted-foreground mb-1">{(c as any).label}</div>
+                      )}
+                      {interactive && (
+                        <button
+                          className="absolute top-1 left-1 text-[10px] leading-none px-1.5 py-0.5 rounded border bg-muted text-foreground cursor-grab active:cursor-grabbing"
+                          draggable
+                          onDragStart={(e) => { e.dataTransfer.setData('text/plain', String(idx)); e.dataTransfer.effectAllowed = 'move' }}
+                          title="Drag to reorder"
+                          aria-label="Drag to reorder"
+                          onClick={(e) => { e.stopPropagation(); setActiveIdx(idx) }}
+                        >≡</button>
                       )}
                       <ErrorBoundary name="ChartCard@Composition">
                         {((ref as any).chartType === 'heatmap') ? (

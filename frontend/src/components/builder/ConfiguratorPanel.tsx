@@ -937,29 +937,7 @@ function NewMeasureButton({ columns, onCreate }: { columns: string[]; onCreate: 
         </div>,
         document.body
       )}
-      {local?.type === 'kpi' && (
-        <Section title="KPI Options" defaultOpen>
-          <div className="grid grid-cols-2 gap-2 items-center">
-            <label className="text-xs text-muted-foreground">Aggregation mode</label>
-            <Select value={String((local.options?.kpi?.aggregationMode || 'count') as any)} onValueChangeAction={(val: string) => {
-              const kpi = { ...((local.options?.kpi || {}) as any), aggregationMode: val as any }
-              const opts = { ...(local.options || {}), kpi }
-              const next = { ...local, options: opts }
-              setLocal(next); updateConfig(next)
-            }}>
-              <SelectTrigger className="w-full rounded-md border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-xs">
-                <SelectValue placeholder="Select..." />
-              </SelectTrigger>
-              <SelectContent>
-                {(['none','sum','count','distinctCount','avg','min','max','first','last'] as const).map((m) => (
-                  <SelectItem key={m} value={m}>{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="text-[11px] text-muted-foreground mt-1">Applies to KPI tiles that show category totals (e.g., badges/category tiles). Defaults to count.</div>
-        </Section>
-      )}
+      
     </>
   )
 }
@@ -2037,6 +2015,21 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               }}
             >
               {[6,8,12].map((n) => (<option key={n} value={n}>{n}</option>))}
+            </select>
+            <label className="text-xs text-muted-foreground">Layout</label>
+            <select
+              className="px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs"
+              value={String((local?.options?.composition?.layout || 'grid'))}
+              onChange={(e) => {
+                const layout = (e.target.value === 'stack' ? 'stack' : 'grid') as 'grid'|'stack'
+                const composition = { ...(local?.options?.composition || { components: [] }), layout }
+                const next = { ...local!, options: { ...(local?.options || {}), composition } }
+                setLocal(next)
+                updateConfig(next as any)
+              }}
+            >
+              <option value="grid">Grid</option>
+              <option value="stack">Stack</option>
             </select>
             <label className="text-xs text-muted-foreground">Gap</label>
             <select
@@ -4755,10 +4748,23 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
             ) : null}
             {(local.type === 'chart' || local.type === 'kpi') ? (
               <div className="rounded-md p-2 bg-[hsl(var(--secondary))]">
-                <PivotBuilder
+                {(() => {
+                  const pivotAssignmentsNormalized = (() => {
+                    try {
+                      const legPivot = Array.isArray((pivot as any)?.legend)
+                        ? ((pivot as any).legend as string[])
+                        : ((pivot as any)?.legend ? [String((pivot as any).legend)] : [])
+                      const legSpecRaw: any = (local?.querySpec as any)?.legend
+                      const legSpec = Array.isArray(legSpecRaw) ? (legSpecRaw as string[]) : (legSpecRaw ? [String(legSpecRaw)] : [])
+                      const legend = (legPivot && legPivot.length > 0) ? legPivot : legSpec
+                      return { ...pivot, legend }
+                    } catch { return pivot }
+                  })()
+                  return (
+                    <PivotBuilder
                   fields={allFieldNames}
                   measures={local.measures || []}
-                  assignments={pivot}
+                  assignments={pivotAssignmentsNormalized as any}
                   numericFields={numericFields}
                   dateLikeFields={dateLikeFields}
                   update={(p: PivotAssignments) => applyPivot(p)}
@@ -4772,13 +4778,28 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                   widgetId={local?.id}
                   valueRequired={local.type === 'chart' ? (local.chartType !== 'tremorTable') : (local.type === 'kpi')}
                 />
+                  )
+                })()}
               </div>
             ) : ((local.type === 'table') && ((local.options?.table?.tableType || 'data') === 'data')) ? (
               <div className="rounded-md p-2 bg-[hsl(var(--secondary))]">
-                <PivotBuilder
+                {(() => {
+                  const pivotAssignmentsNormalized = (() => {
+                    try {
+                      const legPivot = Array.isArray((pivot as any)?.legend)
+                        ? ((pivot as any).legend as string[])
+                        : ((pivot as any)?.legend ? [String((pivot as any).legend)] : [])
+                      const legSpecRaw: any = (local?.querySpec as any)?.legend
+                      const legSpec = Array.isArray(legSpecRaw) ? (legSpecRaw as string[]) : (legSpecRaw ? [String(legSpecRaw)] : [])
+                      const legend = (legPivot && legPivot.length > 0) ? legPivot : legSpec
+                      return { ...pivot, legend }
+                    } catch { return pivot }
+                  })()
+                  return (
+                    <PivotBuilder
                   fields={allFieldNames}
                   measures={local.measures || []}
-                  assignments={pivot}
+                  assignments={pivotAssignmentsNormalized as any}
                   numericFields={numericFields}
                   dateLikeFields={dateLikeFields}
                   update={(p: PivotAssignments) => applyPivot(p)}
@@ -4792,6 +4813,8 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                   widgetId={local?.id}
                   valueRequired={false}
                 />
+                  )
+                })()}
               </div>
             ) : ((local.type === 'table') && ((local.options?.table?.tableType || 'data') === 'pivot')) ? (
               <div className="rounded-md p-2 bg-[hsl(var(--secondary))]">
@@ -4879,6 +4902,29 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                 })()}
               </div>
             ) : null}
+            {local?.type === 'kpi' && (
+              <Section title="KPI Options" defaultOpen>
+                <div className="grid grid-cols-[140px,1fr] gap-2 items-center">
+                  <label className="text-xs text-muted-foreground">Aggregation mode</label>
+                  <Select value={String((local.options?.kpi?.aggregationMode || 'count') as any)} onValueChangeAction={(val: string) => {
+                    const kpi = { ...((local.options?.kpi || {}) as any), aggregationMode: val as any }
+                    const opts = { ...(local.options || {}), kpi }
+                    const next = { ...local, options: opts }
+                    setLocal(next); updateConfig(next)
+                  }}>
+                    <SelectTrigger className="w-full rounded-md border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-xs">
+                      <SelectValue placeholder="Select..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(['none','sum','count','distinctCount','avg','min','max','first','last'] as const).map((m) => (
+                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">Applies to KPI tiles that show category totals (e.g., badges/category tiles). Defaults to count.</div>
+              </Section>
+            )}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs text-muted-foreground">Measures</span>

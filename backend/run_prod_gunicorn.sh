@@ -9,6 +9,23 @@ if [ -f "$SCRIPT_DIR/venv/bin/activate" ]; then
   # shellcheck disable=SC1091
   . "$SCRIPT_DIR/venv/bin/activate"
 fi
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  _ORIG_WEB_CONCURRENCY="${WEB_CONCURRENCY:-}"
+  _ORIG_HOT_RELOAD="${HOT_RELOAD:-}"
+  _ORIG_RUN_SCHEDULER="${RUN_SCHEDULER:-}"
+  _ORIG_HOST="${HOST:-}"
+  _ORIG_PORT="${PORT:-}"
+  _ORIG_LOG_LEVEL="${LOG_LEVEL:-}"
+  set -a
+  . "$SCRIPT_DIR/.env"
+  set +a
+  if [ -n "${_ORIG_WEB_CONCURRENCY}" ]; then WEB_CONCURRENCY="${_ORIG_WEB_CONCURRENCY}"; fi
+  if [ -n "${_ORIG_HOT_RELOAD}" ]; then HOT_RELOAD="${_ORIG_HOT_RELOAD}"; fi
+  if [ -n "${_ORIG_RUN_SCHEDULER}" ]; then RUN_SCHEDULER="${_ORIG_RUN_SCHEDULER}"; fi
+  if [ -n "${_ORIG_HOST}" ]; then HOST="${_ORIG_HOST}"; fi
+  if [ -n "${_ORIG_PORT}" ]; then PORT="${_ORIG_PORT}"; fi
+  if [ -n "${_ORIG_LOG_LEVEL}" ]; then LOG_LEVEL="${_ORIG_LOG_LEVEL}"; fi
+fi
 
 export PYTHONUNBUFFERED=1
 # IMPORTANT: with multiple Gunicorn workers, do NOT run the scheduler in each worker

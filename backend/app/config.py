@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     github_token: Optional[str] = Field(default=None, validation_alias=AliasChoices("GITHUB_TOKEN"))
     update_manifest_name: str = Field(default="bayan-manifest.json")
     # Optional seed for frontend current version when file is missing
-    frontend_version_env: Optional[str] = Field(default=None, validation_alias=AliasChoices("FRONTEND_VERSION"))
+    frontend__env: Optional[str] = Field(default=None, validation_alias=AliasChoices("FRONTEND_VERSION"))
 
     # Admin bootstrap on startup
     admin_email: Optional[str] = Field(default=None, validation_alias=AliasChoices("ADMIN_EMAIL"))

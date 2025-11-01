@@ -55,17 +55,16 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
   <meta name='viewport' content='width=device-width, initial-scale=1'>
   <title>{{subject}}</title>
   <style>
-    body{margin:0;padding:0;background:#f7f7f8;color:#111827;font-family:Inter,Arial,sans-serif;}
+    body{margin:0;padding:0;color:#111827;font-family:Inter,Arial,sans-serif;}
     .wrap{width:100%;padding:24px 0;}
-    .container{max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,0.04);overflow:hidden;}
-    .header{padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fafafa;display:flex;align-items:center;gap:12px;}
+    .container{max-width:640px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,0.04);overflow:hidden;}
+    .header{padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:12px;}
     .brand{font-size:14px;font-weight:600;}
     .content{padding:20px;}
-    .footer{padding:16px 20px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;background:#fafafa;}
+    .footer{padding:16px 20px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;}
   </style>
   <link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap' rel='stylesheet'>
-  <style> @media (prefers-color-scheme: dark) { body{background:#0b0f15;color:#e5e7eb} .container{background:#0f1720;border-color:#1f2937} .header{background:#0f1720;border-color:#1f2937} .footer{background:#0f1720;border-color:#1f2937;color:#9ca3af} .card{background:#0f1720;border-color:#1f2937} th,td{border-color:#1f2937} th{background:#111827} } </style>
-  <style> img{border:0;} a{color:#2563eb;text-decoration:none} .logo{display:flex;align-items:center;gap:12px} .subject{font-size:14px;font-weight:600} table{border-collapse:collapse} th,td{border:1px solid #e5e7eb;padding:6px} th{background:#f3f4f6} .card{border:1px solid #e5e7eb;border-radius:10px;padding:16px} .card + .card{margin-top:12px} @media (prefers-color-scheme: dark) { .card{background:#0f1720;border-color:#1f2937} th,td{border-color:#1f2937} th{background:#111827} } </style>
+  <style> img{border:0;} a{color:#2563eb;text-decoration:none} .logo{display:flex;align-items:center;gap:12px} .subject{font-size:14px;font-weight:600} table{border-collapse:collapse} th,td{border:1px solid #e5e7eb;padding:6px} th{background:#f3f4f6} .card{border:1px solid #e5e7eb;border-radius:10px;padding:16px} .card + .card{margin-top:12px} </style>
   
 </head>
 <body>
@@ -73,8 +72,9 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
     <div class='container'>
       <div class='header'>
         <div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:40px;display:block'/></div>
-        <div class='brand'>{{subject}}</div>
+        
       </div>
+      <div class='header'>{{subject}}</div>
       <div class='content'>
         {{content}}
       </div>
@@ -95,19 +95,18 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
   <meta name='viewport' content='width=device-width, initial-scale=1'>
   <title>{{subject}}</title>
   <style>
-    body{margin:0;padding:0;background:#f8fafc;color:#111827;font-family:Inter,Arial,sans-serif;}
-    .container{max-width:640px;margin:12px auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
-    .header{padding:10px 14px;border-bottom:1px solid #e5e7eb;background:#fafafa;display:flex;align-items:center;gap:10px}
+    body{margin:0;padding:0;color:#111827;font-family:Inter,Arial,sans-serif;}
+    .container{max-width:640px;margin:12px auto;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
+    .header{padding:10px 14px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:10px}
     .brand{font-size:13px;font-weight:600}
     .content{padding:14px}
-    .footer{padding:10px 14px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;background:#fafafa}
+    .footer{padding:10px 14px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px}
     table{border-collapse:collapse;width:100%}
     th,td{border:1px solid #e5e7eb;padding:6px;text-align:left}
     thead th{background:#f3f4f6}
     tbody tr:nth-child(even){background:#f9fafb}
     .card + .card{margin-top:12px}
   </style>
-  <style> @media (prefers-color-scheme: dark) { body{background:#0b0f15;color:#e5e7eb} .container{background:#0f1720;border-color:#1f2937} .header{background:#0f1720;border-color:#1f2937} .brand{color:#e5e7eb} .footer{background:#0f1720;border-color:#1f2937;color:#9ca3af} th,td{border-color:#1f2937} thead th{background:#111827} tbody tr:nth-child(even){background:#0b1220} .card{border-color: #1f2937} } </style>
 </head>
 <body>
   <div class='container'>
@@ -132,19 +131,19 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
   <meta name='viewport' content='width=device-width, initial-scale=1'>
   <title>{{subject}}</title>
   <style>
-    body{margin:0;padding:0;background:#0b0f15;color:#e5e7eb;font-family:Inter,Arial,sans-serif}
+    body{margin:0;padding:0;color:#111827;font-family:Inter,Arial,sans-serif}
     .container{max-width:640px;margin:0 auto}
     .hero{padding:28px 20px;text-align:center}
     .logo{margin-bottom:8px}
-    .title{font-size:16px;font-weight:600;color:#e5e7eb}
-    .card{background:#0f1720;border:1px solid #1f2937;border-radius:12px;padding:22px;margin:0 12px}
+    .title{font-size:16px;font-weight:600;color:#111827}
+    .card{border:1px solid #e5e7eb;border-radius:12px;padding:22px;margin:0 12px}
     .content{padding:20px}
-    .footer{color:#9ca3af;font-size:12px;padding:12px 20px;text-align:center}
-    a{color:#60a5fa;text-decoration:none}
+    .footer{color:#6b7280;font-size:12px;padding:12px 20px;text-align:center}
+    a{color:#2563eb;text-decoration:none}
     table{border-collapse:collapse;width:100%}
-    th,td{border:1px solid #1f2937;padding:6px;text-align:left}
-    thead th{background:#111827}
-    tbody tr:nth-child(even){background:#0b1220}
+    th,td{border:1px solid #e5e7eb;padding:6px;text-align:left}
+    thead th{background:#f3f4f6}
+    tbody tr:nth-child(even){background:#f9fafb}
     .card + .card{margin-top:12px}
   </style>
 </head>
@@ -171,12 +170,12 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
   <meta name='viewport' content='width=device-width, initial-scale=1'>
   <title>{{subject}}</title>
   <style>
-    body{margin:0;padding:0;background:#f7f7f8;color:#111827;font-family:Inter,Arial,sans-serif}
-    .container{max-width:820px;margin:16px auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
-    .header{padding:14px 18px;border-bottom:1px solid #e5e7eb;background:#fafafa;display:flex;align-items:center;gap:12px}
+    body{margin:0;padding:0;color:#111827;font-family:Inter,Arial,sans-serif}
+    .container{max-width:820px;margin:16px auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
+    .header{padding:14px 18px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:12px}
     .brand{font-size:14px;font-weight:600}
     .content{padding:12px}
-    .footer{padding:12px 18px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;background:#fafafa}
+    .footer{padding:12px 18px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px}
     table{border-collapse:collapse;width:100%}
     th,td{border:1px solid #e5e7eb;padding:8px;text-align:left}
     thead th{background:#f3f4f6}
@@ -213,13 +212,7 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
       range: 'current period',
     }
     out = Object.entries(previewRepl).reduce((acc, [k, v]) => acc.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v), out)
-    try {
-      const prefersDark = typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-      if (prefersDark && out.includes('</head>')) {
-        const force = `<style id="force-dark-email">.container,.header,.footer{background:#0f1720 !important;border-color:#1f2937 !important;color:#e5e7eb !important}.brand{color:#e5e7eb !important}.card{background:#0f1720 !important;border-color:#1f2937 !important}.card + .card{margin-top:12px !important}th,td{border-color:#1f2937 !important}thead th{background:#111827 !important}</style>`
-        out = out.replace('</head>', `${force}</head>`)
-      }
-    } catch {}
+    
     return out
   }
 
@@ -312,7 +305,7 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
             <label className="text-sm">Body Content (inserts into {'{{content}}'})
               <textarea className="mt-1 w-full h-32 px-2 py-2 rounded-md border bg-background" value={previewContent} onChange={(e)=>setPreviewContent(e.target.value)} />
             </label>
-            <div className="rounded-md border bg-card overflow-auto" style={{ minHeight: 160 }}>
+            <div className="rounded-md border bg-white overflow-auto" style={{ minHeight: 160 }}>
               <iframe title="email-preview" className="w-full h-[260px]" srcDoc={applyBaseTemplate(previewSubject, previewContent)} />
             </div>
           </div>
@@ -320,7 +313,10 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <label className="text-sm">Test to (comma-separated)<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="user@org.com,another@org.com" value={testTo} onChange={(e)=>setTestTo(e.target.value)} /></label>
           <div className="flex items-end gap-2">
-            <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted" disabled={busy} onClick={onTest}>Send test</button>
+            <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted inline-flex items-center gap-2" disabled={busy} onClick={onTest}>
+              {busy && (<span className="inline-block h-3 w-3 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>)}
+              {busy ? 'Sending…' : 'Send test'}
+            </button>
             <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted" disabled={busy} onClick={onSave}>Save</button>
           </div>
         </div>

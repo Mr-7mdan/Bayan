@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import KpiCard from '@/components/widgets/KpiCard'
 import ChartCard from '@/components/widgets/ChartCard'
 import TableCard from '@/components/widgets/TableCard'
+import HeatmapCard from '@/components/widgets/HeatmapCard'
 import { Api } from '@/lib/api'
 import type { DashboardOut, RGLLayout } from '@/lib/api'
 import type { WidgetConfig } from '@/types/widgets'
@@ -24,6 +25,7 @@ export default function EmbedWidget() {
   const token = useQueryParam('token')
   const et = useQueryParam('et')
   const actorId = useQueryParam('actorId')
+  const dashboardId = useQueryParam('dashboardId')
   const datasourceIdParam = useQueryParam('datasourceId')
   const widgetId = useQueryParam('widgetId') || ''
   const themeParam = (useQueryParam('theme', 'dark') || 'dark') as 'light'|'dark'
@@ -49,18 +51,27 @@ export default function EmbedWidget() {
     async function run() {
       try {
         setLoading(true)
-        // TTL check (client-side hardening)
-        try {
-          const nowSec = Math.floor(Date.now() / 1000)
-          if (ttlParam > 0 && tsParam > 0 && (nowSec - tsParam) > ttlParam) {
-            throw new Error('This embed link has expired')
-          }
-        } catch {}
-        if (!publicId) throw new Error('publicId is required for embedding')
-        const res: DashboardOut = await Api.getDashboardPublic(publicId, token, { et: et || undefined })
-        if (!mounted) return
-        setDashboard(res)
-        setError(null)
+        // TTL check (client-side hardening) applies only to public embeds
+        if (publicId) {
+          try {
+            const nowSec = Math.floor(Date.now() / 1000)
+            if (ttlParam > 0 && tsParam > 0 && (nowSec - tsParam) > ttlParam) {
+              throw new Error('This embed link has expired')
+            }
+          } catch {}
+          const res: DashboardOut = await Api.getDashboardPublic(publicId, token, { et: et || undefined })
+          if (!mounted) return
+          setDashboard(res)
+          setError(null)
+        } else if (dashboardId) {
+          // Internal embed: allow server-side snapshots by dashboardId with actorId
+          const res: DashboardOut = await Api.getDashboard(dashboardId, actorId || undefined)
+          if (!mounted) return
+          setDashboard(res)
+          setError(null)
+        } else {
+          throw new Error('dashboardId or publicId is required for embedding')
+        }
       } catch (e: any) {
         if (!mounted) return
         setError(e?.message || 'Failed to load')
@@ -70,7 +81,7 @@ export default function EmbedWidget() {
       }
     }
     void run(); return () => { mounted = false }
-  }, [publicId, token, et, ttlParam, tsParam])
+  }, [publicId, dashboardId, actorId, token, et, ttlParam, tsParam])
 
   // Apply theme class early
   useEffect(() => {
@@ -196,20 +207,32 @@ export default function EmbedWidget() {
               />
             )}
             {cfg.type === 'chart' && (
-              <ChartCard
-                title={cfg.title}
-                sql={cfg.sql}
-                datasourceId={cfg.datasourceId}
-                type={(cfg as any).chartType || 'line'}
-                options={opts}
-                queryMode={cfg.queryMode as any}
-                querySpec={cfg.querySpec as any}
-                customColumns={cfg.customColumns as any}
-                widgetId={cfg.id}
-                pivot={cfg.pivot as any}
-                layout="measure"
-                reservedTop={0}
-              />
+              ((cfg as any).chartType === 'heatmap') ? (
+                <HeatmapCard
+                  title={cfg.title}
+                  sql={cfg.sql}
+                  datasourceId={cfg.datasourceId}
+                  options={opts}
+                  queryMode={cfg.queryMode as any}
+                  querySpec={cfg.querySpec as any}
+                  widgetId={cfg.id}
+                />
+              ) : (
+                <ChartCard
+                  title={cfg.title}
+                  sql={cfg.sql}
+                  datasourceId={cfg.datasourceId}
+                  type={(cfg as any).chartType || 'line'}
+                  options={opts}
+                  queryMode={cfg.queryMode as any}
+                  querySpec={cfg.querySpec as any}
+                  customColumns={cfg.customColumns as any}
+                  widgetId={cfg.id}
+                  pivot={cfg.pivot as any}
+                  layout="measure"
+                  reservedTop={0}
+                />
+              )
             )}
             {cfg.type === 'table' && (
               <TableCard

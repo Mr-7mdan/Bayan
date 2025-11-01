@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
-import { Select, SelectItem } from '@tremor/react'
+import { Select, SelectItem, Card, Title, Text } from '@tremor/react'
 import { Switch } from '@/components/Switch'
 import { Api, type ContactOut, type ContactIn } from '@/lib/api'
+import { useAuth } from '@/components/providers/AuthProvider'
 
 export default function ContactsPage() {
+  const { user } = useAuth()
+  const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [items, setItems] = useState<ContactOut[]>([])
@@ -28,7 +31,10 @@ export default function ContactsPage() {
   const [bulkSmsDraft, setBulkSmsDraft] = useState<{ to: string; message: string }>({ to: '', message: '' })
   const [bulkEmailSending, setBulkEmailSending] = useState(false)
   const [bulkSmsSending, setBulkSmsSending] = useState(false)
-  const [notice, setNotice] = useState<{ type: 'success'|'error'; text: string } | null>(null)
+  const [notice, setNotice] = useState<{ type: 'success'|'error'; text: string; details?: Array<{ recipient: string; error: string }> } | null>(null)
+  const [emailSendSummary, setEmailSendSummary] = useState(true)
+  const [smsSendSummary, setSmsSendSummary] = useState(true)
+  const pollTimerRef = useRef<any>(null)
   // Throttling
   const [emailRateLimit, setEmailRateLimit] = useState<string>('')
   const [emailQueue, setEmailQueue] = useState<boolean>(false)
@@ -61,6 +67,23 @@ export default function ContactsPage() {
       if (s.type==='tag' && s.tag) addEmailToken({ kind:'tag', label:`#${s.tag}`, value:s.tag })
     })
     setEmailSel(new Set()); setEmailSugOpen(false); setEmailToInput('')
+  }
+
+  function startPolling(jobId: string, kind: 'email'|'sms') {
+    try { if (pollTimerRef.current) clearTimeout(pollTimerRef.current) } catch {}
+    const tick = async () => {
+      try {
+        const s = await Api.contactsSendStatus(jobId)
+        const txt = `${kind.toUpperCase()} ${s.done ? 'completed' : 'sending'}: ${s.success}/${s.total} sent, failed ${s.failed}`
+        setNotice({ type: s.failed > 0 && s.done ? 'error' : 'success', text: txt, details: s.done ? (s.failures || []) : undefined })
+        if (!s.done) {
+          pollTimerRef.current = setTimeout(tick, 1500)
+        }
+      } catch (e: any) {
+        setNotice({ type: 'error', text: e?.message || 'Failed to fetch send status' })
+      }
+    }
+    pollTimerRef.current = setTimeout(tick, 600)
   }
   function addSelectedSms() {
     const selected = new Set(smsSel)
@@ -106,6 +129,8 @@ export default function ContactsPage() {
     })()
     return () => { disposed = true }
   }, [bulkEmailOpen])
+
+  useEffect(() => { return () => { try { if (pollTimerRef.current) clearTimeout(pollTimerRef.current) } catch {} } }, [])
 
 
   const selectedList = useMemo(() => items.filter(it => selectedIds[it.id]), [items, selectedIds])
@@ -292,9 +317,17 @@ export default function ContactsPage() {
     try {
       setBulkEmailSending(true)
       const rate = parseInt(emailRateLimit || '')
-      const res = await Api.contactsSendEmail({ ids, emails, tags, subject: bulkEmailDraft.subject || '(no subject)', html: bulkEmailDraft.html || '<div/>', rateLimitPerMinute: Number.isFinite(rate) ? rate : undefined, queue: !!emailQueue })
+      const res = await Api.contactsSendEmail({ ids, emails, tags, subject: bulkEmailDraft.subject || '(no subject)', html: bulkEmailDraft.html || '<div/>', rateLimitPerMinute: Number.isFinite(rate) ? rate : undefined, queue: !!emailQueue, notifyEmail: (emailSendSummary && (user?.email || '').trim()) ? user!.email : undefined })
       setBulkEmailOpen(false)
-      setNotice({ type: 'success', text: res.queued ? `Queued email to ${res.count} recipient(s)` : `Email sent to ${res.count} recipient(s)` })
+      if (res.queued && res.jobId) {
+        setNotice({ type: 'success', text: `Queued email to ${res.count} recipient(s)` })
+        startPolling(res.jobId, 'email')
+      } else {
+        const succ = Number(res.success ?? res.count ?? 0)
+        const fail = Number(res.failed ?? 0)
+        const total = Number(res.count ?? (succ + fail))
+        setNotice({ type: fail > 0 ? 'error' : 'success', text: `Email sent: ${succ}/${total}. Failed: ${fail}`, details: res.failures || [] })
+      }
     } catch (e: any) {
       setNotice({ type: 'error', text: e?.message || 'Failed to send email' })
     } finally { setBulkEmailSending(false) }
@@ -317,9 +350,17 @@ export default function ContactsPage() {
     try {
       setBulkSmsSending(true)
       const rate = parseInt(smsRateLimit || '')
-      const res = await Api.contactsSendSms({ ids, numbers, tags, message: bulkSmsDraft.message || '', rateLimitPerMinute: Number.isFinite(rate) ? rate : undefined, queue: !!smsQueue })
+      const res = await Api.contactsSendSms({ ids, numbers, tags, message: bulkSmsDraft.message || '', rateLimitPerMinute: Number.isFinite(rate) ? rate : undefined, queue: !!smsQueue, notifyEmail: (smsSendSummary && (user?.email || '').trim()) ? user!.email : undefined })
       setBulkSmsOpen(false)
-      setNotice({ type: 'success', text: res.queued ? `Queued SMS to ${res.count} recipient(s)` : `SMS sent to ${res.count} recipient(s)` })
+      if (res.queued && res.jobId) {
+        setNotice({ type: 'success', text: `Queued SMS to ${res.count} recipient(s)` })
+        startPolling(res.jobId, 'sms')
+      } else {
+        const succ = Number(res.success ?? res.count ?? 0)
+        const fail = Number(res.failed ?? 0)
+        const total = Number(res.count ?? (succ + fail))
+        setNotice({ type: fail > 0 ? 'error' : 'success', text: `SMS sent: ${succ}/${total}. Failed: ${fail}`, details: res.failures || [] })
+      }
     } catch (e: any) {
       setNotice({ type: 'error', text: e?.message || 'Failed to send SMS' })
     } finally { setBulkSmsSending(false) }
@@ -329,27 +370,40 @@ export default function ContactsPage() {
 
   return (
     <div className="p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-sm font-medium">Contacts Manager</div>
-        <div className="flex items-center gap-2">
-          <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openAdd}>Add Contact</button>
-          <label className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] cursor-pointer">
-            Import
-            <input type="file" accept="application/json" className="hidden" onChange={(e)=> importJson(e.target.files)} />
-          </label>
-          <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" onClick={exportSelected} disabled={!Object.values(selectedIds).some(Boolean)}>Export</button>
-          <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openBulkEmail}>Send Bulk Email</button>
-          <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openBulkSms}>Send Bulk SMS</button>
+      <Card className="p-0 bg-[hsl(var(--background))]">
+        <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
+          <div>
+            <Title className="text-gray-500 dark:text-white">Contacts</Title>
+            <Text className="mt-0 text-gray-500 dark:text-white">Create and manage contacts, and send email/SMS</Text>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openAdd}>Add Contact</button>
+            {isAdmin && (
+              <>
+                <label className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] cursor-pointer">
+                  Import
+                  <input type="file" accept="application/json" className="hidden" onChange={(e)=> importJson(e.target.files)} />
+                </label>
+                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" onClick={exportSelected} disabled={!Object.values(selectedIds).some(Boolean)}>Export</button>
+                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openBulkEmail}>Send Bulk Email</button>
+                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openBulkSms}>Send Bulk SMS</button>
+              </>
+            )}
+          </div>
         </div>
-      </div>
-
-      <div className="flex items-center gap-2 mb-3">
-        <input className="w-64 h-8 px-2 rounded-md border bg-background" placeholder="Search name/email/phone" value={search} onChange={(e)=> setSearch(e.target.value)} />
-        <label className="text-xs inline-flex items-center gap-2">
-          <input type="checkbox" checked={activeOnly} onChange={(e)=> setActiveOnly(e.target.checked)} /> Active only
-        </label>
-        <div className="ml-auto text-xs">{loading ? 'Loading…' : `${total} contacts`}</div>
-      </div>
+        <div className="px-3 py-2">
+          <div className="flex items-center py-2 gap-2">
+            <div className="flex items-center gap-2">
+              <label htmlFor="searchContacts" className="text-sm mr-2 text-gray-600 dark:text-gray-300">Search</label>
+              <input id="searchContacts" className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" placeholder="Search contacts..." value={search} onChange={(e)=> setSearch(e.target.value)} />
+            </div>
+            <label className="text-xs inline-flex items-center gap-2">
+              <input type="checkbox" checked={activeOnly} onChange={(e)=> setActiveOnly(e.target.checked)} /> Active only
+            </label>
+            <div className="ml-auto text-xs">{loading ? 'Loading…' : `${total} contacts`}</div>
+          </div>
+        </div>
+      </Card>
 
       {notice && (
         <div className={`mb-3 rounded-md border px-3 py-2 text-sm ${notice.type==='success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
@@ -357,6 +411,20 @@ export default function ContactsPage() {
             <span>{notice.text}</span>
             <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={()=> setNotice(null)}>Dismiss</button>
           </div>
+          {Array.isArray(notice.details) && notice.details.length > 0 && (
+            <div className="mt-2 max-h-40 overflow-auto text-xs">
+              <table className="w-full">
+                <thead>
+                  <tr><th className="text-left pr-2">Recipient</th><th className="text-left">Error</th></tr>
+                </thead>
+                <tbody>
+                  {notice.details.map((d, i) => (
+                    <tr key={i}><td className="pr-2">{d.recipient}</td><td>{d.error}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -565,6 +633,10 @@ export default function ContactsPage() {
                   <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" type="number" min={1} placeholder="e.g., 60" value={emailRateLimit} onChange={(e)=> setEmailRateLimit(e.target.value)} />
                 </label>
               </div>
+              <label className="mt-2 inline-flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={emailSendSummary} onChange={(e)=> setEmailSendSummary(e.target.checked)} />
+                Email me the summary
+              </label>
             </div>
             <div className="mt-3 flex items-center gap-2">
               <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted disabled:opacity-60" disabled={bulkEmailSending} onClick={sendBulkEmail}>{bulkEmailSending ? 'Sending…' : 'Send'}</button>
@@ -636,6 +708,10 @@ export default function ContactsPage() {
                   <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" type="number" min={1} placeholder="e.g., 120" value={smsRateLimit} onChange={(e)=> setSmsRateLimit(e.target.value)} />
                 </label>
               </div>
+              <label className="mt-2 inline-flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={smsSendSummary} onChange={(e)=> setSmsSendSummary(e.target.checked)} />
+                Email me the summary
+              </label>
             </div>
             <div className="mt-3 flex items-center gap-2">
               <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted disabled:opacity-60" disabled={bulkSmsSending} onClick={sendBulkSms}>{bulkSmsSending ? 'Sending…' : 'Send'}</button>

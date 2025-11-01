@@ -92,6 +92,46 @@ export default function KpiCard({
     }
   }
 
+  const isSnap = useMemo(() => {
+    try {
+      if (typeof document === 'undefined') return false
+      const el = document.getElementById('widget-root')
+      return !!el && el.getAttribute('data-snap') === '1'
+    } catch { return false }
+  }, [])
+  const chartReadyOnce = useRef(false)
+  const markChartReady = useMemo(() => {
+    const tryMark = (attempt: number) => {
+      try {
+        const root = (typeof document !== 'undefined') ? document.getElementById('widget-root') : null
+        if (!root) { if (attempt < 8) requestAnimationFrame(() => tryMark(attempt + 1)); return }
+        const already = chartReadyOnce.current
+        if (!already) {
+          const c = root.querySelector('canvas') as HTMLCanvasElement | null
+          const rw = root.clientWidth || 0, rh = root.clientHeight || 0
+          const cw = c ? ((c.clientWidth || 0) || (c.width || 0)) : rw
+          const ch = c ? ((c.clientHeight || 0) || (c.height || 0)) : rh
+          const ok = (!c) || ((cw >= Math.max(1, rw - 2)) && (ch >= Math.max(1, rh - 2)))
+          if (!ok) { if (attempt < 10) { requestAnimationFrame(() => tryMark(attempt + 1)); return } }
+          chartReadyOnce.current = true
+          try { root.setAttribute('data-chart-ready', '1') } catch {}
+          if (typeof window !== 'undefined') {
+            try { window.dispatchEvent(new CustomEvent('widget-data-ready')) } catch {}
+          }
+        }
+        try { const t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now(); root.setAttribute('data-chart-finished-at', String(t)) } catch {}
+      } catch { if (attempt < 10) requestAnimationFrame(() => tryMark(attempt + 1)) }
+    }
+    return () => tryMark(0)
+  }, [])
+  useEffect(() => {
+    try {
+      const root = (typeof document !== 'undefined') ? document.getElementById('widget-root') : null
+      if (root) root.setAttribute('data-chart-ready', '0')
+      chartReadyOnce.current = false
+    } catch {}
+  }, [widgetId])
+
   // KPI labels parity with charts: drop series prefix when single-series and apply per-category casing
   const isSingleSeriesKpi = Array.isArray((querySpec as any)?.series) ? ((querySpec as any).series.length <= 1) : true
   const formatCategoryCaseKpi = (name: string): string => {
@@ -497,6 +537,7 @@ export default function KpiCard({
       const done = !kpi.isLoading && hasData
       if (done && !readyFiredRef.current) {
         readyFiredRef.current = true
+        try { markChartReady() } catch {}
         if (typeof window !== 'undefined') {
           try { window.dispatchEvent(new CustomEvent('widget-data-ready')) } catch {}
         }

@@ -49,7 +49,7 @@ export default function CompositionBuilderModal(props: any) {
   return createPortal(
     <div className="fixed inset-0 z-[999] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-[1000] w-[900px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-card p-4 shadow-none">
+      <div className="relative z-[1000] w-full md:w-[900px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-background p-4 shadow-none">
         <div className="flex items-center justify-between mb-2">
           <div className="text-sm font-medium">Card Composition Builder</div>
           <div className="flex items-center gap-2">
@@ -57,24 +57,24 @@ export default function CompositionBuilderModal(props: any) {
             <button className="text-xs px-2 py-1 rounded-md border bg-[hsl(var(--btn3))] text-black" onClick={save}>Save</button>
           </div>
         </div>
-        <div className="grid grid-cols-[220px,1fr] gap-3">
-          <div className="rounded-md p-2 bg-[hsl(var(--secondary))]">
+        <div className="grid grid-cols-[220px_minmax(0,_1fr)] gap-3">
+          <div className="rounded-md p-2 bg-muted border">
             <div className="text-xs text-muted-foreground mb-1">Add components</div>
             <div className="grid grid-cols-2 gap-2">
               {(['title','subtitle','kpi','chart','table'] as const).map((k) => (
                 <button key={k} className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => add(k as any)}>{k}</button>
               ))}
             </div>
-            <div className="text-[11px] text-muted-foreground mt-2">Drag and drop coming soon — use Up/Down arrows to reorder.</div>
+            <div className="text-[11px] text-muted-foreground mt-2">Drag and drop to reorder — or use Up/Down arrows.</div>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 min-w-0">
             {local.length === 0 && (
               <div className="text-xs text-muted-foreground">No components yet. Add from the left.</div>
             )}
             {local.map((c, idx) => (
               <div
                 key={c.id || idx}
-                className="grid grid-cols-[1fr,auto] gap-2 rounded-md border p-2 hover:border-[hsl(var(--primary))]"
+                className="grid grid-cols-[minmax(0,_1fr)_auto] gap-2 rounded-md border p-2 pr-4 bg-card hover:border-[hsl(var(--primary))] min-w-0 w-full overflow-visible"
                 draggable
                 onDragStart={(e: React.DragEvent<HTMLDivElement>) => {
                   e.dataTransfer.setData('text/plain', String(idx))
@@ -94,13 +94,13 @@ export default function CompositionBuilderModal(props: any) {
                   })
                 }}
               >
-                <div className="space-y-2">
+                <div className="space-y-2 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="cursor-grab select-none" title="Drag to reorder">≡</span>
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-[hsl(var(--secondary))] text-[11px] capitalize">{c.kind}</span>
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted text-[11px] capitalize">{c.kind}</span>
                     <label className="text-[11px] text-muted-foreground">Span</label>
                     <select
-                      className="px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
+                      className="px-2 py-1 rounded-md bg-background border text-xs"
                       value={String(Math.min(columns, Math.max(1, c.span || 1)))}
                       onChange={(e) => {
                         const span = Math.min(columns, Math.max(1, Number(e.target.value) || 1))
@@ -114,13 +114,13 @@ export default function CompositionBuilderModal(props: any) {
                     <div className="grid grid-cols-2 gap-2 items-center">
                       <label className="text-[11px] text-muted-foreground">Text</label>
                       <input
-                        className="px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
+                        className="px-2 py-1 rounded-md bg-background border text-xs"
                         value={String((c as any).text || '')}
                         onChange={(e) => setLocal((prev) => prev.map((x, i) => i === idx ? ({ ...x, text: e.target.value }) : x))}
                       />
                       <label className="text-[11px] text-muted-foreground">Align</label>
                       <select
-                        className="px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
+                        className="px-2 py-1 rounded-md bg-background border text-xs"
                         value={String((c as any).align || 'left')}
                         onChange={(e) => setLocal((prev) => prev.map((x, i) => i === idx ? ({ ...x, align: e.target.value as any }) : x))}
                       >
@@ -131,9 +131,9 @@ export default function CompositionBuilderModal(props: any) {
                   {(c.kind === 'kpi' || c.kind === 'chart' || c.kind === 'table') && (
                     <div className="grid grid-cols-[140px,1fr] gap-2 items-center">
                       <label className="text-[11px] text-muted-foreground">Reference widget</label>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap min-w-0">
                         <select
-                          className="px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
+                          className="px-2 py-1 rounded-md bg-background border text-xs flex-1 min-w-0"
                           value={String((c as any).refId || '')}
                           onChange={(e) => setLocal((prev) => prev.map((x, i) => i === idx ? ({ ...x, refId: e.target.value }) : x))}
                         >
@@ -142,15 +142,9 @@ export default function CompositionBuilderModal(props: any) {
                             <option key={w.id} value={w.id}>{w.id} — {w.title}</option>
                           ))}
                         </select>
-                        <input
-                          className="px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs flex-1"
-                          value={String((c as any).refId || '')}
-                          onChange={(e) => setLocal((prev) => prev.map((x, i) => i === idx ? ({ ...x, refId: e.target.value }) : x))}
-                          placeholder="or type id"
-                        />
                         {onQuickAdd && (
                           <button
-                            className="text-[11px] px-2 py-0.5 rounded border bg-[hsl(var(--btn1))] text-black"
+                            className="text-[11px] px-2 py-0.5 rounded-md border bg-[hsl(var(--btn1))] text-black whitespace-nowrap shrink-0"
                             title={`Create a new ${c.kind} and link it here`}
                             onClick={() => {
                               try {
@@ -166,13 +160,13 @@ export default function CompositionBuilderModal(props: any) {
                           const id = (c as any).refId || ''
                           const preview = (choices || []).find((w) => w.id === id)
                           return preview ? (
-                            <span className="inline-flex items-center gap-2">Preview: <span className="px-1.5 py-0.5 rounded bg-[hsl(var(--secondary))]">{preview.title}</span><span className="px-1 py-0.5 rounded border text-[10px]">ID: {preview.id}</span></span>
+                            <span className="inline-flex items-center gap-2">Preview: <span className="px-1.5 py-0.5 rounded bg-muted">{preview.title}</span><span className="px-1 py-0.5 rounded border text-[10px]">ID: {preview.id}</span></span>
                           ) : 'This will render the referenced widget inline.'
                         })()}
                       </div>
                       <label className="text-[11px] text-muted-foreground">Label (override)</label>
                       <input
-                        className="px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
+                        className="px-2 py-1 rounded-md bg-background border text-xs"
                         value={String((c as any).label || '')}
                         onChange={(e) => setLocal((prev) => prev.map((x, i) => i === idx ? ({ ...x, label: e.target.value }) : x))}
                         placeholder="Optional label shown above"
@@ -180,7 +174,7 @@ export default function CompositionBuilderModal(props: any) {
                     </div>
                   )}
                 </div>
-                <div className="flex flex-col items-end gap-1">
+                <div className="flex flex-col items-end gap-1 pl-1 pr-1">
                   <button className="text-[11px] px-2 py-0.5 rounded border hover:bg-muted" onClick={() => move(idx, -1)} disabled={idx === 0}>↑</button>
                   <button className="text-[11px] px-2 py-0.5 rounded border hover:bg-muted" onClick={() => move(idx, +1)} disabled={idx === local.length - 1}>↓</button>
                   <button className="text-[11px] px-2 py-0.5 rounded border hover:bg-muted" onClick={() => remove(idx)}>Remove</button>

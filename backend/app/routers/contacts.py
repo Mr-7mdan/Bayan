@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy.orm import Session
 import re
+import threading
 
 from ..models import SessionLocal, Contact
 from ..schemas import (
@@ -43,6 +44,94 @@ def _to_out(m: Contact) -> ContactOut:
         active=bool(getattr(m, "active", True)),
         created_at=getattr(m, "created_at", None),
     )
+
+
+# --- In-memory job tracking (simple) ---
+_job_lock = threading.Lock()
+_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def _create_job(job_type: str, recipients: List[str], notify_email: Optional[str]) -> str:
+    job_id = uuid4().hex
+    with _job_lock:
+        _jobs[job_id] = {
+            "type": job_type,  # 'email' | 'sms'
+            "total": int(len(recipients or [])),
+            "success": 0,
+            "failed": 0,
+            "failures": [],  # list[{ recipient, error }]
+            "done": False,
+            "notifyEmail": notify_email or None,
+        }
+    return job_id
+
+
+def _update_job(job_id: str, recipient: str, ok: bool, err: Optional[str] = None) -> None:
+    with _job_lock:
+        st = _jobs.get(job_id)
+        if not st:
+            return
+        if ok:
+            st["success"] = int(st.get("success", 0)) + 1
+        else:
+            st["failed"] = int(st.get("failed", 0)) + 1
+            try:
+                (st.setdefault("failures", [])).append({"recipient": recipient, "error": err or "Failed"})
+            except Exception:
+                pass
+        # Complete when processed all recipients
+        total = int(st.get("total", 0))
+        if (int(st.get("success", 0)) + int(st.get("failed", 0))) >= total and total > 0:
+            st["done"] = True
+
+
+def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    with _job_lock:
+        st = _jobs.get(job_id)
+        # Return a shallow copy to avoid external mutation
+        return dict(st) if st else None
+
+
+def _send_completion_summary(db: Session, job_id: str) -> None:
+    st = _get_job(job_id)
+    if not st:
+        return
+    notify = (st.get("notifyEmail") or "").strip()
+    if not notify:
+        return
+    try:
+        t = str(st.get("type") or "").upper()
+        total = int(st.get("total") or 0)
+        succ = int(st.get("success") or 0)
+        fail = int(st.get("failed") or 0)
+        failures = st.get("failures") or []
+        subject = f"Bulk {t} summary: sent {succ}/{total}, failed {fail}"
+        # Minimal HTML summary with inline failures list
+        rows = []
+        try:
+            for it in failures:
+                r = str((it or {}).get("recipient") or "")
+                e = str((it or {}).get("error") or "")
+                rows.append(f"<tr><td style='border:1px solid #e5e7eb;padding:6px'>{r}</td><td style='border:1px solid #e5e7eb;padding:6px'>{e}</td></tr>")
+        except Exception:
+            pass
+        table = (
+            ("<table style='border-collapse:collapse;width:100%'><thead><tr><th style='border:1px solid #e5e7eb;padding:6px;text-align:left'>Recipient</th>"
+             "<th style='border:1px solid #e5e7eb;padding:6px;text-align:left'>Error</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>")
+            if rows else "<div>No failures</div>"
+        )
+        html = (
+            f"<div style='font-family:Inter,Arial,sans-serif'>"
+            f"<div style='font-size:14px;font-weight:600;margin-bottom:8px'>{subject}</div>"
+            f"<div style='margin:8px 0'>Total: {total} • Success: {succ} • Failed: {fail}</div>"
+            f"{table}"
+            f"</div>"
+        )
+        # Send to single recipient
+        send_email(db, subject=subject, to=[notify], html=html)
+    except Exception:
+        # Best-effort; ignore failure
+        pass
 
 
 @router.get("", response_model=ContactsListResponse)
@@ -210,6 +299,7 @@ async def send_bulk_email(payload: BulkEmailPayload, db: Session = Depends(get_d
         if chunk_size <= 0:
             chunk_size = len(to_list)
         chunks = [to_list[i:i+chunk_size] for i in range(0, len(to_list), chunk_size)]
+        job_id = _create_job("email", to_list, (payload.notifyEmail or None))
         for idx, chunk in enumerate(chunks):
             run_at = datetime.utcnow() + timedelta(seconds=(60 * idx if rl else 0))
             try:
@@ -217,7 +307,7 @@ async def send_bulk_email(payload: BulkEmailPayload, db: Session = Depends(get_d
                 sched.add_job(
                     func=_send_email_chunk_job,
                     trigger=DateTrigger(run_date=run_at),
-                    kwargs={"subject": payload.subject, "html": payload.html, "to": chunk},
+                    kwargs={"job_id": job_id, "subject": payload.subject, "html": payload.html, "to": chunk, "notify": (payload.notifyEmail or None)},
                     id=f"contacts-email:{uuid4().hex}",
                     max_instances=1,
                     coalesce=True,
@@ -226,12 +316,41 @@ async def send_bulk_email(payload: BulkEmailPayload, db: Session = Depends(get_d
             except Exception:
                 # continue scheduling remaining chunks
                 continue
-        return {"ok": True, "count": len(to_list), "queued": True}
+        return {"ok": True, "count": len(to_list), "queued": True, "jobId": job_id}
     # Immediate single-shot send
-    ok, err = send_email(db, subject=payload.subject, to=to_list, html=payload.html)
-    if not ok:
-        raise HTTPException(status_code=500, detail=err or "Failed to send email")
-    return {"ok": True, "count": len(to_list)}
+    success = 0
+    failures: List[Dict[str, str]] = []
+    for r in to_list:
+        ok, err = send_email(db, subject=payload.subject, to=[r], html=payload.html)
+        if ok:
+            success += 1
+        else:
+            failures.append({"recipient": r, "error": err or "Failed"})
+    failed = len(failures)
+    try:
+        notify = (payload.notifyEmail or "").strip()
+        if notify:
+            t = "EMAIL"
+            total = len(to_list)
+            succ = success
+            fail = failed
+            failures_rows = failures or []
+            subject = f"Bulk {t} summary: sent {succ}/{total}, failed {fail}"
+            rows: list[str] = []
+            for it in failures_rows:
+                r = str((it or {}).get("recipient") or "")
+                e = str((it or {}).get("error") or "")
+                rows.append(f"<tr><td style='border:1px solid #e5e7eb;padding:6px'>{r}</td><td style='border:1px solid #e5e7eb;padding:6px'>{e}</td></tr>")
+            table = ("<table style='border-collapse:collapse;width:100%'><thead><tr><th style='border:1px solid #e5e7eb;padding:6px;text-align:left'>Recipient</th><th style='border:1px solid #e5e7eb;padding:6px;text-align:left'>Error</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>") if rows else "<div>No failures</div>"
+            html = (f"<div style='font-family:Inter,Arial,sans-serif'>"
+                    f"<div style='font-size:14px;font-weight:600;margin-bottom:8px'>{subject}</div>"
+                    f"<div style='margin:8px 0'>Total: {total} • Success: {succ} • Failed: {fail}</div>"
+                    f"{table}"
+                    f"</div>")
+            send_email(db, subject=subject, to=[notify], html=html)
+    except Exception:
+        pass
+    return {"ok": failed == 0, "count": len(to_list), "success": success, "failed": failed, "failures": failures}
 
 
 @router.post("/send-sms")
@@ -292,13 +411,14 @@ async def send_bulk_sms(payload: BulkSmsPayload, db: Session = Depends(get_db)) 
         if chunk_size <= 0:
             chunk_size = len(to_list)
         chunks = [to_list[i:i+chunk_size] for i in range(0, len(to_list), chunk_size)]
+        job_id = _create_job("sms", to_list, (payload.notifyEmail or None))
         for idx, chunk in enumerate(chunks):
             run_at = datetime.utcnow() + timedelta(seconds=(60 * idx if rl else 0))
             try:
                 sched.add_job(
                     func=_send_sms_chunk_job,
                     trigger=DateTrigger(run_date=run_at),
-                    kwargs={"numbers": chunk, "message": payload.message},
+                    kwargs={"job_id": job_id, "numbers": chunk, "message": payload.message, "notify": (payload.notifyEmail or None)},
                     id=f"contacts-sms:{uuid4().hex}",
                     max_instances=1,
                     coalesce=True,
@@ -306,17 +426,54 @@ async def send_bulk_sms(payload: BulkSmsPayload, db: Session = Depends(get_db)) 
                 )
             except Exception:
                 continue
-        return {"ok": True, "count": len(to_list), "queued": True}
-    ok, err = send_sms_hadara(db, to_numbers=to_list, message=payload.message)
-    if not ok:
-        raise HTTPException(status_code=500, detail=err or "Failed to send SMS")
-    return {"ok": True, "count": len(to_list)}
+        return {"ok": True, "count": len(to_list), "queued": True, "jobId": job_id}
+    # Immediate per-recipient send to capture failures
+    success = 0
+    failures: List[Dict[str, str]] = []
+    for n in to_list:
+        nn = _norm_phone(n)
+        ok, err = send_sms_hadara(db, to_numbers=[nn], message=payload.message)
+        if ok:
+            success += 1
+        else:
+            failures.append({"recipient": n, "error": err or "Failed"})
+    failed = len(failures)
+    try:
+        notify = (payload.notifyEmail or "").strip()
+        if notify:
+            t = "SMS"
+            total = len(to_list)
+            succ = success
+            fail = failed
+            failures_rows = failures or []
+            subject = f"Bulk {t} summary: sent {succ}/{total}, failed {fail}"
+            rows: list[str] = []
+            for it in failures_rows:
+                r = str((it or {}).get("recipient") or "")
+                e = str((it or {}).get("error") or "")
+                rows.append(f"<tr><td style='border:1px solid #e5e7eb;padding:6px'>{r}</td><td style='border:1px solid #e5e7eb;padding:6px'>{e}</td></tr>")
+            table = ("<table style='border-collapse:collapse;width:100%'><thead><tr><th style='border:1px solid #e5e7eb;padding:6px;text-align:left'>Recipient</th><th style='border:1px solid #e5e7eb;padding:6px;text-align:left'>Error</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>") if rows else "<div>No failures</div>"
+            html = (f"<div style='font-family:Inter,Arial,sans-serif'>"
+                    f"<div style='font-size:14px;font-weight:600;margin-bottom:8px'>{subject}</div>"
+                    f"<div style='margin:8px 0'>Total: {total} • Success: {succ} • Failed: {fail}</div>"
+                    f"{table}"
+                    f"</div>")
+            send_email(db, subject=subject, to=[notify], html=html)
+    except Exception:
+        pass
+    return {"ok": failed == 0, "count": len(to_list), "success": success, "failed": failed, "failures": failures}
 
 
-def _send_email_chunk_job(*, subject: str, html: str, to: list[str]) -> None:
+def _send_email_chunk_job(*, job_id: str, subject: str, html: str, to: list[str], notify: Optional[str] = None) -> None:
     db = SessionLocal()
     try:
-        send_email(db, subject=subject, to=to, html=html)
+        for r in (to or []):
+            ok, err = send_email(db, subject=subject, to=[r], html=html)
+            _update_job(job_id, r, ok, err)
+        # If job finished, send summary if requested
+        st = _get_job(job_id)
+        if st and st.get("done") and st.get("notifyEmail"):
+            _send_completion_summary(db, job_id)
     finally:
         try:
             db.close()
@@ -324,12 +481,27 @@ def _send_email_chunk_job(*, subject: str, html: str, to: list[str]) -> None:
             pass
 
 
-def _send_sms_chunk_job(*, numbers: list[str], message: str) -> None:
+def _send_sms_chunk_job(*, job_id: str, numbers: list[str], message: str, notify: Optional[str] = None) -> None:
     db = SessionLocal()
     try:
-        send_sms_hadara(db, to_numbers=numbers, message=message)
+        for n in (numbers or []):
+            ok, err = send_sms_hadara(db, to_numbers=[n], message=message)
+            _update_job(job_id, n, ok, err)
+        st = _get_job(job_id)
+        if st and st.get("done") and st.get("notifyEmail"):
+            _send_completion_summary(db, job_id)
     finally:
         try:
             db.close()
         except Exception:
             pass
+
+
+@router.get("/send-status")
+async def get_send_status(jobId: str = Query(alias="jobId")) -> dict:
+    st = _get_job(jobId)
+    if not st:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # Avoid leaking notifyEmail
+    out = {k: v for k, v in st.items() if k not in ("notifyEmail",)}
+    return out

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Title, Text, Select, SelectItem } from '@tremor/react'
 import Switch from '@/components/Switch'
 import { Api, type AlertOut, type AlertCreate } from '@/lib/api'
@@ -216,6 +216,7 @@ function QuickAddDialog({ open, onOpenChange, onCreated }: { open: boolean; onOp
 
 export default function AlertsPage() {
   const { user } = useAuth()
+  const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
   const [items, setItems] = useState<AlertOut[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -231,6 +232,9 @@ export default function AlertsPage() {
   const [page, setPage] = useState(0)
   const [sortKey, setSortKey] = useState<'name'|'kind'|'enabled'|'lastRunAt'|'lastStatus'>('name')
   const [sortDir, setSortDir] = useState<'asc'|'desc'>('asc')
+  const [running, setRunning] = useState<Record<string, boolean>>({})
+  const [runProg, setRunProg] = useState<Record<string, { open: boolean; steps: Array<{ id: string; status: 'start'|'ok'|'error'; ts?: string; mode?: string; to?: number; error?: string }>; final?: string; doneAt?: number }>>({})
+  const runTimers = useRef<Record<string, any>>({}) as any
 
   useEffect(() => {
     let cancelled = false
@@ -242,12 +246,39 @@ export default function AlertsPage() {
   }, [])
 
   const onRun = async (id: string) => {
+    const startPolling = () => {
+      // Initialize progress UI immediately
+      setRunProg((prev)=> ({ ...prev, [id]: { open: true, steps: [{ id: 'calc', status: 'start' }], final: undefined } }))
+      // Clear existing timer if any
+      try { if (runTimers.current[id]) { clearInterval(runTimers.current[id]); delete runTimers.current[id] } } catch {}
+      // Poll latest run every 1s
+      runTimers.current[id] = setInterval(async () => {
+        try {
+          const rows = await Api.listAlertRuns(id, 1)
+          const row = Array.isArray(rows) && rows.length ? rows[0] : null
+          if (!row) return
+          let steps: any[] = []
+          try { const m = row.message || ''; const o = typeof m === 'string' ? JSON.parse(m) : m; if (o && Array.isArray(o.steps)) steps = o.steps } catch {}
+          setRunProg((prev)=> ({ ...prev, [id]: { open: true, steps: steps.map((s) => ({ id: String(s.id||'').toLowerCase(), status: (s.status==='ok'?'ok':(s.status==='error'?'error':'start')), ts: s.ts, mode: s.mode, to: s.to, error: s.error })), final: row.status || undefined, doneAt: row.finishedAt ? Date.now() : (prev[id]?.doneAt) } }))
+          if (row.finishedAt || (row.status && (row.status==='ok' || row.status==='failed'))) {
+            clearInterval(runTimers.current[id]); delete runTimers.current[id]
+            // Do not auto-hide; keep visible until user closes it
+          }
+        } catch {}
+      }, 1000)
+    }
     try {
+      setRunning((prev) => ({ ...prev, [id]: true }))
+      startPolling()
       const r = await Api.runAlertNow(id)
       const msg = r?.message || 'Triggered'
       setToast(msg); setTimeout(()=>setToast(''), 1500)
       try { const updated = await Api.getAlert(id); setItems((prev)=>prev.map((x)=>x.id===id?updated:x)) } catch {}
-    } catch (e: any) { setToast(e?.message || 'Failed'); setTimeout(()=>setToast(''), 1800) }
+    } catch (e: any) {
+      setToast(e?.message || 'Failed'); setTimeout(()=>setToast(''), 1800)
+    } finally {
+      setRunning((prev) => ({ ...prev, [id]: false }))
+    }
   }
   const onDelete = async (id: string) => {
     try {
@@ -307,9 +338,13 @@ export default function AlertsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setCreateOpen(true)}><RiAddLine className="w-4 h-4" />New</button>
-            <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setDlgEmail(true)}><RiSettings3Line className="w-4 h-4" />Email Config</button>
-            <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setDlgSms(true)}><RiSettings3Line className="w-4 h-4" />SMS Config</button>
-            {String(user?.role || '').toLowerCase() === 'admin' && (
+            {isAdmin && (
+              <>
+                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setDlgEmail(true)}><RiSettings3Line className="w-4 h-4" />Email Config</button>
+                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setDlgSms(true)}><RiSettings3Line className="w-4 h-4" />SMS Config</button>
+              </>
+            )}
+            {isAdmin && (
               <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={onRefreshJobs}><RiRefreshLine className="w-4 h-4" />Refresh Scheduler</button>
             )}
           </div>
@@ -400,11 +435,16 @@ export default function AlertsPage() {
                           <RiEdit2Line className="w-4 h-4" />
                         </button>
                         <button
-                          className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 hover:bg-[hsl(var(--muted))]"
+                          className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Run now"
                           onClick={() => onRun(a.id)}
+                          disabled={!!running[a.id]}
                         >
-                          <RiPlayLine className="w-4 h-4" />
+                          {running[a.id] ? (
+                            <span className="h-4 w-4 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>
+                          ) : (
+                            <RiPlayLine className="w-4 h-4" />
+                          )}
                         </button>
                         <button
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 hover:bg-[hsl(var(--muted))]"
@@ -437,6 +477,81 @@ export default function AlertsPage() {
           <RiRefreshLine className="w-5 h-5" /><span>{toast}</span>
         </div>
       )}
+      {/* Run progress panel(s) */}
+      <div className="fixed bottom-6 right-6 z-[110] space-y-2">
+        {Object.entries(runProg).filter(([,v])=>v && v.open).map(([id, prog]) => (
+          <div key={id} className="min-w-[280px] max-w-[360px] rounded-lg border bg-[hsl(var(--card))] p-3 shadow-lg">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-xs font-medium">{prog.final ? (prog.final==='ok'?'Completed':'Finished (errors)') : 'Running…'}</div>
+              <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-[hsl(var(--muted))]" onClick={()=> setRunProg((prev)=> ({ ...prev, [id]: { ...(prev[id]||prog), open: false } }))}>Close</button>
+            </div>
+            <div className="space-y-1 text-xs">
+              {(() => {
+                const last = (id: string) => { for (let i = prog.steps.length - 1; i >= 0; i--) { const it = prog.steps[i]; if (it.id === id) return it } return undefined }
+                const ids: string[] = ['calc']
+                if (prog.steps.some((s)=>s.id==='snapshot')) ids.push('snapshot')
+                if (prog.steps.some((s)=>s.id==='email')) ids.push('email')
+                if (prog.steps.some((s)=>s.id==='sms')) ids.push('sms')
+                const renderLine = (id: 'calc'|'snapshot'|'email'|'sms') => {
+                  const ev = last(id) as any
+                  const st: 'start'|'ok'|'error' = (ev?.status || 'start')
+                  let text = ''
+                  if (id === 'calc') {
+                    text = (st==='ok') ? 'Finished Calculated' : 'Calculating …'
+                  } else if (id === 'snapshot') {
+                    const m = String((ev?.mode || 'chart'))
+                    const prep = (m==='kpi' ? 'Preparing KPI Snapshot …' : (m==='table' ? 'Preparing Table …' : 'Preparing Chart Snapshot …'))
+                    if (st==='ok') text = (m==='kpi' ? 'Prepared KPI Snapshot Successfully' : (m==='table' ? 'Prepared Table Successfully' : 'Prepared Chart Snapshot Successfully'))
+                    else if (st==='error') text = 'Snapshot generation Failed'
+                    else text = prep
+                  } else if (id === 'email') {
+                    if (st==='ok') text = `Email Sent${typeof ev?.to==='number'?` (to ${ev.to})`:''}`
+                    else if (st==='error') text = `Email Failed${typeof ev?.to==='number'?` (to ${ev.to})`:''}`
+                    else text = 'Sending Email …'
+                  } else if (id === 'sms') {
+                    if (st==='ok') text = `SMS Sent${typeof ev?.to==='number'?` (to ${ev.to})`:''}`
+                    else if (st==='error') text = `SMS Failed${typeof ev?.to==='number'?` (to ${ev.to})`:''}`
+                    else text = 'Sending SMS …'
+                  }
+                  return (
+                    <div key={id}>
+                      <div className="flex items-center gap-2">
+                        {st === 'start' ? (
+                          <span className="inline-block h-3 w-3 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>
+                        ) : st === 'ok' ? (
+                          <span className="inline-block text-emerald-600">✓</span>
+                        ) : (
+                          <span className="inline-block text-rose-600">✕</span>
+                        )}
+                        <span>{text}</span>
+                      </div>
+                      {id==='snapshot' && st==='error' && (
+                        <div className="pl-5 opacity-70">
+                          <span className="block">{ev?.error ? `Reason: ${ev.error}` : ''}</span>
+                          {(ev?.wid || ev?.did || ev?.actor) && (
+                            <span className="block">{`wid=${ev?.wid||'-'} did=${ev?.did||'-'} actor=${ev?.actor||'-'}`}</span>
+                          )}
+                        </div>
+                      )}
+                      {id==='email' && st==='error' && ev?.error && (
+                        <div className="pl-5 opacity-70">{String(ev.error)}</div>
+                      )}
+                      {id==='sms' && st==='error' && ev?.error && (
+                        <div className="pl-5 opacity-70">{String(ev.error)}</div>
+                      )}
+                    </div>
+                  )
+                }
+                return (
+                  <div>
+                    {ids.map((k)=> renderLine(k as any))}
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+        ))}
+      </div>
       {/* Unified create dialog (Advanced mode default) */}
       <AlertDialog open={createOpen} mode="create" onCloseAction={() => setCreateOpen(false)} onSavedAction={(a)=>{ onCreated(a); setCreateOpen(false) }} />
       <EmailConfigDialog open={dlgEmail} onCloseAction={() => setDlgEmail(false)} />

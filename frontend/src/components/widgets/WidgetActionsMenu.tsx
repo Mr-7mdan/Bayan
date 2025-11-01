@@ -944,6 +944,8 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
         widget={existingAlert ? undefined : cfg}
         alert={existingAlert || undefined}
         parentDashboardId={parentDashboardId}
+        defaultKind={existingAlert ? undefined : 'notification'}
+        defaultTemplate={existingAlert ? undefined : '{{KPI_IMG}}'}
       />
     </>
   )

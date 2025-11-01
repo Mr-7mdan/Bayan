@@ -6,6 +6,7 @@ from uuid import uuid4
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+import anyio
 from decimal import Decimal
 import base64
 import re as _re
@@ -199,19 +200,52 @@ async def run_alert_now(alert_id: str, db: Session = Depends(get_db)) -> dict:
     ar = AlertRun(id=run_id, alert_id=a.id)
     db.add(ar); db.commit()
     try:
-        ok, msg = run_rule(db, a, force_time_ok=True)
+        steps: list[dict] = []
+        # Execute in a worker thread with its own DB session; stream progress by writing to AlertRun.message
+        def worker() -> tuple[bool, str, list[dict]]:
+            db2 = SessionLocal()
+            try:
+                def progress_cb(evt: dict):
+                    try:
+                        e = dict(evt or {})
+                        e["ts"] = datetime.utcnow().isoformat() + "Z"
+                        steps.append(e)
+                        try:
+                            row = db2.get(AlertRun, run_id)
+                            if row:
+                                row.message = json.dumps({"steps": steps})
+                                db2.add(row); db2.commit()
+                        except Exception:
+                            db2.rollback()
+                    except Exception:
+                        pass
+                ok_, msg_ = run_rule(db2, a, force_time_ok=True, progress_cb=progress_cb)
+                return ok_, msg_, steps
+            finally:
+                try:
+                    db2.close()
+                except Exception:
+                    pass
+        ok, msg, steps = await anyio.to_thread.run_sync(worker)
         a.last_run_at = datetime.utcnow()
         a.last_status = (msg or ("ok" if ok else "failed"))
         # Update run row
         ar.finished_at = datetime.utcnow()
         ar.status = ("ok" if ok else "failed")
-        ar.message = msg or ("ok" if ok else "failed")
+        # Finalize message with steps array
+        try:
+            ar.message = json.dumps({"message": (msg or ("ok" if ok else "failed")), "steps": steps})
+        except Exception:
+            ar.message = msg or ("ok" if ok else "failed")
         db.add(a); db.add(ar); db.commit()
-        return {"ok": ok, "message": msg or ("ok" if ok else "failed")}
+        return {"ok": ok, "message": msg or ("ok" if ok else "failed"), "runId": run_id, "steps": steps}
     except Exception as e:
         ar.finished_at = datetime.utcnow()
         ar.status = "failed"
-        ar.message = str(e)
+        try:
+            ar.message = json.dumps({"message": str(e), "steps": []})
+        except Exception:
+            ar.message = str(e)
         db.add(ar); db.commit()
         raise
 
@@ -410,6 +444,39 @@ async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Query(d
                 "source": str(cfg.get("source") or (t0.get("source") if t0 else "") or ""),
                 "datasourceId": str(ds_id or ""),
             }
+            # Provide widget image tokens for preview: prefer real snapshot when widgetRef present; otherwise fallback to SVG KPI
+            try:
+                wref = (render.get("widgetRef") or {}) if isinstance(render, dict) else {}
+                _wid = (wref.get("widgetId") if isinstance(wref, dict) else None) or None
+                _did = (wref.get("dashboardId") if isinstance(wref, dict) else None) or (payload.dashboardId or None)
+                if _wid:
+                    snap_w = int((render.get("width") if isinstance(render, dict) else None) or 1000)
+                    snap_h = int((render.get("height") if isinstance(render, dict) else None) or (280 if render_mode_is_kpi else 360))
+                    png = await snapshot_embed_png(
+                        dashboard_id=_did,
+                        public_id=None,
+                        token=None,
+                        widget_id=_wid,
+                        datasource_id=ds_id,
+                        width=snap_w,
+                        height=snap_h,
+                        theme=str((render.get("theme") if isinstance(render, dict) else None) or "light"),
+                        actor_id=(settings.snapshot_actor_id),
+                        wait_ms=6000,
+                    )
+                    b64 = base64.b64encode(png).decode("ascii")
+                    tag = f"<img alt='Widget' src='data:image/png;base64,{b64}' style='max-width:100%;height:auto'/>"
+                    ctx["KPI_IMG"] = tag
+                    ctx["CHART_IMG"] = tag
+            except Exception:
+                pass
+            # Fallback SVG for KPI when no snapshot token exists
+            try:
+                if (mode == "kpi") and ("KPI_IMG" not in ctx):
+                    svg = _build_kpi_svg((kpi_value if (kpi_value is not None) else 0), kpi_label)
+                    ctx["KPI_IMG"] = f"<img alt='KPI' src='{_to_svg_data_uri(svg)}' style='max-width:100%;height:auto'/>"
+            except Exception:
+                pass
             out = str(raw_tpl)
             for k, v in ctx.items():
                 try:
@@ -419,8 +486,28 @@ async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Query(d
             parts.append(f"<div>{out}</div>")
         except Exception:
             pass
-    html = "\n".join(parts)
-    return EvaluateResponse(html=html, kpi=kpi_value)
+    # Wrap with base template (logo, header/footer) and replace tokens as a final step
+    html_inner = "\n".join(parts)
+    try:
+        from ..models import EmailConfig
+        _cfg_email = db.query(EmailConfig).first()
+        if _cfg_email:
+            email_html = _apply_base_template(_cfg_email, payload.name or "Notification", html_inner)
+        else:
+            email_html = html_inner
+    except Exception:
+        email_html = html_inner
+    # Final token replacement so tokens inside base template also render
+    try:
+        for k, v in (ctx.items() if 'ctx' in locals() else []):
+            try:
+                email_html = email_html.replace("{{" + k + "}}", v)
+                email_html = _re.sub(r"\{\{\s*" + _re.escape(str(k)) + r"\s*\}\}", str(v), email_html, flags=_re.IGNORECASE)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return EvaluateResponse(html=email_html, kpi=kpi_value)
 
 
 @router.post("/evaluate-v2")
@@ -926,10 +1013,34 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
             wref = (render.get("widgetRef") or {}) if isinstance(render, dict) else {}
             _wid = (wref.get("widgetId") if isinstance(wref, dict) else None) or None
             _did = (wref.get("dashboardId") if isinstance(wref, dict) else None) or (payload.dashboardId or None)
+            # If no widgetRef was provided, try top-level payload.widgetId/dashboardId
+            try:
+                if not _wid:
+                    _wid = getattr(payload, 'widgetId', None) or None
+                    if _wid and not _did:
+                        _did = getattr(payload, 'dashboardId', None) or None
+            except Exception:
+                pass
             if _wid:
                 # Heuristic sizes; emails will downscale to container width
                 snap_w = int((render.get("width") if isinstance(render, dict) else None) or 1000)
                 snap_h = int((render.get("height") if isinstance(render, dict) else None) or (280 if render_mode_is_kpi else 360))
+                # Resolve dashboardId if missing by scanning dashboards that contain this widget id
+                if not _did:
+                    try:
+                        rows = db.query(Dashboard).all()
+                        for drow in rows:
+                            try:
+                                import json as _json
+                                definition = _json.loads(drow.definition_json or "{}")
+                                ws = (definition.get('widgets') or {})
+                                if str(_wid) in ws:
+                                    _did = drow.id
+                                    break
+                            except Exception:
+                                continue
+                    except Exception:
+                        _did = _did
                 png = await snapshot_embed_png(
                     dashboard_id=_did,
                     public_id=None,
@@ -938,7 +1049,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                     datasource_id=ds_id,
                     width=snap_w,
                     height=snap_h,
-                    theme=str((render.get("theme") if isinstance(render, dict) else None) or "dark"),
+                    theme=str((render.get("theme") if isinstance(render, dict) else None) or "light"),
                     actor_id=(actorId or settings.snapshot_actor_id),
                     wait_ms=6000,
                 )
@@ -960,6 +1071,14 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                 context["CHART_IMG"] = f"<img alt='Chart' src='{_to_svg_data_uri(svg_c)}' style='max-width:100%;height:auto'/>"
             except Exception:
                 pass
+        # If no widgetRef was provided (no snapshot attempted) and we are rendering a KPI, still provide a KPI_IMG fallback
+        try:
+            if (str((render.get("mode") or "").lower()) == "kpi") and (not context.get("KPI_IMG")):
+                val = kpi_value if (kpi_value is not None) else 0
+                svg = _build_kpi_svg(val, kpi_label)
+                context["KPI_IMG"] = f"<img alt='KPI' src='{_to_svg_data_uri(svg)}' style='max-width:100%;height:auto'/>"
+        except Exception:
+            pass
         # If no custom template is provided, append the image into parts for preview convenience
         try:
             if not template_present:
@@ -1092,12 +1211,12 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                                         except Exception:
                                             fv = 0.0
                                         total += fv
-                                        rows_html.append(f"<tr><th style='padding:6px 8px;border:1px solid #233143;color:#D1D5DB;background:#0F172A;text-align:left'>{name}</th><td style='padding:6px 8px;border:1px solid #233143;color:#E5E7EB;background:#0B1220;text-align:right'>{fv:,.0f}</td></tr>")
+                                        rows_html.append(f"<tr><th style='padding:6px 8px;border:1px solid #e5e7eb;color:#111827;background:#ffffff;text-align:left'>{name}</th><td style='padding:6px 8px;border:1px solid #e5e7eb;color:#111827;background:#ffffff;text-align:right'>{fv:,.0f}</td></tr>")
                                     except Exception:
                                         pass
-                                total_row = f"<tr><th style='padding:6px 8px;border:1px solid #233143;color:#FDE68A;background:#0F172A;text-align:left'>Total</th><td style='padding:6px 8px;border:1px solid #233143;color:#FDE68A;background:#0B1220;text-align:right'>{total:,.0f}</td></tr>"
-                                head = f"<tr><th style='padding:6px 8px;border:1px solid #233143;color:#9CA3AF;background:#111827;text-align:left'>{_esc(row_dims[0] if row_dims else 'Item')}</th><th style='padding:6px 8px;border:1px solid #233143;color:#9CA3AF;background:#111827;text-align:right'>{_esc(label or 'Value')}</th></tr>"
-                                html = """<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;font-size:13px;background:#0B0F15;color:#E5E7EB'>
+                                total_row = f"<tr><th style='padding:6px 8px;border:1px solid #e5e7eb;color:#92400e;background:#fef3c7;text-align:left'>Total</th><td style='padding:6px 8px;border:1px solid #e5e7eb;color:#92400e;background:#fef3c7;text-align:right'>{total:,.0f}</td></tr>"
+                                head = f"<tr><th style='padding:6px 8px;border:1px solid #e5e7eb;color:#374151;background:#f3f4f6;text-align:left'>{_esc(row_dims[0] if row_dims else 'Item')}</th><th style='padding:6px 8px;border:1px solid #e5e7eb;color:#374151;background:#f3f4f6;text-align:right'>{_esc(label or 'Value')}</th></tr>"
+                                html = """<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;font-size:13px;background:#ffffff;color:#111827'>
 <thead>""" + head + "</thead><tbody>" + ("".join(rows_html)) + total_row + "</tbody></table>"
                                 context["TABLE_HTML"] = html
                             elif data:
@@ -1216,19 +1335,22 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                                         prefix_counts[pf] = prefix_counts.get(pf, 0) + 1
 
                                 # Compose HTML table
-                                TH_HEAD = "padding:6px 8px;border:1px solid #233143;color:#9CA3AF;background:#111827;text-align:left"
-                                TH_ROW = "padding:6px 8px;border:1px solid #233143;color:#D1D5DB;background:#0F172A;text-align:left"
-                                TD_CELL = "padding:6px 8px;border:1px solid #233143;color:#E5E7EB;background:#0B1220;text-align:right"
-                                TD_TOTAL = "padding:6px 8px;border:1px solid #233143;color:#FDE68A;background:#0B1220;text-align:right;font-weight:600"
-                                table_open = "<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;font-size:13px;background:#0B0F15;color:#E5E7EB'>"
+                                TH_HEAD = "padding:6px 8px;border:1px solid #e5e7eb;color:#374151;background:#f3f4f6;text-align:left"
+                                TH_ROW = "padding:6px 8px;border:1px solid #e5e7eb;color:#111827;background:#ffffff;text-align:left"
+                                TD_CELL = "padding:6px 8px;border:1px solid #e5e7eb;color:#111827;background:#ffffff;text-align:right"
+                                TD_TOTAL = "padding:6px 8px;border:1px solid #e5e7eb;color:#92400e;background:#fef3c7;text-align:right;font-weight:600"
+                                table_open = "<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;font-size:13px;background:#ffffff;color:#111827'>"
 
                                 # Header builder
                                 thead_parts: list[str] = []
                                 if cdn > 0:
-                                    # First header row: top-left spacer over row headers, then level 0 labels; include Total header if col totals
+                                    # First header row: row dimension titles (instead of empty spacer) over row headers, then level 0 labels; include Total header if col totals
                                     left_span = max(1, rdn)
-                                    first = [f"<th style='{TH_HEAD}' colspan='{left_span}' rowspan='{cdn}'></th>"] if left_span > 0 else []
-                                    row0: list[str] = first
+                                    row0: list[str] = []
+                                    if left_span > 0:
+                                        for i in range(rdn):
+                                            title_i = _esc(row_dims[i] if i < len(row_dims) else '')
+                                            row0.append(f"<th style='{TH_HEAD}' rowspan='{cdn}'>" + title_i + "</th>")
                                     for lb in order_by_level[0]:
                                         if lb in col_root:
                                             cs = leaf_counts.get((lb,), 1)
@@ -1508,10 +1630,10 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                                 if isinstance(cell, (int, float)):
                                     v_fb += float(cell)
                 kpi_value = float(v_fb)
-                context['kpi'] = str(kpi_value)
+                context['kpi'] = str(v_fb)
                 try:
-                    context['kpi_fmt'] = _fmt_num(kpi_value, 0)
-                    if render_mode_is_kpi:
+                    context['kpi_fmt'] = _fmt_num(v_fb, 0)
+                    if render_mode_is_kpi and (not context.get("KPI_IMG")):
                         svg = _build_kpi_svg((kpi_value if (kpi_value is not None) else 0), kpi_label)
                         context["KPI_IMG"] = f"<img alt='KPI' src='{_to_svg_data_uri(svg)}' style='max-width:100%;height:auto'/>"
                 except Exception:
@@ -1791,7 +1913,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                                 context['kpi'] = str(_kpi_matches)
                                 try:
                                     context['kpi_fmt'] = _fmt_num(_kpi_matches, 0)
-                                    if render_mode_is_kpi:
+                                    if render_mode_is_kpi and (not context.get("KPI_IMG")):
                                         svg = _build_kpi_svg((_kpi_matches if (_kpi_matches is not None) else 0), kpi_label)
                                         context["KPI_IMG"] = f"<img alt='KPI' src='{_to_svg_data_uri(svg)}' style='max-width:100%;height:auto'/>"
                                 except Exception:
@@ -1900,7 +2022,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                                 # No per-legend matches: still show the single insert
                                 try:
                                     single = f"<div>{fill_tokens(email_insert)}</div>"
-                                    combined = content_html + "\n" + single
+                                    combined = single
                                     from ..models import EmailConfig
                                     _cfg_email = db.query(EmailConfig).first()
                                     if _cfg_email:
@@ -2267,7 +2389,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                     context['kpi'] = str(_kpi_matches)
                     try:
                         context['kpi_fmt'] = _fmt_num(_kpi_matches, 0)
-                        if render_mode_is_kpi:
+                        if render_mode_is_kpi and (not context.get("KPI_IMG")):
                             svg = _build_kpi_svg((_kpi_matches if (_kpi_matches is not None) else 0), kpi_label)
                             context["KPI_IMG"] = f"<img alt='KPI' src='{_to_svg_data_uri(svg)}' style='max-width:100%;height:auto'/>"
                     except Exception:
@@ -2498,7 +2620,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                     if not composed_multi_email:
                         try:
                             single = f"<div>{fill_tokens(email_insert)}</div>"
-                            combined = content_html + "\n" + single
+                            combined = single
                             from ..models import EmailConfig
                             _cfg_email = db.query(EmailConfig).first()
                             if _cfg_email:
@@ -2519,7 +2641,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                     # Single-render: fill tokens AFTER KPI/context are finalized
                     try:
                         single = f"<div>{fill_tokens(email_insert)}</div>"
-                        combined = content_html + "\n" + single
+                        combined = single
                         from ..models import EmailConfig
                         _cfg_email = db.query(EmailConfig).first()
                         if _cfg_email:
@@ -2604,7 +2726,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                     else:
                         # Fall through to single insert
                         single = f"<div>{fill_tokens(email_insert)}</div>"
-                        combined = content_html + "\n" + single
+                        combined = single
                         from ..models import EmailConfig
                         _cfg_email2 = db.query(EmailConfig).first()
                         if _cfg_email2:
@@ -2614,7 +2736,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                 except Exception:
                     # On any error, just do single insert
                     single = f"<div>{fill_tokens(email_insert)}</div>"
-                    combined = content_html + "\n" + single
+                    combined = single
                     from ..models import EmailConfig
                     _cfg_email2 = db.query(EmailConfig).first()
                     if _cfg_email2:
@@ -2623,7 +2745,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
                         email_html = combined
             else:
                 single = f"<div>{fill_tokens(email_insert)}</div>"
-                combined = content_html + "\n" + single
+                combined = single
                 from ..models import EmailConfig
                 _cfg_email2 = db.query(EmailConfig).first()
                 if _cfg_email2:
@@ -2677,9 +2799,8 @@ async def get_email_config(db: Session = Depends(get_db)) -> EmailConfigPayload:
         host=c.host,
         port=c.port or 587,
         username=c.username,
-        # password not returned
         fromName=c.from_name,
-        fromEmail=c.from_email,
+        fromEmail=c.username,
         useTls=bool(c.use_tls),
         baseTemplateHtml=c.base_template_html,
         logoUrl=c.logo_url,
@@ -2690,21 +2811,18 @@ async def get_email_config(db: Session = Depends(get_db)) -> EmailConfigPayload:
 async def put_email_config(payload: EmailConfigPayload, db: Session = Depends(get_db)) -> dict:
     c = db.query(EmailConfig).first()
     if not c:
-        c = EmailConfig(id="default")
+        c = EmailConfig(id=str(uuid4()))
     c.host = payload.host or c.host
-    c.port = payload.port or c.port or 587
+    c.port = payload.port or 587
     c.username = payload.username or c.username
-    if payload.password:
-        c.password_encrypted = encrypt_text(payload.password)
+    if (payload.password or '').strip():
+        from ..security import encrypt_text
+        c.password_encrypted = encrypt_text(payload.password or "")
     c.from_name = payload.fromName or c.from_name
-    c.from_email = payload.fromEmail or c.from_email
     c.use_tls = bool(payload.useTls)
-    if payload.baseTemplateHtml is not None:
-        c.base_template_html = payload.baseTemplateHtml
-    if payload.logoUrl is not None:
-        c.logo_url = payload.logoUrl
-    db.add(c)
-    db.commit()
+    c.base_template_html = payload.baseTemplateHtml or None
+    c.logo_url = payload.logoUrl or None
+    db.add(c); db.commit(); db.refresh(c)
     return {"ok": True}
 
 
@@ -2733,9 +2851,10 @@ async def put_sms_config_hadara(payload: SmsConfigPayload, db: Session = Depends
 # --- Tests ---
 @router.post("/test-email")
 async def test_email(payload: TestEmailPayload, db: Session = Depends(get_db)) -> dict:
-    ok, err = send_email(db, subject=payload.subject, to=payload.to, html=payload.html)
+    # Payload.html from the Email Config preview is already a full HTML document. Avoid double wrapping.
+    ok, err = send_email(db, subject=payload.subject, to=payload.to, html=payload.html, already_wrapped=True)
     if not ok:
-        raise HTTPException(status_code=400, detail=err or "Failed to send")
+        raise HTTPException(status_code=500, detail=err or "Failed to send")
     return {"ok": True}
 
 

@@ -282,6 +282,7 @@ class BulkEmailPayload(BaseModel):
     html: str
     rateLimitPerMinute: Optional[int] = None
     queue: Optional[bool] = None
+    notifyEmail: Optional[str] = None
 
 
 class BulkSmsPayload(BaseModel):
@@ -291,6 +292,7 @@ class BulkSmsPayload(BaseModel):
     message: str
     rateLimitPerMinute: Optional[int] = None
     queue: Optional[bool] = None
+    notifyEmail: Optional[str] = None
 
 
 # --- QuerySpec (skeleton for Ibis integration) ---

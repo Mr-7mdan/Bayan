@@ -1,5 +1,166 @@
 from __future__ import annotations
 
+def _fetch_snapshot_png_direct(*, dashboard_id: Optional[str], public_id: Optional[str], token: Optional[str], widget_id: str, datasource_id: Optional[str], width: int, height: int, theme: str, actor_id: Optional[str], wait_ms: int = 4000, retries: int = 0, backoff_sec: float = 0.5) -> Optional[bytes]:
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except Exception:
+        return None
+    base_f = (settings.frontend_base_url or "http://localhost:3000").rstrip("/")
+    qs: dict[str, str] = {
+        "widgetId": str(widget_id),
+        "w": str(int(width)),
+        "h": str(int(height)),
+        "theme": str(theme or "dark"),
+        "bg": "transparent",
+        "snap": "1",
+    }
+    if datasource_id:
+        qs["datasourceId"] = str(datasource_id)
+    if dashboard_id:
+        qs["dashboardId"] = str(dashboard_id)
+        if actor_id:
+            qs["actorId"] = str(actor_id)
+    elif public_id:
+        qs["publicId"] = str(public_id)
+        if token:
+            qs["token"] = str(token)
+    else:
+        return None
+    url = f"{base_f}/render/embed/widget?{urlencode(qs)}"
+    last_err: Exception | None = None
+    for attempt in range(0, max(0, int(retries)) + 1):
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                try:
+                    is_dark = str(theme or "dark").lower() == "dark"
+                    context = browser.new_context(viewport={"width": int(width), "height": int(height)}, device_scale_factor=2, color_scheme=("dark" if is_dark else "light"), reduced_motion="reduce")
+                    # Initialize theme and patch ECharts to disable animations, prefer SVG renderer
+                    try:
+                        context.add_init_script(
+                            (
+                                "try {\n"
+                                f"  localStorage.setItem('theme', '{'dark' if is_dark else 'light'}');\n"
+                                "  const r = document.documentElement;\n"
+                                f"  if ({'true' if is_dark else 'false'}) r.classList.add('dark'); else r.classList.remove('dark');\n"
+                                "} catch (e) {}\n"
+                            )
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        context.add_init_script(
+                            (
+                                "(() => {\n"
+                                "  try {\n"
+                                "    try { const st = document.createElement('style'); st.innerHTML = '*{animation:none!important;transition:none!important}'; document.head.appendChild(st); } catch(e) {}\n"
+                                "    const applyPatch = (echarts) => {\n"
+                                "      try {\n"
+                                "        if (!echarts || echarts.__snapPatched) return;\n"
+                                "        echarts.__snapPatched = true;\n"
+                                "        const _init = echarts.init.bind(echarts);\n"
+                                "        echarts.init = function(dom, theme, opts) {\n"
+                                "          try { opts = Object.assign({}, opts||{}, { renderer: 'svg' }); } catch(e) {}\n"
+                                "          const inst = _init(dom, theme, opts);\n"
+                                "          const _set = inst.setOption.bind(inst);\n"
+                                "          inst.setOption = function(opt, ...rest) {\n"
+                                "            try {\n"
+                                "              if (opt) {\n"
+                                "                opt.animation = false; opt.animationDuration = 0; opt.animationDurationUpdate = 0;\n"
+                                "                if (Array.isArray(opt.series)) {\n"
+                                "                  opt.series = opt.series.map((s) => ({ ...s, animation:false, animationDuration:0, animationDurationUpdate:0, progressive:0, progressiveThreshold:0 }));\n"
+                                "                }\n"
+                                "              }\n"
+                                "            } catch(e) {}\n"
+                                "            return _set(opt, ...rest);\n"
+                                "          };\n"
+                                "          return inst;\n"
+                                "        };\n"
+                                "      } catch(e) {}\n"
+                                "    };\n"
+                                "    Object.defineProperty(window, 'echarts', {\n"
+                                "      configurable: true,\n"
+                                "      get() { return this.__echarts__; },\n"
+                                "      set(v) { this.__echarts__ = v; try { applyPatch(v) } catch(e) {} },\n"
+                                "    });\n"
+                                "    document.addEventListener('DOMContentLoaded', () => { try { applyPatch(window.echarts) } catch(e) {} });\n"
+                                "  } catch(e) {}\n"
+                                "})();\n"
+                            )
+                        )
+                    except Exception:
+                        pass
+                    page = context.new_page()
+                    try:
+                        page.emulate_media(color_scheme=("dark" if is_dark else "light"))
+                    except Exception:
+                        pass
+                    try:
+                        page.set_default_navigation_timeout(15000)
+                    except Exception:
+                        pass
+                    page.goto(url, wait_until="domcontentloaded")
+                    try:
+                        page.wait_for_function(
+                            "() => { const root = document.getElementById('widget-root'); if (!root) return false; const wd = (window.__READY__ === true); const chartOk = (root.getAttribute('data-chart-ready') === '1'); return wd && chartOk; }",
+                            timeout=wait_ms,
+                        )
+                    except Exception:
+                        try:
+                            page.wait_for_selector("#widget-root[data-widget-ready='1']", timeout=wait_ms)
+                        except Exception:
+                            try:
+                                page.wait_for_selector("#widget-root", timeout=wait_ms)
+                            except Exception:
+                                pass
+                    # Wait for quiescence: data-chart-finished-at stable for >= 1000ms
+                    try:
+                        page.wait_for_function(
+                            "() => {\n"
+                            "  const root = document.getElementById('widget-root');\n"
+                            "  if (!root) return false;\n"
+                            "  const t = Number(root.getAttribute('data-chart-finished-at') || '0');\n"
+                            "  if (!t) return false;\n"
+                            "  const now = (typeof performance!== 'undefined' && performance && typeof performance.now==='function') ? performance.now() : Date.now();\n"
+                            "  return (now - t) >= 1000;\n"
+                            "}",
+                            timeout=2000,
+                        )
+                    except Exception:
+                        pass
+                    # Post-ready settle
+                    try:
+                        page.wait_for_function("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))", timeout=400)
+                    except Exception:
+                        pass
+                    try:
+                        page.wait_for_timeout(600)
+                    except Exception:
+                        pass
+                    el = page.query_selector("#widget-root")
+                    if el:
+                        png = el.screenshot(type="png", omit_background=True)
+                    else:
+                        png = page.screenshot(type="png", full_page=False, omit_background=True)
+                    context.close()
+                    return png
+                finally:
+                    browser.close()
+        except Exception as e:
+            last_err = e
+            try:
+                logger.warning("snapshot sync attempt %s failed for %s: %s", attempt + 1, url, getattr(e, "message", str(e)))
+            except Exception:
+                pass
+            if attempt < int(retries):
+                try:
+                    import time as _t
+                    _t.sleep(max(0.0, float(backoff_sec) * (attempt + 1)))
+                except Exception:
+                    pass
+            else:
+                break
+    return None
 def _fmt_num(value: Any, decimals: int = 0) -> str:
     try:
         x = float(value)
@@ -17,6 +178,7 @@ def _fmt_num(value: Any, decimals: int = 0) -> str:
             return ''
 
 import json
+import re as _re
 import logging
 import time
 import smtplib
@@ -26,6 +188,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 import base64
 from uuid import uuid4
+import xml.etree.ElementTree as ET
 
 from sqlalchemy.orm import Session
 from .metrics import counter_inc
@@ -36,6 +199,7 @@ from .routers.query import run_query_spec
 from .schemas import QuerySpecRequest, QueryResponse
 from datetime import datetime, timedelta
 from .config import settings
+from pathlib import Path
 
 # --- Rendering helpers ---
 
@@ -177,7 +341,7 @@ def _fetch_snapshot_png_via_http(*, dashboard_id: Optional[str], public_id: Opti
 
 # --- Email / SMS senders ---
 
-def send_email(db: Session, *, subject: str, to: list[str], html: str, replacements: Optional[dict[str, str]] = None, inline_images: Optional[list[tuple[str, bytes, str, str]]] = None) -> Tuple[bool, Optional[str]]:
+def send_email(db: Session, *, subject: str, to: list[str], html: str, replacements: Optional[dict[str, str]] = None, inline_images: Optional[list[tuple[str, bytes, str, str]]] = None, already_wrapped: bool = False) -> Tuple[bool, Optional[str]]:
     cfg: EmailConfig | None = db.query(EmailConfig).first()
     if not cfg or not cfg.host or not cfg.username or not cfg.password_encrypted:
         return False, "Email is not configured"
@@ -193,43 +357,129 @@ def send_email(db: Session, *, subject: str, to: list[str], html: str, replaceme
             msg["From"] = from_email
         msg["To"] = ", ".join(to)
         msg.set_content("This email contains HTML content. Please view in an HTML-capable client.")
-        final_html = _apply_base_template(cfg, subject, html)
+        # If caller provided a full HTML document, optionally bypass base template wrapping
+        final_html = html if already_wrapped or (str(html).lstrip().lower().startswith("<!doctype") or str(html).lstrip().lower().startswith("<html")) else _apply_base_template(cfg, subject, html)
         # Apply extra placeholders after wrapping
         if replacements:
-            for k, v in replacements.items():
+            # Be tolerant: case-insensitive keys and whitespace inside braces
+            # Also duplicate common variants (TABLE_HTML vs table_html)
+            try:
+                reps = dict(replacements)
+                if 'TABLE_HTML' in reps and 'table_html' not in reps:
+                    reps['table_html'] = reps['TABLE_HTML']
+                for k, v in reps.items():
+                    try:
+                        final_html = final_html.replace("{{" + k + "}}", v)
+                    except Exception:
+                        pass
+                for k, v in reps.items():
+                    try:
+                        final_html = _re.sub(r"\{\{\s*" + _re.escape(k) + r"\s*\}\}", str(v), final_html, flags=_re.IGNORECASE)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        # Remove known unreplaced tokens (case-insensitive) to avoid showing {{CHART_IMG}} in emails
+        try:
+            for k in ("CHART_IMG", "KPI_IMG", "TABLE_HTML", "chart_img", "kpi_img", "table_html"):
                 try:
-                    final_html = final_html.replace("{{" + k + "}}", v)
+                    final_html = final_html.replace("{{" + k + "}}", "")
                 except Exception:
                     pass
-        # Inline logo via CID (supports data URI and HTTP/HTTPS)
+                try:
+                    final_html = _re.sub(r"\{\{\s*" + _re.escape(k) + r"\s*\}\}", "", final_html, flags=_re.IGNORECASE)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Inline logo: ensure any referenced logo becomes a data URI
         inline_images_buf: list[tuple[str, bytes, str, str]] = []
         try:
             lu = (cfg.logo_url or "").strip()
+            inline_logo: str | None = None
             if lu.startswith("data:") and ";base64," in lu:
-                try:
-                    head, b64 = lu.split(",", 1)
-                    mime = head[5:].split(";", 1)[0] if head.startswith("data:") else "image/png"
-                    data = base64.b64decode(b64)
-                    logo_cid = f"logo_{uuid4().hex[:8]}"
-                    # replace occurrences of the data URI in HTML with cid
-                    final_html = final_html.replace(lu, f"cid:{logo_cid}")
-                    inline_images_buf.append((logo_cid, data, mime, "logo"))
-                except Exception:
-                    pass
+                inline_logo = lu
             elif lu.lower().startswith("http://") or lu.lower().startswith("https://"):
                 try:
                     with urlopen(lu, timeout=15) as resp:  # nosec B310
                         data = resp.read()
                         ct = (resp.headers.get("content-type") or "image/png").split(";")[0]
-                    logo_cid = f"logo_{uuid4().hex[:8]}"
-                    final_html = final_html.replace(lu, f"cid:{logo_cid}")
-                    inline_images_buf.append((logo_cid, data, ct, "logo"))
+                    inline_logo = f"data:{ct};base64,{base64.b64encode(data).decode('ascii')}"
+                    final_html = final_html.replace(lu, inline_logo)
+                except Exception:
+                    inline_logo = None
+            # If still not set, try to inline /logo.svg from frontend
+            if inline_logo is None and ("/logo.svg" in final_html or _re.search(r"originalsrc\s*=\s*['\"]/logo\.svg['\"]", final_html or "")):
+                try:
+                    base_f = (settings.frontend_base_url or "http://localhost:3000").rstrip("/")
+                    absu = f"{base_f}/logo.svg"
+                    with urlopen(absu, timeout=15) as resp:  # nosec B310
+                        data = resp.read()
+                        ct = (resp.headers.get("content-type") or "image/svg+xml").split(";")[0]
+                    inline_logo = f"data:{ct};base64,{base64.b64encode(data).decode('ascii')}"
+                except Exception:
+                    inline_logo = None
+            # If still not set, try branding logoLight from metadata
+            if inline_logo is None:
+                try:
+                    data_dir = Path(settings.metadata_db_path).resolve().parent
+                    f = data_dir / "branding.json"
+                    if f.exists():
+                        import json as _json
+                        obj = _json.loads(f.read_text(encoding="utf-8") or "{}")
+                        ll = (obj.get("logoLight") or "").strip()
+                        if ll.startswith("data:") and ";base64," in ll:
+                            inline_logo = ll
+                        elif ll.lower().startswith("http://") or ll.lower().startswith("https://"):
+                            try:
+                                with urlopen(ll, timeout=15) as resp:  # nosec B310
+                                    data = resp.read()
+                                    ct = (resp.headers.get("content-type") or "image/png").split(";")[0]
+                                inline_logo = f"data:{ct};base64,{base64.b64encode(data).decode('ascii')}"
+                            except Exception:
+                                inline_logo = None
+                except Exception:
+                    inline_logo = None
+            # Apply inline logo replacement for any '/logo.svg' or missing 'src' variants
+            if inline_logo:
+                try:
+                    final_html = final_html.replace("src='/logo.svg'", f"src='{inline_logo}'").replace('src="/logo.svg"', f'src="{inline_logo}"')
+                    final_html = _re.sub(r"src\s*=\s*(['\"])\/logo\.svg\1", f"src='{inline_logo}'", final_html, flags=_re.IGNORECASE)
+                    # Remove any originalsrc (Outlook, etc.) and ensure src is present for alt='Logo'
+                    final_html = _re.sub(r"originalsrc\s*=\s*(['\"])\/logo\.svg\1", "", final_html, flags=_re.IGNORECASE)
+                    final_html = _re.sub(r"originalsrc\s*=\s*(['\"][^'\"]+['\"])", "", final_html, flags=_re.IGNORECASE)
+                    def _ensure_logo_src(m):
+                        tag = m.group(0)
+                        try:
+                            if _re.search(r"\bsrc\s*=", tag, flags=_re.IGNORECASE):
+                                return tag
+                            return tag[:-1] + f" src='{inline_logo}'>"
+                        except Exception:
+                            return tag
+                    final_html = _re.sub(r"<img\b[^>]*\balt=([\'\"])Logo\1[^>]*>", _ensure_logo_src, final_html, flags=_re.IGNORECASE)
+                    # Convert inline data URI logo into CID so email clients that block data URIs still render it
+                    if inline_logo.startswith('data:'):
+                        try:
+                            _m = _re.match(r"data:([^;]+);base64,(.+)$", inline_logo, flags=_re.IGNORECASE)
+                            if _m:
+                                _mime = (_m.group(1) or 'image/png').strip()
+                                _b64 = _m.group(2)
+                                _bytes = base64.b64decode(_b64)
+                                _cid = f"logo_{uuid4().hex}"
+                                inline_images_buf.append((_cid, _bytes, _mime, 'logo'))
+                                # Replace any occurrence of the data URI (or alt='Logo' img) with CID reference
+                                final_html = final_html.replace(inline_logo, f"cid:{_cid}")
+                                final_html = _re.sub(r"(<img\b[^>]*\balt=([\'\"])Logo\2[^>]*\bsrc=)([\'\"])data:[^>]+?\3", r"\\1'cid:" + _cid + r"'", final_html, flags=_re.IGNORECASE)
+                                if "/logo.svg" in final_html:
+                                    final_html = final_html.replace("/logo.svg", f"cid:{_cid}")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
         except Exception:
             pass
         msg.add_alternative(final_html, subtype="html")
-        # Attach inline images (CID) if provided
+        # Attach inline images (CID) if provided; mark as inline and avoid filename to reduce attachment previews
         try:
             all_images = []
             if inline_images_buf:
@@ -244,7 +494,10 @@ def send_email(db: Session, *, subject: str, to: list[str], html: str, replaceme
                         maintype, subtype = (mime.split("/", 1) + ["octet-stream"])[:2]
                     except Exception:
                         maintype, subtype = "application", "octet-stream"
-                    target.add_related(data, maintype=maintype, subtype=subtype, cid=cid, filename=filename)
+                    try:
+                        target.add_related(data, maintype=maintype, subtype=subtype, cid=cid, disposition='inline')
+                    except Exception:
+                        target.add_related(data, maintype=maintype, subtype=subtype, cid=cid)
         except Exception:
             pass
         server = smtplib.SMTP(cfg.host, int(cfg.port or 587), timeout=30)
@@ -273,7 +526,7 @@ def send_email(db: Session, *, subject: str, to: list[str], html: str, replaceme
 
 def _default_base_template(logo_url: Optional[str]) -> str:
     lu = (logo_url or "").strip()
-    logo = f"<img src='{lu}' alt='Logo' style='max-height:40px;display:block'/>" if lu else ""
+    logo = f"<img src='{lu}' alt='Logo' style='height:40px;display:block' height='40'/>" if lu else ""
     return f"""
 <!doctype html>
 <html>
@@ -282,20 +535,19 @@ def _default_base_template(logo_url: Optional[str]) -> str:
   <meta name='viewport' content='width=device-width, initial-scale=1'>
   <title>{{subject}}</title>
   <style>
-    body{{margin:0;padding:0;background:#f7f7f8;color:#111827;font-family:Inter,Arial,sans-serif;}}
+    body{{margin:0;padding:0;color:#111827;font-family:Inter,Arial,sans-serif;}}
     .wrap{{width:100%;padding:24px 0;}}
-    .container{{max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,0.04);overflow:hidden;}}
-    .header{{padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fafafa;display:flex;align-items:center;gap:12px;}}
+    .container{{max-width:640px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,0.04);overflow:hidden;}}
+    .header{{padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:12px;}}
     .brand{{font-size:14px;font-weight:600;color:#111827;}}
     .content{{padding:20px;}}
-    .footer{{padding:16px 20px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;background:#fafafa;}}
+    .footer{{padding:16px 20px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;}}
     table{{border-collapse:collapse;width:100%}}
     th,td{{border:1px solid #e5e7eb;padding:6px;text-align:left;}}
     thead th{{background:#f3f4f6;}}
     tbody tr:nth-child(even){{background:#f9fafb;}}
   </style>
   <link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap' rel='stylesheet'>
-  <style> @media (prefers-color-scheme: dark) {{ body{{background:#0b0f15;color:#e5e7eb}} .container{{background:#0f1720;border-color:#1f2937}} .header{{background:#0f1720;border-color:#1f2937}} .footer{{background:#0f1720;border-color:#1f2937;color:#9ca3af}} }} </style>
   <style> img{{border:0;}} a{{color:#2563eb;text-decoration:none}} </style>
   <style> .logo{{display:flex;align-items:center;gap:12px}} </style>
   <style> .subject{{font-size:14px;font-weight:600}} </style>
@@ -323,11 +575,80 @@ def _default_base_template(logo_url: Optional[str]) -> str:
 
 
 def _apply_base_template(cfg: EmailConfig, subject: str, body_html: str) -> str:
-    tpl = (cfg.base_template_html or "").strip() or _default_base_template(cfg.logo_url)
-    out = tpl.replace("{{content}}", body_html)
-    out = out.replace("{{subject}}", subject or "")
-    out = out.replace("{{logoUrl}}", (cfg.logo_url or ""))
-    out = out.replace("{{year}}", str(datetime.utcnow().year))
+    # Prefer branding logoLight for always-light emails; fall back to email config logoUrl
+    branding_logo = None
+    try:
+        data_dir = Path(settings.metadata_db_path).resolve().parent
+        f = data_dir / "branding.json"
+        if f.exists():
+            import json as _json
+            obj = _json.loads(f.read_text(encoding="utf-8") or "{}")
+            branding_logo = (obj.get("logoLight") or None)
+    except Exception:
+        branding_logo = None
+    logo_src = (branding_logo or (cfg.logo_url or ""))
+    # Resolve/inline logo: http(s) or relative '/...' via frontend_base_url
+    try:
+        if isinstance(logo_src, str) and logo_src:
+            if logo_src.lower().startswith("http://") or logo_src.lower().startswith("https://"):
+                with urlopen(logo_src, timeout=15) as resp:  # nosec B310
+                    data = resp.read()
+                    ct = (resp.headers.get("content-type") or "image/png").split(";")[0]
+                import base64 as _b64
+                logo_src = f"data:{ct};base64,{_b64.b64encode(data).decode('ascii')}"
+            elif logo_src.startswith("/"):
+                base_f = (settings.frontend_base_url or "http://localhost:3000").rstrip("/")
+                absu = f"{base_f}{logo_src}"
+                try:
+                    with urlopen(absu, timeout=15) as resp:  # nosec B310
+                        data = resp.read()
+                        ct = (resp.headers.get("content-type") or "image/png").split(";")[0]
+                    import base64 as _b64
+                    logo_src = f"data:{ct};base64,{_b64.b64encode(data).decode('ascii')}"
+                except Exception:
+                    # leave as relative if fetch fails
+                    pass
+    except Exception:
+        pass
+    tpl = (cfg.base_template_html or "").strip() or _default_base_template(logo_src)
+    # Replace tokens with tolerance for whitespace inside braces
+    try:
+        repl = {"content": body_html, "subject": subject or "", "logoUrl": logo_src, "year": str(datetime.utcnow().year)}
+        out = _apply_placeholders(tpl, repl)
+    except Exception:
+        # Fallback to direct replace if regex helper fails
+        out = tpl.replace("{{content}}", body_html)
+        out = out.replace("{{subject}}", subject or "")
+        out = out.replace("{{logoUrl}}", logo_src)
+        out = out.replace("{{year}}", str(datetime.utcnow().year))
+    # If base template hardcodes a relative logo path, replace it with computed/inlined logo_src or default /logo.svg inlined from frontend
+    try:
+        if isinstance(out, str):
+            inline_val = None
+            if isinstance(logo_src, str) and logo_src:
+                inline_val = logo_src
+            else:
+                # Try fetching /logo.svg from frontend to inline
+                try:
+                    base_f = (settings.frontend_base_url or "http://localhost:3000").rstrip("/")
+                    absu = f"{base_f}/logo.svg"
+                    with urlopen(absu, timeout=15) as resp:  # nosec B310
+                        data = resp.read()
+                        ct = (resp.headers.get("content-type") or "image/svg+xml").split(";")[0]
+                    import base64 as _b64
+                    inline_val = f"data:{ct};base64,{_b64.b64encode(data).decode('ascii')}"
+                except Exception:
+                    inline_val = None
+            if inline_val:
+                out = out.replace("src='/logo.svg'", f"src='{inline_val}'").replace('src="/logo.svg"', f'src="{inline_val}"')
+                try:
+                    # Regex variants: allow spaces and no quotes
+                    out = _re.sub(r"src\s*=\s*(['\"])\/logo\.svg\1", f"src='{inline_val}'", out, flags=_re.IGNORECASE)
+                    out = _re.sub(r"src\s*=\s*\/logo\.svg(?![\w])", f"src='{inline_val}'", out, flags=_re.IGNORECASE)
+                except Exception:
+                    pass
+    except Exception:
+        pass
     return out
 
 
@@ -339,13 +660,59 @@ def send_sms_hadara(db: Session, *, to_numbers: list[str], message: str) -> Tupl
     base = "http://smsservice.hadara.ps:4545/SMS.ashx/bulkservice/sessionvalue/sendmessage/"
     try:
         for p in to_numbers:
-            qs = urlencode({
+            params = {
                 "apikey": api_key,
                 "to": p,
                 "msg": message,
-            })
-            with urlopen(f"{base}?{qs}", timeout=15) as resp:  # nosec B310
-                _ = resp.read()
+            }
+            # Include default sender if configured (provider may ignore if not needed)
+            try:
+                if (cfg.default_sender or "").strip():
+                    params["sender"] = str(cfg.default_sender).strip()
+            except Exception:
+                pass
+            qs = urlencode(params)
+            with urlopen(f"{base}?{qs}", timeout=20) as resp:  # nosec B310
+                status = getattr(resp, "status", 200)
+                body = resp.read()
+                text = ""
+                try:
+                    text = (body or b"").decode("utf-8", "ignore").strip()
+                except Exception:
+                    text = ""
+                # Treat only plausible success tokens as success; otherwise bubble up provider message
+                if status >= 400:
+                    raise RuntimeError(f"HTTP {status}")
+                low = text.lower()
+                # First, try to parse XML and read <Status> codes
+                parsed_ok = False
+                try:
+                    if text.startswith("<") or "<status>" in low:
+                        root = ET.fromstring(text)
+                        statuses: list[str] = []
+                        for el in root.iter():
+                            try:
+                                if el.tag and str(el.tag).lower().endswith("status"):
+                                    sval = (el.text or "").strip()
+                                    if sval != "":
+                                        statuses.append(sval)
+                            except Exception:
+                                pass
+                        if statuses:
+                            # Common semantics: 1 = success; 0 or -1 = failure
+                            if any(s == "1" for s in statuses) and not any(s in {"0", "-1"} for s in statuses):
+                                parsed_ok = True
+                            elif any(s in {"0", "-1"} for s in statuses):
+                                raise RuntimeError(text or "Provider error")
+                except Exception:
+                    parsed_ok = False
+                if not parsed_ok:
+                    # Only accept strict numeric success codes when not XML
+                    if (low == "1") or low.startswith("1|"):
+                        parsed_ok = True
+                    else:
+                        # Explicitly do NOT accept generic 'ok/sent/success' tokens to avoid false positives
+                        raise RuntimeError(text or "Unknown provider response")
         try:
             counter_inc("notifications_sms_sent_total", amount=float(len(to_numbers or [])))
         except Exception:
@@ -356,7 +723,14 @@ def send_sms_hadara(db: Session, *, to_numbers: list[str], message: str) -> Tupl
             counter_inc("notifications_sms_failed_total", amount=float(len(to_numbers or [])))
         except Exception:
             pass
-        return False, str(e)
+        # Return short snippet of provider response/error
+        msg = str(e)
+        try:
+            if len(msg) > 240:
+                msg = msg[:240]
+        except Exception:
+            pass
+        return False, msg
 
 
 # --- KPI/Threshold evaluation ---
@@ -521,7 +895,10 @@ def evaluate_threshold(db: Session, *, trigger: dict, datasource_id: Optional[st
     where2, x_value2 = _apply_xpick_to_where(where, x_field=x_field, trigger=trigger, datasource_id=datasource_id, source=source, db=db)
     operator = str(trigger.get("operator") or "").strip()
     value = trigger.get("value")
-    kpi = compute_kpi(db, datasource_id=datasource_id, source=source, agg=agg, measure=measure, where=where2, x_field=x_field, x_value=x_value2)
+    try:
+        kpi = compute_kpi(db, datasource_id=datasource_id, source=source, agg=agg, measure=measure, where=where2, x_field=x_field, x_value=x_value2)
+    except Exception:
+        kpi = 0.0
     ok = False
     try:
         if operator == "<":
@@ -560,8 +937,8 @@ def _apply_placeholders(s: str, repl: dict[str, str]) -> str:
             pass
         try:
             import re as _re
-            # Also tolerate whitespace inside braces: {{ key }}
-            out = _re.sub(r"\{\{\s*" + _re.escape(k) + r"\s*\}\}", str(v), out)
+            # Also tolerate whitespace inside braces and token case-insensitivity: {{ key }}
+            out = _re.sub(r"\{\{\s*" + _re.escape(k) + r"\s*\}\}", str(v), out, flags=_re.IGNORECASE)
         except Exception:
             pass
     return out
@@ -588,7 +965,9 @@ def _now_matches_time(cond: dict) -> bool:
         return True
 
 
-def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tuple[bool, str]:
+from typing import Callable
+
+def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progress_cb: Optional[Callable[[dict], None]] = None) -> Tuple[bool, str]:
     try:
         cfg = json.loads(rule.config_json or "{}")
     except Exception:
@@ -597,6 +976,11 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
     actions = cfg.get("actions") or []
     ds_id = cfg.get("datasourceId")
     render = cfg.get("render") or {}
+    template_present = False
+    try:
+        template_present = bool(str(cfg.get("template") or "").strip())
+    except Exception:
+        template_present = False
 
     # V2: triggersGroup support
     tg = cfg.get("triggersGroup") or None
@@ -609,7 +993,7 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
             time_ok = _now_matches_time(tcond)
         else:
             time_ok = True  # if not enabled, ignore
-        # Manual run: bypass time window if forced
+        # Manual run: bypass time window and threshold if forced
         if force_time_ok:
             try:
                 time_ok = True
@@ -617,48 +1001,335 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
                 time_ok = True
         # Threshold condition
         thr = tg.get("threshold") or {}
+        if progress_cb:
+            try: progress_cb({"id": "calc", "status": "start"})
+            except Exception: pass
         if thr and thr.get("enabled"):
             try:
-                thr_ok, kpi_value = evaluate_threshold(db, trigger=thr, datasource_id=ds_id)
+                if force_time_ok:
+                    thr_ok = True
+                    try:
+                        _, kpi_value = evaluate_threshold(db, trigger=thr, datasource_id=ds_id)
+                    except Exception:
+                        kpi_value = kpi_value if 'kpi_value' in locals() else None
+                else:
+                    thr_ok, kpi_value = evaluate_threshold(db, trigger=thr, datasource_id=ds_id)
             except Exception:
                 thr_ok = False
         else:
             thr_ok = True
             kpi_value = None
+        if progress_cb:
+            try: progress_cb({"id": "calc", "status": ("ok" if thr_ok else "error"), "kpi": (None if kpi_value is None else float(kpi_value))})
+            except Exception: pass
         logic = str(tg.get("logic") or "AND").upper()
         fired = (time_ok and thr_ok) if logic == "AND" else (time_ok or thr_ok)
         if not fired:
-            return True, "No trigger fired"
+            if force_time_ok:
+                fired = True
+            else:
+                return True, "No trigger fired"
         # Continue to assemble and send as in v1 using computed kpi_value and render
-        html_parts = [f"<div style='font-family:Inter,Arial,sans-serif;font-size:13px'>Rule: {_html_escape(rule.name)}</div>"]
+        is_notification = str(getattr(rule, "kind", "") or "").lower() == "notification"
+        html_parts = ([] if is_notification else [f"<div style='font-family:Inter,Arial,sans-serif;font-size:13px'>Rule: {_html_escape(rule.name)}</div>"])
+        # Prepare replacements map BEFORE any pivot/table rendering so we can assign TABLE_HTML safely
+        replacements_extra: dict[str, str] = {}
         if render.get("mode") == "kpi":
+            # Emit snapshot-like progress for KPI (no Playwright involved)
+            if progress_cb:
+                try: progress_cb({"id": "snapshot", "status": "start", "mode": "kpi"})
+                except Exception: pass
             val = (kpi_value if (kpi_value is not None) else 0)
             label = render.get("label") or "KPI"
             html_parts.append(_render_kpi_html(val, label=label))
-        elif render.get("mode") == "table":
+            if progress_cb:
+                try: progress_cb({"id": "snapshot", "status": "ok", "mode": "kpi"})
+                except Exception: pass
+            # Provide KPI image placeholder as SVG data URI so {{KPI_IMG}} resolves in template/preview
             try:
-                spec = render.get("querySpec") or {}
-                req = QuerySpecRequest(spec=spec, datasourceId=ds_id, limit=spec.get("limit") or 1000, offset=0, includeTotal=False)
-                res = run_query_spec(req, db)
-                html_parts.append(_render_table_html(res))
+                svg_bytes = _build_kpi_svg(val, label)
+                data_uri = _to_svg_data_uri(svg_bytes)
+                if data_uri:
+                    replacements_extra["KPI_IMG"] = f"<img alt='KPI' src='{data_uri}' style='max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:10px'/>"
             except Exception:
+                pass
+        elif render.get("mode") == "table":
+            # Emit snapshot-like progress for Table (server-side HTML render)
+            if progress_cb:
+                try: progress_cb({"id": "snapshot", "status": "start", "mode": "table"})
+                except Exception: pass
+            try:
+                # Try pivot render based on widgetRef configuration
+                import json as _json
+                widget_cfg = None
+                try:
+                    wref = (render.get("widgetRef") or {}) if isinstance(render, dict) else {}
+                    wid = (wref.get("widgetId") if isinstance(wref, dict) else None) or None
+                    did0 = (wref.get("dashboardId") if isinstance(wref, dict) else None) or getattr(rule, "dashboard_id", None)
+                    if wid and not did0:
+                        try:
+                            rows = db.query(Dashboard).all()
+                            for drow2 in rows:
+                                try:
+                                    definition2 = _json.loads(drow2.definition_json or "{}")
+                                    ws2 = (definition2.get('widgets') or {})
+                                    if str(wid) in ws2:
+                                        did0 = drow2.id
+                                        break
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+                    if wid and did0:
+                        drow = db.get(Dashboard, did0)
+                        if drow and drow.definition_json:
+                            definition = _json.loads(drow.definition_json or "{}")
+                            widget_cfg = ((definition or {}).get('widgets') or {}).get(str(wid))
+                except Exception:
+                    widget_cfg = None
+                is_pivot = False
+                if isinstance(widget_cfg, dict) and ((widget_cfg.get('type') or '') == 'table'):
+                    opts = (widget_cfg.get('options') or {})
+                    tbl = (opts.get('table') or {})
+                    pcfg_probe = (tbl.get('pivotConfig') or {})
+                    pv_probe = ((widget_cfg.get('pivot') or {}).get('values') or [])
+                    is_pivot = ((tbl.get('tableType') or 'data') == 'pivot') or bool(pcfg_probe.get('rows') or pcfg_probe.get('cols') or pv_probe)
+                table_html_val = None
+                if is_pivot:
+                    # Build pivot request
+                    from .routers.query import run_pivot  # lazy import to avoid cycles
+                    from .schemas import PivotRequest
+                    opts = (widget_cfg.get('options') or {})
+                    tbl = (opts.get('table') or {})
+                    pcfg = (tbl.get('pivotConfig') or {})
+                    row_dims = list((pcfg.get('rows') or []))
+                    col_dims = list((pcfg.get('cols') or []))
+                    pv = ((widget_cfg.get('pivot') or {}).get('values') or [])
+                    vals_list = list((pcfg.get('vals') or []))
+                    try:
+                        chip = (pv[0] if len(pv) > 0 else {}) or {}
+                        value_field = chip.get('field') or chip.get('measureId') or (vals_list[0] if len(vals_list) > 0 else None)
+                        agg_raw = chip.get('agg') or ('count' if not value_field else 'sum')
+                        label = chip.get('label') or (value_field or 'Value')
+                    except Exception:
+                        value_field = (vals_list[0] if len(vals_list) > 0 else None); agg_raw = ('count' if not value_field else 'sum'); label = (value_field or 'Value')
+                    agg = str(agg_raw or 'sum').lower()
+                    if 'distinct' in agg: agg = 'distinct'
+                    elif agg.startswith('avg'): agg = 'avg'
+                    elif agg not in {'sum','avg','min','max','distinct','count'}: agg = 'count'
+                    # Totals preferences
+                    show_row_totals = (pcfg.get('rowTotals') is not False)
+                    show_col_totals = (pcfg.get('colTotals') is not False)
+                    # Source resolution
+                    qspec_src = ((widget_cfg.get('querySpec') or {}) or {}).get('source') or (cfg.get('source') if isinstance(cfg, dict) else None) or ''
+                    if not qspec_src:
+                        raise Exception('No querySpec.source for server pivot')
+                    payload_p = PivotRequest(
+                        source=qspec_src,
+                        rows=row_dims,
+                        cols=col_dims,
+                        valueField=(None if agg=='count' and not value_field else (value_field or None)),
+                        aggregator=agg,
+                        where=(thr.get('where') if isinstance(thr, dict) else (cfg.get('where') if isinstance(cfg, dict) else None)),
+                        datasourceId=ds_id,
+                        limit=int((tbl.get('pivotMaxRows') or 20000)),
+                        widgetId=str((wref or {}).get('widgetId') or ''),
+                    )
+                    res_p = run_pivot(payload_p, db)
+                    cols = list(res_p.columns or [])
+                    data = list(res_p.rows or [])
+                    # Light theme styles
+                    TH_HEAD = "padding:6px 8px;border:1px solid #e5e7eb;color:#374151;background:#f3f4f6;text-align:left"
+                    TH_ROW =  "padding:6px 8px;border:1px solid #e5e7eb;color:#111827;background:#ffffff;text-align:left"
+                    TD_CELL =  "padding:6px 8px;border:1px solid #e5e7eb;color:#111827;background:#ffffff;text-align:right"
+                    TD_TOTAL = "padding:6px 8px;border:1px solid #e5e7eb;color:#92400e;background:#fef3c7;text-align:right;font-weight:600"
+                    table_open = "<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;font-size:13px;background:#ffffff;color:#111827'>"
+                    def _esc(x: object) -> str:
+                        try:
+                            s = str(x if x is not None else '')
+                            return s.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;').replace("'",'&#39;')
+                        except Exception:
+                            return ''
+                    rdn = len(row_dims); cdn = len(col_dims)
+                    if data and cdn == 0:
+                        vi = len(cols) - 1 if cols else -1
+                        total = 0.0; rows_html = []
+                        for r in data:
+                            if not isinstance(r, (list, tuple)): continue
+                            name = " / ".join(_esc(r[i]) for i in range(0, rdn)) if rdn else ''
+                            v = r[vi] if (vi >= 0 and vi < len(r)) else 0
+                            try: fv = float(v) if v is not None else 0.0
+                            except Exception: fv = 0.0
+                            total += fv
+                            rows_html.append(f"<tr><th style='{TH_ROW}'>{name}</th><td style='{TD_CELL}'>{fv:,.0f}</td></tr>")
+                        head = f"<tr><th style='{TH_HEAD}'>{_esc(row_dims[0] if row_dims else 'Item')}</th><th style='{TH_HEAD}'>{_esc(label or 'Value')}</th></tr>"
+                        total_row = f"<tr><th style='{TH_HEAD}'>Total</th><td style='{TD_TOTAL}'>{total:,.0f}</td></tr>"
+                        table_html_val = table_open + "<thead>" + head + "</thead><tbody>" + ("".join(rows_html)) + total_row + "</tbody></table>"
+                    elif data:
+                        # General matrix
+                        try:
+                            vi = len(cols) - 1
+                        except Exception:
+                            vi = -1
+                        # Build row/col keys
+                        row_leaves = []
+                        _r_seen = set()
+                        col_root: dict = {}
+                        order_by_level: list[list[str]] = [[] for _ in range(cdn)]
+                        seen_by_level: list[set[str]] = [set() for _ in range(cdn)]
+                        valmap: dict[tuple, float] = {}
+                        for r in data:
+                            if not isinstance(r, (list, tuple)): continue
+                            rk = tuple(r[i] for i in range(0, rdn)) if rdn > 0 else tuple()
+                            ck = tuple(r[rdn + j] for j in range(0, cdn)) if cdn > 0 else tuple()
+                            v = r[vi] if (vi >= 0 and vi < len(r)) else 0
+                            try: vv = float(v) if v is not None else 0.0
+                            except Exception: vv = 0.0
+                            valmap[(rk, ck)] = vv
+                            if rk not in _r_seen:
+                                _r_seen.add(rk); row_leaves.append(rk)
+                            node = col_root
+                            for lvl in range(cdn):
+                                lb = str(ck[lvl] if lvl < len(ck) else '')
+                                if lb not in node:
+                                    node[lb] = {}
+                                    if lb not in seen_by_level[lvl]:
+                                        seen_by_level[lvl].add(lb); order_by_level[lvl].append(lb)
+                                node = node[lb]
+                        leaf_counts: dict[tuple, int] = {}
+                        col_leaves: list[tuple] = []
+                        def _count(n: dict, depth: int, path: tuple) -> int:
+                            if depth >= cdn: return 1
+                            s = 0; labels = order_by_level[depth]
+                            for lb in labels:
+                                if lb in n:
+                                    s += _count(n[lb], depth + 1, path + (lb,))
+                            leaf_counts[path] = max(1, s); return max(1, s)
+                        _count(col_root, 0, tuple())
+                        def _collect(n: dict, depth: int, path: tuple):
+                            if depth >= cdn:
+                                col_leaves.append(path); return
+                            labels = order_by_level[depth]
+                            for lb in labels:
+                                if lb in n: _collect(n[lb], depth + 1, path + (lb,))
+                        _collect(col_root, 0, tuple())
+                        prefix_counts: dict[tuple, int] = {}
+                        for rk in row_leaves:
+                            for i in range(1, rdn + 1):
+                                pf = rk[:i]; prefix_counts[pf] = prefix_counts.get(pf, 0) + 1
+                        thead_parts: list[str] = []
+                        if cdn > 0:
+                            left_span = max(1, rdn)
+                            # Emit row dimension titles instead of a blank top-left block
+                            row0: list[str] = []
+                            if left_span > 0:
+                                for i in range(rdn):
+                                    title_i = _esc(row_dims[i] if i < len(row_dims) else "")
+                                    row0.append(f"<th style='{TH_HEAD}' rowspan='{cdn}'>{title_i}</th>")
+                            for lb in order_by_level[0]:
+                                if lb in col_root:
+                                    cs = leaf_counts.get((lb,), 1)
+                                    row0.append(f"<th style='{TH_HEAD}' colspan='{cs}'>{_esc(lb)}</th>")
+                            if show_row_totals:
+                                row0.append(f"<th style='{TH_HEAD}' rowspan='{cdn}'>Total</th>")
+                            thead_parts.append("<tr>" + "".join(row0) + "</tr>")
+                            def _emit_level(n: dict, depth: int, path: tuple):
+                                if depth >= cdn: return
+                                cells: list[str] = []
+                                labels = order_by_level[depth]
+                                for lb in labels:
+                                    if lb in n:
+                                        cs = leaf_counts.get(path + (lb,), 1)
+                                        cells.append(f"<th style='{TH_HEAD}' colspan='{cs}'>{_esc(lb)}</th>")
+                                if cells:
+                                    thead_parts.append("<tr>" + "".join(cells) + "</tr>")
+                                merged: dict = {}
+                                for lb in labels:
+                                    if lb in n:
+                                        for k2, v2 in n[lb].items():
+                                            if k2 not in merged: merged[k2] = v2
+                                if depth + 1 < cdn:
+                                    _emit_level(merged, depth + 1, path)
+                            if cdn > 1:
+                                _emit_level(col_root, 1, tuple())
+                        else:
+                            left_span = max(1, rdn)
+                            thead_parts.append(f"<tr><th style='{TH_HEAD}' colspan='{left_span}'></th><th style='{TH_HEAD}'>Value</th></tr>")
+                        tbody_parts: list[str] = []
+                        seen_prefix: set[tuple] = set()
+                        col_totals: list[float] = [0.0 for _ in range(len(col_leaves))]
+                        grand_total = 0.0
+                        for rk in row_leaves:
+                            tds: list[str] = []
+                            for d in range(0, rdn):
+                                pf = rk[: d + 1]
+                                if pf not in seen_prefix:
+                                    seen_prefix.add(pf); rs = prefix_counts.get(pf, 1)
+                                    tds.append(f"<th style='{TH_ROW}' rowspan='{rs}'>{_esc(rk[d])}</th>")
+                            row_sum = 0.0
+                            for j, ck in enumerate(col_leaves):
+                                v = float(valmap.get((rk, ck), 0.0) or 0.0)
+                                row_sum += v; col_totals[j] += v
+                                tds.append(f"<td style='{TD_CELL}'>{v:,.0f}</td>")
+                            if show_row_totals:
+                                tds.append(f"<td style='{TD_TOTAL}'>{row_sum:,.0f}</td>")
+                            grand_total += row_sum
+                            tbody_parts.append("<tr>" + "".join(tds) + "</tr>")
+                        if show_col_totals:
+                            tr: list[str] = []
+                            left_span = max(1, rdn)
+                            tr.append(f"<th style='{TH_HEAD}' colspan='{left_span}'>Total</th>")
+                            for j in range(len(col_leaves)):
+                                tr.append(f"<td style='{TD_TOTAL}'>{col_totals[j]:,.0f}</td>")
+                            if show_row_totals:
+                                tr.append(f"<td style='{TD_TOTAL}'>{grand_total:,.0f}</td>")
+                            tbody_parts.append("<tr>" + "".join(tr) + "</tr>")
+                        table_html_val = table_open + "<thead>" + "".join(thead_parts) + "</thead><tbody>" + "".join(tbody_parts) + "</tbody></table>"
+                else:
+                    # Fallback: plain table from query spec
+                    spec = render.get("querySpec") or {}
+                    req = QuerySpecRequest(spec=spec, datasourceId=ds_id, limit=spec.get("limit") or 1000, offset=0, includeTotal=False)
+                    res = run_query_spec(req, db)
+                    table_html_val = _render_table_html(res)
+                if progress_cb:
+                    try: progress_cb({"id": "snapshot", "status": "ok", "mode": "table"})
+                    except Exception: pass
+                # Place into template or append directly depending on whether a template exists
+                try:
+                    if template_present:
+                        if table_html_val:
+                            replacements_extra["TABLE_HTML"] = table_html_val
+                    else:
+                        html_parts.append(table_html_val or "<div>Failed to render table.</div>")
+                except Exception:
+                    if not template_present:
+                        html_parts.append("<div>Failed to render table.</div>")
+            except Exception:
+                if progress_cb:
+                    try: progress_cb({"id": "snapshot", "status": "error", "mode": "table", "error": "render_failed"})
+                    except Exception: pass
                 html_parts.append("<div>Failed to render table.</div>")
         html = "\n".join(html_parts)
         # Dispatch
         errs: list[str] = []
         # Prepare inline images and replacements for template insert
         inline_images: list[tuple[str, bytes, str, str]] = []
-        replacements_extra: dict[str, str] = {}
+        snapshot_expected = False
+        snapshot_ok = False
         try:
-            # Preferred: real widget snapshot via headless embed if widgetRef present
+            # Preferred: real widget snapshot via headless embed if widgetRef present and render is chart-like
             try:
                 wref = (render or {}).get("widgetRef") or {}
-                wid = (wref or {}).get("widgetId")
+                wid = (wref or {}).get("widgetId") or getattr(rule, "widget_id", None)
                 did = (wref or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
-                if wid:
+                mode_ = str(((render or {}).get("mode") or "kpi")).lower()
+                # Snapshot for all widget modes except 'table' (includes KPI and charts)
+                should_snapshot = bool(wid) and (mode_ != "table")
+                if should_snapshot:
+                    snapshot_expected = True
                     w = int((render or {}).get("width") or 1000)
-                    h = int((render or {}).get("height") or (280 if str((render or {}).get("mode") or "kpi") == "kpi" else 360))
-                    th = str((render or {}).get("theme") or "dark")
+                    h = int((render or {}).get("height") or (280 if mode_ == "kpi" else 360))
+                    th = "light"
                     # Prefer dashboard owner's user id for snapshot actor to enforce correct permissions
                     actor_for_snapshot = None
                     try:
@@ -670,39 +1341,65 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
                         actor_for_snapshot = None
                     if not actor_for_snapshot:
                         actor_for_snapshot = getattr(settings, "snapshot_actor_id", None)
-                    png = _fetch_snapshot_png_via_http(dashboard_id=did, public_id=None, token=None, widget_id=str(wid), datasource_id=ds_id, width=w, height=h, theme=th, actor_id=actor_for_snapshot)
+                    if progress_cb:
+                        try: progress_cb({"id": "snapshot", "status": "start", "mode": mode_, "wid": str(wid), "did": str(did), "actor": (str(actor_for_snapshot or '') or None)})
+                        except Exception: pass
+                    # If dashboardId is missing, try to resolve by scanning dashboards that contain this widget id
+                    if not did:
+                        try:
+                            rows = db.query(Dashboard).all()
+                            for drow in rows:
+                                try:
+                                    import json as _json
+                                    definition = _json.loads(drow.definition_json or "{}")
+                                    ws = (definition.get('widgets') or {})
+                                    if str(wid) in ws:
+                                        did = drow.id
+                                        break
+                                except Exception:
+                                    continue
+                        except Exception:
+                            did = did
+                    # If still missing, fail fast with a clear reason
+                    if not did:
+                        if progress_cb:
+                            try: progress_cb({"id": "snapshot", "status": "error", "mode": mode_, "error": "missing_dashboard_id", "wid": str(wid), "did": str(did or '')})
+                            except Exception: pass
+                        # Do not attempt Playwright without dashboard context
+                        raise Exception("snapshot_missing_dashboard_id")
+                    png = _fetch_snapshot_png_direct(dashboard_id=did, public_id=None, token=None, widget_id=str(wid), datasource_id=ds_id, width=w, height=h, theme=th, actor_id=actor_for_snapshot, wait_ms=20000, retries=1)
                     if png:
-                        w_cid = f"widget_{uuid4().hex[:8]}"
-                        tag = f"<img alt='Widget' src='cid:{w_cid}' style='max-width:100%;height:auto'/>"
-                        inline_images.append((w_cid, png, "image/png", "widget.png"))
-                        # Use for both KPI and Chart tokens
-                        replacements_extra["KPI_IMG"] = tag
+                        snapshot_ok = True
+                        if progress_cb:
+                            try: progress_cb({"id": "snapshot", "status": "ok", "mode": mode_})
+                            except Exception: pass
+                        b64 = base64.b64encode(png).decode("ascii")
+                        tag = f"<img alt='Widget' src='data:image/png;base64,{b64}' style='max-width:100%;height:auto'/>"
+                        # Provide tokens and also append to HTML so it shows without template tokens
                         replacements_extra["CHART_IMG"] = tag
-                        html = html + f"\n<div style='margin-top:8px'>{tag}</div>"
+                        replacements_extra["KPI_IMG"] = tag
+                        if not template_present:
+                            try:
+                                html = html + f"\n<div style='margin-top:8px'>{tag}</div>"
+                            except Exception:
+                                pass
+                    else:
+                        if progress_cb:
+                            try: progress_cb({"id": "snapshot", "status": "error", "mode": mode_, "error": "returned_none"})
+                            except Exception: pass
             except Exception:
                 pass
-            if render.get("mode") == "kpi" and ("KPI_IMG" not in replacements_extra):
-                val = (kpi_value if (kpi_value is not None) else 0)
-                k_cid = f"kpi_{uuid4().hex[:8]}"
-                svg = _build_kpi_svg(val, render.get("label") or "KPI")
-                inline_images.append((k_cid, svg, "image/svg+xml", "kpi.svg"))
-                # Also include the inline image in the HTML content for recipients without template tokens
-                html = html + f"\n<div style='margin-top:8px'><img alt='KPI' src='cid:{k_cid}' style='max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:10px'/></div>"
-                replacements_extra["KPI_IMG"] = f"<img alt='KPI' src='cid:{k_cid}' style='max-width:100%;height:auto'/>"
-            elif render.get("mode") == "table":
+            if render.get("mode") == "table":
                 try:
-                    spec = render.get("querySpec") or {}
-                    req = QuerySpecRequest(spec=spec, datasourceId=ds_id, limit=spec.get("limit") or 1000, offset=0, includeTotal=False)
-                    res = run_query_spec(req, db)
-                    replacements_extra["TABLE_HTML"] = _render_table_html(res)
+                    # If not already set by the snapshot/table branch above, set a basic fallback
+                    if "TABLE_HTML" not in replacements_extra:
+                        spec = render.get("querySpec") or {}
+                        req = QuerySpecRequest(spec=spec, datasourceId=ds_id, limit=spec.get("limit") or 1000, offset=0, includeTotal=False)
+                        res = run_query_spec(req, db)
+                        replacements_extra["TABLE_HTML"] = _render_table_html(res)
                 except Exception:
-                    replacements_extra["TABLE_HTML"] = "<div>Failed to render table.</div>"
-            elif render.get("mode") == "chart" and ("CHART_IMG" not in replacements_extra):
-                c_cid = f"chart_{uuid4().hex[:8]}"
-                svg = _build_chart_svg_placeholder()
-                inline_images.append((c_cid, svg, "image/svg+xml", "chart.svg"))
-                html = html + f"\n<div><img alt='Chart' src='cid:{c_cid}' style='max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:10px'/></div>"
-                replacements_extra["CHART_IMG"] = f"<img alt='Chart' src='cid:{c_cid}' style='max-width:100%;height:auto'/>"
+                    if "TABLE_HTML" not in replacements_extra:
+                        replacements_extra["TABLE_HTML"] = "<div>Failed to render table.</div>"
         except Exception:
             pass
 
@@ -964,11 +1661,25 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
         for a in actions:
             at = str(a.get("type") or "").lower()
             if at == "email":
+                # If snapshot was expected but not available, send anyway with placeholders
                 to = [str(x).strip() for x in (a.get("to") or []) if str(x).strip()]
+                if not to:
+                    # No recipients configured; skip email send
+                    continue
                 subj = str(a.get("subject") or rule.name)
+                if progress_cb:
+                    try: progress_cb({"id": "email", "status": "start", "to": len(to)})
+                    except Exception: pass
                 ok, err = send_email(db, subject=subj, to=to, html=html, replacements=replacements_all, inline_images=inline_images)
                 if not ok and err:
                     errs.append(f"email: {err}")
+                    if progress_cb:
+                        try: progress_cb({"id": "email", "status": "error", "to": len(to), "error": err})
+                        except Exception: pass
+                else:
+                    if progress_cb:
+                        try: progress_cb({"id": "email", "status": "ok", "to": len(to)})
+                        except Exception: pass
             elif at == "sms":
                 to = [str(x).strip() for x in (a.get("to") or []) if str(x).strip()]
                 text = str(a.get("message") or rule.name)
@@ -977,9 +1688,26 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
                     text = _apply_placeholders(text, ctx_tokens)
                 except Exception:
                     pass
+                # No recipients configured: mark as error and skip provider call
+                if not to:
+                    if progress_cb:
+                        try: progress_cb({"id": "sms", "status": "error", "to": 0, "error": "no_recipients"})
+                        except Exception: pass
+                    errs.append("sms: no recipients")
+                    continue
+                if progress_cb:
+                    try: progress_cb({"id": "sms", "status": "start", "to": len(to)})
+                    except Exception: pass
                 ok, err = send_sms_hadara(db, to_numbers=to, message=text)
                 if not ok and err:
                     errs.append(f"sms: {err}")
+                    if progress_cb:
+                        try: progress_cb({"id": "sms", "status": "error", "to": len(to), "error": err})
+                        except Exception: pass
+                else:
+                    if progress_cb:
+                        try: progress_cb({"id": "sms", "status": "ok", "to": len(to)})
+                        except Exception: pass
         return (len(errs) == 0), ("; ".join(errs) if errs else "ok")
 
     # V1: If any threshold trigger passes or time trigger invoked, send actions
@@ -998,35 +1726,125 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
             fired = True
             break
     if not fired:
-        return True, "No trigger fired"
+        if force_time_ok:
+            fired = True
+        else:
+            return True, "No trigger fired"
 
     # Build HTML body based on render.mode
     html_parts = [f"<div style='font-family:Inter,Arial,sans-serif;font-size:13px'>Rule: {_html_escape(rule.name)}</div>"]
+    widget_img_cid: Optional[str] = None
+    widget_img_bytes: Optional[bytes] = None
+    snapshot_expected_v1 = False
+    snapshot_ok_v1 = False
+    if progress_cb:
+        try: progress_cb({"id": "calc", "status": "start"})
+        except Exception: pass
     if render.get("mode") == "table":
+        # Emit snapshot-like progress for Table
+        if progress_cb:
+            try: progress_cb({"id": "snapshot", "status": "start", "mode": "table"})
+            except Exception: pass
         try:
             spec = render.get("querySpec") or {}
             req = QuerySpecRequest(spec=spec, datasourceId=ds_id, limit=spec.get("limit") or 1000, offset=0, includeTotal=False)
             res = run_query_spec(req, db)
             parts = [_render_table_html(res)]
+            if progress_cb:
+                try: progress_cb({"id": "snapshot", "status": "ok", "mode": "table"})
+                except Exception: pass
         except Exception:
             parts = ["<div>Failed to render table.</div>"]
+            if progress_cb:
+                try: progress_cb({"id": "snapshot", "status": "error", "mode": "table", "error": "render_failed"})
+                except Exception: pass
     elif render.get("mode") == "kpi":
+        # Emit snapshot-like progress for KPI
+        if progress_cb:
+            try: progress_cb({"id": "snapshot", "status": "start", "mode": "kpi"})
+            except Exception: pass
         kpi_label = render.get("label") or "KPI"
         render_mode_is_kpi = True
         val = kpi_value if (kpi_value is not None) else 0
         parts = [_render_kpi_html(val, label=kpi_label)]
+        if progress_cb:
+            try: progress_cb({"id": "snapshot", "status": "ok", "mode": "kpi"})
+            except Exception: pass
         try:
             svg = _build_kpi_svg(val, kpi_label)
             parts.append(f"<div style='margin-top:8px'><img alt='KPI' src='{_to_svg_data_uri(svg)}' style='max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:10px'/></div>")
         except Exception:
             pass
     else:
-        try:
-            c_cid = f"chart_{uuid4().hex[:8]}"
-            svg = _build_chart_svg_placeholder()
-            html_parts.append(f"<div><img alt='Chart' src='cid:{c_cid}' style='max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:10px'/></div>")
-        except Exception:
-            html_parts.append("<div>Chart rendering not yet available.</div>")
+        pass  # No placeholder fallback for charts
+    if progress_cb:
+        try: progress_cb({"id": "calc", "status": "ok", "kpi": (None if kpi_value is None else float(kpi_value))})
+        except Exception: pass
+
+    # If a widgetRef is provided, compute a real snapshot (direct Playwright only) and provide tokens
+    try:
+        wref = (render or {}).get("widgetRef") or {}
+        wid = (wref or {}).get("widgetId")
+        did = (wref or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
+        mode_ = str(((render or {}).get("mode") or "kpi")).lower()
+        is_chart_like_v1 = (mode_ not in ("table", "kpi"))
+        if wid and is_chart_like_v1:
+            snapshot_expected_v1 = True
+            w = int((render or {}).get("width") or 1000)
+            h = int((render or {}).get("height") or 360)
+            th = "light"
+            actor_for_snapshot = None
+            try:
+                if did:
+                    drow = db.get(Dashboard, did)
+                    if drow and getattr(drow, 'user_id', None):
+                        actor_for_snapshot = drow.user_id
+            except Exception:
+                actor_for_snapshot = None
+            if not actor_for_snapshot:
+                actor_for_snapshot = getattr(settings, "snapshot_actor_id", None)
+            if progress_cb:
+                try: progress_cb({"id": "snapshot", "status": "start", "mode": "chart", "wid": str(wid), "did": str(did), "actor": (str(actor_for_snapshot or '') or None)})
+                except Exception: pass
+            # If dashboardId is missing, try to resolve by scanning dashboards for this widget id
+            if not did:
+                try:
+                    rows = db.query(Dashboard).all()
+                    for drow in rows:
+                        try:
+                            import json as _json
+                            definition = _json.loads(drow.definition_json or "{}")
+                            ws = (definition.get('widgets') or {})
+                            if str(wid) in ws:
+                                did = drow.id
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    did = did
+            if not did:
+                if progress_cb:
+                    try: progress_cb({"id": "snapshot", "status": "error", "mode": "chart", "error": "missing_dashboard_id", "wid": str(wid), "did": str(did or '')})
+                    except Exception: pass
+                raise Exception("snapshot_missing_dashboard_id")
+            png = _fetch_snapshot_png_direct(dashboard_id=did, public_id=None, token=None, widget_id=str(wid), datasource_id=ds_id, width=w, height=h, theme=th, actor_id=actor_for_snapshot, wait_ms=20000, retries=1)
+            if png:
+                widget_img_bytes = png
+                snapshot_ok_v1 = True
+                if progress_cb:
+                    try: progress_cb({"id": "snapshot", "status": "ok", "mode": "chart"})
+                    except Exception: pass
+                try:
+                    _b64_inline = base64.b64encode(png).decode('ascii')
+                    html_parts.append(f"<div style='margin-top:8px'><img alt='Widget' src='data:image/png;base64,{_b64_inline}' style='max-width:100%;height:auto'/></div>")
+                except Exception:
+                    pass
+            else:
+                if progress_cb:
+                    try: progress_cb({"id": "snapshot", "status": "error", "mode": "chart", "error": "returned_none"})
+                    except Exception: pass
+    except Exception:
+        pass
 
     # Compute placeholders
     dash_name = None
@@ -1057,21 +1875,250 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
                     placeholders["KPI_IMG"] = f"<img alt='KPI' src='cid:{k_cid}' style='max-width:100%;height:auto'/>"
             except Exception:
                 pass
-        if any("src='cid:chart_" in s for s in html_parts):
+        # If we computed a widget snapshot, provide CHART_IMG/KPI_IMG tokens with data URI
+        if widget_img_bytes:
             try:
-                c_match = next((seg for seg in html_parts if "src='cid:chart_" in seg), None)
-                if c_match:
-                    cid_start = c_match.split("cid:",1)[1]
-                    c_cid = cid_start.split("'",1)[0]
-                    placeholders["CHART_IMG"] = f"<img alt='Chart' src='cid:{c_cid}' style='max-width:100%;height:auto'/>"
+                _b64w = base64.b64encode(widget_img_bytes).decode('ascii')
+                _tag = f"<img alt='Widget' src='data:image/png;base64,{_b64w}' style='max-width:100%;height:auto'/>"
+                placeholders["CHART_IMG"] = _tag
+                placeholders["KPI_IMG"] = _tag
+            except Exception:
+                pass
+        # Fallback for KPI mode: if no widget snapshot, provide a KPI SVG data URI for {{KPI_IMG}}
+        if render.get("mode") == "kpi" and "KPI_IMG" not in placeholders:
+            try:
+                val2 = kpi_value if (kpi_value is not None) else 0
+                label2 = render.get("label") or "KPI"
+                svg2 = _build_kpi_svg(val2, label2)
+                tag2 = f"<img alt='KPI' src='{_to_svg_data_uri(svg2)}' style='max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:10px'/>"
+                placeholders["KPI_IMG"] = tag2
             except Exception:
                 pass
         if render.get("mode") == "table":
             try:
-                spec = render.get("querySpec") or {}
-                req = QuerySpecRequest(spec=spec, datasourceId=ds_id, limit=spec.get("limit") or 1000, offset=0, includeTotal=False)
-                res = run_query_spec(req, db)
-                placeholders["TABLE_HTML"] = _render_table_html(res)
+                # Prefer pivot HTML when widgetRef points to a pivot-configured table widget
+                import json as _json
+                table_html_val = None
+                try:
+                    wref = (render.get("widgetRef") or {}) if isinstance(render, dict) else {}
+                    wid = (wref.get("widgetId") if isinstance(wref, dict) else None) or None
+                    did0 = (wref.get("dashboardId") if isinstance(wref, dict) else None) or getattr(rule, "dashboard_id", None)
+                    if wid and not did0:
+                        try:
+                            rows = db.query(Dashboard).all()
+                            for drow2 in rows:
+                                try:
+                                    definition2 = _json.loads(drow2.definition_json or "{}")
+                                    ws2 = (definition2.get('widgets') or {})
+                                    if str(wid) in ws2:
+                                        did0 = drow2.id
+                                        break
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+                    widget_cfg = None
+                    if wid and did0:
+                        drow = db.get(Dashboard, did0)
+                        if drow and drow.definition_json:
+                            definition = _json.loads(drow.definition_json or "{}")
+                            widget_cfg = ((definition or {}).get('widgets') or {}).get(str(wid))
+                except Exception:
+                    widget_cfg = None
+                is_pivot = False
+                if isinstance(widget_cfg, dict) and ((widget_cfg.get('type') or '') == 'table'):
+                    opts = (widget_cfg.get('options') or {})
+                    tbl = (opts.get('table') or {})
+                    pcfg_probe = (tbl.get('pivotConfig') or {})
+                    pv_probe = ((widget_cfg.get('pivot') or {}).get('values') or [])
+                    is_pivot = ((tbl.get('tableType') or 'data') == 'pivot') or bool(pcfg_probe.get('rows') or pcfg_probe.get('cols') or pv_probe)
+                if is_pivot:
+                    from .routers.query import run_pivot  # lazy import
+                    from .schemas import PivotRequest
+                    opts = (widget_cfg.get('options') or {})
+                    tbl = (opts.get('table') or {})
+                    pcfg = (tbl.get('pivotConfig') or {})
+                    row_dims = list((pcfg.get('rows') or []))
+                    col_dims = list((pcfg.get('cols') or []))
+                    pv = ((widget_cfg.get('pivot') or {}).get('values') or [])
+                    try:
+                        chip = (pv[0] if len(pv) > 0 else {}) or {}
+                        value_field = chip.get('field') or chip.get('measureId') or None
+                        agg_raw = chip.get('agg') or 'sum'
+                        label = chip.get('label') or (value_field or 'Value')
+                    except Exception:
+                        value_field = None; agg_raw = 'sum'; label = 'Value'
+                    agg_p = str(agg_raw or 'sum').lower()
+                    if 'distinct' in agg_p: agg_p = 'distinct'
+                    elif agg_p.startswith('avg'): agg_p = 'avg'
+                    elif agg_p not in {'sum','avg','min','max','distinct','count'}: agg_p = 'count'
+                    show_row_totals = (pcfg.get('rowTotals') is not False)
+                    show_col_totals = (pcfg.get('colTotals') is not False)
+                    qspec_src = ((widget_cfg.get('querySpec') or {}) or {}).get('source') or (cfg.get('source') if isinstance(cfg, dict) else None) or ''
+                    if not qspec_src:
+                        raise Exception('No querySpec.source for server pivot')
+                    payload_p = PivotRequest(
+                        source=qspec_src,
+                        rows=row_dims,
+                        cols=col_dims,
+                        valueField=(None if agg_p=='count' and not value_field else (value_field or None)),
+                        aggregator=agg_p,
+                        where=(cfg.get('where') if isinstance(cfg, dict) else None),
+                        datasourceId=ds_id,
+                        limit=int((tbl.get('pivotMaxRows') or 20000)),
+                        widgetId=str((wref or {}).get('widgetId') or ''),
+                    )
+                    res_p = run_pivot(payload_p, db)
+                    cols = list(res_p.columns or [])
+                    data = list(res_p.rows or [])
+                    TH_HEAD = "padding:6px 8px;border:1px solid #e5e7eb;color:#374151;background:#f3f4f6;text-align:left"
+                    TH_ROW =  "padding:6px 8px;border:1px solid #e5e7eb;color:#111827;background:#ffffff;text-align:left"
+                    TD_CELL =  "padding:6px 8px;border:1px solid #e5e7eb;color:#111827;background:#ffffff;text-align:right"
+                    TD_TOTAL = "padding:6px 8px;border:1px solid #e5e7eb;color:#92400e;background:#fef3c7;text-align:right;font-weight:600"
+                    table_open = "<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;font-size:13px;background:#ffffff;color:#111827'>"
+                    def _esc(x: object) -> str:
+                        try:
+                            s = str(x if x is not None else '')
+                            return s.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;').replace("'",'&#39;')
+                        except Exception:
+                            return ''
+                    rdn = len(row_dims); cdn = len(col_dims)
+                    if data and cdn == 0:
+                        vi = len(cols) - 1 if cols else -1
+                        total = 0.0; rows_html = []
+                        for r in data:
+                            if not isinstance(r, (list, tuple)): continue
+                            name = " / ".join(_esc(r[i]) for i in range(0, rdn)) if rdn else ''
+                            v = r[vi] if (vi >= 0 and vi < len(r)) else 0
+                            try: fv = float(v) if v is not None else 0.0
+                            except Exception: fv = 0.0
+                            total += fv
+                            rows_html.append(f"<tr><th style='{TH_ROW}'>{name}</th><td style='{TD_CELL}'>{fv:,.0f}</td></tr>")
+                        head = f"<tr><th style='{TH_HEAD}'>{_esc(row_dims[0] if row_dims else 'Item')}</th><th style='{TH_HEAD}'>{_esc(label or 'Value')}</th></tr>"
+                        total_row = f"<tr><th style='{TH_HEAD}'>Total</th><td style='{TD_TOTAL}'>{total:,.0f}</td></tr>"
+                        table_html_val = table_open + "<thead>" + head + "</thead><tbody>" + ("".join(rows_html)) + total_row + "</tbody></table>"
+                    elif data:
+                        try: vi = len(cols) - 1
+                        except Exception: vi = -1
+                        row_leaves = []
+                        _r_seen = set()
+                        col_root: dict = {}
+                        order_by_level: list[list[str]] = [[] for _ in range(cdn)]
+                        seen_by_level: list[set[str]] = [set() for _ in range(cdn)]
+                        valmap: dict[tuple, float] = {}
+                        for r in data:
+                            if not isinstance(r, (list, tuple)): continue
+                            rk = tuple(r[i] for i in range(0, rdn)) if rdn > 0 else tuple()
+                            ck = tuple(r[rdn + j] for j in range(0, cdn)) if cdn > 0 else tuple()
+                            v = r[vi] if (vi >= 0 and vi < len(r)) else 0
+                            try: vv = float(v) if v is not None else 0.0
+                            except Exception: vv = 0.0
+                            valmap[(rk, ck)] = vv
+                            if rk not in _r_seen:
+                                _r_seen.add(rk); row_leaves.append(rk)
+                            node = col_root
+                            for lvl in range(cdn):
+                                lb = str(ck[lvl] if lvl < len(ck) else '')
+                                if lb not in node:
+                                    node[lb] = {}
+                                    if lb not in seen_by_level[lvl]:
+                                        seen_by_level[lvl].add(lb); order_by_level[lvl].append(lb)
+                                node = node[lb]
+                        leaf_counts: dict[tuple, int] = {}
+                        col_leaves: list[tuple] = []
+                        def _count(n: dict, depth: int, path: tuple) -> int:
+                            if depth >= cdn: return 1
+                            s = 0; labels = order_by_level[depth]
+                            for lb in labels:
+                                if lb in n:
+                                    s += _count(n[lb], depth + 1, path + (lb,))
+                            leaf_counts[path] = max(1, s); return max(1, s)
+                        _count(col_root, 0, tuple())
+                        def _collect(n: dict, depth: int, path: tuple):
+                            if depth >= cdn:
+                                col_leaves.append(path); return
+                            labels = order_by_level[depth]
+                            for lb in labels:
+                                if lb in n: _collect(n[lb], depth + 1, path + (lb,))
+                        _collect(col_root, 0, tuple())
+                        prefix_counts: dict[tuple, int] = {}
+                        for rk in row_leaves:
+                            for i in range(1, rdn + 1):
+                                pf = rk[:i]; prefix_counts[pf] = prefix_counts.get(pf, 0) + 1
+                        thead_parts: list[str] = []
+                        if cdn > 0:
+                            left_span = max(1, rdn)
+                            row0: list[str] = []
+                            if left_span > 0:
+                                for i in range(rdn):
+                                    title_i = _esc(row_dims[i] if i < len(row_dims) else "")
+                                    row0.append(f"<th style='{TH_HEAD}' rowspan='{cdn}'>" + title_i + "</th>")
+                            for lb in order_by_level[0]:
+                                if lb in col_root:
+                                    cs = leaf_counts.get((lb,), 1)
+                                    row0.append(f"<th style='{TH_HEAD}' colspan='{cs}'>" + _esc(lb) + "</th>")
+                            if show_row_totals:
+                                row0.append(f"<th style='{TH_HEAD}' rowspan='{cdn}'>Total</th>")
+                            thead_parts.append("<tr>" + "".join(row0) + "</tr>")
+                            def _emit_level(n: dict, depth: int, path: tuple):
+                                if depth >= cdn: return
+                                cells: list[str] = []
+                                labels = order_by_level[depth]
+                                for lb in labels:
+                                    if lb in n:
+                                        cs = leaf_counts.get(path + (lb,), 1)
+                                        cells.append(f"<th style='{TH_HEAD}' colspan='{cs}'>" + _esc(lb) + "</th>")
+                                if cells:
+                                    thead_parts.append("<tr>" + "".join(cells) + "</tr>")
+                                merged: dict = {}
+                                for lb in labels:
+                                    if lb in n:
+                                        for k2, v2 in n[lb].items():
+                                            if k2 not in merged: merged[k2] = v2
+                                if depth + 1 < cdn:
+                                    _emit_level(merged, depth + 1, path)
+                            if cdn > 1:
+                                _emit_level(col_root, 1, tuple())
+                        else:
+                            left_span = max(1, rdn)
+                            thead_parts.append(f"<tr><th style='{TH_HEAD}' colspan='{left_span}'></th><th style='{TH_HEAD}'>Value</th></tr>")
+                        tbody_parts: list[str] = []
+                        seen_prefix: set[tuple] = set()
+                        col_totals: list[float] = [0.0 for _ in range(len(col_leaves))]
+                        grand_total = 0.0
+                        for rk in row_leaves:
+                            tds: list[str] = []
+                            for d in range(0, rdn):
+                                pf = rk[: d + 1]
+                                if pf not in seen_prefix:
+                                    seen_prefix.add(pf); rs = prefix_counts.get(pf, 1)
+                                    tds.append(f"<th style='{TH_ROW}' rowspan='{rs}'>" + _esc(rk[d]) + "</th>")
+                            row_sum = 0.0
+                            for j, ck in enumerate(col_leaves):
+                                v = float(valmap.get((rk, ck), 0.0) or 0.0)
+                                row_sum += v; col_totals[j] += v
+                                tds.append(f"<td style='{TD_CELL}'>" + f"{v:,.0f}" + "</td>")
+                            if show_row_totals:
+                                tds.append(f"<td style='{TD_TOTAL}'>" + f"{row_sum:,.0f}" + "</td>")
+                            grand_total += row_sum
+                            tbody_parts.append("<tr>" + "".join(tds) + "</tr>")
+                        if show_col_totals:
+                            tr: list[str] = []
+                            left_span = max(1, rdn)
+                            tr.append(f"<th style='{TH_HEAD}' colspan='{left_span}'>Total</th>")
+                            for j in range(len(col_leaves)):
+                                tr.append(f"<td style='{TD_TOTAL}'>" + f"{col_totals[j]:,.0f}" + "</td>")
+                            if show_row_totals:
+                                tr.append(f"<td style='{TD_TOTAL}'>" + f"{grand_total:,.0f}" + "</td>")
+                            tbody_parts.append("<tr>" + "".join(tr) + "</tr>")
+                        table_html_val = table_open + "<thead>" + "".join(thead_parts) + "</thead><tbody>" + "".join(tbody_parts) + "</tbody></table>"
+                if table_html_val is None:
+                    # Fallback: plain table
+                    spec = render.get("querySpec") or {}
+                    req = QuerySpecRequest(spec=spec, datasourceId=ds_id, limit=spec.get("limit") or 1000, offset=0, includeTotal=False)
+                    res = run_query_spec(req, db)
+                    table_html_val = _render_table_html(res)
+                placeholders["TABLE_HTML"] = table_html_val
             except Exception:
                 placeholders["TABLE_HTML"] = "<div>Failed to render table.</div>"
     except Exception:
@@ -1088,7 +2135,7 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
 
     html = "\n".join(html_parts)
 
-    # Dispatch actions (attach inline images for KPI/Chart if present)
+    # Dispatch actions (attach inline images for KPI if present and widget snapshot when available)
     errs: list[str] = []
     inline_images: list[tuple[str, bytes, str, str]] = []
     try:
@@ -1101,18 +2148,19 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
                 inline_images.append((k_cid, _build_kpi_svg(val, label), "image/svg+xml", "kpi.svg"))
             except Exception:
                 pass
-        if any("src='cid:chart_" in s for s in html_parts):
-            try:
-                c_cid = next(seg.split("cid:",1)[1].split("'",1)[0] for seg in html_parts if "src='cid:chart_" in seg)
-                inline_images.append((c_cid, _build_chart_svg_placeholder(), "image/svg+xml", "chart.svg"))
-            except Exception:
-                pass
+        # No widget/chart attachments when using data URIs
     except Exception:
         pass
     for a in actions:
         atype = str(a.get("type") or "").lower()
         if atype == "email":
+            # If snapshot was expected but not available, suppress email send
+            if snapshot_expected_v1 and not snapshot_ok_v1:
+                continue
             to = [str(x).strip() for x in (a.get("to") or []) if str(x).strip()]
+            if not to:
+                # No recipients configured; skip email send
+                continue
             raw_subject = str(a.get("subject") or rule.name)
             subj = _apply_placeholders(raw_subject, placeholders)
             ok, err = send_email(db, subject=subj, to=to, html=html, replacements=placeholders, inline_images=inline_images)
@@ -1121,6 +2169,10 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False) -> Tu
         elif atype == "sms":
             to = [str(x).strip() for x in (a.get("to") or []) if str(x).strip()]
             text = str(a.get("message") or (template or rule.name))
+            try:
+                text = _apply_placeholders(text, placeholders)
+            except Exception:
+                pass
             ok, err = send_sms_hadara(db, to_numbers=to, message=text)
             if not ok and err:
                 errs.append(f"sms: {err}")

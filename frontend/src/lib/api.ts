@@ -690,14 +690,14 @@ export const Api = {
   getAlert: (id: string) => http<AlertOut>(`/alerts/${encodeURIComponent(id)}`),
   updateAlert: (id: string, payload: AlertCreate) => http<AlertOut>(`/alerts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteAlert: (id: string) => http<{ deleted: number }>(`/alerts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  runAlertNow: (id: string) => http<{ ok: boolean; message?: string }>(`/alerts/${encodeURIComponent(id)}/run`, { method: 'POST' }),
+  runAlertNow: (id: string) => http<{ ok: boolean; message?: string }>(`/alerts/${encodeURIComponent(id)}/run`, { method: 'POST' }, 60000),
   listAlertRuns: (id: string, limit: number = 50) => http<AlertRunOut[]>(`/alerts/${encodeURIComponent(id)}/runs?limit=${encodeURIComponent(String(limit))}`),
   evaluateAlert: (payload: { name: string; dashboardId?: string | null; config: AlertConfig }, actorId?: string) =>
     http<EvaluateResponse>(`/alerts/evaluate${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`,
-      { method: 'POST', body: JSON.stringify(payload) }),
+      { method: 'POST', body: JSON.stringify(payload) }, 60000),
   evaluateAlertV2: (payload: { name: string; dashboardId?: string | null; config: AlertConfig }, actorId?: string) =>
     http<EvaluateV2Response>(`/alerts/evaluate-v2${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`,
-      { method: 'POST', body: JSON.stringify(payload) }),
+      { method: 'POST', body: JSON.stringify(payload) }, 60000),
   getEmailConfig: () => http<EmailConfigPayload>(`/alerts/config/email`),
   putEmailConfig: (payload: EmailConfigPayload) => http<{ ok: boolean }>(`/alerts/config/email`, { method: 'PUT', body: JSON.stringify(payload) }),
   getSmsConfigHadara: () => http<SmsConfigPayload>(`/alerts/config/sms/hadara`),
@@ -728,10 +728,12 @@ export const Api = {
     const qs = (ids && ids.length) ? `?ids=${ids.map(encodeURIComponent).join(',')}` : ''
     return http<{ items: ContactOut[] }>(`/contacts/export${qs}`)
   },
-  contactsSendEmail: (payload: { ids?: string[]; emails?: string[]; tags?: string[]; subject: string; html: string; rateLimitPerMinute?: number; queue?: boolean }) =>
-    http<{ ok: boolean; count: number; queued?: boolean }>(`/contacts/send-email`, { method: 'POST', body: JSON.stringify(payload) }),
-  contactsSendSms: (payload: { ids?: string[]; numbers?: string[]; tags?: string[]; message: string; rateLimitPerMinute?: number; queue?: boolean }) =>
-    http<{ ok: boolean; count: number; queued?: boolean }>(`/contacts/send-sms`, { method: 'POST', body: JSON.stringify(payload) }),
+  contactsSendEmail: (payload: { ids?: string[]; emails?: string[]; tags?: string[]; subject: string; html: string; rateLimitPerMinute?: number; queue?: boolean; notifyEmail?: string }) =>
+    http<{ ok: boolean; count: number; queued?: boolean; jobId?: string; success?: number; failed?: number; failures?: Array<{ recipient: string; error: string }> }>(`/contacts/send-email`, { method: 'POST', body: JSON.stringify(payload) }),
+  contactsSendSms: (payload: { ids?: string[]; numbers?: string[]; tags?: string[]; message: string; rateLimitPerMinute?: number; queue?: boolean; notifyEmail?: string }) =>
+    http<{ ok: boolean; count: number; queued?: boolean; jobId?: string; success?: number; failed?: number; failures?: Array<{ recipient: string; error: string }> }>(`/contacts/send-sms`, { method: 'POST', body: JSON.stringify(payload) }),
+  contactsSendStatus: (jobId: string) =>
+    http<{ type: 'email'|'sms'; total: number; success: number; failed: number; failures: Array<{ recipient: string; error: string }>; done: boolean }>(`/contacts/send-status?jobId=${encodeURIComponent(jobId)}`),
 }
 
 export type QueryRequest = {

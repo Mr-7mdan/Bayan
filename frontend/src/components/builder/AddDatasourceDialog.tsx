@@ -423,7 +423,14 @@ export default function AddDatasourceDialog({
                     onClick={onTest}
                     disabled={testing}
                   >
-                    {testing ? 'Testing…' : 'Test Connection'}
+                    {testing ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>
+                        <span>Testing…</span>
+                      </span>
+                    ) : (
+                      'Test Connection'
+                    )}
                   </button>
                   <button
                     type="button"
@@ -431,7 +438,14 @@ export default function AddDatasourceDialog({
                     onClick={onDetect}
                     disabled={detecting}
                   >
-                    {detecting ? 'Detecting…' : 'Detect Server'}
+                    {detecting ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>
+                        <span>Detecting…</span>
+                      </span>
+                    ) : (
+                      'Detect Server'
+                    )}
                   </button>
                   <div className="flex flex-col items-end gap-1 text-xs min-w-[160px]">
                     {testResult && (

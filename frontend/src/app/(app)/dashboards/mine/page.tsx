@@ -54,6 +54,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 export default function MyDashboardsPage() {
   const { user } = useAuth()
   const { env } = useEnvironment()
+  const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -237,71 +238,75 @@ export default function MyDashboardsPage() {
             >
               Build New Dashboard
             </button>
-            <button
-              type="button"
-              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
-              onClick={async () => {
-                try {
-                  const data = await Api.exportDashboards({ userId: user?.id || 'dev_user', includeDatasources: true, includeSyncTasks: true, actorId: user?.id || undefined })
-                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-                  const a = document.createElement('a')
-                  const ts = new Date()
-                  const name = `dashboards-export-${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}-${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}.json`
-                  a.href = URL.createObjectURL(blob)
-                  a.download = name
-                  document.body.appendChild(a)
-                  a.click()
-                  a.remove()
-                } catch (e: any) {
-                  setToast(e?.message || 'Export failed'); window.setTimeout(() => setToast(''), 2000)
-                }
-              }}
-            >
-              Export All (.json)
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50"
-              disabled={busyImport}
-              onClick={() => fileRef.current?.click()}
-            >
-              {busyImport ? 'Importing…' : 'Import JSON'}
-            </button>
-            <input ref={fileRef} type="file" accept="application/json" hidden onChange={async (e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              setBusyImport(true)
-              try {
-                const text = await file.text()
-                const json = JSON.parse(text)
-                // Expect DashboardExportResponse shape; handle minimal variations
-                const dashboards = Array.isArray(json?.dashboards) ? json.dashboards : []
-                const datasources = Array.isArray(json?.datasources) ? json.datasources : []
-                let idMap: Record<string, string> | undefined
-                if (datasources.length > 0) {
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+                  onClick={async () => {
+                    try {
+                      const data = await Api.exportDashboards({ userId: user?.id || 'dev_user', includeDatasources: true, includeSyncTasks: true, actorId: user?.id || undefined })
+                      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+                      const a = document.createElement('a')
+                      const ts = new Date()
+                      const name = `dashboards-export-${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}-${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}.json`
+                      a.href = URL.createObjectURL(blob)
+                      a.download = name
+                      document.body.appendChild(a)
+                      a.click()
+                      a.remove()
+                    } catch (e: any) {
+                      setToast(e?.message || 'Export failed'); window.setTimeout(() => setToast(''), 2000)
+                    }
+                  }}
+                >
+                  Export All (.json)
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50"
+                  disabled={busyImport}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {busyImport ? 'Importing…' : 'Import JSON'}
+                </button>
+                <input ref={fileRef} type="file" accept="application/json" hidden onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  setBusyImport(true)
                   try {
-                    const res = await Api.importDatasources(datasources, user?.id || undefined)
-                    idMap = res?.idMap || undefined
-                  } catch (err) {
-                    // If datasource import fails, we still try dashboards (they might not need remap)
+                    const text = await file.text()
+                    const json = JSON.parse(text)
+                    // Expect DashboardExportResponse shape; handle minimal variations
+                    const dashboards = Array.isArray(json?.dashboards) ? json.dashboards : []
+                    const datasources = Array.isArray(json?.datasources) ? json.datasources : []
+                    let idMap: Record<string, string> | undefined
+                    if (datasources.length > 0) {
+                      try {
+                        const res = await Api.importDatasources(datasources, user?.id || undefined)
+                        idMap = res?.idMap || undefined
+                      } catch (err) {
+                        // If datasource import fails, we still try dashboards (they might not need remap)
+                      }
+                    }
+                    if (dashboards.length > 0) {
+                      await Api.importDashboards({ dashboards, datasourceIdMap: idMap || null }, user?.id || undefined)
+                      const next = await Api.listDashboards(user?.id || 'dev_user')
+                      setItems(next || [])
+                      setToast('Imported')
+                      window.setTimeout(() => setToast(''), 1600)
+                    } else {
+                      setToast('No dashboards found in file'); window.setTimeout(() => setToast(''), 2000)
+                    }
+                  } catch (e: any) {
+                    setToast(e?.message || 'Import failed'); window.setTimeout(() => setToast(''), 2000)
+                  } finally {
+                    setBusyImport(false)
+                    try { if (fileRef.current) fileRef.current.value = '' } catch {}
                   }
-                }
-                if (dashboards.length > 0) {
-                  await Api.importDashboards({ dashboards, datasourceIdMap: idMap || null }, user?.id || undefined)
-                  const next = await Api.listDashboards(user?.id || 'dev_user')
-                  setItems(next || [])
-                  setToast('Imported')
-                  window.setTimeout(() => setToast(''), 1600)
-                } else {
-                  setToast('No dashboards found in file'); window.setTimeout(() => setToast(''), 2000)
-                }
-              } catch (e: any) {
-                setToast(e?.message || 'Import failed'); window.setTimeout(() => setToast(''), 2000)
-              } finally {
-                setBusyImport(false)
-                try { if (fileRef.current) fileRef.current.value = '' } catch {}
-              }
-            }} />
+                }} />
+              </>
+            )}
           </div>
         </div>
         {error && <div className="px-4 py-2 text-sm text-red-600">{error}</div>}
