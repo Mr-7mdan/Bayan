@@ -1284,23 +1284,23 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     }
     // Also include currently selected suggestions that haven't been added as tokens yet
     try {
-      const selected = new Set(recipSel)
-      recipSuggestions.forEach((s: any) => {
-        const k = recipKey(s)
-        if (!selected.has(k)) return
+      const selSet = new Set<string>(recipSel)
+      for (const s of recipSuggestions) {
+        const k = (s.type === 'contact' ? `c:${(s.id||'').toLowerCase()}` : `t:${(s.tag||'').toLowerCase()}`)
+        if (!selSet.has(k)) continue
         if (s.type === 'contact') {
           const em = String(s.email||'').trim(); if (em) emailSet.add(em)
           const ph = String(s.phone||'').trim(); if (ph) phoneSet.add(ph)
         } else if (s.type === 'tag') {
           const tg = String(s.tag||'').trim()
-          if (!tg) return
+          if (!tg) continue
           const exp = tagExpansions[tg]
           if (exp) {
-            (exp.emails || []).forEach((em: string) => { const v=String(em||'').trim(); if (v) emailSet.add(v) });
-            (exp.phones || []).forEach((ph: string) => { const v=String(ph||'').trim(); if (v) phoneSet.add(v) });
+            (exp.emails || []).forEach((em: string) => { const v=String(em||'').trim(); if (v) emailSet.add(v) })
+            (exp.phones || []).forEach((ph: string) => { const v=String(ph||'').trim(); if (v) phoneSet.add(v) })
           }
         }
-      })
+      }
     } catch {}
     // Also include direct inputs from Email To / SMS To fields
     try {

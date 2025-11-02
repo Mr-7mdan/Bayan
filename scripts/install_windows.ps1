@@ -35,21 +35,49 @@ function Install-WithWinget($id){
     return $true
   } catch { return $false }
 }
+
+# Ensure Chocolatey is installed (fallback when winget is unavailable)
+function Ensure-Choco {
+  if (Ensure-Command choco) { return $true }
+  Write-Host "Chocolatey not found. Installing Chocolatey..."
+  try {
+    Set-ExecutionPolicy Bypass -Scope Process -Force | Out-Null
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+    Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    # Refresh PATH for current session
+    $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
+  } catch {
+    Write-Warning "Failed to install Chocolatey automatically: $($_.Exception.Message)"
+  }
+  return (Ensure-Command choco)
+}
 function Install-Git {
   if (Ensure-Command git) { return }
-  if (-not (Install-WithWinget 'Git.Git')) { throw "Failed to install Git. Please install Git and rerun." }
+  if (Install-WithWinget 'Git.Git') { return }
+  if (Ensure-Choco) {
+    try { choco install git -y | Out-Null; return } catch {}
+  }
+  throw "Failed to install Git via winget or Chocolatey. Please install Git manually and rerun."
 }
 function Install-Python {
   # Prefer Python 3.12
   $hasPy = $false
   try { $v = (& py -3.12 -V) 2>$null; if ($LASTEXITCODE -eq 0) { $hasPy = $true } } catch {}
   if (-not $hasPy) {
-    if (-not (Install-WithWinget 'Python.Python.3.12')) { throw "Failed to install Python 3.12. Please install and rerun." }
+    if (Install-WithWinget 'Python.Python.3.12') { return }
+    if (Ensure-Choco) {
+      try { choco install python --version=3.12.7 -y | Out-Null; return } catch { try { choco install python -y | Out-Null; return } catch {} }
+    }
+    throw "Failed to install Python 3.12 via winget or Chocolatey. Please install Python 3.12 and rerun."
   }
 }
 function Install-Node {
   if (Ensure-Command node) { return }
-  if (-not (Install-WithWinget 'OpenJS.NodeJS.LTS')) { throw "Failed to install Node.js LTS. Please install and rerun." }
+  if (Install-WithWinget 'OpenJS.NodeJS.LTS') { return }
+  if (Ensure-Choco) {
+    try { choco install nodejs-lts -y | Out-Null; return } catch {}
+  }
+  throw "Failed to install Node.js LTS via winget or Chocolatey. Please install Node.js LTS and rerun."
 }
 function Install-NSSM {
   $nssmTarget = "C:\Program Files\nssm\nssm.exe"
@@ -81,6 +109,11 @@ Install-Git
 Install-Python
 Install-Node
 $nssm = Install-NSSM
+
+Write-Heading "Stopping running services (if any)"
+foreach ($svc in @('BayanAPIUvicorn','BayanUI','BayanProxy')) {
+  try { & $nssm stop $svc | Out-Null } catch {}
+}
 
 Write-Heading "Cloning or updating repository"
 if (-not (Test-Path $InstallDir)) { Ensure-Dir $InstallDir }
@@ -235,8 +268,9 @@ try { & $nssm stop $frontendSvc | Out-Null } catch {}
 
 # Reverse proxy (Caddy) service via NSSM
 $proxySvc = 'BayanProxy'
-$caddyExe = ($null)
-try { $caddyExe = (Get-Command caddy -ErrorAction SilentlyContinue).Source } catch {}
+$caddyExe = $null
+$caddyPreferred = 'C:\ProgramData\Caddy\caddy.exe'
+if (Test-Path $caddyPreferred) { $caddyExe = $caddyPreferred } else { try { $caddyExe = (Get-Command caddy -ErrorAction SilentlyContinue).Source } catch {} }
 if ($caddyExe) {
   # Remove Caddy's own Windows service to avoid conflicts (ignore errors if not present)
   try { caddy stop-service 2>$null | Out-Null } catch {}
@@ -257,6 +291,34 @@ if ($caddyExe) {
   if (-not (Get-NetFirewallRule -DisplayName 'Caddy HTTPS 443' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName 'Caddy HTTPS 443' -Direction Inbound -LocalPort 443 -Protocol TCP -Action Allow | Out-Null }
 } else {
   Write-Host 'caddy.exe not found in PATH; skipping proxy service registration. Run scripts/setup_reverse_proxy_windows.ps1 first.'
+}
+
+Write-Heading "Post-install verification"
+# Backend direct health
+try {
+  $r = Invoke-WebRequest -UseBasicParsing -Uri "http://${BackendHost}:${BackendPort}/api/healthz" -TimeoutSec 5
+  Write-Host ("Backend health: {0}" -f $r.StatusCode)
+} catch {
+  Write-Warning ("Backend health check failed: " + $_.Exception.Message)
+}
+# Proxy health (HTTP via localhost)
+try {
+  $r2 = Invoke-WebRequest -UseBasicParsing -Uri "http://localhost/api/healthz" -TimeoutSec 5
+  Write-Host ("Proxy health: {0}" -f $r2.StatusCode)
+} catch {
+  Write-Warning ("Proxy health check failed (if proxy not configured for :80, this may be expected): " + $_.Exception.Message)
+}
+# Frontend reachability
+try {
+  $r3 = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:${FrontendPort}" -TimeoutSec 5
+  Write-Host ("Frontend check: {0}" -f $r3.StatusCode)
+} catch {
+  Write-Warning ("Frontend check failed: " + $_.Exception.Message)
+}
+# Listener summary
+$ports = @(8000,3000,80,443)
+foreach ($p in $ports) {
+  try { $t = Test-NetConnection -ComputerName 127.0.0.1 -Port $p -WarningAction SilentlyContinue; Write-Host ("Port {0}: {1}" -f $p, ($t.TcpTestSucceeded ? 'LISTENING' : 'not listening')) } catch { Write-Host ("Port {0}: unknown" -f $p) }
 }
 
 Write-Heading "Done"

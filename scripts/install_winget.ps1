@@ -7,6 +7,24 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 
 function Test-Admin { $id = [Security.Principal.WindowsIdentity]::GetCurrent(); (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 
+# Expand .nupkg/.zip using .NET to avoid Expand-Archive's .zip-only restriction
+function Expand-ZipCompat {
+  param([string]$Path, [string]$Destination)
+  try {
+    if (Test-Path $Destination) { Remove-Item -Recurse -Force $Destination }
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+  } catch {}
+  try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+  } catch {}
+  try {
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($Path, $Destination)
+  } catch {
+    # Fallback: try Expand-Archive if available
+    Expand-Archive -Path $Path -DestinationPath $Destination -Force
+  }
+}
+
 if (Get-Command winget -ErrorAction SilentlyContinue) {
   try { $v = & winget -v; Write-Host "winget already installed: $v" } catch { Write-Host "winget already installed" }
   exit 0
@@ -22,7 +40,7 @@ try {
   $uixamlNupkg = Join-Path $root "Microsoft.UI.Xaml.2.8.6.nupkg"
   Invoke-WebRequest -UseBasicParsing -Uri "https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/2.8.6" -OutFile $uixamlNupkg
   $uixamlDir = Join-Path $root "uixaml"
-  Expand-Archive -Path $uixamlNupkg -DestinationPath $uixamlDir -Force
+  Expand-ZipCompat -Path $uixamlNupkg -Destination $uixamlDir
   $uixamlAppx = Get-ChildItem -Recurse -Path $uixamlDir -Filter *.appx | Where-Object { $_.FullName -match "\\x64\\" } | Select-Object -First 1
   if (-not $uixamlAppx) { throw "Microsoft.UI.Xaml appx not found" }
 
