@@ -6,7 +6,12 @@ set -euo pipefail
 
 OWNER="${1:-${UPDATE_REPO_OWNER:-Mr-7mdan}}"
 REPO="${2:-${UPDATE_REPO_NAME:-Bayan}}"
-REMOTE_URL="https://github.com/${OWNER}/${REPO}.git"
+# Prefer SSH to avoid HTTPS TLS/CA issues when GIT_USE_SSH is enabled
+if [ "${GIT_USE_SSH:-0}" = "1" ] || [ "${GIT_USE_SSH:-}" = "true" ] || [ "${GIT_USE_SSH:-}" = "yes" ] || [ "${GIT_USE_SSH:-}" = "on" ]; then
+  REMOTE_URL="git@github.com:${OWNER}/${REPO}.git"
+else
+  REMOTE_URL="https://github.com/${OWNER}/${REPO}.git"
+fi
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${ROOT_DIR}/scripts/out"
@@ -52,6 +57,12 @@ fi
 if ! git remote get-url origin >/dev/null 2>&1; then
   echo "[push] Adding remote origin -> ${REMOTE_URL}"
   git remote add origin "$REMOTE_URL" || true
+else
+  CURRENT_URL=$(git remote get-url origin 2>/dev/null || echo "")
+  if [ "${CURRENT_URL}" != "${REMOTE_URL}" ]; then
+    echo "[push] Updating remote origin URL -> ${REMOTE_URL} (was: ${CURRENT_URL})"
+    git remote set-url origin "$REMOTE_URL" || true
+  fi
 fi
 
 # Create initial commit if repo has no commits
