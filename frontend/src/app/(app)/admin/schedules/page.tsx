@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import type React from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text, TextInput, Badge, TabGroup, TabList, Tab, TabPanels, TabPanel, Select, SelectItem } from '@tremor/react'
 import * as Popover from '@radix-ui/react-popover'
@@ -27,6 +28,9 @@ function AdminSchedulesInner() {
   const prevTabIndex = useRef(0)
   const [slideDir, setSlideDir] = useState<'left' | 'right'>('right')
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [cronMode, setCronMode] = useState<'custom' | 'every_n_hours'>('custom')
+  const [cronHoursInterval, setCronHoursInterval] = useState<number>(4)
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isAdmin) router.replace('/home')
@@ -119,6 +123,14 @@ function AdminSchedulesInner() {
     setForm((f) => ({ ...f, sourceSchema: undefined, sourceTable: (f.sourceTable || 'api') }))
   }, [selectedId, isApiDs])
 
+  // Derive cron expression for preset modes
+  useEffect(() => {
+    if (cronMode === 'every_n_hours') {
+      const n = Math.max(1, Math.min(24, Number.isFinite(cronHoursInterval) ? cronHoursInterval : 1))
+      setForm((f) => ({ ...f, scheduleCron: `0 */${n} * * *` }))
+    }
+  }, [cronMode, cronHoursInterval])
+
   const availableColumns = useMemo(() => {
     const schName = (form.sourceSchema || '').trim()
     const tblName = (form.sourceTable || '').trim()
@@ -155,6 +167,54 @@ function AdminSchedulesInner() {
     onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] }) },
   })
 
+  const saveTask = useMutation({
+    mutationFn: async () => {
+      if (!selectedId || !editingTaskId) return null as any
+      const payload: SyncTaskCreate = { ...form, datasourceId: selectedId }
+      return await Api.updateSyncTask(selectedId as string, editingTaskId as string, payload, user?.id)
+    },
+    onSuccess: async () => {
+      show('Task', 'Saved')
+      setEditingTaskId(null)
+      setDestEdited(false)
+      setCronMode('custom')
+      setForm({ mode: 'snapshot', sourceTable: '', destTableName: '', scheduleCron: '0 2 * * *', enabled: true, selectColumns: [] })
+      await qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
+    },
+  })
+
+  function beginEdit(t: SyncTaskOut) {
+    setEditingTaskId(t.id)
+    setDestEdited(true)
+    setForm({
+      mode: (t.mode as any) === 'sequence' ? 'sequence' : 'snapshot',
+      sourceSchema: t.sourceSchema || undefined,
+      sourceTable: t.sourceTable,
+      destTableName: t.destTableName,
+      sequenceColumn: t.sequenceColumn || undefined,
+      batchSize: t.batchSize || undefined,
+      pkColumns: t.pkColumns || [],
+      selectColumns: t.selectColumns || [],
+      scheduleCron: t.scheduleCron || undefined,
+      enabled: t.enabled,
+    })
+    const m = String(t.scheduleCron || '').match(/^0\s+\*\/(\d+)\s+\*\s+\*\s+\*$/)
+    if (m) {
+      const n = Math.max(1, Math.min(24, parseInt(m[1], 10) || 1))
+      setCronMode('every_n_hours')
+      setCronHoursInterval(n)
+    } else {
+      setCronMode('custom')
+    }
+  }
+
+  function cancelEdit() {
+    setEditingTaskId(null)
+    setDestEdited(false)
+    setCronMode('custom')
+    setForm({ mode: 'snapshot', sourceTable: '', destTableName: '', scheduleCron: '0 2 * * *', enabled: true, selectColumns: [] })
+  }
+
   const runAll = useMutation({
     mutationFn: async () => Api.runSyncNow(selectedId as string, undefined, user?.id),
     onSuccess: (res) => {
@@ -175,6 +235,16 @@ function AdminSchedulesInner() {
       void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
     },
     onError: (e: any) => show('Sync', e?.message || 'Failed to start'),
+  })
+
+  const abortOne = useMutation({
+    mutationFn: async (taskId?: string) => Api.abortSync(selectedId as string, taskId, user?.id),
+    onSuccess: () => {
+      show('Sync', 'Abort requested')
+      void qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
+      void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
+    },
+    onError: (e: any) => show('Sync', e?.message || 'Abort failed'),
   })
 
   const clearLogs = useMutation({
@@ -218,6 +288,21 @@ function AdminSchedulesInner() {
   const logsData = logsQ.data || []
   const totalLogPages = Math.max(1, Math.ceil(logsData.length / logPageSize))
   const pagedLogs = logsData.slice((logPage - 1) * logPageSize, logPage * logPageSize)
+
+  // Map last run duration per task (in seconds) using logs (latest entry per task)
+  const durationByTask = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const r of logsData) {
+      // logs are already ordered by startedAt desc
+      if (r.taskId && map[r.taskId] === undefined) {
+        if (r.startedAt && r.finishedAt) {
+          const sec = Math.max(0, Math.round((new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()) / 1000))
+          map[r.taskId] = sec
+        }
+      }
+    }
+    return map
+  }, [logsData])
 
   return (
     <div className="space-y-3">
@@ -444,25 +529,72 @@ function AdminSchedulesInner() {
                         <TextInput className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent" value={(form.batchSize as any) || ''} onChange={(e) => setForm((f) => ({ ...f, batchSize: Number(e.target.value) || undefined }))} placeholder="10000" />
                       </div>
                     </div>
-                    <div className="md:col-span-2 md:col-start-1 flex flex-col justify-end">
-                      <div className="text-xs text-muted-foreground">Cron</div>
-                      <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
-                        [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
-                        <TextInput className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent" value={(form.scheduleCron || '') as string} onChange={(e) => setForm((f) => ({ ...f, scheduleCron: e.target.value }))} placeholder="0 2 * * *" />
+                    <div className="md:col-span-2 md:col-start-1 flex flex-col justify-end gap-2">
+                      <div>
+                        <div className="text-xs text-muted-foreground">Cron mode</div>
+                        <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
+                          [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
+                          [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
+                          <Select value={cronMode} onValueChange={(v) => setCronMode((v as 'custom'|'every_n_hours'))} className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent">
+                            <SelectItem value="custom">Custom cron</SelectItem>
+                            <SelectItem value="every_n_hours">Every N hours</SelectItem>
+                          </Select>
+                        </div>
+                      </div>
+                      {cronMode === 'every_n_hours' && (
+                        <div>
+                          <div className="text-xs text-muted-foreground">Every N hours</div>
+                          <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
+                            [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
+                            <TextInput
+                              type="number"
+                              min={1}
+                              max={24}
+                              className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent"
+                              value={String(cronHoursInterval)}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCronHoursInterval(Math.max(1, Math.min(24, parseInt(e.target.value || '1', 10))))}
+                              placeholder="4"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <div className="text-xs text-muted-foreground">Cron</div>
+                        <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
+                          [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
+                          <TextInput
+                            className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent"
+                            value={(form.scheduleCron || '') as string}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, scheduleCron: e.target.value }))}
+                            placeholder="0 2 * * *"
+                            disabled={cronMode === 'every_n_hours'}
+                          />
+                        </div>
                       </div>
                     </div>
                     <div className="md:col-span-2 md:col-start-3 flex items-end" />
                     <div className="md:col-start-5 flex items-end md:justify-start">
                       <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> Enabled</label>
                     </div>
-                    <div className="md:col-start-6 flex items-end md:justify-start">
+                    <div className="md:col-start-6 flex items-end md:justify-start gap-2">
                       <button
                         className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed h-9"
-                        disabled={!selectedId || createTask.isPending}
-                        onClick={() => selectedId && form.sourceTable && form.destTableName && createTask.mutate(form)}
+                        disabled={!selectedId || (!!editingTaskId ? saveTask.isPending : createTask.isPending)}
+                        onClick={() => {
+                          if (!selectedId || !form.sourceTable || !form.destTableName) return
+                          if (editingTaskId) saveTask.mutate()
+                          else createTask.mutate(form)
+                        }}
                       >
-                        Create
+                        {editingTaskId ? 'Save' : 'Create'}
                       </button>
+                      {editingTaskId && (
+                        <button
+                          className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed h-9"
+                          onClick={cancelEdit}
+                          disabled={saveTask.isPending}
+                        >Cancel</button>
+                      )}
                     </div>
                   </div>
                   {/* Hints */}
@@ -508,6 +640,7 @@ function AdminSchedulesInner() {
                           <th className="text-left font-medium px-2 py-1">Enabled</th>
                           <th className="text-left font-medium px-2 py-1">Last run</th>
                           <th className="text-left font-medium px-2 py-1">Rows</th>
+                          <th className="text-left font-medium px-2 py-1">Duration (s)</th>
                           <th className="text-left font-medium px-2 py-1">Status</th>
                           <th className="text-left font-medium px-2 py-1">Actions</th>
                         </tr>
@@ -525,6 +658,7 @@ function AdminSchedulesInner() {
                             <td className="px-2 py-1">{t.enabled ? 'Yes' : 'No'}</td>
                             <td className="px-2 py-1">{t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : '—'}</td>
                             <td className="px-2 py-1">{typeof t.lastRowCount === 'number' ? t.lastRowCount.toLocaleString() : '—'}</td>
+                            <td className="px-2 py-1">{typeof durationByTask[t.id] === 'number' ? durationByTask[t.id].toLocaleString() : '—'}</td>
                             <td className="px-2 py-1">{t.inProgress ? (
                               <span className="text-emerald-700 dark:text-emerald-300">Running {typeof t.progressCurrent === 'number' && typeof t.progressTotal === 'number' ? `(${t.progressCurrent}/${t.progressTotal})` : ''}</span>
                             ) : (t.error ? <span className="text-red-600">Error</span> : 'Idle')}</td>
@@ -532,9 +666,22 @@ function AdminSchedulesInner() {
                               <div className="flex items-center gap-2">
                                 <button
                                   className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
-                                  title="Run now"
-                                  onClick={() => runOne.mutate(t.id)}
-                                >Run</button>
+                                  title="Edit"
+                                  onClick={() => beginEdit(t)}
+                                >Edit</button>
+                                {t.inProgress ? (
+                                  <button
+                                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Abort"
+                                    onClick={() => abortOne.mutate(t.id)}
+                                  >Abort</button>
+                                ) : (
+                                  <button
+                                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Run now"
+                                    onClick={() => runOne.mutate(t.id)}
+                                  >Run</button>
+                                )}
                                 <button
                                   className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed text-red-600"
                                   title="Delete"
@@ -545,7 +692,7 @@ function AdminSchedulesInner() {
                           </tr>
                         ))}
                         {tasksData.length === 0 && (
-                          <tr><td colSpan={12} className="px-2 py-2 text-muted-foreground">No tasks yet. Create one above.</td></tr>
+                          <tr><td colSpan={13} className="px-2 py-2 text-muted-foreground">No tasks yet. Create one above.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -645,7 +792,12 @@ function AdminSchedulesInner() {
                             <td className="px-2 py-1 font-mono">{t.destTableName}</td>
                             <td className="px-2 py-1">{t.mode}</td>
                             <td className="px-2 py-1">{typeof t.progressTotal === 'number' ? `${t.progressCurrent || 0}/${t.progressTotal}` : (t.progressCurrent || 0)}</td>
-                            <td className="px-2 py-1"><button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" onClick={() => runOne.mutate(t.id)}>Rerun</button></td>
+                            <td className="px-2 py-1">
+                              <button
+                                className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                onClick={() => abortOne.mutate(t.id)}
+                              >Abort</button>
+                            </td>
                           </tr>
                         ))}
                         {runningCount === 0 && (

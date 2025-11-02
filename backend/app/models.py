@@ -202,6 +202,8 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE sync_states ADD COLUMN progress_total INTEGER"))
             if "last_duck_path" not in cols_sync:
                 conn.execute(text("ALTER TABLE sync_states ADD COLUMN last_duck_path TEXT"))
+            if "cancel_requested" not in cols_sync:
+                conn.execute(text("ALTER TABLE sync_states ADD COLUMN cancel_requested INTEGER DEFAULT 0"))
             # ensure sync_runs table exists
             conn.execute(text(
                 """
@@ -719,6 +721,8 @@ class SyncState(Base):
     progress_total: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # The DuckDB file path used during the last successful run (for accurate local stats)
     last_duck_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Cancellation flag requested by user
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class SyncLock(Base):

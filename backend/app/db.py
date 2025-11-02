@@ -944,7 +944,8 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                       last_sequence_value: int | None = None,
                       max_batches: int = 10,
                       on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
-                      select_columns: Optional[list[str]] = None) -> dict:
+                      select_columns: Optional[list[str]] = None,
+                      should_abort: Optional[Callable[[], bool]] = None) -> dict:
     """Incremental append+upsert by monotonic sequence. Naive row-by-row DML (MVP).
     Returns {row_count, last_sequence_value}.
     """
@@ -981,9 +982,21 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                 total_rows_to_copy = int(cnt)
         except Exception:
             total_rows_to_copy = None
+        # Emit initial progress tick to expose totals early
+        if on_progress:
+            try:
+                on_progress(0, (int(total_rows_to_copy) if total_rows_to_copy is not None else None))
+            except Exception:
+                pass
         copied = 0
         batches = 0
         while batches < max_batches:
+            if should_abort:
+                try:
+                    if should_abort():
+                        return {"row_count": total_rows, "last_sequence_value": max_seq_seen, "aborted": True}
+                except Exception:
+                    pass
             batches += 1
             seq_col = _quote_ident(sequence_column, src_dialect)
             if src_dialect.startswith('mssql'):
@@ -1010,6 +1023,12 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                     on_progress(int(copied), (int(total_rows_to_copy) if total_rows_to_copy is not None else None))
                 except Exception:
                     pass
+            if should_abort:
+                try:
+                    if should_abort():
+                        return {"row_count": total_rows, "last_sequence_value": max_seq_seen, "aborted": True}
+                except Exception:
+                    pass
             # Advance sequence
             try:
                 seq_idx = columns.index(sequence_column)
@@ -1031,7 +1050,8 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                       dest_table: str,
                       batch_size: int = 50000,
                       on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
-                      select_columns: Optional[list[str]] = None) -> dict:
+                      select_columns: Optional[list[str]] = None,
+                      should_abort: Optional[Callable[[], bool]] = None) -> dict:
     """Full rebuild into a staging table, then swap. Naive chunked copy via OFFSET/LIMIT (MVP)."""
     src_dialect = _dialect_name(source_engine)
     q_source = _compose_table_name(source_schema, source_table, src_dialect)
@@ -1076,8 +1096,20 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
             total_rows_source = int(total_rows_source) if total_rows_source is not None else None
         except Exception:
             total_rows_source = None
+        # Emit initial progress tick to expose totals early
+        if on_progress:
+            try:
+                on_progress(0, (int(total_rows_source) if total_rows_source is not None else None))
+            except Exception:
+                pass
         offset = 0
         while True:
+            if should_abort:
+                try:
+                    if should_abort():
+                        return {"row_count": total_rows, "aborted": True}
+                except Exception:
+                    pass
             if src_dialect.startswith('mssql'):
                 sql = f"SELECT {sel_clause} FROM {q_source} ORDER BY (SELECT 1) OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY"
             else:
@@ -1091,6 +1123,12 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
             if on_progress:
                 try:
                     on_progress(int(total_rows), (int(total_rows_source) if total_rows_source is not None else None))
+                except Exception:
+                    pass
+            if should_abort:
+                try:
+                    if should_abort():
+                        return {"row_count": total_rows, "aborted": True}
                 except Exception:
                     pass
             if len(rows) < int(batch_size):

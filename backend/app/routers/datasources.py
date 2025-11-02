@@ -636,8 +636,9 @@ def run_sync_now(
             st = SyncState(id=str(uuid4()), task_id=t.id, in_progress=False)
             db.add(st)
             db.commit()
-        # Mark in progress
+        # Mark in progress and clear any previous cancel flag
         st.in_progress = True
+        st.cancel_requested = False  # type: ignore[attr-defined]
         st.progress_current = 0
         st.progress_total = None
         db.add(st)
@@ -703,12 +704,13 @@ def run_sync_now(
                     batch_size=int(t.batch_size or 10000),
                     last_sequence_value=st.last_sequence_value,
                     on_progress=lambda cur, tot: _update_progress(db, st.id, cur, tot),
+                    should_abort=lambda: bool(getattr(db.query(SyncState).filter(SyncState.id == st.id).first(), 'cancel_requested', False)),
                     select_columns=(t.select_columns or None),
                 )
                 st.last_sequence_value = res.get("last_sequence_value")
                 st.last_row_count = res.get("row_count")
                 st.last_run_at = datetime.utcnow()
-                st.error = None
+                st.error = ("aborted" if bool(res.get("aborted")) else None)
                 st.last_duck_path = curr_duck_path
                 # update run log
                 run.row_count = st.last_row_count
@@ -730,12 +732,14 @@ def run_sync_now(
                     source_schema=t.source_schema,
                     source_table=t.source_table,
                     dest_table=dest_name,
+                    batch_size=int(t.batch_size or 50000),
                     on_progress=lambda cur, tot: _update_progress(db, st.id, cur, tot),
+                    should_abort=lambda: bool(getattr(db.query(SyncState).filter(SyncState.id == st.id).first(), 'cancel_requested', False)),
                     select_columns=(t.select_columns or None),
                 )
                 st.last_row_count = res.get("row_count")
                 st.last_run_at = datetime.utcnow()
-                st.error = None
+                st.error = ("aborted" if bool(res.get("aborted")) else None)
                 st.last_duck_path = curr_duck_path
                 run.row_count = st.last_row_count
                 run.finished_at = st.last_run_at
@@ -892,6 +896,35 @@ def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorI
         except Exception:
             pass
     return {"deleted": deleted}
+
+
+@router.post("/{ds_id}/sync/abort")
+def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if not _is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if ds.user_id and ds.user_id != actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    q = db.query(SyncState).join(SyncTask, SyncTask.id == SyncState.task_id).filter(SyncTask.datasource_id == ds_id, SyncState.in_progress == True)
+    if taskId:
+        q = q.filter(SyncState.task_id == taskId)
+    rows = q.all()
+    updated = 0
+    for st in rows:
+        try:
+            setattr(st, 'cancel_requested', True)
+            db.add(st)
+            updated += 1
+        except Exception:
+            continue
+    try:
+        db.commit()
+    except Exception:
+        try: db.rollback()
+        except Exception: pass
+    return {"ok": True, "updated": int(updated)}
 
 
 @router.patch("/{ds_id}/sync-tasks/{task_id}", response_model=SyncTaskOut)
