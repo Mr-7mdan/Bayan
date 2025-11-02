@@ -318,7 +318,13 @@ try {
 # Listener summary
 $ports = @(8000,3000,80,443)
 foreach ($p in $ports) {
-  try { $t = Test-NetConnection -ComputerName 127.0.0.1 -Port $p -WarningAction SilentlyContinue; Write-Host ("Port {0}: {1}" -f $p, ($t.TcpTestSucceeded ? 'LISTENING' : 'not listening')) } catch { Write-Host ("Port {0}: unknown" -f $p) }
+  try {
+    $t = Test-NetConnection -ComputerName 127.0.0.1 -Port $p -WarningAction SilentlyContinue
+    $status = if ($t.TcpTestSucceeded) { 'LISTENING' } else { 'not listening' }
+    Write-Host ("Port {0}: {1}" -f $p, $status)
+  } catch {
+    Write-Host ("Port {0}: unknown" -f $p)
+  }
 }
 
 Write-Heading "Done"
