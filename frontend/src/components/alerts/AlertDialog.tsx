@@ -1296,8 +1296,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           if (!tg) continue
           const exp = tagExpansions[tg]
           if (exp) {
-            (exp.emails || []).forEach((em: string) => { const v=String(em||'').trim(); if (v) emailSet.add(v) })
-            (exp.phones || []).forEach((ph: string) => { const v=String(ph||'').trim(); if (v) phoneSet.add(v) })
+            for (const em of (exp.emails ?? [])) { const v = String(em || '').trim(); if (v) emailSet.add(v) }
+            for (const ph of (exp.phones ?? [])) { const v = String(ph || '').trim(); if (v) phoneSet.add(v) }
           }
         }
       }
@@ -1305,8 +1305,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     // Also include direct inputs from Email To / SMS To fields
     try {
       const splitList = (s: string) => (s||'').split(/[;\,\s]+/).map(x=>x.trim()).filter(Boolean)
-      splitList(emailTo).forEach((em) => { if (isValidEmail(em)) emailSet.add(em) })
-      splitList(smsTo).forEach((ph) => { if (isValidPhone(ph)) phoneSet.add(ph) })
+      for (const em of splitList(emailTo)) { if (isValidEmail(em)) emailSet.add(em) }
+      for (const ph of splitList(smsTo)) { if (isValidPhone(ph)) phoneSet.add(ph) }
     } catch {}
     const emails = Array.from(emailSet)
     const phones = Array.from(phoneSet)
