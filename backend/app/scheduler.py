@@ -22,6 +22,23 @@ def ensure_scheduler_started() -> BackgroundScheduler:
     return _scheduler
 
 
+def shutdown_scheduler(wait: bool = True) -> None:
+    """Shut down the singleton scheduler if running.
+    This prevents background threads from lingering during app shutdown,
+    which can trigger GIL-related crashes on Windows when the interpreter exits.
+    """
+    global _scheduler
+    try:
+        if _scheduler is not None:
+            try:
+                _scheduler.shutdown(wait=wait)
+            finally:
+                _scheduler = None
+    except Exception:
+        # Best-effort; ignore errors during shutdown
+        _scheduler = None
+
+
 def _job_id(task_id: str) -> str:
     return f"sync:{task_id}"
 

@@ -649,8 +649,8 @@ function AdminSchedulesInner() {
                         {pagedTasks.map((t, idx) => (
                           <tr key={t.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
                             <td className="px-2 py-1">{t.mode}</td>
-                            <td className="px-2 py-1">{t.sourceSchema ? `${t.sourceSchema}.` : ''}{t.sourceTable}</td>
-                            <td className="px-2 py-1 font-mono">{t.destTableName}</td>
+                            <td className="px-2 py-1 whitespace-normal break-words">{t.sourceSchema ? `${t.sourceSchema}.` : ''}{t.sourceTable}</td>
+                            <td className="px-2 py-1 font-mono whitespace-normal break-words">{t.destTableName}</td>
                             <td className="px-2 py-1">{t.pkColumns?.join(', ')}</td>
                             <td className="px-2 py-1">{t.sequenceColumn || '—'}</td>
                             <td className="px-2 py-1">{t.batchSize || '—'}</td>

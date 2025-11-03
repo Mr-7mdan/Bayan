@@ -23,6 +23,9 @@ interface ProgressToastState {
   minimized?: boolean
   monitoring?: boolean
   actorId?: string
+  phase?: string | null
+  startedAtMs?: number
+  elapsedSec?: number
 }
 
 interface ProgressToastContextValue {
@@ -45,6 +48,7 @@ export function useProgressToast() {
 export default function ProgressToastProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<ProgressToastState>({ visible: false })
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const LS_KEY = 'progress_toast_active'
   const persist = useCallback((p: any) => { try { localStorage.setItem(LS_KEY, JSON.stringify(p)) } catch {} }, [])
   const getPersist = useCallback(() => { try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null } catch { return null } }, [])
@@ -60,6 +64,10 @@ export default function ProgressToastProvider({ children }: { children: React.Re
       clearInterval(timerRef.current as unknown as number)
       timerRef.current = null
     }
+    if (tickRef.current) {
+      clearInterval(tickRef.current as unknown as number)
+      tickRef.current = null
+    }
     try { clearPersist() } catch {}
   }, [])
 
@@ -73,44 +81,56 @@ export default function ProgressToastProvider({ children }: { children: React.Re
     let curSum = 0
     let totSum = 0
     let unknown = 0
+    let phase: string | null = null
     for (const t of running) {
       const c = Number(t.progressCurrent ?? 0)
       const tot = t.progressTotal
       curSum += isFinite(c) ? c : 0
       if (typeof tot === 'number' && isFinite(tot)) totSum += tot
       else unknown += 1
+      if (!phase) phase = (t.progressPhase || null) as any
+      else if (t.progressPhase === 'insert') phase = 'insert'
     }
     if (totSum > 0) {
       const p = Math.max(0, Math.min(1, curSum / totSum))
-      return { percent: p, current: curSum, total: totSum, runningTasks: running.length }
+      return { percent: p, current: curSum, total: totSum, runningTasks: running.length, phase }
     }
     // Unknown totals -> indeterminate
-    return { percent: null, current: curSum, total: null, runningTasks: running.length }
+    return { percent: null, current: curSum, total: null, runningTasks: running.length, phase }
   }, [])
 
   const startMonitoring = useCallback((datasourceId: string, actorId?: string) => {
     // Immediately show toast
-    setState({ visible: true, title: 'Sync in progress', message: 'Starting…', datasourceId, monitoring: true, minimized: false, actorId })
-    try { persist({ active: true, datasourceId, actorId, minimized: false }) } catch {}
+    const now = Date.now()
+    setState({ visible: true, title: 'Sync in progress', message: 'Starting…', datasourceId, monitoring: true, minimized: false, actorId, startedAtMs: now, elapsedSec: 0 })
+    try { persist({ active: true, datasourceId, actorId, minimized: false, startedAtMs: now }) } catch {}
     if (timerRef.current) {
       clearInterval(timerRef.current as unknown as number)
       timerRef.current = null
     }
+    if (tickRef.current) {
+      clearInterval(tickRef.current as unknown as number)
+      tickRef.current = null
+    }
     const poll = async () => {
       try {
         const tasks = await Api.getSyncStatus(datasourceId, actorId)
-        const { percent, current, total, runningTasks } = computeProgress(tasks)
+        const { percent, current, total, runningTasks, phase } = computeProgress(tasks)
         setState((s: ProgressToastState) => {
-          const next = { ...s, visible: true, title: 'Sync in progress', message: runningTasks ? `Running ${runningTasks} task(s)…` : 'Finishing…', percent, current, total, runningTasks, monitoring: runningTasks > 0, datasourceId: s.datasourceId || datasourceId, actorId: s.actorId || actorId }
-          try { persist({ active: runningTasks > 0, datasourceId: next.datasourceId, actorId: next.actorId, minimized: !!next.minimized }) } catch {}
+          const next = { ...s, visible: true, title: 'Sync in progress', message: runningTasks ? `Running ${runningTasks} task(s)…` : 'Finishing…', percent, current, total, runningTasks, phase: (phase || s.phase || null), monitoring: runningTasks > 0, datasourceId: s.datasourceId || datasourceId, actorId: s.actorId || actorId }
+          try { persist({ active: runningTasks > 0, datasourceId: next.datasourceId, actorId: next.actorId, minimized: !!next.minimized, startedAtMs: (next.startedAtMs || Date.now()) }) } catch {}
           return next
         })
         if (!tasks.some((t) => t.inProgress)) {
           // Done
-          setState((s: ProgressToastState) => ({ ...s, visible: true, title: 'Sync complete', message: 'All tasks finished', percent: 1 }))
+          setState((s: ProgressToastState) => ({ ...s, visible: true, title: 'Sync complete', message: 'All tasks finished', percent: 1, phase: null }))
           if (timerRef.current) {
             clearInterval(timerRef.current as unknown as number)
             timerRef.current = null
+          }
+          if (tickRef.current) {
+            clearInterval(tickRef.current as unknown as number)
+            tickRef.current = null
           }
           // Auto-hide after a short delay
           setTimeout(() => hide(), 2000)
@@ -123,9 +143,21 @@ export default function ProgressToastProvider({ children }: { children: React.Re
     // Kick off immediately, then poll every 2s
     void poll()
     timerRef.current = setInterval(poll, 2000)
+    // Tick elapsed every 1s
+    tickRef.current = setInterval(() => {
+      setState((s: ProgressToastState) => {
+        if (!s.monitoring) return s
+        const start = s.startedAtMs || now
+        const el = Math.max(0, Math.floor((Date.now() - start) / 1000))
+        return { ...s, elapsedSec: el }
+      })
+    }, 1000)
   }, [computeProgress, hide])
 
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current as unknown as number) }, [])
+  useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current as unknown as number)
+    if (tickRef.current) clearInterval(tickRef.current as unknown as number)
+  }, [])
 
   const value = useMemo(() => ({ state, show, hide, update, startMonitoring }), [state, show, hide, update, startMonitoring])
 
@@ -134,7 +166,7 @@ export default function ProgressToastProvider({ children }: { children: React.Re
       const p = getPersist()
       if (p && p.active && p.datasourceId) {
         startMonitoring(p.datasourceId as string, p.actorId as string | undefined)
-        setState((s: ProgressToastState) => ({ ...s, visible: true, minimized: !!p.minimized }))
+        setState((s: ProgressToastState) => ({ ...s, visible: true, minimized: !!p.minimized, startedAtMs: (p.startedAtMs || Date.now()) }))
       }
     } catch {}
   }, [getPersist, startMonitoring])
@@ -160,8 +192,9 @@ export default function ProgressToastProvider({ children }: { children: React.Re
                 </div>
               )}
               <div className="mt-1 text-[10px] text-muted-foreground">
-                {typeof state.current === 'number' ? state.current.toLocaleString() : '—'}
-                {typeof state.total === 'number' ? ` / ${state.total.toLocaleString()} rows` : ' rows'}
+                <span className="capitalize">{state.phase === 'insert' ? 'inserted' : state.phase === 'fetch' ? 'fetched' : 'rows'}</span>
+                : {typeof state.current === 'number' ? state.current.toLocaleString() : '—'}{typeof state.total === 'number' ? ` / ${state.total.toLocaleString()} rows` : ' rows'}
+                {typeof state.elapsedSec === 'number' ? ` • ${state.elapsedSec}s` : ''}
               </div>
             </div>
           </div>
@@ -182,8 +215,12 @@ export default function ProgressToastProvider({ children }: { children: React.Re
                 </div>
               )}
               <div className="mt-1 text-[11px] text-muted-foreground">
-                {typeof state.current === 'number' ? state.current.toLocaleString() : '—'}
-                {typeof state.total === 'number' ? ` / ${state.total.toLocaleString()} rows` : ' rows'}
+                <span className="capitalize">{state.phase === 'insert' ? 'Inserted' : state.phase === 'fetch' ? 'Fetched' : 'Rows'}</span>
+                : {typeof state.current === 'number' ? state.current.toLocaleString() : '—'}{typeof state.total === 'number' ? ` / ${state.total.toLocaleString()} rows` : ' rows'}
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground flex items-center justify-between">
+                <span>Phase: <span className="capitalize">{state.phase || '—'}</span></span>
+                <span>Elapsed: {typeof state.elapsedSec === 'number' ? `${state.elapsedSec}s` : '—'}</span>
               </div>
             </div>
             <div className="px-3 pb-2 flex justify-end gap-2">

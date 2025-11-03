@@ -240,6 +240,10 @@ if ($proxyScript) {
   }
 }
 
+# Ensure logs directory exists
+$logsDir = Join-Path $InstallDir 'logs'
+if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
+
 Write-Heading "Creating and starting services with NSSM"
 $backendSvc = 'BayanAPIUvicorn'
 $frontendSvc = 'BayanUI'
@@ -256,6 +260,13 @@ if (-not $exists) {
 & $nssm set $backendSvc Start SERVICE_AUTO_START
 & $nssm set $backendSvc AppStdout (Join-Path $InstallDir 'logs\backend.out.log')
 & $nssm set $backendSvc AppStderr (Join-Path $InstallDir 'logs\backend.err.log')
+# Log rotation and restart throttling
+& $nssm set $backendSvc AppRotateFiles 1
+& $nssm set $backendSvc AppRotateOnline 1
+& $nssm set $backendSvc AppRotateBytes 10485760        # 10 MB max per file
+& $nssm set $backendSvc AppRotateSeconds 86400         # rotate at least daily
+& $nssm set $backendSvc AppRestartDelay 60000          # wait 60s before restart
+& $nssm set $backendSvc AppThrottle 15000              # throttle rapid restarts
 try { & $nssm stop $backendSvc | Out-Null } catch {}
 & $nssm start $backendSvc | Out-Null
 
@@ -270,6 +281,13 @@ if (-not $exists2) {
 & $nssm set $frontendSvc Start SERVICE_AUTO_START
 & $nssm set $frontendSvc AppStdout (Join-Path $InstallDir 'logs\frontend.out.log')
 & $nssm set $frontendSvc AppStderr (Join-Path $InstallDir 'logs\frontend.err.log')
+# Log rotation and restart throttling
+& $nssm set $frontendSvc AppRotateFiles 1
+& $nssm set $frontendSvc AppRotateOnline 1
+& $nssm set $frontendSvc AppRotateBytes 10485760       # 10 MB max per file
+& $nssm set $frontendSvc AppRotateSeconds 86400        # rotate at least daily
+& $nssm set $frontendSvc AppRestartDelay 60000         # wait 60s before restart
+& $nssm set $frontendSvc AppThrottle 15000             # throttle rapid restarts
 # Optionally set env overrides for the service (uncomment to customize)
 # & $nssm set $frontendSvc AppEnvironmentExtra "PORT=${FrontendPort}`nHOST=0.0.0.0`nNODE_ENV=production`nNEXT_PUBLIC_API_BASE_URL=http://${BackendHost}:${BackendPort}/api"
 try { & $nssm stop $frontendSvc | Out-Null } catch {}
@@ -296,6 +314,13 @@ if ($caddyExe) {
   & $nssm set $proxySvc Start SERVICE_AUTO_START
   & $nssm set $proxySvc AppStdout (Join-Path $InstallDir 'logs\proxy.out.log')
   & $nssm set $proxySvc AppStderr (Join-Path $InstallDir 'logs\proxy.err.log')
+  # Log rotation and restart throttling
+  & $nssm set $proxySvc AppRotateFiles 1
+  & $nssm set $proxySvc AppRotateOnline 1
+  & $nssm set $proxySvc AppRotateBytes 10485760        # 10 MB max per file
+  & $nssm set $proxySvc AppRotateSeconds 86400         # rotate at least daily
+  & $nssm set $proxySvc AppRestartDelay 60000          # wait 60s before restart
+  & $nssm set $proxySvc AppThrottle 15000              # throttle rapid restarts
   try { & $nssm stop $proxySvc | Out-Null } catch {}
   & $nssm start $proxySvc | Out-Null
   # Ensure firewall rules (idempotent)

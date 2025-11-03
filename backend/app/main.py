@@ -28,7 +28,7 @@ from .routers import periods as periods_router
 from .routers import ai as ai_router
 from .routers import users as users_router
 from .routers import admin as admin_router
-from .scheduler import ensure_scheduler_started, schedule_all_jobs, schedule_all_alert_jobs
+from .scheduler import ensure_scheduler_started, schedule_all_jobs, schedule_all_alert_jobs, shutdown_scheduler
 from .routers import alerts as alerts_router
 from .routers import snapshot as snapshot_router
 from .routers import contacts as contacts_router
@@ -335,5 +335,10 @@ async def metrics() -> Response:
 async def _shutdown():
     try:
         close_duck_shared()
+    except Exception:
+        pass
+    # Ensure BackgroundScheduler threads are terminated to avoid GIL crash on Windows
+    try:
+        shutdown_scheduler(wait=True)
     except Exception:
         pass

@@ -39,6 +39,7 @@ export type SyncTaskOut = {
   error?: string | null
   progressCurrent?: number | null
   progressTotal?: number | null
+  progressPhase?: string | null
 }
 
 export type LocalTableStat = {
@@ -713,6 +714,13 @@ export const Api = {
   updatesVersion: () => http<{ backend?: string|null; frontend?: string|null }>(`/updates/version`),
   updatesCheck: (component: 'backend'|'frontend'|'both' = 'backend') => http<{ enabled: boolean; component: string; currentVersion?: string|null; latestVersion?: string|null; updateType?: 'auto'|'manual'; requiresMigrations?: boolean; releaseNotes?: string|null; manifestUrl?: string|null }>(`/updates/check?component=${encodeURIComponent(component)}`),
   updatesApply: (component: 'backend'|'frontend', actorId: string) => http<{ ok: boolean; component: string; version: string; stagedPath?: string; requiresRestart: boolean }>(`/updates/apply?component=${encodeURIComponent(component)}&actorId=${encodeURIComponent(actorId)}`, { method: 'POST' }),
+  updatesPromote: (component: 'backend'|'frontend', actorId: string, opts?: { version?: string; restart?: boolean }) => {
+    const params: string[] = [ `component=${encodeURIComponent(component)}`, `actorId=${encodeURIComponent(actorId)}` ]
+    if (opts?.version) params.push(`version=${encodeURIComponent(opts.version)}`)
+    if (typeof opts?.restart === 'boolean') params.push(`restart=${opts.restart ? 'true' : 'false'}`)
+    const qs = params.join('&')
+    return http<{ ok: boolean; component: string; version: string; releasesPath?: string; currentPath?: string; restarted?: boolean; message?: string }>(`/updates/promote?${qs}`, { method: 'POST' })
+  },
   // --- Contacts Manager ---
   listContacts: (opts?: { search?: string; tags?: string[]; active?: boolean; page?: number; pageSize?: number }) => {
     const qs = new URLSearchParams()

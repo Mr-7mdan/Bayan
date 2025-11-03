@@ -61,6 +61,16 @@ class ApplyResult(BaseModel):
     requiresRestart: bool = True
 
 
+class PromoteResult(BaseModel):
+    ok: bool
+    component: str
+    version: str
+    releasesPath: Optional[str] = None
+    currentPath: Optional[str] = None
+    restarted: bool = False
+    message: Optional[str] = None
+
+
 _DATA_DIR = Path(settings.metadata_db_path).resolve().parent
 _FRONTEND_VERSION_FILE = _DATA_DIR / "frontend_version.txt"
 
@@ -71,9 +81,9 @@ def _read_or_seed_frontend_version() -> Optional[str]:
             v = _FRONTEND_VERSION_FILE.read_text(encoding="utf-8").strip()
             return v or None
         # Seed from env if provided
-        if settings.frontend_version_env:
+        if getattr(settings, 'frontend__env', None):
             _FRONTEND_VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-            val = str(settings.frontend_version_env).strip()
+            val = str(getattr(settings, 'frontend__env')).strip()
             _FRONTEND_VERSION_FILE.write_text(val, encoding="utf-8")
             return val or None
     except Exception:
@@ -234,3 +244,198 @@ async def apply_update(
         except Exception:
             pass
     return ApplyResult(ok=True, component=component, version=mf.version, stagedPath=str(sd), requiresRestart=True)
+
+
+def _win_path(p: Path) -> str:
+    return str(p).replace('/', '\\')
+
+
+def _find_root_install_dir() -> Path:
+    # app/routers/updates.py -> app/routers -> backend/app -> backend -> root
+    here = Path(__file__).resolve()
+    # parents[0]=.../routers, [1]=.../app, [2]=.../backend, [3]=.../root
+    try:
+        return here.parents[3]
+    except Exception:
+        return here.parents[2]
+
+
+def _copy_tree(src: Path, dst: Path) -> None:
+    import shutil
+    dst.mkdir(parents=True, exist_ok=True)
+    # Python 3.8+: copytree with dirs_exist_ok
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def _copy_overlay(src: Path, dst: Path, ignore_names: Optional[set[str]] = None) -> None:
+    import shutil
+    ignore = set(ignore_names or set())
+    dst.mkdir(parents=True, exist_ok=True)
+    for p in src.iterdir():
+        name = p.name
+        if name in ignore:
+            continue
+        if p.is_dir():
+            if name in {"venv", ".data", "logs", "__pycache__"}:
+                continue
+            shutil.copytree(p, dst / name, dirs_exist_ok=True)
+        else:
+            shutil.copy2(p, dst / name)
+
+
+def _ensure_current_pointer(component_dir: Path, version_dir: Path) -> Path:
+    current = component_dir / 'current'
+    try:
+        if current.exists() or current.is_symlink():
+            # Remove existing link or dir
+            if os.name == 'nt':
+                # Use rmdir for junctions/symlinks
+                import subprocess
+                subprocess.run(['cmd', '/c', 'rmdir', '/S', '/Q', _win_path(current)], check=False)
+            else:
+                import shutil
+                shutil.rmtree(current, ignore_errors=True)
+    except Exception:
+        pass
+    # Create symlink/junction pointing to version_dir
+    try:
+        if os.name == 'nt':
+            import subprocess
+            subprocess.run(['cmd', '/c', 'mklink', '/J', _win_path(current), _win_path(version_dir)], check=True)
+        else:
+            current.symlink_to(version_dir, target_is_directory=True)
+    except Exception:
+        # Fallback: create a marker file with the path
+        try:
+            (component_dir / 'CURRENT.txt').write_text(str(version_dir), encoding='utf-8')
+        except Exception:
+            pass
+    return current
+
+
+def _nssm_path_candidates() -> list[str]:
+    cands = ['nssm']
+    for p in (
+        'C\\Program Files\\nssm\\nssm.exe',
+        'C\\Program Files (x86)\\nssm\\nssm.exe',
+    ):
+        try:
+            if os.path.exists(p.replace('\\', '\\\\')):
+                cands.append(p)
+        except Exception:
+            pass
+    return cands
+
+
+def _run_nssm(args: list[str]) -> bool:
+    import subprocess
+    for exe in _nssm_path_candidates():
+        try:
+            r = subprocess.run([exe] + args, capture_output=True, text=True)
+            if r.returncode == 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _restart_service_win(name: str) -> bool:
+    ok1 = _run_nssm(['stop', name])
+    ok2 = _run_nssm(['start', name])
+    return bool(ok1 and ok2)
+
+
+@router.post("/promote", response_model=PromoteResult)
+async def promote_update(
+    component: str = Query(default="backend", pattern=r"^(backend|frontend)$"),
+    version: Optional[str] = Query(default=None),
+    restart: bool = Query(default=True),
+    actorId: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> PromoteResult:
+    # Admin gate
+    if actorId:
+        u = db.query(User).filter(User.id == str(actorId).strip()).first()
+        if not (u and (u.role or "user").lower() == "admin"):
+            raise HTTPException(status_code=403, detail="Admin required")
+    else:
+        raise HTTPException(status_code=403, detail="actorId is required for updates")
+
+    # Determine version if not provided
+    if not version:
+        release = await _github_latest_release()
+        mf, _ = await _download_manifest_for_release(release)
+        if (mf.type or "").lower() != "auto" or bool(mf.requiresMigrations):
+            raise HTTPException(status_code=400, detail="This update requires manual intervention")
+        version = mf.version
+
+    sd = _stage_dir(component, version)
+    if not sd.exists():
+        raise HTTPException(status_code=404, detail=f"Staged version not found: {component} {version}")
+
+    # Source dir to copy: prefer extracted/
+    src = sd / 'extracted'
+    if not src.exists():
+        src = sd
+    # Resolve payload dir when archives include top-level component folder
+    payload = src
+    if (src / 'backend').exists() and component == 'backend':
+        payload = src / 'backend'
+    if (src / 'frontend').exists() and component == 'frontend':
+        payload = src / 'frontend'
+
+    root = _find_root_install_dir()
+    releases_dir = root / 'releases' / component
+    target = releases_dir / str(version)
+    try:
+        _copy_tree(payload, target)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to copy to releases: {e}")
+
+    # Update 'current' pointer
+    current = _ensure_current_pointer(releases_dir, target)
+
+    restarted = False
+    msg = None
+    if component == 'backend':
+        backend_dir = root / 'backend'
+        # Backup current live backend (lightweight overlay backup)
+        try:
+            from datetime import datetime as _dt
+            backups_dir = root / 'backups' / 'backend'
+            backup_target = backups_dir / _dt.now().strftime('%Y%m%d-%H%M%S')
+            _copy_overlay(backend_dir, backup_target, ignore_names={'.data', 'logs', 'venv', '__pycache__'})
+        except Exception:
+            pass
+        if os.name == 'nt' and restart:
+            _run_nssm(['stop', 'BayanAPIUvicorn'])
+        try:
+            _copy_overlay(current, backend_dir, ignore_names={'.env', '.data', 'logs', 'venv', '__pycache__'})
+        except Exception:
+            pass
+        if os.name == 'nt' and restart:
+            restarted = _restart_service_win('BayanAPIUvicorn')
+        elif restart:
+            msg = 'Promoted. Please restart the backend service to apply.'
+    else:
+        frontend_dir = root / 'frontend'
+        # Backup current live frontend (lightweight overlay backup)
+        try:
+            from datetime import datetime as _dt
+            backups_dir = root / 'backups' / 'frontend'
+            backup_target = backups_dir / _dt.now().strftime('%Y%m%d-%H%M%S')
+            _copy_overlay(frontend_dir, backup_target, ignore_names={'node_modules', '.next', 'logs'})
+        except Exception:
+            pass
+        if os.name == 'nt' and restart:
+            _run_nssm(['stop', 'BayanUI'])
+        try:
+            _copy_overlay(current, frontend_dir, ignore_names={})
+        except Exception:
+            pass
+        if os.name == 'nt' and restart:
+            restarted = _restart_service_win('BayanUI')
+        elif restart:
+            msg = 'Promoted. Please restart the frontend service to apply.'
+
+    return PromoteResult(ok=True, component=component, version=str(version), releasesPath=str(releases_dir), currentPath=str(current), restarted=bool(restarted), message=msg)

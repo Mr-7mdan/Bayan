@@ -446,6 +446,7 @@ class SyncTaskOut(BaseModel):
     error: str | None = None
     progressCurrent: int | None = None
     progressTotal: int | None = None
+    progressPhase: str | None = None
 
 
 class LocalTableStat(BaseModel):

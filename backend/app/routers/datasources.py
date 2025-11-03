@@ -257,6 +257,7 @@ def _task_to_out(db: Session, t: SyncTask) -> SyncTaskOut:
         error=(st.error if st else None),
         progressCurrent=(st.progress_current if st else None),
         progressTotal=(st.progress_total if st else None),
+        progressPhase=(st.progress_phase if st else None),
     )
 
 
@@ -641,6 +642,7 @@ def run_sync_now(
         st.cancel_requested = False  # type: ignore[attr-defined]
         st.progress_current = 0
         st.progress_total = None
+        st.progress_phase = 'fetch'  # type: ignore[attr-defined]
         db.add(st)
         db.commit()
         # Create a run log row
@@ -704,20 +706,19 @@ def run_sync_now(
                     batch_size=int(t.batch_size or 10000),
                     last_sequence_value=st.last_sequence_value,
                     on_progress=lambda cur, tot: _update_progress(db, st.id, cur, tot),
-                    should_abort=lambda: bool(getattr(db.query(SyncState).filter(SyncState.id == st.id).first(), 'cancel_requested', False)),
                     select_columns=(t.select_columns or None),
+                    should_abort=lambda: bool(getattr(db.query(SyncState).filter(SyncState.id == st.id).first(), 'cancel_requested', False)),
+                    on_phase=lambda ph: _set_phase(db, st.id, ph),
                 )
                 st.last_sequence_value = res.get("last_sequence_value")
                 st.last_row_count = res.get("row_count")
                 st.last_run_at = datetime.utcnow()
                 st.error = ("aborted" if bool(res.get("aborted")) else None)
                 st.last_duck_path = curr_duck_path
-                # update run log
                 run.row_count = st.last_row_count
                 run.finished_at = st.last_run_at
                 results.append({"taskId": t.id, "mode": t.mode, "rowCount": st.last_row_count, "lastSeq": st.last_sequence_value})
             else:  # snapshot
-                # Optional user-scoped destination naming
                 dest_name = t.dest_table_name
                 try:
                     if str(os.getenv("DUCKDB_USER_SCOPED_TABLES", "0")).strip().lower() in ("1", "true", "yes", "on"):
@@ -734,8 +735,9 @@ def run_sync_now(
                     dest_table=dest_name,
                     batch_size=int(t.batch_size or 50000),
                     on_progress=lambda cur, tot: _update_progress(db, st.id, cur, tot),
-                    should_abort=lambda: bool(getattr(db.query(SyncState).filter(SyncState.id == st.id).first(), 'cancel_requested', False)),
                     select_columns=(t.select_columns or None),
+                    should_abort=lambda: bool(getattr(db.query(SyncState).filter(SyncState.id == st.id).first(), 'cancel_requested', False)),
+                    on_phase=lambda ph: _set_phase(db, st.id, ph),
                 )
                 st.last_row_count = res.get("row_count")
                 st.last_run_at = datetime.utcnow()
@@ -814,6 +816,10 @@ def run_sync_now(
                 pass
         finally:
             st.in_progress = False
+            try:
+                st.progress_phase = None  # type: ignore[attr-defined]
+            except Exception:
+                pass
             db.add(st)
             db.add(run)
             db.commit()
@@ -846,6 +852,20 @@ def _update_progress(db: Session, state_id: str, cur: int | None, tot: int | Non
         except Exception:
             pass
 
+
+def _set_phase(db: Session, state_id: str, phase: str | None) -> None:
+    try:
+        st = db.query(SyncState).filter(SyncState.id == state_id).first()
+        if not st:
+            return
+        st.progress_phase = (str(phase) if phase else None)
+        db.add(st)
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 @router.get("/{ds_id}/sync/logs", response_model=list[SyncRunOut])
 def list_sync_logs(ds_id: str, taskId: str | None = Query(default=None), limit: int = Query(default=50), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):

@@ -945,7 +945,8 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                       max_batches: int = 10,
                       on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
                       select_columns: Optional[list[str]] = None,
-                      should_abort: Optional[Callable[[], bool]] = None) -> dict:
+                      should_abort: Optional[Callable[[], bool]] = None,
+                      on_phase: Optional[Callable[[str], None]] = None) -> dict:
     """Incremental append+upsert by monotonic sequence. Naive row-by-row DML (MVP).
     Returns {row_count, last_sequence_value}.
     """
@@ -955,6 +956,7 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
     seq = int(last_sequence_value or 0)
     total_rows = 0
     max_seq_seen = seq
+    fetched = 0
     with source_engine.connect() as src, _open_duck_write_conn(duck_engine) as duck:
         # For first batch, inspect columns
         # 
@@ -1003,16 +1005,32 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                 sql = f"SELECT {sel_clause} FROM {q_source} WHERE {seq_col} > :last ORDER BY {seq_col} OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY"
             else:
                 sql = f"SELECT {sel_clause} FROM {q_source} WHERE {seq_col} > :last ORDER BY {seq_col} LIMIT :lim"
+            if on_phase:
+                try: on_phase('fetch')
+                except Exception: pass
             res = src.execute(text(sql), {"last": seq, "lim": int(batch_size)})
             rows = res.fetchall()
             if not rows:
                 break
+            # Report fetch progress before any insert/upsert work
+            try:
+                fetched += len(rows)
+            except Exception:
+                fetched = (len(rows) if 'fetched' in locals() else len(rows))
+            if on_progress:
+                try:
+                    on_progress(int(fetched), (int(total_rows_to_copy) if total_rows_to_copy is not None else None))
+                except Exception:
+                    pass
             columns = list(res.keys())
             # Ensure destination exists
             if not _table_exists(duck, dest_table):
                 # Create typed table using the first fetched batch as sample
                 _create_table_typed(duck, dest_table, columns, [list(r) for r in rows])
             # Upsert: delete existing pk matches, then insert
+            if on_phase:
+                try: on_phase('insert')
+                except Exception: pass
             if pk_columns:
                 _delete_by_pk(duck, dest_table, pk_columns, rows, columns)
             inserted = _insert_rows(duck, dest_table, columns, [list(r) for r in rows])
@@ -1051,7 +1069,8 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                       batch_size: int = 50000,
                       on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
                       select_columns: Optional[list[str]] = None,
-                      should_abort: Optional[Callable[[], bool]] = None) -> dict:
+                      should_abort: Optional[Callable[[], bool]] = None,
+                      on_phase: Optional[Callable[[str], None]] = None) -> dict:
     """Full rebuild into a staging table, then swap. Naive chunked copy via OFFSET/LIMIT (MVP)."""
     src_dialect = _dialect_name(source_engine)
     q_source = _compose_table_name(source_schema, source_table, src_dialect)
@@ -1110,6 +1129,9 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                         return {"row_count": total_rows, "aborted": True}
                 except Exception:
                     pass
+            if on_phase:
+                try: on_phase('fetch')
+                except Exception: pass
             if src_dialect.startswith('mssql'):
                 sql = f"SELECT {sel_clause} FROM {q_source} ORDER BY (SELECT 1) OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY"
             else:
@@ -1118,13 +1140,17 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
             rows = res.fetchall()
             if not rows:
                 break
-            _insert_rows(duck, stg, columns, [list(r) for r in rows])
-            total_rows += len(rows)
+            # Emit progress after fetch, before insert to reflect fetch progress
             if on_progress:
                 try:
-                    on_progress(int(total_rows), (int(total_rows_source) if total_rows_source is not None else None))
+                    on_progress(int(total_rows + len(rows)), (int(total_rows_source) if total_rows_source is not None else None))
                 except Exception:
                     pass
+            if on_phase:
+                try: on_phase('insert')
+                except Exception: pass
+            _insert_rows(duck, stg, columns, [list(r) for r in rows])
+            total_rows += len(rows)
             if should_abort:
                 try:
                     if should_abort():

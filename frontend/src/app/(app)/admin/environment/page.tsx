@@ -44,6 +44,7 @@ export default function AdminEnvironmentPage() {
   const [updF, setUpdF] = useState<any>(null)
   const [checkingUpd, setCheckingUpd] = useState<boolean>(false)
   const [applyBusy, setApplyBusy] = useState<null | 'backend' | 'frontend'>(null)
+  const [promoteBusy, setPromoteBusy] = useState<null | 'backend' | 'frontend'>(null)
 
   useEffect(() => {
     if (!isAdmin) router.replace('/home')
@@ -88,6 +89,21 @@ export default function AdminEnvironmentPage() {
     } catch (e: any) {
       setErr(e?.message || 'Failed to apply update')
     } finally { setApplyBusy(null) }
+  }
+
+  const promoteUpdate = async (component: 'backend'|'frontend') => {
+    if (!user?.id) { setErr('Login required'); return }
+    setPromoteBusy(component)
+    try {
+      const res = await Api.updatesPromote(component, user.id, { restart: true })
+      const extra = res.restarted ? ' (service restarted)' : (res.message ? ` (${res.message})` : '')
+      setMsg(`Promoted ${component} ${res.version}${extra}`)
+      window.setTimeout(() => setMsg(null), 2500)
+      // Refresh check panel after promotion
+      try { await checkUpdates() } catch {}
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to promote update')
+    } finally { setPromoteBusy(null) }
   }
 
   useEffect(() => {
@@ -278,6 +294,11 @@ export default function AdminEnvironmentPage() {
                     disabled={!updB?.enabled || updB?.updateType !== 'auto' || updB?.requiresMigrations || applyBusy === 'backend'}
                     onClick={() => applyUpdate('backend')}
                   >{applyBusy === 'backend' ? 'Applying…' : 'Apply auto update'}</button>
+                  <button
+                    className="ml-2 text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                    disabled={promoteBusy === 'backend'}
+                    onClick={() => promoteUpdate('backend')}
+                  >{promoteBusy === 'backend' ? 'Promoting…' : 'Promote & restart'}</button>
                 </div>
               </div>
               <div className="rounded-md border p-2">
@@ -296,6 +317,11 @@ export default function AdminEnvironmentPage() {
                     disabled={!updF?.enabled || updF?.updateType !== 'auto' || updF?.requiresMigrations || applyBusy === 'frontend'}
                     onClick={() => applyUpdate('frontend')}
                   >{applyBusy === 'frontend' ? 'Applying…' : 'Apply auto update'}</button>
+                  <button
+                    className="ml-2 text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                    disabled={promoteBusy === 'frontend'}
+                    onClick={() => promoteUpdate('frontend')}
+                  >{promoteBusy === 'frontend' ? 'Promoting…' : 'Promote & restart'}</button>
                 </div>
               </div>
             </div>
