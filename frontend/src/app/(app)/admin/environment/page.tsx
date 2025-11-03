@@ -45,6 +45,9 @@ export default function AdminEnvironmentPage() {
   const [checkingUpd, setCheckingUpd] = useState<boolean>(false)
   const [applyBusy, setApplyBusy] = useState<null | 'backend' | 'frontend'>(null)
   const [promoteBusy, setPromoteBusy] = useState<null | 'backend' | 'frontend'>(null)
+  const [issuesBusy, setIssuesBusy] = useState(false)
+  const [issuesMsg, setIssuesMsg] = useState<string | null>(null)
+  const [issuesErr, setIssuesErr] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isAdmin) router.replace('/home')
@@ -177,6 +180,18 @@ export default function AdminEnvironmentPage() {
     } catch (e: any) {
       setAiErr(e?.message || 'AI endpoint failed')
     } finally { setTestingAI(false) }
+  }
+
+  const onTestIssues = async () => {
+    setIssuesBusy(true); setIssuesErr(null); setIssuesMsg(null)
+    try {
+      const r = await Api.issuesTest()
+      const m = r?.issueUrl ? `Created ${r.issueUrl}` : 'OK'
+      setIssuesMsg(m)
+      window.setTimeout(() => setIssuesMsg(null), 2000)
+    } catch (e: any) {
+      setIssuesErr(e?.message || 'Failed to create test issue')
+    } finally { setIssuesBusy(false) }
   }
 
   const saveAiToServer = async (clearKey?: boolean) => {
@@ -476,6 +491,28 @@ export default function AdminEnvironmentPage() {
               <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={()=> setEnv({ publicDomain: '' })}>Clear override</button>
             </div>
             <p className="text-xs text-muted-foreground mt-2">This domain is used when generating share links (Publish/View). If empty, we use the current origin.</p>
+          </section>
+
+          <section className="rounded-md border p-3 bg-[hsl(var(--card))]">
+            <h3 className="text-sm font-semibold mb-2">Issues & Bug Reporting</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className="text-sm block">Reporting mode
+                <select
+                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
+                  value={env.bugReportMode || 'auto'}
+                  onChange={(e)=> setEnv({ bugReportMode: e.target.value as any })}
+                >
+                  <option value="auto">Submit automatically</option>
+                  <option value="ask">Ask user</option>
+                  <option value="off">Don't report</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={issuesBusy} onClick={onTestIssues}>{issuesBusy ? 'Testing…' : 'Test GitHub token'}</button>
+              {issuesMsg && <span className="text-xs text-emerald-600">{issuesMsg}</span>}
+              {issuesErr && <span className="text-xs text-rose-600">{issuesErr}</span>}
+            </div>
           </section>
 
           <section className="rounded-md border p-3 bg-[hsl(var(--card))]">

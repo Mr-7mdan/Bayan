@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from fastapi import FastAPI, Request, Response
+import asyncio
+from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
@@ -34,6 +35,7 @@ from .routers import snapshot as snapshot_router
 from .routers import contacts as contacts_router
 from .routers import metrics as metrics_router
 from .routers import updates as updates_router
+from .routers import issues as issues_router
 from .metrics import counter_inc, gauge_inc, gauge_dec, summary_observe, render_prometheus
 
 app = FastAPI(title=settings.app_name)
@@ -71,6 +73,19 @@ async def _metrics_mw(request: Request, call_next):
         if is_api:
             gauge_dec("app_active_requests", 1.0, {"path": path, "method": method})
             summary_observe("app_request_duration_ms", _e, {"path": path, "method": method})
+
+@app.middleware("http")
+async def _issues_mw(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:  # noqa: BLE001 - report all exceptions
+        try:
+            from .routers.issues import report_backend_exception
+            if not isinstance(exc, HTTPException) or int(getattr(exc, "status_code", 500) or 500) >= 500:
+                asyncio.create_task(report_backend_exception(exc, request))
+        except Exception:
+            pass
+        raise
 
 @app.on_event("startup")
 async def _startup():
@@ -123,6 +138,7 @@ app.include_router(snapshot_router.router, prefix="/api")
 app.include_router(contacts_router.router, prefix="/api")
 app.include_router(metrics_router.router, prefix="/api")
 app.include_router(updates_router.router, prefix="/api")
+app.include_router(issues_router.router, prefix="/api")
 
 
 @app.get("/api/healthz", response_model=HealthResponse)

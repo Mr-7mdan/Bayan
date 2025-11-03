@@ -11,6 +11,7 @@ import FiltersProvider from '@/components/providers/FiltersProvider'
 import ThemeProvider from '@/components/providers/ThemeProvider'
 import ProgressToastProvider from '@/components/providers/ProgressToastProvider'
 import EnvironmentProvider from '@/components/providers/EnvironmentProvider'
+import ErrorReporterProvider from '@/components/providers/ErrorReporterProvider'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -68,9 +69,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <BrandingProvider>
                   <QueryProvider>
                     <AuthProvider>
-                      <ProgressToastProvider>
-                        {children}
-                      </ProgressToastProvider>
+                      <ErrorReporterProvider>
+                        <ProgressToastProvider>
+                          {children}
+                        </ProgressToastProvider>
+                      </ErrorReporterProvider>
                     </AuthProvider>
                   </QueryProvider>
                 </BrandingProvider>

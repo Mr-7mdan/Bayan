@@ -17,6 +17,7 @@ export type EnvironmentSettings = {
   orgLogoLight?: string
   orgLogoDark?: string
   favicon?: string
+  bugReportMode?: 'auto' | 'ask' | 'off'
 }
 
 type EnvContextType = {
@@ -35,6 +36,7 @@ const DEFAULTS: EnvironmentSettings = {
   orgLogoLight: '',
   orgLogoDark: '',
   favicon: '',
+  bugReportMode: 'auto',
 }
 const STORAGE_KEY = 'app.environment.settings'
 

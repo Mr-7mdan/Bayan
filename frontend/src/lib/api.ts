@@ -416,6 +416,24 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
   }
 }
 
+export type IssueReportIn = {
+  kind: 'frontend' | 'backend'
+  errorName?: string
+  message?: string
+  stack?: string
+  componentStack?: string
+  file?: string
+  line?: number
+  column?: number
+  url?: string
+  appVersion?: string
+  environment?: string
+  browser?: string
+  userId?: string
+  metadata?: Record<string, any>
+  occurredAt?: string
+}
+
 export const Api = {
   listDatasources: (userId?: string, actorId?: string) => {
     const params: string[] = []
@@ -721,6 +739,17 @@ export const Api = {
     const qs = params.join('&')
     return http<{ ok: boolean; component: string; version: string; releasesPath?: string; currentPath?: string; restarted?: boolean; message?: string }>(`/updates/promote?${qs}`, { method: 'POST' })
   },
+  // --- Issues ---
+  reportIssue: (payload: IssueReportIn) =>
+    http<{ ok: boolean; deduped?: boolean; issueNumber?: number; issueUrl?: string; fingerprint?: string }>(
+      '/issues/report',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  issuesTest: () =>
+    http<{ ok: boolean; issueNumber?: number; issueUrl?: string }>(
+      '/issues/test',
+      { method: 'POST' }
+    ),
   // --- Contacts Manager ---
   listContacts: (opts?: { search?: string; tags?: string[]; active?: boolean; page?: number; pageSize?: number }) => {
     const qs = new URLSearchParams()
