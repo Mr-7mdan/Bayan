@@ -311,6 +311,23 @@ async function _acquireWidgetSlot(): Promise<() => void> {
   })
 }
 
+let _offlineUntil = 0
+const _inflightGet = new Map<string, Promise<any>>()
+const _recentGetCache = new Map<string, { exp: number; promise: Promise<any> }>()
+const GET_CACHE_MS = (() => { const v = Number(process.env.NEXT_PUBLIC_GET_CACHE_MS || 3000); return Number.isFinite(v) ? Math.max(0, v) : 3000 })()
+function _cacheTtlForPath(p: string): number {
+  try {
+    // Normalize path (strip origin and trailing slash)
+    const path = p.replace(/^https?:\/\/[^/]+/, '').replace(/\/$/, '')
+    if (/\/updates\/version$/.test(path)) return 15000
+    if (/\/ai\/config$/.test(path)) return 20000
+    if (/\/users\/[^/]+\/notifications$/.test(path)) return 30000
+    if (/\/users\/[^/]+\/counts$/.test(path)) return 4000
+    if (/\/alerts$/.test(path)) return 5000
+  } catch {}
+  return GET_CACHE_MS
+}
+
 async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Promise<T> {
   const controller = new AbortController()
   const externalSignal: AbortSignal | undefined = (init as any)?.signal as AbortSignal | undefined
@@ -344,6 +361,83 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
         }
       }
     } catch {}
+    const method = String(((restInit as any)?.method || (init as any)?.method || 'GET')).toUpperCase()
+    const canDedup = method === 'GET' && !hasBody
+    if (canDedup) {
+      if (Date.now() < _offlineUntil) {
+        throw new Error('Service unavailable')
+      }
+      const k = finalPath
+      // Serve from very recent cache to coalesce sequential duplicates across remounts
+      const nowTs = Date.now()
+      const cached = _recentGetCache.get(k)
+      if (cached && cached.exp > nowTs) {
+        return await cached.promise as T
+      } else if (cached) {
+        _recentGetCache.delete(k)
+      }
+      const ex = _inflightGet.get(k) as Promise<T> | undefined
+      if (ex) return await ex
+      const p: Promise<T> = (async () => {
+        let attempt = 0
+        const max429 = 2
+        let res: Response
+        while (true) {
+          res = await fetch(`${getApiBase()}${finalPath}`.replace(/\/$/, ''), {
+            ...restInit,
+            headers,
+            cache: 'no-store',
+            signal: controller.signal,
+          })
+          if (res.status === 429 && attempt < max429) {
+            const raRaw = (res.headers.get('retry-after') || '').trim()
+            const ra = Number.isFinite(Number(raRaw)) ? parseInt(raRaw, 10) : 0
+            try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('rate-limit', { detail: { path: finalPath, retryAfter: ra } } as any)) } catch {}
+            const base = ra > 0 ? ra * 1000 : Math.min(2000 * (attempt + 1), 5000)
+            const jitter = Math.floor(Math.random() * 250)
+            await new Promise((r) => setTimeout(r, base + jitter))
+            attempt += 1
+            continue
+          }
+          break
+        }
+        if (!res.ok) {
+          const body = await res.text().catch(() => '')
+          throw new Error(`HTTP ${res.status}: ${body}`)
+        }
+        if (res.status === 204) {
+          return undefined as unknown as T
+        }
+        const ct = (res.headers.get('content-type') || '').toLowerCase()
+        if (ct.includes('application/json')) {
+          try {
+            return (await res.json()) as T
+          } catch {
+            const text = await res.text().catch(() => '')
+            const trimmed = (text || '').trim()
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+              try { return JSON.parse(trimmed) as T } catch {}
+            }
+            return undefined as unknown as T
+          }
+        } else {
+          const text = await res.text().catch(() => '')
+          const trimmed = (text || '').trim()
+          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            try { return JSON.parse(trimmed) as T } catch {}
+          }
+          return undefined as unknown as T
+        }
+      })()
+      _inflightGet.set(k, p as Promise<any>)
+      try {
+        // Cache the promise for a short TTL (per-path)
+        _recentGetCache.set(k, { exp: Date.now() + _cacheTtlForPath(k), promise: p as Promise<any> })
+        return await p
+      } finally {
+        _inflightGet.delete(k)
+      }
+    }
     let attempt = 0
     const max429 = 2
     let res: Response
@@ -371,20 +465,17 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
       throw new Error(`HTTP ${res.status}: ${body}`)
     }
     if (res.status === 204) {
-      // No Content
       return undefined as unknown as T
     }
-    // Some servers omit content-type or send invalid JSON; be tolerant
     const ct = (res.headers.get('content-type') || '').toLowerCase()
     if (ct.includes('application/json')) {
       try {
         return (await res.json()) as T
       } catch {
-        // Fallback to text parsing if JSON parser fails
         const text = await res.text().catch(() => '')
         const trimmed = (text || '').trim()
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-          try { return JSON.parse(trimmed) as T } catch { /* fall through */ }
+          try { return JSON.parse(trimmed) as T } catch {}
         }
         return undefined as unknown as T
       }
@@ -392,9 +483,8 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
       const text = await res.text().catch(() => '')
       const trimmed = (text || '').trim()
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try { return JSON.parse(trimmed) as T } catch { /* fall through */ }
+        try { return JSON.parse(trimmed) as T } catch {}
       }
-      // Non-JSON or empty body
       return undefined as unknown as T
     }
   } catch (e: any) {
@@ -404,6 +494,7 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
       if (extAborted) { throw e }
       throw new Error('Request timed out')
     }
+    try { _offlineUntil = Date.now() + 1500 } catch {}
     if (aborted && extAborted) {
       try { throw new DOMException('Aborted', 'AbortError') } catch { throw e }
     }

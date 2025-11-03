@@ -4,18 +4,15 @@ const nextConfig = {
   // Use stable option location for typed routes (moved out of experimental)
   typedRoutes: true,
   // Silence workspace root inference warning (point to monorepo root if applicable)
-  outputFileTracingRoot: 'C:\Bayan',
-  // Allow serving dev assets to these origins (silence cross-origin dev warning)
-  // experimental: {
-  //   allowedDevOrigins: [
-  //     'http://localhost:3000',
-  //     'http://:3000',
-  //     'http://172.16.4.121:3000',
-  //     'https://127.0.0.1:3000',
-  //     'http://127.0.0.1:3000',
-  //     'https://172.16.4.121:3000',
-  //   ],
-  // },
+  outputFileTracingRoot: __dirname,
+  experimental: {
+    allowedDevOrigins: [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://172.16.4.120:3000',
+      'http://192.168.31.43:3000',
+    ],
+  },
   async rewrites() {
     const backend = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '')
     if (!backend) return []

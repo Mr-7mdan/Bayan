@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useMemo, useState, useEffect, useCallback } from 'react'
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { navConfig, SidebarGroup, SidebarItem } from '@/config/navigation'
 import { useTheme } from '@/components/providers/ThemeProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
@@ -114,7 +114,16 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
 
   const [counts, setCounts] = useState<SidebarCounts>({ dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0 })
 
+  const lastRunRef = useRef<number>(0)
+  const busyRef = useRef<boolean>(false)
   const loadCounts = useCallback(() => {
+    const w: any = typeof window !== 'undefined' ? window : {} as any
+    if (busyRef.current || w.__sidebarCountsBusy) return
+    const now = Date.now()
+    const last = Math.max((lastRunRef.current || 0), Number(w.__sidebarCountsLastRunMs || 0))
+    if (now - last < 2000) return
+    busyRef.current = true
+    w.__sidebarCountsBusy = true
     const userId = user?.id || 'dev_user'
     Promise.all([
       Api.getSidebarCounts(userId).catch(() => null),
@@ -128,6 +137,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
         alerts: Array.isArray(alerts) ? alerts.length : 0,
       })
     }).catch(() => {})
+    .finally(() => { busyRef.current = false; lastRunRef.current = Date.now(); try { if (typeof window !== 'undefined') { (window as any).__sidebarCountsLastRunMs = Date.now(); (window as any).__sidebarCountsBusy = false } } catch {} })
   }, [user?.id])
 
   useEffect(() => {

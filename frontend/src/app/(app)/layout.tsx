@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useState, useRef } from 'react'
 import { Api, type NotificationOut } from '@/lib/api'
 import { RiCheckLine } from '@remixicon/react'
 import { usePathname, useRouter } from 'next/navigation'
@@ -20,6 +20,8 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
   const [clFrontendVer, setClFrontendVer] = useState<string|undefined>(undefined)
   const [clNotesBackend, setClNotesBackend] = useState<string>('')
   const [clNotesFrontend, setClNotesFrontend] = useState<string>('')
+  const didRunNotifsRef = useRef(false)
+  const didRunUpdatesRef = useRef(false)
 
   useEffect(() => {
     if (loading) return
@@ -32,6 +34,9 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
     let cancelled = false
     async function run() {
       if (!user?.id) return
+      if (didRunNotifsRef.current) return
+      didRunNotifsRef.current = true
+      try { if (typeof window !== 'undefined') { if (window.sessionStorage.getItem('once_notifs') === '1') return; window.sessionStorage.setItem('once_notifs', '1') } } catch {}
       try {
         const items = await Api.getNotifications(user.id)
         if (!cancelled && items && items.length) {
@@ -51,6 +56,9 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
     async function run() {
       try {
         if (!user?.id) return
+        if (didRunUpdatesRef.current) return
+        didRunUpdatesRef.current = true
+        try { if (typeof window !== 'undefined') { if (window.sessionStorage.getItem('once_updates') === '1') return; window.sessionStorage.setItem('once_updates', '1') } } catch {}
         const vers = await Api.updatesVersion()
         const backendV = (vers?.backend || '').trim() || undefined
         const frontendV = (vers?.frontend || '').trim() || undefined

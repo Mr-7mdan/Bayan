@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text } from '@tremor/react'
 import { useAuth } from '@/components/providers/AuthProvider'
@@ -14,7 +14,7 @@ function resolveDefaultApi(): string {
 }
 
 export default function AdminEnvironmentPage() {
-  const { user } = useAuth()
+  const { user, loading } = useAuth() as any
   const router = useRouter()
   const isAdmin = (user?.role || '').toLowerCase() === 'admin'
   const { env, setEnv } = useEnvironment()
@@ -50,8 +50,9 @@ export default function AdminEnvironmentPage() {
   const [issuesErr, setIssuesErr] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!isAdmin) router.replace('/home')
-  }, [isAdmin, router])
+    if (loading) return
+    if (user && !isAdmin) router.replace('/home')
+  }, [loading, user, isAdmin, router])
 
   useEffect(() => {
     try {
@@ -109,8 +110,12 @@ export default function AdminEnvironmentPage() {
     } finally { setPromoteBusy(null) }
   }
 
+  const didRunAiRef = useRef(false)
   useEffect(() => {
-    (async () => {
+    if (didRunAiRef.current) return
+    try { if (typeof window !== 'undefined') { if (window.sessionStorage.getItem('once_ai_config') === '1') return; window.sessionStorage.setItem('once_ai_config', '1') } } catch {}
+    didRunAiRef.current = true
+    ;(async () => {
       try {
         const cfg = await Api.getAiConfig()
         setServerHasKey(!!cfg?.hasKey)
@@ -121,20 +126,7 @@ export default function AdminEnvironmentPage() {
     })()
   }, [])
 
-  // Load server branding on mount and hydrate environment for single source of truth
-  useEffect(() => {
-    (async () => {
-      try {
-        const b = await Api.getBranding()
-        const patch: any = {}
-        if ((b.orgName || '').trim()) patch.orgName = b.orgName
-        if ((b.logoLight || '').trim()) patch.orgLogoLight = b.logoLight
-        if ((b.logoDark || '').trim()) patch.orgLogoDark = b.logoDark
-        if ((b.favicon || '').trim()) patch.favicon = b.favicon
-        if (Object.keys(patch).length) setEnv(patch)
-      } catch {}
-    })()
-  }, [])
+  // Branding is already loaded by EnvironmentProvider; this panel reads and optionally saves.
 
   const onSave = () => {
     try {
@@ -269,12 +261,12 @@ export default function AdminEnvironmentPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="text-sm block">Current effective API base
-                  <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={effectiveApi} readOnly />
+                  <input name="effective_api_base" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={effectiveApi} readOnly autoComplete="off" />
                 </label>
               </div>
               <div>
                 <label className="text-sm block">Override API base (optional)
-                  <input placeholder="https://api.example.com/api" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={apiOverride} onChange={(e) => setApiOverride(e.target.value)} />
+                  <input name="api_base_override" placeholder="https://api.example.com/api" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={apiOverride} onChange={(e) => setApiOverride(e.target.value)} autoComplete="url" />
                 </label>
               </div>
             </div>
@@ -345,62 +337,71 @@ export default function AdminEnvironmentPage() {
           {/* AI Features */}
           <section className="rounded-md border p-3 bg-[hsl(var(--card))]">
             <h3 className="text-sm font-semibold mb-2">AI Features</h3>
-            <p className="text-xs text-muted-foreground mb-3">Configure the AI provider, model, and API key. Defaults to Gemini Flash. Keys can be saved securely on the server.</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <label className="text-sm block">Provider
-                <select
-                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  value={env.aiProvider || 'gemini'}
-                  onChange={(e)=> setEnv({ aiProvider: e.target.value as any })}
-                >
-                  <option value="gemini">Gemini</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="mistral">Mistral</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="openrouter">OpenRouter</option>
-                </select>
-              </label>
-              <label className="text-sm block">Model
-                <input
-                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  placeholder={env.aiProvider === 'gemini' ? 'gemini-1.5-flash' : env.aiProvider === 'openai' ? 'gpt-4o-mini' : 'mistral-small'}
-                  value={env.aiModel || ''}
-                  onChange={(e)=> setEnv({ aiModel: e.target.value })}
-                />
-              </label>
-              <label className="text-sm block">API Key
-                <input
-                  type="password"
-                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  placeholder="Enter API key"
-                  value={env.aiApiKey || ''}
-                  onChange={(e)=> setEnv({ aiApiKey: e.target.value })}
-                />
-              </label>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-              <label className="text-sm block">AI Base URL (optional)
-                <input
-                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  placeholder={env.aiProvider === 'openai' ? 'https://api.openai.com/v1' : env.aiProvider === 'mistral' ? 'https://api.mistral.ai/v1' : env.aiProvider === 'anthropic' ? 'https://api.anthropic.com/v1' : env.aiProvider === 'openrouter' ? 'https://openrouter.ai/api/v1' : ''}
-                  value={env.aiBaseUrl || ''}
-                  onChange={(e)=> setEnv({ aiBaseUrl: e.target.value })}
-                />
-              </label>
-              <label className="text-sm block">Server Base URL
-                <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={serverBaseUrl} readOnly />
-              </label>
-            </div>
-            <div className="mt-2 text-[11px] text-muted-foreground">Server key: {serverHasKey ? 'set' : 'not set'}</div>
-            <div className="mt-3 flex items-center gap-2">
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={testingAI} onClick={onTestAI}>{testingAI ? 'Testing…' : 'Test endpoint'}</button>
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingAI} onClick={() => saveAiToServer(false)}>{savingAI ? 'Saving…' : 'Save to server'}</button>
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingAI} onClick={() => saveAiToServer(true)}>Clear server key</button>
-              {aiMsg && <span className="text-xs text-emerald-600">{aiMsg}</span>}
-              {aiErr && <span className="text-xs text-rose-600">{aiErr}</span>}
-              {aiSaveMsg && <span className="text-xs text-emerald-600">{aiSaveMsg}</span>}
-              {aiSaveErr && <span className="text-xs text-rose-600">{aiSaveErr}</span>}
-            </div>
+            <form onSubmit={(e)=>{e.preventDefault()}}>
+              <p className="text-xs text-muted-foreground mb-3">Configure the AI provider, model, and API key. Defaults to Gemini Flash. Keys can be saved securely on the server.</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="text-sm block">Provider
+                  <select
+                    name="ai_provider"
+                    className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
+                    value={env.aiProvider || 'gemini'}
+                    onChange={(e)=> setEnv({ aiProvider: e.target.value as any })}
+                  >
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="mistral">Mistral</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openrouter">OpenRouter</option>
+                  </select>
+                </label>
+                <label className="text-sm block">Model
+                  <input
+                    name="ai_model"
+                    className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
+                    placeholder={env.aiProvider === 'gemini' ? 'gemini-1.5-flash' : env.aiProvider === 'openai' ? 'gpt-4o-mini' : 'mistral-small'}
+                    value={env.aiModel || ''}
+                    onChange={(e)=> setEnv({ aiModel: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="text-sm block">API Key
+                  <input
+                    name="ai_api_key"
+                    type="password"
+                    className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
+                    placeholder="Enter API key"
+                    value={env.aiApiKey || ''}
+                    onChange={(e)=> setEnv({ aiApiKey: e.target.value })}
+                    autoComplete="new-password"
+                  />
+                </label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                <label className="text-sm block">AI Base URL (optional)
+                  <input
+                    name="ai_base_url"
+                    className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
+                    placeholder={env.aiProvider === 'openai' ? 'https://api.openai.com/v1' : env.aiProvider === 'mistral' ? 'https://api.mistral.ai/v1' : env.aiProvider === 'anthropic' ? 'https://api.anthropic.com/v1' : env.aiProvider === 'openrouter' ? 'https://openrouter.ai/api/v1' : ''}
+                    value={env.aiBaseUrl || ''}
+                    onChange={(e)=> setEnv({ aiBaseUrl: e.target.value })}
+                    autoComplete="url"
+                  />
+                </label>
+                <label className="text-sm block">Server Base URL
+                  <input name="ai_server_base_url" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={serverBaseUrl} readOnly autoComplete="off" />
+                </label>
+              </div>
+              <div className="mt-2 text-[11px] text-muted-foreground">Server key: {serverHasKey ? 'set' : 'not set'}</div>
+              <div className="mt-3 flex items-center gap-2">
+                <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={testingAI} onClick={onTestAI}>{testingAI ? 'Testing…' : 'Test endpoint'}</button>
+                <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingAI} onClick={() => saveAiToServer(false)}>{savingAI ? 'Saving…' : 'Save to server'}</button>
+                <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingAI} onClick={() => saveAiToServer(true)}>Clear server key</button>
+                {aiMsg && <span className="text-xs text-emerald-600">{aiMsg}</span>}
+                {aiErr && <span className="text-xs text-rose-600">{aiErr}</span>}
+                {aiSaveMsg && <span className="text-xs text-emerald-600">{aiSaveMsg}</span>}
+                {aiSaveErr && <span className="text-xs text-rose-600">{aiSaveErr}</span>}
+              </div>
+            </form>
           </section>
           {/* Branding */}
           <section className="rounded-md border p-3 bg-[hsl(var(--card))]">
@@ -409,34 +410,42 @@ export default function AdminEnvironmentPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="text-sm block">Organization Name
                 <input
+                  name="org_name"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   placeholder="e.g., Bayan Holdings"
                   value={env.orgName || ''}
                   onChange={(e)=> setEnv({ orgName: e.target.value })}
+                  autoComplete="organization"
                 />
               </label>
               <label className="text-sm block">Favicon URL
                 <input
+                  name="org_favicon"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   placeholder="/favicon.svg"
                   value={env.favicon || ''}
                   onChange={(e)=> setEnv({ favicon: e.target.value })}
+                  autoComplete="url"
                 />
               </label>
               <label className="text-sm block">Light mode logo URL
                 <input
+                  name="org_logo_light"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   placeholder="/logo.svg"
                   value={env.orgLogoLight || ''}
                   onChange={(e)=> setEnv({ orgLogoLight: e.target.value })}
+                  autoComplete="url"
                 />
               </label>
               <label className="text-sm block">Dark mode logo URL
                 <input
+                  name="org_logo_dark"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   placeholder="/logo-dark.svg"
                   value={env.orgLogoDark || ''}
                   onChange={(e)=> setEnv({ orgLogoDark: e.target.value })}
+                  autoComplete="url"
                 />
               </label>
             </div>
@@ -462,10 +471,10 @@ export default function AdminEnvironmentPage() {
             <h3 className="text-sm font-semibold mb-2">Frontend</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="text-sm block">Current origin
-                <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={frontendOrigin} readOnly />
+                <input name="frontend_origin" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={frontendOrigin} readOnly autoComplete="off" />
               </label>
               <label className="text-sm block">Port (info)
-                <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={frontendPort} readOnly />
+                <input name="frontend_port" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={frontendPort} readOnly autoComplete="off" />
               </label>
             </div>
             <p className="text-xs text-muted-foreground mt-2">To change the frontend port, restart Next.js with a different port (e.g. <code>next dev -p 3001</code>). This panel only displays the current port.</p>
@@ -475,14 +484,16 @@ export default function AdminEnvironmentPage() {
             <h3 className="text-sm font-semibold mb-2">Public Links</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="text-sm block">Effective public domain
-                <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={effectivePublicDomain} readOnly />
+                <input name="effective_public_domain" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={effectivePublicDomain} readOnly autoComplete="off" />
               </label>
               <label className="text-sm block">Override public domain (optional)
                 <input
+                  name="public_domain_override"
                   placeholder={defaultPublicDomain || 'https://example.com'}
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   value={env.publicDomain || ''}
                   onChange={(e)=> setEnv({ publicDomain: e.target.value.replace(/\/$/, '') })}
+                  autoComplete="url"
                 />
               </label>
             </div>
@@ -498,6 +509,7 @@ export default function AdminEnvironmentPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <label className="text-sm block">Reporting mode
                 <select
+                  name="bug_report_mode"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   value={env.bugReportMode || 'auto'}
                   onChange={(e)=> setEnv({ bugReportMode: e.target.value as any })}
