@@ -12,7 +12,7 @@ if "%WORKERS%"=="" set WORKERS=1
 if "%RUN_SCHEDULER%"=="" set RUN_SCHEDULER=1
 if "%HOT_RELOAD%"=="1" (
   echo [watch] uvicorn --reload enabled
-  venv\Scripts\python.exe -m uvicorn app.main:app --host %HOST% --port %PORT% --workers %WORKERS% --reload
+  venv\Scripts\python.exe -m uvicorn app.main:app --host %HOST% --port %PORT% --workers %WORKERS% --reload --log-level warning --no-access-log
 ) else (
-  venv\Scripts\python.exe -m uvicorn app.main:app --host %HOST% --port %PORT% --workers %WORKERS%
+  venv\Scripts\python.exe -m uvicorn app.main:app --host %HOST% --port %PORT% --workers %WORKERS% --log-level warning --no-access-log
 )

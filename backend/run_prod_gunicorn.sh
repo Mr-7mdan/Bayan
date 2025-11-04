@@ -76,6 +76,8 @@ fi
 
 # Start Gunicorn with Uvicorn workers (ASGI)
 HOT_RELOAD="${HOT_RELOAD:-0}"
+# Disable access logs to prevent log bloat (or use /dev/null)
+# Only errors/warnings will be logged
 BASE_CMD=(gunicorn app.main:app \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind "${HOST}:${PORT}" \
@@ -85,9 +87,9 @@ BASE_CMD=(gunicorn app.main:app \
   --graceful-timeout "${GRACEFUL_TIMEOUT}" \
   --max-requests "${MAX_REQUESTS}" \
   --max-requests-jitter "${MAX_REQUESTS_JITTER}" \
-  --access-logfile '-' \
+  --access-logfile /dev/null \
   --error-logfile '-' \
-  --log-level "${LOG_LEVEL}")
+  --log-level warning)
 
 if [ "${HOT_RELOAD}" = "1" ]; then
   if command -v watchmedo >/dev/null 2>&1; then
