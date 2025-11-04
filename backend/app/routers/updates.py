@@ -288,8 +288,8 @@ def _copy_overlay(src: Path, dst: Path, ignore_names: Optional[set[str]] = None)
         if name in ignore:
             continue
         if p.is_dir():
-            if name in {"venv", ".data", "logs", "__pycache__"}:
-                continue
+            # Only skip if explicitly in ignore list (removed hardcoded blacklist)
+            # The caller should specify what to ignore via ignore_names parameter
             shutil.copytree(p, dst / name, dirs_exist_ok=True)
         else:
             shutil.copy2(p, dst / name)
@@ -422,9 +422,11 @@ async def promote_update(
         if os.name == 'nt' and restart:
             _run_nssm(['stop', 'BayanAPIUvicorn'])
         try:
-            _copy_overlay(current, backend_dir, ignore_names={'.env', '.data', 'logs', 'venv', '__pycache__'})
-        except Exception:
-            pass
+            # Copy all files from release to live backend, preserving user config (.env)
+            # and runtime data (.data, logs, venv)
+            _copy_overlay(current, backend_dir, ignore_names={'.env', '.data', 'logs', 'venv', '__pycache__', 'dist'})
+        except Exception as e:
+            print(f"[WARN] Failed to copy files during promote: {e}", file=sys.stderr)
         # Update APP_VERSION in .env to reflect the promoted version
         try:
             env_file = backend_dir / '.env'
