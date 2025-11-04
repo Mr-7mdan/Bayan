@@ -131,6 +131,10 @@ def _normalize_expr_idents(dialect: str, expr: str, *, numericify: bool = False)
     d = _dialect_name(dialect)
     if d == 'mssql' or not expr:
         return expr
+    
+    # First pass: Apply dialect normalizer for common fixes (bracket syntax, CASE/END spacing)
+    from .sql_dialect_normalizer import auto_normalize
+    expr = auto_normalize(expr, d)
     s = str(expr)
     out: list[str] = []
     i = 0
