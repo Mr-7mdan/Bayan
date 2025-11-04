@@ -425,7 +425,6 @@ def list_sync_tasks(ds_id: str, actorId: str | None = Query(default=None), db: S
     
     # For DuckDB datasources, find tasks by destination path
     is_duckdb = str(ds.type or '').lower().startswith('duckdb')
-    _log.info(f"[list_sync_tasks] ds_id={ds_id}, ds.name={ds.name}, ds.type={ds.type}, is_duckdb={is_duckdb}")
     
     if is_duckdb:
         # Get DuckDB path from connection_encrypted or use active path
@@ -448,10 +447,6 @@ def list_sync_tasks(ds_id: str, actorId: str | None = Query(default=None), db: S
                 tasks.append(t)
     else:
         tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).order_by(SyncTask.created_at.asc()).all()
-    
-    _log.info(f"[list_sync_tasks] Found {len(tasks)} tasks for ds_id={ds_id}")
-    for t in tasks:
-        _log.info(f"  - Task {t.id}: {t.source_table} -> {t.dest_table_name}, scheduleCron={t.schedule_cron}")
     
     return [_task_to_out(db, t) for t in tasks]
 

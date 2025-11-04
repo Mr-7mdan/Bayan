@@ -107,9 +107,22 @@ async def _github_latest_release() -> Dict[str, Any]:
         headers["Authorization"] = f"Bearer {settings.github_token}"
     async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
         # Prefer latest stable, or latest prerelease if channel != stable
-        releases = (await client.get(f"{base}/releases", headers=headers)).json()
+        try:
+            response = await client.get(f"{base}/releases", headers=headers)
+            if response.status_code == 404:
+                raise HTTPException(status_code=502, detail=f"Repository not found: {settings.update_repo_owner}/{settings.update_repo_name}")
+            elif response.status_code == 401:
+                raise HTTPException(status_code=502, detail="GitHub authentication failed - check GITHUB_TOKEN")
+            elif response.status_code == 403:
+                raise HTTPException(status_code=502, detail="GitHub API rate limit exceeded or access denied")
+            elif response.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"GitHub API error: {response.status_code} - {response.text[:200]}")
+            releases = response.json()
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"Failed to reach GitHub API: {str(e)}")
+        
         if not isinstance(releases, list) or not releases:
-            raise HTTPException(status_code=502, detail="No releases found")
+            raise HTTPException(status_code=502, detail="No releases found in repository")
         if (settings.update_channel or "stable").lower() == "stable":
             # first non-prerelease
             for r in releases:
