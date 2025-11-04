@@ -238,15 +238,23 @@ async def apply_update(
     try:
         if dest.suffixes[-2:] == [".tar", ".gz"]:
             import tarfile
+            print(f"[EXTRACT] Extracting {dest} to {sd / 'extracted'}", file=sys.stderr)
             with tarfile.open(dest, "r:gz") as tf:
+                members = tf.getmembers()
+                print(f"[EXTRACT] Archive contains {len(members)} files/dirs", file=sys.stderr)
                 tf.extractall(sd / "extracted")
+                print(f"[EXTRACT] Extraction completed", file=sys.stderr)
         elif dest.suffix == ".zip":
             import zipfile
+            print(f"[EXTRACT] Extracting {dest} to {sd / 'extracted'}", file=sys.stderr)
             with zipfile.ZipFile(dest, 'r') as zf:
+                print(f"[EXTRACT] Archive contains {len(zf.namelist())} files/dirs", file=sys.stderr)
                 zf.extractall(sd / "extracted")
-    except Exception:
-        # Non-fatal
-        pass
+                print(f"[EXTRACT] Extraction completed", file=sys.stderr)
+    except Exception as e:
+        print(f"[ERROR] Failed to extract archive: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
 
     # Persist applied frontend version for display
     if component == "frontend":
@@ -281,18 +289,33 @@ def _copy_tree(src: Path, dst: Path) -> None:
 
 def _copy_overlay(src: Path, dst: Path, ignore_names: Optional[set[str]] = None) -> None:
     import shutil
+    import sys
     ignore = set(ignore_names or set())
     dst.mkdir(parents=True, exist_ok=True)
+    
+    copied_dirs = []
+    copied_files = []
+    skipped = []
+    
     for p in src.iterdir():
         name = p.name
         if name in ignore:
+            skipped.append(name)
             continue
         if p.is_dir():
             # Only skip if explicitly in ignore list (removed hardcoded blacklist)
             # The caller should specify what to ignore via ignore_names parameter
             shutil.copytree(p, dst / name, dirs_exist_ok=True)
+            copied_dirs.append(name)
         else:
             shutil.copy2(p, dst / name)
+            copied_files.append(name)
+    
+    print(f"[COPY_OVERLAY] Source: {src}", file=sys.stderr)
+    print(f"[COPY_OVERLAY] Dest: {dst}", file=sys.stderr)
+    print(f"[COPY_OVERLAY] Copied {len(copied_dirs)} dirs: {copied_dirs[:10]}", file=sys.stderr)
+    print(f"[COPY_OVERLAY] Copied {len(copied_files)} files: {copied_files[:10]}", file=sys.stderr)
+    print(f"[COPY_OVERLAY] Skipped: {skipped}", file=sys.stderr)
 
 
 def _ensure_current_pointer(component_dir: Path, version_dir: Path) -> Path:
@@ -424,9 +447,26 @@ async def promote_update(
         try:
             # Copy all files from release to live backend, preserving user config (.env)
             # and runtime data (.data, logs, venv)
-            _copy_overlay(current, backend_dir, ignore_names={'.env', '.data', 'logs', 'venv', '__pycache__', 'dist'})
+            # On Windows, resolve junction/symlink to actual path before copying
+            source_dir = current
+            if os.name == 'nt' and current.is_symlink():
+                try:
+                    import subprocess
+                    result = subprocess.run(['cmd', '/c', 'dir', '/AL', '/B', str(current.parent)], 
+                                          capture_output=True, text=True, check=True)
+                    # If current is a junction, resolve it
+                    source_dir = target
+                except Exception:
+                    source_dir = target
+            
+            print(f"[UPDATE] Copying from {source_dir} to {backend_dir}", file=sys.stderr)
+            _copy_overlay(source_dir, backend_dir, ignore_names={'.env', '.data', 'logs', 'venv', '__pycache__', 'dist'})
+            print(f"[UPDATE] Copy completed successfully", file=sys.stderr)
         except Exception as e:
-            print(f"[WARN] Failed to copy files during promote: {e}", file=sys.stderr)
+            print(f"[ERROR] Failed to copy files during promote: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            raise HTTPException(status_code=500, detail=f"Failed to copy files: {e}")
         # Update APP_VERSION in .env to reflect the promoted version
         try:
             env_file = backend_dir / '.env'
