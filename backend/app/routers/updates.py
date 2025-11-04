@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -424,6 +425,17 @@ async def promote_update(
             _copy_overlay(current, backend_dir, ignore_names={'.env', '.data', 'logs', 'venv', '__pycache__'})
         except Exception:
             pass
+        # Update APP_VERSION in .env to reflect the promoted version
+        try:
+            env_file = backend_dir / '.env'
+            if env_file.exists():
+                content = env_file.read_text(encoding='utf-8')
+                import re
+                updated = re.sub(r'^APP_VERSION=.*$', f'APP_VERSION={version}', content, flags=re.MULTILINE)
+                if updated != content:
+                    env_file.write_text(updated, encoding='utf-8')
+        except Exception as e:
+            print(f"[WARN] Failed to update APP_VERSION in .env: {e}", file=sys.stderr)
         if os.name == 'nt' and restart:
             restarted = _restart_service_win('BayanAPIUvicorn')
         elif restart:
