@@ -30,6 +30,7 @@ mkdir -p "${STAGE_DIR}"
 
 # Required app code & config
 cp -r app "${STAGE_DIR}/"
+[ -d scripts ] && cp -r scripts "${STAGE_DIR}/"
 [ -f requirements.txt ] && cp requirements.txt "${STAGE_DIR}/"
 [ -f wsgi.py ] && cp wsgi.py "${STAGE_DIR}/"
 [ -f asgi.py ] && cp asgi.py "${STAGE_DIR}/"
