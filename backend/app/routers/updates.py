@@ -103,8 +103,8 @@ async def _github_latest_release() -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="Updates not configured")
     base = f"https://api.github.com/repos/{settings.update_repo_owner}/{settings.update_repo_name}"
     headers = {"Accept": "application/vnd.github+json"}
-    if settings.github_token:
-        headers["Authorization"] = f"Bearer {settings.github_token}"
+    # Do NOT use GITHUB_TOKEN for updates - public releases don't need authentication
+    # (The token is for bug reporting only)
     async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
         # Prefer latest stable, or latest prerelease if channel != stable
         try:
@@ -112,9 +112,9 @@ async def _github_latest_release() -> Dict[str, Any]:
             if response.status_code == 404:
                 raise HTTPException(status_code=502, detail=f"Repository not found: {settings.update_repo_owner}/{settings.update_repo_name}")
             elif response.status_code == 401:
-                raise HTTPException(status_code=502, detail="GitHub authentication failed - check GITHUB_TOKEN")
+                raise HTTPException(status_code=502, detail="GitHub API requires authentication for this repository (it may be private)")
             elif response.status_code == 403:
-                raise HTTPException(status_code=502, detail="GitHub API rate limit exceeded or access denied")
+                raise HTTPException(status_code=502, detail="GitHub API rate limit exceeded or repository access denied")
             elif response.status_code != 200:
                 raise HTTPException(status_code=502, detail=f"GitHub API error: {response.status_code} - {response.text[:200]}")
             releases = response.json()
@@ -146,9 +146,8 @@ async def _download_manifest_for_release(release: Dict[str, Any]) -> tuple[Updat
     url = asset.get("browser_download_url")
     if not url:
         raise HTTPException(status_code=502, detail="Manifest download URL missing")
-    headers = {}
-    if settings.github_token:
-        headers["Authorization"] = f"Bearer {settings.github_token}"
+    # Don't use authentication for public release assets
+    headers = {"Accept": "application/json"}
     async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
         r = await client.get(url, headers=headers, follow_redirects=True)
         if r.status_code != 200:
@@ -190,9 +189,8 @@ def _stage_dir(component: str, version: str) -> Path:
 
 
 async def _download_asset(url: str, dest: Path) -> None:
-    headers = {}
-    if settings.github_token:
-        headers["Authorization"] = f"Bearer {settings.github_token}"
+    # Don't use authentication for public release assets
+    headers = {"Accept": "application/octet-stream"}
     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
         async with client.stream("GET", url, headers=headers, follow_redirects=True) as r:
             if r.status_code != 200:
