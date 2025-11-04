@@ -183,7 +183,10 @@ export default function TableCard({
       if (filters.endDate) {
         const d = new Date(`${filters.endDate}T00:00:00`)
         d.setDate(d.getDate() + 1)
-        base[`${df}__lt`] = d.toISOString().slice(0, 10)
+        const y = d.getFullYear()
+        const m = String(d.getMonth() + 1).padStart(2, '0')
+        const da = String(d.getDate()).padStart(2, '0')
+        base[`${df}__lt`] = `${y}-${m}-${da}`
       }
     }
     const eff: Record<string, any> = { ...base }
@@ -456,7 +459,10 @@ export default function TableCard({
           if (filters.endDate) {
             const d = new Date(`${filters.endDate}T00:00:00`)
             d.setDate(d.getDate() + 1)
-            const nextDay = d.toISOString().slice(0, 10)
+            const y = d.getFullYear()
+            const m = String(d.getMonth() + 1).padStart(2, '0')
+            const da = String(d.getDate()).padStart(2, '0')
+            const nextDay = `${y}-${m}-${da}`
             baseWhere[`${df}__lt`] = nextDay
           }
         }
@@ -1012,9 +1018,10 @@ export default function TableCard({
               const pivotViewTableOptions = { ...options?.table, pivotConfig: { ...cleanCfg, cols: colsWithMetric, vals: ['value'] }, pivotStyle: style }
               const pivotForMatrix = { ...(pivot as any), values: (Array.isArray((pivot as any)?.values) ? (pivot as any).values.map((v: any) => ({ ...v, agg: 'sum' })) : []) }
               const onExport = () => { try { window.dispatchEvent(new CustomEvent('pivot-export-excel', { detail: { widgetId, filename: title } } as any)) } catch {} }
+              const showControls = pivotViewTableOptions?.showControls ?? true // Default to true
               return (
                 <div className="flex-1 min-h-0 overflow-auto">
-                  {!isSnap && (
+                  {!isSnap && showControls && (
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <button

@@ -7,6 +7,7 @@ import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
 import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
 import type { IntrospectResponse as IR } from '@/lib/api'
 import { Select, SelectItem, Card, TextInput } from '@tremor/react'
+import * as Dialog from '@radix-ui/react-dialog'
 
 type Row = {
   table: string
@@ -31,8 +32,10 @@ export default function DataModelPage() {
   const [tasksByDs, setTasksByDs] = useState<Record<string, SyncTaskOut[]>>({})
   const [preview, setPreview] = useState<{ open: boolean; dsId?: string; table?: string }>({ open: false })
   const [adv, setAdv] = useState<{ open: boolean; dsId?: string; dsType?: string; source?: string; schema?: IR }>(() => ({ open: false }))
-  const [dropping, setDropping] = useState<string | null>(null)
   const [pageSize, setPageSize] = useState(8)
+  // Confirmation dialogs
+  const [confirmDeleteTable, setConfirmDeleteTable] = useState<{ open: boolean; dsId?: string; table?: string }>({ open: false })
+  const [confirmDeleteDuck, setConfirmDeleteDuck] = useState<{ open: boolean; duck?: DatasourceOut }>({ open: false })
   const [page, setPage] = useState(0)
   // Local DuckDB management
   const [defaultDsId, setDefaultDsId] = useState<string | null>(null)
@@ -40,6 +43,9 @@ export default function DataModelPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('Local DuckDB')
   const [activeDuckPath, setActiveDuckPath] = useState<string | null>(null)
+  const [activeDuckId, setActiveDuckId] = useState<string | null>(null)
+  // User-selected DuckDB for viewing tables (separate from default)
+  const [viewingDuckId, setViewingDuckId] = useState<string | null>(null)
 
   // Keep defaultDsId in sync with localStorage and custom events
   useEffect(() => {
@@ -100,10 +106,22 @@ export default function DataModelPage() {
         setTasksByDs(tmap)
         // Load default ds id from localStorage (initial)
         try { if (typeof window !== 'undefined') setDefaultDsId((prev)=> prev ?? localStorage.getItem('default_ds_id')) } catch {}
-        // Fetch current global active DuckDB path (admin-only)
+        // Fetch current global active DuckDB (admin-only)
         try {
           const res = await Api.duckActiveGet(user?.id)
-          setActiveDuckPath((res as any)?.path || null)
+          const path = (res as any)?.path || null
+          setActiveDuckPath(path)
+          // Find which datasource matches this path
+          if (path) {
+            const matchingDs = duckOnly.find(d => {
+              const uri = d.connectionUri || ''
+              const extracted = uri.replace(/^duckdb:\/\/\//, '')
+              return path.includes(extracted) || extracted.includes(path)
+            })
+            setActiveDuckId(matchingDs?.id || null)
+          } else {
+            setActiveDuckId(null)
+          }
         } catch {}
       } catch (e: any) {
         if (!stop) setError(String(e?.message || 'Failed to load Data Model'))
@@ -114,12 +132,13 @@ export default function DataModelPage() {
     return () => { stop = true }
   }, [user?.id])
 
-  // Determine which DuckDB is selected for the grid: default id if valid, else first DuckDB
+  // Determine which DuckDB is selected for the grid: user selection, default id if valid, else first DuckDB
   const selectedDuckId = useMemo(() => {
     const ducks = datasources.filter((d) => String(d.type||'').toLowerCase().includes('duckdb'))
+    if (viewingDuckId && ducks.some((d) => d.id === viewingDuckId)) return viewingDuckId
     if (defaultDsId && ducks.some((d) => d.id === defaultDsId)) return defaultDsId
     return (ducks[0]?.id || null)
-  }, [defaultDsId, datasources])
+  }, [viewingDuckId, defaultDsId, datasources])
 
   // Keep columns listing in sync with selected DuckDB
   useEffect(() => {
@@ -135,7 +154,9 @@ export default function DataModelPage() {
           ;(s.tables || []).forEach((t) => { map[t.name] = t.columns || [] })
         })
         setColumnsByTable(map)
-      } catch {}
+      } catch (err) {
+        console.error('[DataModel] Failed to load columns:', err)
+      }
     })()
     return () => { stop = true }
   }, [selectedDuckId])
@@ -197,39 +218,65 @@ export default function DataModelPage() {
             <tbody>
               {datasources.filter(d=>String(d.type||'').toLowerCase().includes('duckdb')).map((d)=>{
                 const isDefault = defaultDsId && d.id === defaultDsId
+                const isViewing = selectedDuckId === d.id
+                const isActiveSync = activeDuckId === d.id
                 return (
-                  <tr key={d.id} className="border-b border-[hsl(var(--border))]">
-                    <td className="px-2 py-1">{d.name}</td>
+                  <tr 
+                    key={d.id} 
+                    className={`border-b border-[hsl(var(--border))] cursor-pointer transition-colors ${
+                      isViewing 
+                        ? 'bg-blue-50 dark:bg-blue-950/20 border-l-4 !border-l-blue-500' 
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-800/30 border-l-4 border-l-transparent'
+                    }`}
+                    onClick={() => setViewingDuckId(d.id)}
+                    title="Click to view tables from this DuckDB"
+                  >
+                    <td className="px-2 py-1">
+                      <div className="flex items-center gap-2">
+                        {isActiveSync && (
+                          <span 
+                            className="inline-block w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" 
+                            title="Active for scheduled syncs"
+                          ></span>
+                        )}
+                        <span className={isViewing ? 'font-semibold' : ''}>{d.name}</span>
+                        {isViewing && <span className="text-xs text-blue-600 dark:text-blue-400">(viewing)</span>}
+                      </div>
+                    </td>
                     <td className="px-2 py-1">{d.type}</td>
                     <td className="px-2 py-1">{isDefault ? 'Yes' : 'No'}</td>
                     <td className="px-2 py-1">
                       <div className="flex items-center gap-2">
                         {!isDefault && (
-                          <button className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]" onClick={()=>{
+                          <button className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]" onClick={(e)=>{
+                            e.stopPropagation()
                             try { if (typeof window !== 'undefined') { localStorage.setItem('default_ds_id', d.id); window.dispatchEvent(new CustomEvent('default-ds-change')); setDefaultDsId(d.id) } } catch {}
                           }}>Make Default</button>
                         )}
-                        <button
-                          className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
-                          title="Use this database for scheduled sync tasks (admin only)"
-                          onClick={async () => {
-                            try {
-                              const res = await Api.duckActiveSet({ datasourceId: d.id }, user?.id)
-                              setActiveDuckPath((res as any)?.path || null)
-                            } catch (e) {
-                              console.error('Set active failed', e)
-                            }
+                        {!isActiveSync && (
+                          <button
+                            className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
+                            title="Use this database for scheduled sync tasks (admin only)"
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              try {
+                                const res = await Api.duckActiveSet({ datasourceId: d.id }, user?.id)
+                                const path = (res as any)?.path || null
+                                setActiveDuckPath(path)
+                                setActiveDuckId(d.id)
+                              } catch (e) {
+                                console.error('Set active failed', e)
+                              }
+                            }}
+                          >Set Active (Sync)</button>
+                        )}
+                        <button 
+                          className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" 
+                          onClick={(e)=>{
+                            e.stopPropagation()
+                            setConfirmDeleteDuck({ open: true, duck: d })
                           }}
-                        >Set Active (Sync)</button>
-                        <button className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" onClick={async()=>{
-                          try {
-                            await Api.deleteDatasource(d.id)
-                            setDatasources((prev)=>prev.filter(x=>x.id!==d.id))
-                            if (defaultDsId === d.id && typeof window !== 'undefined') {
-                              localStorage.removeItem('default_ds_id'); setDefaultDsId(null); try { window.dispatchEvent(new CustomEvent('default-ds-change')) } catch {}
-                            }
-                          } catch {}
-                        }}>Delete</button>
+                        >Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -237,6 +284,15 @@ export default function DataModelPage() {
               })}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="mt-4 mb-2 flex items-center justify-between">
+        <div className="text-sm font-medium">
+          Tables from: <span className="text-blue-600 dark:text-blue-400">{datasources.find(d => d.id === selectedDuckId)?.name || 'No DuckDB selected'}</span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {baseRows.length} table{baseRows.length !== 1 ? 's' : ''}
         </div>
       </div>
 
@@ -312,24 +368,10 @@ export default function DataModelPage() {
                             setAdv({ open: true, dsId: r.datasourceId, dsType: r.datasourceType, source: r.table, schema: schemaOne })
                           }}
                         >Advanced SQL</button>
-                        {dropping === `${r.datasourceId}:${r.table}` ? (
-                          <>
-                            <span className="text-xs text-muted-foreground">Drop?</span>
-                            <button
-                              className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]"
-                              onClick={async () => {
-                                try {
-                                  setDropping(null)
-                                  await Api.dropLocalTable(r.datasourceId, r.table, user?.id)
-                                  setRows((arr) => arr.filter((x) => !(x.datasourceId === r.datasourceId && x.table === r.table)))
-                                } catch {}
-                              }}
-                            >Confirm</button>
-                            <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setDropping(null)}>Cancel</button>
-                          </>
-                        ) : (
-                          <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" onClick={() => setDropping(`${r.datasourceId}:${r.table}`)}>Delete</button>
-                        )}
+                        <button 
+                          className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" 
+                          onClick={() => setConfirmDeleteTable({ open: true, dsId: r.datasourceId, table: r.table })}
+                        >Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -379,6 +421,84 @@ export default function DataModelPage() {
         <AdvancedSqlDialog open={adv.open} onCloseAction={() => setAdv({ open: false })} datasourceId={adv.dsId} dsType={adv.dsType} source={adv.source} schema={adv.schema}
         />
       )}
+
+      {/* Confirm Delete Table Dialog */}
+      <Dialog.Root open={confirmDeleteTable.open} onOpenChange={(open) => setConfirmDeleteTable({ open })}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/40" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-[hsl(var(--card))] p-6 shadow-lg">
+            <Dialog.Title className="text-lg font-semibold mb-2">Delete Table</Dialog.Title>
+            <Dialog.Description className="text-sm text-muted-foreground mb-4">
+              Are you sure you want to delete the table <span className="font-mono font-semibold text-foreground">{confirmDeleteTable.table}</span>? This action cannot be undone.
+            </Dialog.Description>
+            <div className="flex items-center justify-end gap-2">
+              <button 
+                className="px-3 py-1.5 text-sm rounded-md border hover:bg-[hsl(var(--muted))]"
+                onClick={() => setConfirmDeleteTable({ open: false })}
+              >
+                Cancel
+              </button>
+              <button 
+                className="px-3 py-1.5 text-sm rounded-md border bg-red-600 text-white hover:bg-red-700"
+                onClick={async () => {
+                  try {
+                    await Api.dropLocalTable(confirmDeleteTable.dsId!, confirmDeleteTable.table!, user?.id)
+                    setRows((arr) => arr.filter((x) => !(x.datasourceId === confirmDeleteTable.dsId && x.table === confirmDeleteTable.table)))
+                    setConfirmDeleteTable({ open: false })
+                  } catch (err) {
+                    console.error('Failed to delete table:', err)
+                  }
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Confirm Delete DuckDB Dialog */}
+      <Dialog.Root open={confirmDeleteDuck.open} onOpenChange={(open) => setConfirmDeleteDuck({ open })}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/40" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-[hsl(var(--card))] p-6 shadow-lg">
+            <Dialog.Title className="text-lg font-semibold mb-2">Delete DuckDB</Dialog.Title>
+            <Dialog.Description className="text-sm text-muted-foreground mb-4">
+              Are you sure you want to delete the DuckDB datasource <span className="font-semibold text-foreground">{confirmDeleteDuck.duck?.name}</span>? All tables and data will be permanently deleted. This action cannot be undone.
+            </Dialog.Description>
+            <div className="flex items-center justify-end gap-2">
+              <button 
+                className="px-3 py-1.5 text-sm rounded-md border hover:bg-[hsl(var(--muted))]"
+                onClick={() => setConfirmDeleteDuck({ open: false })}
+              >
+                Cancel
+              </button>
+              <button 
+                className="px-3 py-1.5 text-sm rounded-md border bg-red-600 text-white hover:bg-red-700"
+                onClick={async () => {
+                  try {
+                    const duckId = confirmDeleteDuck.duck?.id
+                    if (!duckId) return
+                    await Api.deleteDatasource(duckId)
+                    setDatasources((prev) => prev.filter(x => x.id !== duckId))
+                    if (defaultDsId === duckId && typeof window !== 'undefined') {
+                      localStorage.removeItem('default_ds_id')
+                      setDefaultDsId(null)
+                      try { window.dispatchEvent(new CustomEvent('default-ds-change')) } catch {}
+                    }
+                    if (viewingDuckId === duckId) setViewingDuckId(null)
+                    setConfirmDeleteDuck({ open: false })
+                  } catch (err) {
+                    console.error('Failed to delete DuckDB:', err)
+                  }
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       {/* Create New DuckDB Dialog */}
       {createOpen && (

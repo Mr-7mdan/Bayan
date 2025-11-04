@@ -422,7 +422,37 @@ def list_sync_tasks(ds_id: str, actorId: str | None = Query(default=None), db: S
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
-    tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).order_by(SyncTask.created_at.asc()).all()
+    
+    # For DuckDB datasources, find tasks by destination path
+    is_duckdb = str(ds.type or '').lower().startswith('duckdb')
+    _log.info(f"[list_sync_tasks] ds_id={ds_id}, ds.name={ds.name}, ds.type={ds.type}, is_duckdb={is_duckdb}")
+    
+    if is_duckdb:
+        # Get DuckDB path from connection_encrypted or use active path
+        duck_path = None
+        if ds.connection_encrypted:
+            try:
+                dsn = decrypt_text(ds.connection_encrypted)
+                if dsn:
+                    duck_path = dsn.replace('duckdb:///', '')
+            except Exception:
+                pass
+        if not duck_path:
+            duck_path = get_active_duck_path()
+        
+        all_tasks = db.query(SyncTask).order_by(SyncTask.created_at.asc()).all()
+        tasks = []
+        for t in all_tasks:
+            st = db.query(SyncState).filter(SyncState.task_id == t.id).first()
+            if st and st.last_duck_path and duck_path and duck_path in st.last_duck_path:
+                tasks.append(t)
+    else:
+        tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).order_by(SyncTask.created_at.asc()).all()
+    
+    _log.info(f"[list_sync_tasks] Found {len(tasks)} tasks for ds_id={ds_id}")
+    for t in tasks:
+        _log.info(f"  - Task {t.id}: {t.source_table} -> {t.dest_table_name}, scheduleCron={t.schedule_cron}")
+    
     return [_task_to_out(db, t) for t in tasks]
 
 
@@ -483,7 +513,32 @@ def get_sync_status(ds_id: str, actorId: str | None = Query(default=None), db: S
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
-    tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).all()
+    
+    # For DuckDB datasources, find tasks by destination path
+    is_duckdb = str(ds.type or '').lower().startswith('duckdb')
+    
+    if is_duckdb:
+        # Get DuckDB path from connection_encrypted or use active path
+        duck_path = None
+        if ds.connection_encrypted:
+            try:
+                dsn = decrypt_text(ds.connection_encrypted)
+                if dsn:
+                    duck_path = dsn.replace('duckdb:///', '')
+            except Exception:
+                pass
+        if not duck_path:
+            duck_path = get_active_duck_path()
+        
+        all_tasks = db.query(SyncTask).all()
+        tasks = []
+        for t in all_tasks:
+            st = db.query(SyncState).filter(SyncState.task_id == t.id).first()
+            if st and st.last_duck_path and duck_path and duck_path in st.last_duck_path:
+                tasks.append(t)
+    else:
+        tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).all()
+    
     return [_task_to_out(db, t) for t in tasks]
 
 
@@ -1001,9 +1056,37 @@ def local_stats(ds_id: str, db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    # Determine per-task DuckDB paths (last used), defaulting to current active
-    tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).all()
-    states_by_task: dict[str, SyncState | None] = { t.id: db.query(SyncState).filter(SyncState.task_id == t.id).first() for t in tasks }
+    
+    # For DuckDB datasources, find tasks by destination path, not source datasource_id
+    is_duckdb = str(ds.type or '').lower().startswith('duckdb')
+    
+    if is_duckdb:
+        # Get DuckDB path from connection_encrypted or use active path
+        duck_path = None
+        if ds.connection_encrypted:
+            try:
+                dsn = decrypt_text(ds.connection_encrypted)
+                if dsn:
+                    duck_path = dsn.replace('duckdb:///', '')
+            except Exception:
+                pass
+        if not duck_path:
+            duck_path = get_active_duck_path()
+        
+        # Find all tasks that write to this DuckDB (via their last_duck_path)
+        all_tasks = db.query(SyncTask).all()
+        all_states = {t.id: db.query(SyncState).filter(SyncState.task_id == t.id).first() for t in all_tasks}
+        # Filter tasks that wrote to this specific DuckDB path
+        tasks = []
+        for t in all_tasks:
+            st = all_states.get(t.id)
+            if st and st.last_duck_path and duck_path and duck_path in st.last_duck_path:
+                tasks.append(t)
+        states_by_task = {t.id: all_states[t.id] for t in tasks}
+    else:
+        # For non-DuckDB datasources, use the original logic
+        tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).all()
+        states_by_task: dict[str, SyncState | None] = { t.id: db.query(SyncState).filter(SyncState.task_id == t.id).first() for t in tasks }
     paths = []
     for t in tasks:
         st = states_by_task.get(t.id)
@@ -1028,27 +1111,54 @@ def local_stats(ds_id: str, db: Session = Depends(get_db)):
     try:
         def _q_duck(name: str) -> str:
             return '"' + str(name).replace('"', '""') + '"'
-        # Query row counts per task using its recorded path
+        
+        # Get all tables from the DuckDB file directly
+        path_to_query = header_path or get_active_duck_path()
+        all_tables_in_duck: dict[str, dict] = {}  # table_name -> {row_count, ...}
+        
+        try:
+            with open_duck_native(path_to_query) as conn:
+                # Query information_schema to get all tables
+                result = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()
+                for row in result:
+                    table_name = row[0]
+                    try:
+                        count_row = conn.execute(f"SELECT COUNT(*) FROM {_q_duck(table_name)}").fetchone()
+                        row_count = int(count_row[0]) if count_row else 0
+                    except Exception:
+                        row_count = None
+                    all_tables_in_duck[table_name] = {
+                        'row_count': row_count,
+                        'datasource_id': ds_id
+                    }
+        except Exception as e:
+            # If we can't query DuckDB directly, fall back to task-based approach
+            pass
+        
+        # Also include task info for tables that have sync tasks
+        task_info: dict[str, dict] = {}  # table_name -> {lastSyncAt, sourceSchema, sourceTable}
         for t in tasks:
             st = states_by_task.get(t.id)
-            p = (st.last_duck_path if st and st.last_duck_path else None) or get_active_duck_path()
-            row_count = None
-            try:
-                with open_duck_native(p) as conn:
-                    row = conn.execute(f"SELECT COUNT(*) FROM {_q_duck(t.dest_table_name)}").fetchone()
-                    row_count = int(row[0]) if row else 0
-            except Exception:
-                row_count = None
+            task_info[t.dest_table_name] = {
+                'lastSyncAt': (st.last_run_at if st else None),
+                'sourceSchema': t.source_schema,
+                'sourceTable': t.source_table,
+            }
+        
+        # Combine: all tables from DuckDB + task info where available
+        for table_name, table_data in all_tables_in_duck.items():
+            task_data = task_info.get(table_name, {})
             out.append(
                 LocalTableStat(
-                    table=t.dest_table_name,
-                    rowCount=row_count,
-                    lastSyncAt=(st.last_run_at if st else None),
-                    datasourceId=t.datasource_id,
-                    sourceSchema=t.source_schema,
-                    sourceTable=t.source_table,
+                    table=table_name,
+                    rowCount=table_data.get('row_count'),
+                    lastSyncAt=task_data.get('lastSyncAt'),
+                    datasourceId=ds_id,
+                    sourceSchema=task_data.get('sourceSchema'),
+                    sourceTable=task_data.get('sourceTable'),
                 )
             )
+        
         return LocalStatsResponse(enginePath=header_path or get_active_duck_path(), fileSize=int(file_size), tables=out)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Local stats failed: {e}")

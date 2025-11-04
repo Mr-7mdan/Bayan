@@ -58,6 +58,13 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
   const [insertAsNumber, setInsertAsNumber] = useState<boolean>(false)
   const [colFilter, setColFilter] = useState<string>('')
   const insertSinkRef = useRef<((txt: string) => void) | null>(null)
+  // Fallback datasource selection when missing
+  const [dsIdLocal, setDsIdLocal] = useState<string | undefined>(undefined)
+  const [dsList, setDsList] = useState<Array<{ id: string; name: string; type?: string }>>([])
+  const effectiveDsId = useMemo(() => {
+    const fromProp = (datasourceId || '').trim()
+    return fromProp ? fromProp : (dsIdLocal || undefined)
+  }, [datasourceId, dsIdLocal])
   // Editing states for prefilled builders
   const [editingCustomIndex, setEditingCustomIndex] = useState<number | null>(null)
   const [initialCustom, setInitialCustom] = useState<any | undefined>(undefined)
@@ -78,7 +85,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
       if (!src || !sc) return [] as string[]
       const parts = src.split('.')
       const tbl = parts.pop() as string
-      const sch = parts.join('.')
+      const sch = parts.join('.') || 'main'  // Default to 'main' schema if no schema prefix
       const schNode = (sc.schemas || []).find(s => s.name === sch)
       const tblNode = schNode?.tables.find(t => t.name === tbl)
       return (tblNode?.columns || []).map(c => c.name)
@@ -146,13 +153,27 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
       try {
         if (!open) return
         if (schemaLocal) return
-        const sc = await (datasourceId ? Api.introspect(datasourceId, ac.signal) : Api.introspectLocal(ac.signal))
+        const sc = await (effectiveDsId ? Api.introspect(effectiveDsId, ac.signal) : Api.introspectLocal(ac.signal))
         if (!ac.signal.aborted) setSchemaLocal(sc as any)
       } catch {}
     }
     run()
     return () => { try { ac.abort() } catch {} }
-  }, [open, datasourceId, schemaLocal])
+  }, [open, effectiveDsId, schemaLocal])
+
+  // Load datasources list when needed for fallback selection
+  useEffect(() => {
+    let stop = false
+    ;(async () => {
+      try {
+        if (!open) return
+        if (effectiveDsId) return
+        const list = await Api.listDatasources()
+        if (!stop) setDsList(Array.isArray(list) ? list.map((d:any)=>({ id: d.id, name: d.name, type: d.type })) : [])
+      } catch {}
+    })()
+    return () => { stop = true }
+  }, [open, effectiveDsId])
 
   // load transforms on open
   useEffect(() => {
@@ -304,7 +325,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
   }, [editJson])
 
   const isDirty = useMemo(() => (baselineJson || '') !== (editJson || ''), [baselineJson, editJson])
-  const canSave = useMemo(() => !!datasourceId && !!editJson && !jsonError && isDirty, [datasourceId, editJson, jsonError, isDirty])
+  const canSave = useMemo(() => !!effectiveDsId && !!editJson && !jsonError && isDirty, [effectiveDsId, editJson, jsonError, isDirty])
 
   // Helpers to show and mutate current items without manual JSON editing
   const parsedModel = useMemo(() => {
@@ -354,7 +375,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
   // (Insert tab removed)
 
   async function runPreview() {
-    if (!datasourceId) return
+    if (!effectiveDsId) return
     if (jsonError) return
     const parsed = JSON.parse(editJson || '{}') as DatasourceTransforms
     setPvLoading(true); setError(undefined)
@@ -369,7 +390,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
         limit: 50,
         context: widgetId ? { widgetId } : undefined,
       }
-      const res = await Api.previewDatasourceTransforms(datasourceId, payload)
+      const res = await Api.previewDatasourceTransforms(effectiveDsId, payload)
       setPvSql(String(res?.sql || ''))
       setPvCols((res?.columns as any) || [])
       setPvRows((res?.rows as any) || [])
@@ -443,7 +464,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
           </div>
           <div className="mt-2 flex items-center justify-end gap-2">
             <button className={`px-2 py-0.5 rounded-md border ${saving? 'opacity-60 cursor-not-allowed' : 'bg-[hsl(var(--btn3))] text-black'}`} disabled={!!jsonPanelError || saving} onClick={async () => {
-              if (!datasourceId) return
+              if (!effectiveDsId) return
               try {
                 const parsed = JSON.parse(editJson || '{}') as DatasourceTransforms
                 const payload: DatasourceTransforms = {
@@ -456,7 +477,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                 setEditJson(JSON.stringify(payload, null, 2))
                 // Save immediately
                 setSaving(true); setError(undefined)
-                await Api.saveDatasourceTransforms(datasourceId, payload)
+                await Api.saveDatasourceTransforms(effectiveDsId, payload)
                 setModel(payload)
                 setBaselineJson(JSON.stringify(payload, null, 2))
               } catch (e:any) {
@@ -472,10 +493,26 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
         <div className="flex items-center justify-between mb-3">
           <div>
             <div className="text-sm font-medium">SQL Advanced Mode</div>
-            <div className="text-[11px] text-muted-foreground">Datasource: <span className="font-mono">{datasourceId || 'none'}</span> · Type: {dsType || 'unknown'}</div>
+            <div className="text-[11px] text-muted-foreground">Datasource: <span className="font-mono">{effectiveDsId || 'none'}</span> · Type: {dsType || 'unknown'}</div>
           </div>
           <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>✕</button>
         </div>
+
+        {!effectiveDsId && (
+          <div className="mb-3 rounded-md border p-2 bg-[hsl(var(--secondary))]">
+            <div className="text-[11px] mb-1">Select a datasource to enable Advanced SQL</div>
+            <select
+              className="text-xs px-2 py-1.5 rounded-md border bg-background"
+              value={dsIdLocal || ''}
+              onChange={(e)=> setDsIdLocal(e.target.value || undefined)}
+            >
+              <option value="">— Select datasource —</option>
+              {dsList.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}{d.type ? ` (${d.type})` : ''}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="flex items-center gap-2 mb-3 relative">
           {/* Left chevron to toggle JSON viewer */}
@@ -874,7 +911,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                 <button
                   className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
                   onClick={() => runPreview()}
-                  disabled={!datasourceId || !source || pvLoading || !!jsonError}
+                  disabled={!effectiveDsId || !source || pvLoading || !!jsonError}
                 >{pvLoading ? 'Running…' : 'Run Preview'}</button>
               </div>
               {!source && <div className="text-[11px] text-amber-600">Select a source table in the Data section to enable preview.</div>}
@@ -986,22 +1023,22 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
             className={`text-xs px-3 py-1.5 rounded-md border ${canSave ? 'bg-[hsl(var(--btn3))] text-black' : 'opacity-60 cursor-not-allowed'}`}
             disabled={!canSave || saving}
             onClick={async () => {
-              if (!datasourceId) return
+              if (!effectiveDsId) return
               setSaving(true); setError(undefined)
               try {
-                const parsed = JSON.parse(editJson || '{}') as DatasourceTransforms
+                const parsed = JSON.parse(editJson || '{}') as any
                 const payload: DatasourceTransforms = {
                   customColumns: Array.isArray(parsed?.customColumns) ? parsed.customColumns : [],
                   transforms: Array.isArray(parsed?.transforms) ? parsed.transforms : [],
                   joins: Array.isArray(parsed?.joins) ? parsed.joins : [],
                   ...(parsed?.defaults ? { defaults: parsed.defaults } : {}),
                 }
-                await Api.saveDatasourceTransforms(datasourceId, payload)
+                await Api.saveDatasourceTransforms(effectiveDsId, payload)
                 setModel(payload)
                 setBaselineJson(JSON.stringify(payload, null, 2))
                 try {
                   if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('datasource-transforms-saved', { detail: { datasourceId } }))
+                    window.dispatchEvent(new CustomEvent('datasource-transforms-saved', { detail: { datasourceId: effectiveDsId } }))
                   }
                 } catch {}
                 onCloseAction()
@@ -1011,7 +1048,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                 setSaving(false)
               }
             }}
-            title={!datasourceId ? 'Select a datasource first' : ''}
+            title={!effectiveDsId ? 'Select a datasource first' : ''}
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

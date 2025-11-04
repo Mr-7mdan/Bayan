@@ -258,7 +258,10 @@ export default function AgTable({
           }
           const dt = (d instanceof Date) ? d : new Date(d)
           if (isNaN(dt.getTime())) return null
-          return dt.toISOString().slice(0, 10)
+          const y = dt.getFullYear()
+          const m = String(dt.getMonth() + 1).padStart(2, '0')
+          const da = String(dt.getDate()).padStart(2, '0')
+          return `${y}-${m}-${da}`
         } catch { return null }
       }
       const addDateRange = (field: string, from?: any, to?: any) => {
@@ -266,7 +269,7 @@ export default function AgTable({
         const b = toYmd(to)
         if (a) where[`${field}__gte`] = a
         if (b) {
-          const d = new Date(`${b}T00:00:00`); if (!isNaN(d.getTime())) { d.setDate(d.getDate() + 1); where[`${field}__lt`] = d.toISOString().slice(0, 10) }
+          const d = new Date(`${b}T00:00:00`); if (!isNaN(d.getTime())) { d.setDate(d.getDate() + 1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); where[`${field}__lt`] = `${y}-${m}-${da}` }
         }
       }
       const entries = Object.entries(model)

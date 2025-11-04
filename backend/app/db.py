@@ -1076,92 +1076,104 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
     q_source = _compose_table_name(source_schema, source_table, src_dialect)
     stg = f"stg_{dest_table}"
     total_rows = 0
+    staging_created = False
     with source_engine.connect() as src, _open_duck_write_conn(duck_engine) as duck:
         # Drop stale staging if exists
         try:
             duck.exec_driver_sql(f"DROP TABLE IF EXISTS {_quote_duck_ident(stg)}")
         except Exception:
             pass
-        # Determine columns to select
-        sel_set = set([c.strip() for c in (select_columns or []) if c and isinstance(c, str)])
-        if len(sel_set) == 0:
-            sel_clause = "*"
-        else:
-            if src_dialect.startswith('mssql'):
-                sel_clause = ", ".join([_quote_ident(c, src_dialect) for c in sorted(sel_set)])
-            else:
-                sel_clause = ", ".join(sorted(sel_set))
-        # Discover columns via a zero-row probe using the same selection
-        if src_dialect.startswith('mssql'):
-            probe = src.execute(text(f"SELECT TOP 0 {sel_clause} FROM {q_source}"))
-        else:
-            probe = src.execute(text(f"SELECT {sel_clause} FROM {q_source} LIMIT 0"))
-        columns = list(probe.keys())
-        # Sample a small batch to infer types for staging table
+        
         try:
-            if src_dialect.startswith('mssql'):
-                sample_sql = text(f"SELECT {sel_clause} FROM {q_source} ORDER BY (SELECT 1) OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY")
-                sample_rows = src.execute(sample_sql, {"lim": 64}).fetchall()
+            # Determine columns to select
+            sel_set = set([c.strip() for c in (select_columns or []) if c and isinstance(c, str)])
+            if len(sel_set) == 0:
+                sel_clause = "*"
             else:
-                sample_sql = text(f"SELECT {sel_clause} FROM {q_source} LIMIT :lim OFFSET :off")
-                sample_rows = src.execute(sample_sql, {"lim": 64, "off": 0}).fetchall()
-        except Exception:
-            sample_rows = []
-        _create_table_typed(duck, stg, columns, [list(r) for r in (sample_rows or [])])
-        # Chunked copy
-        total_rows_source = None
-        try:
-            total_rows_source = src.execute(text(f"SELECT COUNT(*) FROM {q_source}")).scalar()
-            total_rows_source = int(total_rows_source) if total_rows_source is not None else None
-        except Exception:
-            total_rows_source = None
-        # Emit initial progress tick to expose totals early
-        if on_progress:
+                if src_dialect.startswith('mssql'):
+                    sel_clause = ", ".join([_quote_ident(c, src_dialect) for c in sorted(sel_set)])
+                else:
+                    sel_clause = ", ".join(sorted(sel_set))
+            # Discover columns via a zero-row probe using the same selection
+            if src_dialect.startswith('mssql'):
+                probe = src.execute(text(f"SELECT TOP 0 {sel_clause} FROM {q_source}"))
+            else:
+                probe = src.execute(text(f"SELECT {sel_clause} FROM {q_source} LIMIT 0"))
+            columns = list(probe.keys())
+            # Sample a small batch to infer types for staging table
             try:
-                on_progress(0, (int(total_rows_source) if total_rows_source is not None else None))
+                if src_dialect.startswith('mssql'):
+                    sample_sql = text(f"SELECT {sel_clause} FROM {q_source} ORDER BY (SELECT 1) OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY")
+                    sample_rows = src.execute(sample_sql, {"lim": 64}).fetchall()
+                else:
+                    sample_sql = text(f"SELECT {sel_clause} FROM {q_source} LIMIT :lim OFFSET :off")
+                    sample_rows = src.execute(sample_sql, {"lim": 64, "off": 0}).fetchall()
             except Exception:
-                pass
-        offset = 0
-        while True:
-            if should_abort:
-                try:
-                    if should_abort():
-                        return {"row_count": total_rows, "aborted": True}
-                except Exception:
-                    pass
-            if on_phase:
-                try: on_phase('fetch')
-                except Exception: pass
-            if src_dialect.startswith('mssql'):
-                sql = f"SELECT {sel_clause} FROM {q_source} ORDER BY (SELECT 1) OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY"
-            else:
-                sql = f"SELECT {sel_clause} FROM {q_source} LIMIT :lim OFFSET :off"
-            res = src.execute(text(sql), {"lim": int(batch_size), "off": int(offset)})
-            rows = res.fetchall()
-            if not rows:
-                break
-            # Emit progress after fetch, before insert to reflect fetch progress
+                sample_rows = []
+            _create_table_typed(duck, stg, columns, [list(r) for r in (sample_rows or [])])
+            staging_created = True
+            # Chunked copy
+            total_rows_source = None
+            try:
+                total_rows_source = src.execute(text(f"SELECT COUNT(*) FROM {q_source}")).scalar()
+                total_rows_source = int(total_rows_source) if total_rows_source is not None else None
+            except Exception:
+                total_rows_source = None
+            # Emit initial progress tick to expose totals early
             if on_progress:
                 try:
-                    on_progress(int(total_rows + len(rows)), (int(total_rows_source) if total_rows_source is not None else None))
+                    on_progress(0, (int(total_rows_source) if total_rows_source is not None else None))
                 except Exception:
                     pass
-            if on_phase:
-                try: on_phase('insert')
-                except Exception: pass
-            _insert_rows(duck, stg, columns, [list(r) for r in rows])
-            total_rows += len(rows)
-            if should_abort:
+            offset = 0
+            while True:
+                if should_abort:
+                    try:
+                        if should_abort():
+                            return {"row_count": total_rows, "aborted": True}
+                    except Exception:
+                        pass
+                if on_phase:
+                    try: on_phase('fetch')
+                    except Exception: pass
+                if src_dialect.startswith('mssql'):
+                    sql = f"SELECT {sel_clause} FROM {q_source} ORDER BY (SELECT 1) OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY"
+                else:
+                    sql = f"SELECT {sel_clause} FROM {q_source} LIMIT :lim OFFSET :off"
+                res = src.execute(text(sql), {"lim": int(batch_size), "off": int(offset)})
+                rows = res.fetchall()
+                if not rows:
+                    break
+                # Emit progress after fetch, before insert to reflect fetch progress
+                if on_progress:
+                    try:
+                        on_progress(int(total_rows + len(rows)), (int(total_rows_source) if total_rows_source is not None else None))
+                    except Exception:
+                        pass
+                if on_phase:
+                    try: on_phase('insert')
+                    except Exception: pass
+                _insert_rows(duck, stg, columns, [list(r) for r in rows])
+                total_rows += len(rows)
+                if should_abort:
+                    try:
+                        if should_abort():
+                            return {"row_count": total_rows, "aborted": True}
+                    except Exception:
+                        pass
+                if len(rows) < int(batch_size):
+                    break
+                offset += int(batch_size)
+            # Swap
+            if _table_exists(duck, dest_table):
+                duck.exec_driver_sql(f"DROP TABLE {_quote_duck_ident(dest_table)}")
+            duck.exec_driver_sql(f"ALTER TABLE {_quote_duck_ident(stg)} RENAME TO {_quote_duck_ident(dest_table)}")
+            staging_created = False  # Successfully renamed, no cleanup needed
+        finally:
+            # Cleanup: if staging table exists and wasn't renamed, drop it
+            if staging_created:
                 try:
-                    if should_abort():
-                        return {"row_count": total_rows, "aborted": True}
+                    duck.exec_driver_sql(f"DROP TABLE IF EXISTS {_quote_duck_ident(stg)}")
                 except Exception:
                     pass
-            if len(rows) < int(batch_size):
-                break
-            offset += int(batch_size)
-        # Swap
-        if _table_exists(duck, dest_table):
-            duck.exec_driver_sql(f"DROP TABLE {_quote_duck_ident(dest_table)}")
-        duck.exec_driver_sql(f"ALTER TABLE {_quote_duck_ident(stg)} RENAME TO {_quote_duck_ident(dest_table)}")
     return {"row_count": total_rows}

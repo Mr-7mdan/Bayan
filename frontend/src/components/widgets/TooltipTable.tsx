@@ -15,7 +15,7 @@ export type TooltipRow = {
   changeColor?: string
 }
 
-export function TooltipTable({ header, prevLabel, rows }: { header: string; prevLabel?: string; rows: TooltipRow[] }) {
+export function TooltipTable({ header, prevLabel, rows, showDeltas = true }: { header: string; prevLabel?: string; rows: TooltipRow[]; showDeltas?: boolean }) {
   const Arrow = ({ text, color }: { text: string; color?: string }) => {
     const t = String(text || '').trim()
     if (!t) return <RiSubtractLine size={12} style={{ color: color || 'inherit' }} />
@@ -40,7 +40,7 @@ export function TooltipTable({ header, prevLabel, rows }: { header: string; prev
           <span style={{ fontWeight: 400, opacity: 0.8, fontSize: 11 }}> (vs {prevLabel})</span>
         ) : null}
       </div>
-      <table style={{ borderCollapse: 'separate', borderSpacing: '0 2px', minWidth: 320 }}>
+      <table style={{ borderCollapse: 'separate', borderSpacing: '0 2px', minWidth: showDeltas ? 320 : 240 }}>
         <thead>
           <tr>
             <th style={{ textAlign: 'left', padding: '2px 6px' }} />
@@ -48,10 +48,14 @@ export function TooltipTable({ header, prevLabel, rows }: { header: string; prev
             <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Value</th>
             <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Share</th>
             <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Agg</th>
-            <th style={{ width: 8 }} />
-            <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Change</th>
-            <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Delta</th>
-            <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Prev</th>
+            {showDeltas && (
+              <>
+                <th style={{ width: 8 }} />
+                <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Change</th>
+                <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Delta</th>
+                <th style={{ textAlign: 'right', padding: '2px 6px', opacity: 0.85 }}>Prev</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -64,20 +68,24 @@ export function TooltipTable({ header, prevLabel, rows }: { header: string; prev
               <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>{r.valueStr}</td>
               <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>{r.shareStr}</td>
               <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>{r.aggLabel}</td>
-              <td style={{ padding: '2px 6px', verticalAlign: 'middle' }} />
-              <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, lineHeight: 1 }}>
-                  <Arrow text={r.changeStr} color={r.changeColor} />
-                  <span style={{ color: r.changeColor, lineHeight: 1 }}>{r.changeStr}</span>
-                </span>
-              </td>
-              <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, lineHeight: 1 }}>
-                  <Arrow text={r.deltaStr} color={r.changeColor} />
-                  <span style={{ color: r.changeColor, lineHeight: 1 }}>{r.deltaStr}</span>
-                </span>
-              </td>
-              <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>{r.prevStr}</td>
+              {showDeltas && (
+                <>
+                  <td style={{ padding: '2px 6px', verticalAlign: 'middle' }} />
+                  <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, lineHeight: 1 }}>
+                      <Arrow text={r.changeStr} color={r.changeColor} />
+                      <span style={{ color: r.changeColor, lineHeight: 1 }}>{r.changeStr}</span>
+                    </span>
+                  </td>
+                  <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, lineHeight: 1 }}>
+                      <Arrow text={r.deltaStr} color={r.changeColor} />
+                      <span style={{ color: r.changeColor, lineHeight: 1 }}>{r.deltaStr}</span>
+                    </span>
+                  </td>
+                  <td style={{ padding: '2px 6px', verticalAlign: 'middle', textAlign: 'right' }}>{r.prevStr}</td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>

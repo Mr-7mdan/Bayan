@@ -20,6 +20,7 @@ import { compileFormula, parseReferences } from '@/lib/formula'
 import RichTextEditor from '@/components/ui/RichTextEditor'
 import CompositionBuilderModal from '@/components/builder/CompositionBuilderModal'
 import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
+import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
 import * as SchemaCache from '@/lib/schemaCache'
@@ -84,6 +85,7 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
   const [deltaPreviewLoading, setDeltaPreviewLoading] = useState(false)
   const [deltaPreviewError, setDeltaPreviewError] = useState<string | undefined>(undefined)
   const dsQ = useQuery({ queryKey: ['datasources'], queryFn: () => Api.listDatasources(undefined, user?.id) })
+  const toast = useProgressToast()
 
   // Default datasource selection (per-user, saved in localStorage by Data Model page)
   const [defaultDsId, setDefaultDsId] = useState<string | null>(null)
@@ -499,7 +501,64 @@ function StringRuleDetails({ field, where, onPatch }: { field: string; where?: R
   type StrOp = 'contains'|'not_contains'|'eq'|'ne'|'starts_with'|'ends_with'
   const [op, setOp] = useState<StrOp>('contains')
   const [val, setVal] = useState<string>('')
+  const interactedRef = useRef(false)
+  
+  // Hydrate from where on mount/field change
   useEffect(() => {
+    try {
+      const eqArr = (where as any)?.[field]
+      const contains = (where as any)?.[`${field}__contains`]
+      const notcontains = (where as any)?.[`${field}__notcontains`]
+      const startswith = (where as any)?.[`${field}__startswith`]
+      const endswith = (where as any)?.[`${field}__endswith`]
+      const ne = (where as any)?.[`${field}__ne`]
+      
+      if (Array.isArray(eqArr) && eqArr.length === 1) { setOp('eq'); setVal(String(eqArr[0])) }
+      else if (typeof ne === 'string') { setOp('ne'); setVal(ne) }
+      else if (typeof contains === 'string') { setOp('contains'); setVal(contains) }
+      else if (typeof notcontains === 'string') { setOp('not_contains'); setVal(notcontains) }
+      else if (typeof startswith === 'string') { setOp('starts_with'); setVal(startswith) }
+      else if (typeof endswith === 'string') { setOp('ends_with'); setVal(endswith) }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [field])
+  
+  // Reflect external where changes
+  useEffect(() => {
+    try {
+      if (interactedRef.current) return
+      const eqArr = (where as any)?.[field]
+      const contains = (where as any)?.[`${field}__contains`]
+      const notcontains = (where as any)?.[`${field}__notcontains`]
+      const startswith = (where as any)?.[`${field}__startswith`]
+      const endswith = (where as any)?.[`${field}__endswith`]
+      const ne = (where as any)?.[`${field}__ne`]
+      
+      if (Array.isArray(eqArr) && eqArr.length === 1) {
+        if (op !== 'eq') setOp('eq')
+        const v = String(eqArr[0])
+        if (val !== v) setVal(v)
+      } else if (typeof ne === 'string') {
+        if (op !== 'ne') setOp('ne')
+        if (val !== ne) setVal(ne)
+      } else if (typeof contains === 'string') {
+        if (op !== 'contains') setOp('contains')
+        if (val !== contains) setVal(contains)
+      } else if (typeof notcontains === 'string') {
+        if (op !== 'not_contains') setOp('not_contains')
+        if (val !== notcontains) setVal(notcontains)
+      } else if (typeof startswith === 'string') {
+        if (op !== 'starts_with') setOp('starts_with')
+        if (val !== startswith) setVal(startswith)
+      } else if (typeof endswith === 'string') {
+        if (op !== 'ends_with') setOp('ends_with')
+        if (val !== endswith) setVal(endswith)
+      }
+    } catch {}
+  }, [field, (where as any)?.[field], (where as any)?.[`${field}__contains`], (where as any)?.[`${field}__notcontains`], (where as any)?.[`${field}__startswith`], (where as any)?.[`${field}__endswith`], (where as any)?.[`${field}__ne`]])
+  
+  useEffect(() => {
+    if (!interactedRef.current) return
     const patch: Record<string, any> = { [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }
     const v = String(val || '').trim()
     if (!v) { onPatch(patch); return }
@@ -520,7 +579,7 @@ function StringRuleDetails({ field, where, onPatch }: { field: string; where?: R
         <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('contains'); setVal(''); onPatch({ [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
       </div>
       <div className="grid grid-cols-3 gap-2 mt-2 items-center">
-        <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>setOp(e.target.value as StrOp)}>
+        <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{interactedRef.current = true; setOp(e.target.value as StrOp)}}>
           <option value="contains">Contains</option>
           <option value="not_contains">Does not contain</option>
           <option value="eq">Is equal to</option>
@@ -528,7 +587,7 @@ function StringRuleDetails({ field, where, onPatch }: { field: string; where?: R
           <option value="starts_with">Starts with</option>
           <option value="ends_with">Ends with</option>
         </select>
-        <input className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Value" value={val} onChange={(e)=>setVal(e.target.value)} />
+        <input className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Value" value={val} onChange={(e)=>{interactedRef.current = true; setVal(e.target.value)}} />
       </div>
     </div>
   )
@@ -557,27 +616,23 @@ function FilterDetailsTabs({ kind, selField, local, setLocal, updateConfig }: { 
         <button type="button" className={`text-[11px] px-2 py-1 rounded-md border ${tab==='rule'?'bg-[hsl(var(--secondary))]':''}`} onClick={()=>setTabPersist('rule')}>Rule</button>
       </div>
       {tab==='manual' ? (
-        kind === 'string' ? (
-          <FilterEditor
-            field={selField}
-            source={local.querySpec?.source || ''}
-            datasourceId={dsId}
-            values={(local.querySpec?.where as any)?.[selField] as any[]}
-            where={(local.querySpec?.where as any)}
-            onChange={(vals) => {
-              const where = { ...(local.querySpec?.where || {}) as any }
-              const hasVals = Array.isArray(vals) && vals.length > 0
-              if (hasVals) where[selField] = vals
-              else delete where[selField]
-              const next = { ...local, querySpec: { ...(local.querySpec || { source: '' }), where } }
-              setLocal(next)
-              updateConfig(next)
-              try { const patch: Record<string, any> = { [selField]: hasVals ? vals : undefined }; window.dispatchEvent(new CustomEvent('config-where-change', { detail: { widgetId: local.id, patch } } as any)) } catch {}
-            }}
-          />
-        ) : (
-          <div className="text-[11px] text-muted-foreground">Manual selection is not available for this field type.</div>
-        )
+        <FilterEditor
+          field={selField}
+          source={local.querySpec?.source || ''}
+          datasourceId={dsId}
+          values={(local.querySpec?.where as any)?.[selField] as any[]}
+          where={(local.querySpec?.where as any)}
+          onChange={(vals) => {
+            const where = { ...(local.querySpec?.where || {}) as any }
+            const hasVals = Array.isArray(vals) && vals.length > 0
+            if (hasVals) where[selField] = vals
+            else delete where[selField]
+            const next = { ...local, querySpec: { ...(local.querySpec || { source: '' }), where } }
+            setLocal(next)
+            updateConfig(next)
+            try { const patch: Record<string, any> = { [selField]: hasVals ? vals : undefined }; window.dispatchEvent(new CustomEvent('config-where-change', { detail: { widgetId: local.id, patch } } as any)) } catch {}
+          }}
+        />
       ) : (
         kind === 'number' ? (
           <NumberFilterDetails
@@ -671,27 +726,87 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       editTimerRef.current = window.setTimeout(() => { editingRef.current = false }, 600) as any
     }
   }
+  // Hydrate UI state on field change (handles remounts or parent re-renders)
   useEffect(() => {
     try {
-      const raw = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null
-      if (raw) {
-        const st = JSON.parse(raw) as { mode?: Mode; preset?: Preset; op?: CustomOp; a?: string; b?: string }
-        if (st.mode) setMode(st.mode)
-        if (st.preset) setPreset(st.preset)
-        if (st.op) setOp(st.op)
-        if (typeof st.a === 'string') setA(st.a)
-        if (typeof st.b === 'string') setB(st.b)
+      // Prefer hydrating from incoming where if present
+      const gte = (where as any)?.[`${field}__gte`] as string | undefined
+      const lt = (where as any)?.[`${field}__lt`] as string | undefined
+      if (gte || lt) {
+        const presets: Preset[] = ['today','yesterday','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+        const match = presets.find((p) => {
+          const r = rangeForPreset(p)
+          return (r.gte || undefined) === (gte || undefined) && (r.lt || undefined) === (lt || undefined)
+        })
+        if (match) { setMode('preset'); setPreset(match) }
+        else {
+          setMode('custom')
+          if (gte) setA(gte)
+          if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); setB(`${y}-${m}-${da}`) }
+        }
+      } else {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null
+        if (raw) {
+          const st = JSON.parse(raw) as { mode?: Mode; preset?: Preset; op?: CustomOp; a?: string; b?: string }
+          if (st.mode) setMode(st.mode)
+          if (st.preset) setPreset(st.preset)
+          if (st.op) setOp(st.op)
+          if (typeof st.a === 'string') setA(st.a)
+          if (typeof st.b === 'string') setB(st.b)
+        }
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [field])
+  // Persist UI state only after user has interacted (avoid persisting defaults that can override where)
   useEffect(() => {
+    if (!interactedRef.current) return
     try { if (typeof window !== 'undefined') localStorage.setItem(storageKey, JSON.stringify({ mode, preset, op, a, b })) } catch {}
   }, [storageKey, mode, preset, op, a, b])
+  // Reflect external where->UI to prevent defaulting back to Today
+  useEffect(() => {
+    try {
+      const gte = (where as any)?.[`${field}__gte`] as string | undefined
+      const lt = (where as any)?.[`${field}__lt`] as string | undefined
+      if (editingRef.current) return
+      if (!gte && !lt) return
+      const presets: Preset[] = ['today','yesterday','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+      const match = presets.find((p) => {
+        const r = rangeForPreset(p)
+        return (r.gte || undefined) === (gte || undefined) && (r.lt || undefined) === (lt || undefined)
+      })
+      if (match) {
+        if (mode !== 'preset') setMode('preset')
+        if (preset !== match) setPreset(match)
+        return
+      }
+      if (mode !== 'custom') setMode('custom')
+      const hasG = !!gte
+      const hasL = !!lt
+      if (hasG && hasL) {
+        if (op !== 'between') setOp('between')
+        if (a !== (gte || '')) setA(gte || '')
+        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const prev = `${y}-${m}-${da}`; if (b !== prev) setB(prev) } } catch {}
+      } else if (hasG) {
+        if (op !== 'after') setOp('after')
+        if (a !== (gte || '')) setA(gte || '')
+        if (b !== '') setB('')
+      } else if (hasL) {
+        if (op !== 'before') setOp('before')
+        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const prev = `${y}-${m}-${da}`; if (b !== prev) setB(prev) } } catch {}
+        if (a !== '') setA('')
+      }
+    } catch {}
+  }, [field, (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lt`]])
 
   function rangeForPreset(p: Preset): { gte?: string; lt?: string } {
     const now = new Date()
-    const ymd = (d: Date) => d.toISOString().slice(0,10)
+    const ymd = (d: Date) => {
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const da = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${da}`
+    }
     const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
     const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth()+1, 1)
     const quarter = Math.floor(now.getMonth()/3)
@@ -736,10 +851,10 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       patch[`${field}__gte`] = a || undefined
     } else if (op === 'before') {
       // before end-of-day: set lt to next day
-      if (b) { const d = new Date(`${b}T00:00:00`); d.setDate(d.getDate()+1); patch[`${field}__lt`] = d.toISOString().slice(0,10) }
+      if (b) { const d = new Date(`${b}T00:00:00`); d.setDate(d.getDate()+1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); patch[`${field}__lt`] = `${y}-${m}-${da}` }
     } else if (op === 'between') {
       patch[`${field}__gte`] = a || undefined
-      if (b) { const d = new Date(`${b}T00:00:00`); d.setDate(d.getDate()+1); patch[`${field}__lt`] = d.toISOString().slice(0,10) }
+      if (b) { const d = new Date(`${b}T00:00:00`); d.setDate(d.getDate()+1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); patch[`${field}__lt`] = `${y}-${m}-${da}` }
     }
     const sig = JSON.stringify(patch)
     if (sig !== lastSigRef.current) { lastSigRef.current = sig; onPatch(patch) }
@@ -1307,7 +1422,62 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
   const baseSamples = (samplesByField?.[field] || []) as string[]
   // Merge fallback distinct values with existing samples/computed
   const mergedPool = Array.from(new Set<string>([...computedSamples, ...baseSamples, ...extraSamples]))
-  const samples = mergedPool.filter((v) => String(v).toLowerCase().includes(filterQuery.toLowerCase()))
+  
+  // Smart sort: detect if values are numeric or dates for natural ordering
+  const sortedPool = (() => {
+    const pool = [...mergedPool]
+    // Check if mostly numeric
+    const numericCount = pool.filter(v => v !== '' && !isNaN(Number(v))).length
+    if (numericCount >= Math.ceil(pool.length / 2)) {
+      return pool.sort((a, b) => {
+        const na = Number(a), nb = Number(b)
+        if (isNaN(na) && isNaN(nb)) return String(a).localeCompare(String(b))
+        if (isNaN(na)) return 1
+        if (isNaN(nb)) return -1
+        return na - nb
+      })
+    }
+    // Check if mostly dates
+    const dateCount = pool.filter(v => {
+      if (!v || v === '') return false
+      const d = new Date(v)
+      return !isNaN(d.getTime())
+    }).length
+    if (dateCount >= Math.ceil(pool.length / 2)) {
+      return pool.sort((a, b) => {
+        const da = new Date(a), db = new Date(b)
+        const ta = da.getTime(), tb = db.getTime()
+        if (isNaN(ta) && isNaN(tb)) return String(a).localeCompare(String(b))
+        if (isNaN(ta)) return 1
+        if (isNaN(tb)) return -1
+        return ta - tb
+      })
+    }
+    // Default alphabetical
+    return pool.sort((a, b) => String(a).localeCompare(String(b)))
+  })()
+  
+  // Initialize with all values selected when first loading
+  useEffect(() => {
+    if (sortedPool.length > 0 && selected.length === 0 && !values?.length) {
+      const allValues = [...sortedPool]
+      setSelected(allValues)
+      onChange(allValues)
+    }
+  }, [sortedPool.length])
+  
+  const samples = sortedPool.filter((v) => String(v).toLowerCase().includes(filterQuery.toLowerCase()))
+  
+  // Auto-select search results when typing
+  useEffect(() => {
+    if (!filterQuery) return
+    const set = new Set<string>(selected)
+    samples.forEach((v) => set.add(v))
+    const next = Array.from(set.values())
+    setSelected(next)
+    onChange(next)
+  }, [filterQuery])
+  
   const toggle = (v: any) => {
     const exists = selected.some((x) => x === v)
     const next = exists ? selected.filter((x) => x !== v) : [...selected, v]
@@ -1330,8 +1500,15 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
           <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => onChange(selected)}>Apply</button>
         </div>
       </div>
-      <div className="mt-2">
+      <div className="mt-2 space-y-2">
         <input className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" placeholder="Search values" value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} />
+        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>{selected.length} of {mergedPool.length} selected</span>
+          <div className="flex gap-2">
+            <button className="hover:text-foreground" onClick={() => { const next = [...samples]; setSelected(next); onChange(next) }}>Select All</button>
+            <button className="hover:text-foreground" onClick={() => { setSelected([]); onChange([]) }}>Deselect All</button>
+          </div>
+        </div>
       </div>
       <div className="max-h-56 overflow-auto mt-2">
         <ul className="space-y-1">
@@ -1360,10 +1537,12 @@ function NumberFilterDetails({ field, where, onPatch }: { field: string; where?:
   const lte = (where as any)?.[`${field}__lte`] as number | undefined
   const gt = (where as any)?.[`${field}__gt`] as number | undefined
   const lt = (where as any)?.[`${field}__lt`] as number | undefined
+  const ne = (where as any)?.[`${field}__ne`] as number | undefined
   const eqArr = (where as any)?.[field] as number[] | undefined
   const singleEq = (Array.isArray(eqArr) && eqArr.length === 1) ? Number(eqArr[0]) : undefined
   const initial: { op: NumberOp; a?: number | ''; b?: number | '' } = (() => {
     if (typeof singleEq === 'number') return { op: 'eq', a: singleEq }
+    if (typeof ne === 'number') return { op: 'ne', a: ne }
     if (typeof gt === 'number') return { op: 'gt', a: gt }
     if (typeof gte === 'number' && typeof lte === 'number') return { op: 'between', a: gte, b: lte }
     if (typeof gte === 'number') return { op: 'gte', a: gte }
@@ -1374,9 +1553,52 @@ function NumberFilterDetails({ field, where, onPatch }: { field: string; where?:
   const [op, setOp] = useState<NumberOp>(initial.op)
   const [a, setA] = useState<number | ''>(initial.a ?? '')
   const [b, setB] = useState<number | ''>(initial.b ?? '')
+  const interactedRef = useRef(false)
+
+  // Reflect external where changes
+  useEffect(() => {
+    if (interactedRef.current) return
+    const currentGte = (where as any)?.[`${field}__gte`] as number | undefined
+    const currentLte = (where as any)?.[`${field}__lte`] as number | undefined
+    const currentGt = (where as any)?.[`${field}__gt`] as number | undefined
+    const currentLt = (where as any)?.[`${field}__lt`] as number | undefined
+    const currentNe = (where as any)?.[`${field}__ne`] as number | undefined
+    const currentEqArr = (where as any)?.[field] as number[] | undefined
+    const currentEq = (Array.isArray(currentEqArr) && currentEqArr.length === 1) ? Number(currentEqArr[0]) : undefined
+    
+    if (typeof currentEq === 'number') {
+      if (op !== 'eq') setOp('eq')
+      if (a !== currentEq) setA(currentEq)
+      if (b !== '') setB('')
+    } else if (typeof currentNe === 'number') {
+      if (op !== 'ne') setOp('ne')
+      if (a !== currentNe) setA(currentNe)
+      if (b !== '') setB('')
+    } else if (typeof currentGt === 'number') {
+      if (op !== 'gt') setOp('gt')
+      if (a !== currentGt) setA(currentGt)
+      if (b !== '') setB('')
+    } else if (typeof currentGte === 'number' && typeof currentLte === 'number') {
+      if (op !== 'between') setOp('between')
+      if (a !== currentGte) setA(currentGte)
+      if (b !== currentLte) setB(currentLte)
+    } else if (typeof currentGte === 'number') {
+      if (op !== 'gte') setOp('gte')
+      if (a !== currentGte) setA(currentGte)
+      if (b !== '') setB('')
+    } else if (typeof currentLt === 'number') {
+      if (op !== 'lt') setOp('lt')
+      if (a !== currentLt) setA(currentLt)
+      if (b !== '') setB('')
+    } else if (typeof currentLte === 'number') {
+      if (op !== 'lte') setOp('lte')
+      if (a !== currentLte) setA(currentLte)
+      if (b !== '') setB('')
+    }
+  }, [field, (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lte`], (where as any)?.[`${field}__gt`], (where as any)?.[`${field}__lt`], (where as any)?.[`${field}__ne`], JSON.stringify((where as any)?.[field])])
 
   const emit = (nextOp: NumberOp, av: number | '', bv: number | '') => {
-    const patch: Record<string, any> = { [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [field]: undefined }
+    const patch: Record<string, any> = { [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined, [field]: undefined }
     const hasNum = (x: any) => typeof x === 'number' && !isNaN(x)
     switch (nextOp) {
       case 'eq': if (hasNum(av)) patch[field] = [av]; break
@@ -1390,18 +1612,21 @@ function NumberFilterDetails({ field, where, onPatch }: { field: string; where?:
     onPatch(patch)
   }
 
-  useEffect(() => { emit(op, a, b) }, [op, a, b])
+  useEffect(() => {
+    if (!interactedRef.current) return
+    emit(op, a, b)
+  }, [op, a, b])
 
   return (
     <div className="rounded-md border bg-card p-2">
       <div className="flex items-center justify-between">
         <div className="text-xs font-medium">Value filter: {field}</div>
         <div className="flex items-center gap-2">
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined }) }}>Clear</button>
+          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-2 mt-2 items-center">
-        <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e) => setOp(e.target.value as NumberOp)}>
+        <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e) => {interactedRef.current = true; setOp(e.target.value as NumberOp)}}>
           <option value="eq">Is equal to</option>
           <option value="ne">Is not equal to</option>
           <option value="gt">Is greater than</option>
@@ -1411,11 +1636,11 @@ function NumberFilterDetails({ field, where, onPatch }: { field: string; where?:
           <option value="between">Is between</option>
         </select>
         {op !== 'between' ? (
-          <input type="number" className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={a} onChange={(e) => setA(e.target.value === '' ? '' : Number(e.target.value))} />
+          <input type="number" className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={a} onChange={(e) => {interactedRef.current = true; setA(e.target.value === '' ? '' : Number(e.target.value))}} />
         ) : (
           <>
-            <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Min" value={a} onChange={(e) => setA(e.target.value === '' ? '' : Number(e.target.value))} />
-            <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Max" value={b} onChange={(e) => setB(e.target.value === '' ? '' : Number(e.target.value))} />
+            <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Min" value={a} onChange={(e) => {interactedRef.current = true; setA(e.target.value === '' ? '' : Number(e.target.value))}} />
+            <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Max" value={b} onChange={(e) => {interactedRef.current = true; setB(e.target.value === '' ? '' : Number(e.target.value))}} />
           </>
         )}
       </div>
@@ -1431,10 +1656,13 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
     if (!b) return undefined
     const d = new Date(`${b}T00:00:00`); if (isNaN(d.getTime())) return undefined
     d.setDate(d.getDate() + 1)
-    return d.toISOString().slice(0, 10)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const da = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${da}`
   }
   const [start, setStart] = useState<string>(a0 || '')
-  const [end, setEnd] = useState<string>(b0 ? (() => { const d = new Date(b0 + 'T00:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10) })() : '')
+  const [end, setEnd] = useState<string>(b0 ? (() => { const d = new Date(b0 + 'T00:00:00'); d.setDate(d.getDate() - 1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); return `${y}-${m}-${da}` })() : '')
 
   useEffect(() => {
     const patch: Record<string, any> = {}
@@ -2436,82 +2664,82 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     )}
                     {local.chartType === 'gantt' && (
                       <div className="border rounded-md p-2 space-y-3">
-                        <div className="text-[11px] font-medium text-muted-foreground">Gantt</div>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <label className="flex items-center gap-2">
-                            <span className="w-28 text-muted-foreground">Category field</span>
+                        <div className="text-[11px] font-medium text-muted-foreground">Gantt Options</div>
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="text-muted-foreground font-medium">Mode:</span>
+                          <label className="flex items-center gap-1.5">
                             <input
-                              type="text"
-                              className="flex-1 h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]"
-                              value={String((local.options as any)?.gantt?.categoryField || '')}
-                              onChange={(e) => {
-                                const g = { ...((local.options as any)?.gantt || {}), categoryField: e.target.value || undefined }
+                              type="radio"
+                              name="gantt-mode"
+                              className="accent-[hsl(var(--primary))]"
+                              checked={((local.options as any)?.gantt?.mode || 'startEnd') === 'startEnd'}
+                              onChange={() => {
+                                const g = { ...((local.options as any)?.gantt || {}), mode: 'startEnd' }
                                 const next = { ...local!, options: { ...(local!.options || {}), gantt: g } }
                                 setLocal(next); updateConfig(next)
                               }}
-                              placeholder="e.g., Owner"
                             />
+                            Start + End
                           </label>
-                          <label className="flex items-center gap-2">
-                            <span className="w-28 text-muted-foreground">Start field</span>
+                          <label className="flex items-center gap-1.5">
                             <input
-                              type="text"
-                              className="flex-1 h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]"
-                              value={String((local.options as any)?.gantt?.startField || '')}
-                              onChange={(e) => {
-                                const g = { ...((local.options as any)?.gantt || {}), startField: e.target.value || undefined }
-                                const next = { ...local!, options: { ...(local!.options || {}), gantt: g } }
-                                setLocal(next); updateConfig(next)
-                              }}
-                              placeholder="datetime column"
-                            />
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <span className="w-28 text-muted-foreground">End field</span>
-                            <input
-                              type="text"
-                              className="flex-1 h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]"
-                              value={String((local.options as any)?.gantt?.endField || '')}
-                              onChange={(e) => {
-                                const g = { ...((local.options as any)?.gantt || {}), endField: e.target.value || undefined }
-                                const next = { ...local!, options: { ...(local!.options || {}), gantt: g } }
-                                setLocal(next); updateConfig(next)
-                              }}
-                              placeholder="datetime column"
-                            />
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <span className="w-28 text-muted-foreground">Color field</span>
-                            <input
-                              type="text"
-                              className="flex-1 h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]"
-                              value={String((local.options as any)?.gantt?.colorField || '')}
-                              onChange={(e) => {
-                                const g = { ...((local.options as any)?.gantt || {}), colorField: e.target.value || undefined }
-                                const next = { ...local!, options: { ...(local!.options || {}), gantt: g } }
-                                setLocal(next); updateConfig(next)
-                              }}
-                              placeholder="optional"
-                            />
-                          </label>
-                          <label className="flex items-center gap-2 col-span-2">
-                            <span className="w-28 text-muted-foreground">Bar height</span>
-                            <input
-                              type="number"
-                              min={6}
-                              max={24}
-                              className="w-24 h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]"
-                              value={Number((local.options as any)?.gantt?.barHeight ?? 10)}
-                              onChange={(e) => {
-                                const n = Math.max(6, Math.min(24, Number(e.target.value || 10)))
-                                const g = { ...((local.options as any)?.gantt || {}), barHeight: n }
+                              type="radio"
+                              name="gantt-mode"
+                              className="accent-[hsl(var(--primary))]"
+                              checked={((local.options as any)?.gantt?.mode) === 'startDuration'}
+                              onChange={() => {
+                                const g = { ...((local.options as any)?.gantt || {}), mode: 'startDuration' }
                                 const next = { ...local!, options: { ...(local!.options || {}), gantt: g } }
                                 setLocal(next); updateConfig(next)
                               }}
                             />
+                            Start + Duration
                           </label>
                         </div>
-                        <div className="text-[11px] text-muted-foreground">Map the fields for your Gantt. Category is shown on Y, Start/End define each bar. Color field is optional.</div>
+                        {((local.options as any)?.gantt?.mode) === 'startDuration' && (
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-muted-foreground">Duration unit:</span>
+                            <select
+                              className="h-7 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)] text-xs"
+                              value={String((local.options as any)?.gantt?.durationUnit || 'hours')}
+                              onChange={(e) => {
+                                const g = { ...((local.options as any)?.gantt || {}), durationUnit: e.target.value }
+                                const next = { ...local!, options: { ...(local!.options || {}), gantt: g } }
+                                setLocal(next); updateConfig(next)
+                              }}
+                            >
+                              <option value="seconds">Seconds</option>
+                              <option value="minutes">Minutes</option>
+                              <option value="hours">Hours</option>
+                              <option value="days">Days</option>
+                              <option value="weeks">Weeks</option>
+                              <option value="months">Months</option>
+                            </select>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-muted-foreground">Bar height:</span>
+                          <input
+                            type="number"
+                            min={6}
+                            max={24}
+                            className="w-20 h-7 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)] text-xs"
+                            value={Number((local.options as any)?.gantt?.barHeight ?? 10)}
+                            onChange={(e) => {
+                              const n = Math.max(6, Math.min(24, Number(e.target.value || 10)))
+                              const g = { ...((local.options as any)?.gantt || {}), barHeight: n }
+                              const next = { ...local!, options: { ...(local!.options || {}), gantt: g } }
+                              setLocal(next); updateConfig(next)
+                            }}
+                          />
+                          <span className="text-muted-foreground text-[10px]">px</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground leading-relaxed">
+                          {((local.options as any)?.gantt?.mode || 'startEnd') === 'startEnd'
+                            ? '• X = Start datetime • Legend = Category/Task • Value = End datetime'
+                            : '• X = Start datetime • Legend = Category/Task • Value = Duration (numeric)'
+                          }
+                        </div>
                       </div>
                     )}
                     {local.chartType === 'heatmap' && (
@@ -3985,6 +4213,19 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     />
                     Compute pivot on server
                   </label>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      className="accent-[hsl(var(--primary))]"
+                      checked={(local.options?.table?.showControls ?? true)}
+                      onChange={(e) => {
+                        const table = { ...(local.options?.table || {}), showControls: e.target.checked }
+                        const next = { ...local, options: { ...(local.options || {}), table } }
+                        setLocal(next); updateConfig(next)
+                      }}
+                    />
+                    Show pivot controls (Expand/Collapse/Export)
+                  </label>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="flex items-center gap-2 text-xs">
                       <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={local.options?.table?.pivotConfig?.rowTotals !== false}
@@ -4561,8 +4802,17 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           <div className="flex items-center justify-between">
             <div className="text-[11px] text-muted-foreground">Advanced transforms, custom columns, and joins at datasource level</div>
             <button
-              className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-foreground"
-              onClick={() => setAdvOpen(true)}
+              className={`text-xs px-2 py-1 rounded-md border bg-card ${dsId ? 'hover:bg-[hsl(var(--secondary)/0.6)]' : 'opacity-60 cursor-not-allowed'} text-foreground`}
+              onClick={() => {
+                if (!dsId) {
+                  try {
+                    toast.show('Advanced SQL unavailable', 'Select a datasource first (Data → Source) or set a default on Data Model page')
+                    window.setTimeout(() => { try { toast.hide() } catch {} }, 2200)
+                  } catch {}
+                  return
+                }
+                setAdvOpen(true)
+              }}
             >
               SQL Advanced Mode
             </button>
@@ -4686,7 +4936,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
     <AdvancedSqlDialog
       open={advOpen}
       onCloseAction={() => setAdvOpen(false)}
-      datasourceId={local?.datasourceId}
+      datasourceId={dsId}
       dsType={dsType}
       schema={(schemaQ.data as any) || (fallbackQ.data as any)}
       source={local?.querySpec?.source}
@@ -4760,6 +5010,8 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       return { ...pivot, legend }
                     } catch { return pivot }
                   })()
+                  // Gantt chart constraints: limit to 1 chip per zone
+                  const isGantt = local.type === 'chart' && local.chartType === 'gantt'
                   return (
                     <PivotBuilder
                   fields={allFieldNames}
@@ -4772,7 +5024,8 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                   selected={selKind && selField ? { kind: selKind, id: selField } : undefined}
                   disableRows={false}
                   disableValues={false}
-                  allowMultiLegend
+                  allowMultiLegend={!isGantt}
+                  allowMultiRows={!isGantt}
                   datasourceId={dsId as any}
                   source={local?.querySpec?.source}
                   widgetId={local?.id}

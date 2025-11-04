@@ -38,6 +38,7 @@ export default function GanttCard({
   queryMode = 'spec',
   querySpec,
   widgetId,
+  pivot,
 }: {
   title: string
   datasourceId?: string
@@ -45,14 +46,27 @@ export default function GanttCard({
   queryMode?: 'sql' | 'spec'
   querySpec?: QuerySpec
   widgetId?: string
+  pivot?: {
+    x?: string | string[]
+    legend?: string | string[]
+    values: Array<{ field?: string; measureId?: string; agg?: string }>
+    filters: string[]
+  }
 }) {
   const { filters } = useFilters()
   const gantt = (options?.gantt || {}) as NonNullable<WidgetConfig['options']>['gantt']
-  const catField = gantt?.categoryField
-  const startField = gantt?.startField
-  const endField = gantt?.endField
-  const colorField = gantt?.colorField
+  const mode = gantt?.mode || 'startEnd'
+  const durationUnit = gantt?.durationUnit || 'hours'
   const barH = Math.max(6, Math.min(24, Number(gantt?.barHeight ?? 10)))
+  
+  // Map pivot assignments to gantt fields
+  // X = Start field, Legend = Category field, Value[0] = End/Duration field
+  const startField = Array.isArray(pivot?.x) ? pivot.x[0] : pivot?.x
+  const catField = Array.isArray(pivot?.legend) ? pivot.legend[0] : pivot?.legend
+  const valueField = pivot?.values?.[0]?.field
+  const endField = mode === 'startEnd' ? valueField : undefined
+  const durationField = mode === 'startDuration' ? valueField : undefined
+  const colorField = undefined // Can be added later via filters or additional legend
 
   const q = useQuery({
     queryKey: ['gantt', title, datasourceId, querySpec, options, filters],
@@ -63,7 +77,8 @@ export default function GanttCard({
       const select: string[] = []
       if (catField) select.push(catField)
       if (startField) select.push(startField)
-      if (endField) select.push(endField)
+      if (mode === 'startEnd' && endField) select.push(endField)
+      if (mode === 'startDuration' && durationField) select.push(durationField)
       if (colorField) select.push(colorField)
       // Fallback: if no mapping provided, attempt best-effort heuristic
       const sel = select.length ? select : (querySpec.select && querySpec.select.length ? querySpec.select : [])
@@ -95,18 +110,43 @@ export default function GanttCard({
     }
     const ci = idxOf(catField, /(name|task|owner|category)/i)
     const si = idxOf(startField, /(start|begin|from)/i)
-    const ei = idxOf(endField, /(end|finish|to)/i)
+    const ei = mode === 'startEnd' ? idxOf(endField, /(end|finish|to)/i) : -1
+    const di = mode === 'startDuration' ? (durationField ? cols.indexOf(durationField) : -1) : -1
     const coli = colorField ? cols.indexOf(colorField) : -1
+    
+    // Duration multipliers in milliseconds
+    const durationMultipliers: Record<string, number> = {
+      seconds: 1000,
+      minutes: 60 * 1000,
+      hours: 60 * 60 * 1000,
+      days: 24 * 60 * 60 * 1000,
+      weeks: 7 * 24 * 60 * 60 * 1000,
+      months: 30 * 24 * 60 * 60 * 1000, // Approximate
+    }
+    
     const items: Array<{ cat: string; start: number; end: number; color?: string }> = []
     const cats: string[] = []
     rows.forEach((r: any) => {
       const cat = String(ci >= 0 ? r[ci] : (r?.[catField as any]))
       const sv = si >= 0 ? r[si] : (r?.[startField as any])
-      const ev = ei >= 0 ? r[ei] : (r?.[endField as any])
       const col = (coli >= 0 ? r[coli] : (colorField ? r?.[colorField as any] : undefined))
       const sd = parseDateLoose(sv)
-      const ed = parseDateLoose(ev)
-      if (!cat || !sd || !ed) return
+      if (!cat || !sd) return
+      
+      let ed: Date | null = null
+      if (mode === 'startEnd') {
+        const ev = ei >= 0 ? r[ei] : (r?.[endField as any])
+        ed = parseDateLoose(ev)
+      } else if (mode === 'startDuration') {
+        const dv = di >= 0 ? r[di] : (r?.[durationField as any])
+        const duration = Number(dv)
+        if (Number.isFinite(duration) && duration >= 0) {
+          const durationMs = duration * (durationMultipliers[durationUnit] || durationMultipliers.hours)
+          ed = new Date(sd.getTime() + durationMs)
+        }
+      }
+      
+      if (!ed) return
       if (!cats.includes(cat)) cats.push(cat)
       items.push({ cat, start: sd.getTime(), end: ed.getTime(), color: col != null ? String(col) : undefined })
     })

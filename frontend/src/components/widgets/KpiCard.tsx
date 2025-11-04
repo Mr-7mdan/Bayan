@@ -12,6 +12,13 @@ import { useKpiData } from '@/components/widgets/useKpiData'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
 import { getDefaultSeriesColors, getPresetPalette, tremorNameToHex } from '@/lib/chartUtils'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
+import {
+  ResponsiveContainer,
+  AreaChart as ReAreaChart,
+  Area as ReArea,
+  XAxis as ReXAxis,
+  YAxis as ReYAxis,
+} from 'recharts'
 
 // Tremor chart blocks we need
 const TremorDonutChart = dynamic(
@@ -290,7 +297,10 @@ export default function KpiCard({
       if (filters.endDate) {
         const d = new Date(`${filters.endDate}T00:00:00`)
         d.setDate(d.getDate() + 1)
-        base[`${df}__lt`] = d.toISOString().slice(0, 10)
+        const y = d.getFullYear()
+        const m = String(d.getMonth() + 1).padStart(2, '0')
+        const da = String(d.getDate()).padStart(2, '0')
+        base[`${df}__lt`] = `${y}-${m}-${da}`
       }
     }
     if (!isSpec) return Object.keys(base).length ? base : undefined
@@ -314,13 +324,13 @@ export default function KpiCard({
       const lteRaw = eff[`${df}__lte`]
       if (typeof lteRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(lteRaw)) {
         const d = new Date(`${lteRaw}T00:00:00`)
-        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + 1); eff[`${df}__lt`] = d.toISOString().slice(0, 10) }
+        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + 1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); eff[`${df}__lt`] = `${y}-${m}-${da}` }
         delete eff[`${df}__lte`]
       }
       const ltRaw = eff[`${df}__lt`]
       if (typeof ltRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ltRaw)) {
         const d = new Date(`${ltRaw}T00:00:00`)
-        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + 1); eff[`${df}__lt`] = d.toISOString().slice(0, 10) }
+        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + 1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); eff[`${df}__lt`] = `${y}-${m}-${da}` }
       }
     }
     return eff
@@ -396,25 +406,44 @@ export default function KpiCard({
   // (moved below baseValue)
 
   // Validate that the configured deltaDateField exists in the source; if not, disable delta behavior
-  const [deltaFieldValid, setDeltaFieldValid] = useState<boolean>(false)
+  // Default to true since field is selected from dropdown - only validate if schema is available
+  const [deltaFieldValid, setDeltaFieldValid] = useState<boolean>(true)
   useEffect(() => {
     let ignore = false
     async function run() {
       try {
         const src = (querySpec as any)?.source as string | undefined
         const df = effectiveDeltaDateField
+        // If no delta field configured, mark as invalid
         if (!src || !df) { if (!ignore) setDeltaFieldValid(false); return }
-        const schema = datasourceId ? await (await import('@/lib/api')).Api.introspect(datasourceId) : await (await import('@/lib/api')).Api.introspectLocal()
-        const parts = (src || '').split('.')
-        const tbl = parts.pop() || ''
-        const sch = parts.join('.')
-        const schObj = (schema as any)?.schemas?.find((s: any) => s.name === sch)
-        const tblObj = schObj?.tables?.find((t: any) => t.name === tbl)
-        const cols: Array<{ name: string; type?: string | null }> = tblObj?.columns || []
-        const names = new Set(cols.map(c => c.name))
-        try { console.log('[KPICardDebug] deltaFieldValid check', { src, df, found: names.has(df as string), columns: cols.map(c => c.name) }) } catch {}
-        if (!ignore) setDeltaFieldValid(names.has(df))
-      } catch { if (!ignore) setDeltaFieldValid(false) }
+        // If delta field is configured, assume valid (selected from dropdown)
+        // Try to validate against schema but don't block on failure
+        try {
+          const schema = datasourceId ? await (await import('@/lib/api')).Api.introspect(datasourceId) : await (await import('@/lib/api')).Api.introspectLocal()
+          const parts = (src || '').split('.')
+          const tbl = parts.pop() || ''
+          const sch = parts.join('.')
+          const schObj = (schema as any)?.schemas?.find((s: any) => s.name === sch)
+          const tblObj = schObj?.tables?.find((t: any) => t.name === tbl)
+          const cols: Array<{ name: string; type?: string | null }> = tblObj?.columns || []
+          const names = new Set(cols.map(c => c.name))
+          const found = names.has(df as string)
+          try { console.log('[KPICardDebug] deltaFieldValid check', { src, df, found, schemaObj: !!schObj, tableObj: !!tblObj, columnsCount: cols.length, columns: cols.map(c => c.name) }) } catch {}
+          // Only mark invalid if we successfully got schema and field is NOT found
+          if (schObj && tblObj && !found) {
+            if (!ignore) setDeltaFieldValid(false)
+          } else {
+            if (!ignore) setDeltaFieldValid(true)
+          }
+        } catch (err) { 
+          try { console.warn('[KPICardDebug] deltaFieldValid check FAILED (introspection unavailable), assuming valid', err) } catch {}
+          // Introspection failed - assume field is valid since it was selected from dropdown
+          if (!ignore) setDeltaFieldValid(true)
+        }
+      } catch (err) { 
+        // Outer catch - assume valid
+        if (!ignore) setDeltaFieldValid(true) 
+      }
     }
     void run()
     return () => { ignore = true }
@@ -451,6 +480,7 @@ export default function KpiCard({
   // Fallback: base value when delta not configured or invalid date field
   const deltaModeOn = !!effectiveDeltaMode
   const deltaEnabled = deltaModeOn && !!(querySpec as any)?.source && deltaFieldValid
+  try { console.log('[KPICardDebug] deltaEnabled', { deltaEnabled, deltaModeOn, hasSource: !!(querySpec as any)?.source, deltaFieldValid, effectiveDeltaMode }) } catch {}
   const [baseValue, setBaseValue] = useState<string | number | undefined>(undefined)
   useEffect(() => {
     let ignore = false
@@ -744,7 +774,8 @@ export default function KpiCard({
           where[`${df}__gte`] = res.curStart
           where[`${df}__lt`] = res.curEnd
         }
-        const legendField = (querySpec as any)?.legend as string | undefined
+        const legendRaw = (querySpec as any)?.legend
+        const legendField = (Array.isArray(legendRaw) && legendRaw.length > 0) ? legendRaw[0] : (legendRaw || undefined)
         const gb = (querySpec as any)?.groupBy
         // If legend present, ask server for legend-split aggregation [x, legend, value]
         if (legendField) {
@@ -785,7 +816,8 @@ export default function KpiCard({
 
   // Choose displayed value/delta for presets Basic/Badge
   const displayed = useMemo(() => {
-    const legend = (querySpec as any)?.legend as string | undefined
+    const legendRaw = (querySpec as any)?.legend
+    const legend = (Array.isArray(legendRaw) && legendRaw.length > 0) ? legendRaw[0] : legendRaw
     const data = kpi.data
     // If KPI delta query didn't run (delta disabled) or hasn't produced data, use baseValue fallback
     if (!data) return { value: baseValue as any, pct: undefined as number | undefined }
@@ -901,7 +933,8 @@ export default function KpiCard({
             const vStr = formatNumber(displayed.value)
             const pct = displayed.pct
             const pctStr = pct == null ? undefined : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
-            const legendField = (querySpec as any)?.legend as string | undefined
+            const legendRaw = (querySpec as any)?.legend
+            const legendField = (Array.isArray(legendRaw) && legendRaw.length > 0) ? legendRaw[0] : legendRaw
             const legendFilterVals = legendField ? (effectiveWhere as any)?.[legendField] : undefined
             const isSingleLegendSelected = Array.isArray(legendFilterVals) && legendFilterVals.length === 1
             // If a legend exists and no single legend value is selected, render multiple KPI tiles (Top N)
@@ -999,7 +1032,8 @@ export default function KpiCard({
             }
             // Donut: per-category tiles when legend present; else single value vs total
             if (preset === 'donut') {
-              const legendField = (querySpec as any)?.legend as string | undefined
+              const legendRaw = (querySpec as any)?.legend
+              const legendField = (Array.isArray(legendRaw) && legendRaw.length > 0) ? legendRaw[0] : legendRaw
               const legendFilterVals = legendField ? (effectiveWhere as any)?.[legendField] : undefined
               const isSingleLegendSelected = Array.isArray(legendFilterVals) && legendFilterVals.length === 1
               const topN = (typeof options?.kpi?.topN === 'number' ? options.kpi.topN : 3) || 3
@@ -1072,7 +1106,8 @@ export default function KpiCard({
             }
             // Progress: per-category tiles when legend present; else single progress vs total
             if (preset === 'progress') {
-              const legendField = (querySpec as any)?.legend as string | undefined
+              const legendRaw = (querySpec as any)?.legend
+              const legendField = (Array.isArray(legendRaw) && legendRaw.length > 0) ? legendRaw[0] : legendRaw
               const legendFilterVals = legendField ? (effectiveWhere as any)?.[legendField] : undefined
               const isSingleLegendSelected = Array.isArray(legendFilterVals) && legendFilterVals.length === 1
               const topN = (typeof options?.kpi?.topN === 'number' ? options.kpi.topN : 3) || 3
@@ -1133,17 +1168,26 @@ export default function KpiCard({
             // Spark: small trend line with colored stroke
             if (preset === 'spark') {
               const p = Number(displayed.pct || 0)
-              const color = (p > 0) ? 'emerald' : (p < 0) ? 'rose' : 'slate'
+              // When delta is off, calculate color from sparkline data trend instead of delta pct
+              const getColorFromTrend = (data: SparkPoint[]): string => {
+                if (!data || data.length < 2) return 'slate'
+                const first = Number(data[0]?.value || 0)
+                const last = Number(data[data.length - 1]?.value || 0)
+                return (last > first) ? 'emerald' : (last < first) ? 'rose' : 'slate'
+              }
+              const color = deltaEnabled ? ((p > 0) ? 'emerald' : (p < 0) ? 'rose' : 'slate') : 'slate' // Will be calculated per-series
               // Prefer sparkByLegend keys; if empty but legend data exists, still render per-category tiles
               const legends = (() => {
                 const keys = Object.keys(sparkByLegend || {})
                 if (keys.length > 0) return keys
-                const by = (kpi.data?.byLegend || {}) as Record<string, any>
+                const by = deltaEnabled ? ((kpi.data?.byLegend || {}) as Record<string, any>) : baseByLegend
                 return Object.keys(by)
               })()
               if (legends.length > 0) {
                 // Multi-tile grid like Basic preset (Top N by current period)
-                const sourceMap: Record<string, { current: number; previous: number; absoluteDelta: number; percentChange: number }> | undefined = (kpi.data?.byLegend || kpi.data?.bySeries)
+                const sourceMap: Record<string, { current: number; previous: number; absoluteDelta: number; percentChange: number }> | undefined = deltaEnabled
+                  ? (kpi.data?.byLegend || kpi.data?.bySeries)
+                  : (Object.keys(baseByLegend || {}).length > 0 ? Object.fromEntries(Object.entries(baseByLegend || {}).map(([k, v]) => [k, { current: Number(v||0), previous: 0, absoluteDelta: 0, percentChange: 0 }])) : undefined)
                 const entries = Object.entries(sourceMap || {})
                 const sorted = entries.sort((a,b) => Number(b[1]?.current||0) - Number(a[1]?.current||0))
                 const topN = (typeof options?.kpi?.topN === 'number' ? options.kpi.topN : 3) || 3
@@ -1170,6 +1214,9 @@ export default function KpiCard({
                           { x: 2, value: currLocal * 1.00 },
                         ])
                       const data: SparkPoint[] = base.map((d: any) => ({ x: d.x, xLabel: (d.xLabel ?? formatXLabel(d.x)), value: d.value }))
+                      const lineColor = deltaEnabled ? lineColors[i % lineColors.length] : getColorFromTrend(data)
+                      const colorHex = tremorNameToHex(lineColor as any)
+                      const gradientId = `kpi-spark-${sizeKey}-${i}-${lineColor}`
                       return (
                         <div key={lg} className="rounded-lg border bg-card p-[clamp(10px,1.3vw,14px)]">
                           <div className={`${labelClass} truncate mb-1`} title={String(lg)}>{displayKpiLabel(String(lg))}</div>
@@ -1180,13 +1227,28 @@ export default function KpiCard({
                             )}
                           </div>
                           <div className="w-full h-[48px] mt-1">
-                            {sparkType === 'bar' ? (
-                              <BarChart key={`spark-${sizeKey}-${i}`} data={data} index="xLabel" categories={["value"]} colors={[lineColors[i % lineColors.length]]} showLegend={false} showGridLines={false} showXAxis={false} showYAxis={false} valueFormatter={(v: number) => formatNumber(v as any)} className="h-[48px] text-[10px]" customTooltip={SparkTooltip as any} />
-                            ) : sparkType === 'area' ? (
-                              <AreaChart key={`spark-${sizeKey}-${i}`} data={data} index="xLabel" categories={["value"]} colors={[lineColors[i % lineColors.length]]} showLegend={false} showGridLines={false} showXAxis={false} showYAxis={false} showGradient={false} valueFormatter={(v: number) => formatNumber(v as any)} className="h-[48px] text-[10px]" customTooltip={SparkTooltip as any} />
-                            ) : (
-                              <LineChart key={`spark-${sizeKey}-${i}`} data={data} index="xLabel" categories={["value"]} colors={[lineColors[i % lineColors.length]]} showLegend={false} showGridLines={false} showXAxis={false} showYAxis={false} startEndOnly={true} autoMinValue={true} showGradient={false} valueFormatter={(v: number) => formatNumber(v as any)} className="h-[48px] text-[10px]" customTooltip={SparkTooltip as any} />
-                            )}
+                            <ResponsiveContainer width="100%" height="100%">
+                              <ReAreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                                <defs>
+                                  <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor={colorHex} stopOpacity={0.3} />
+                                    <stop offset="95%" stopColor={colorHex} stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <ReYAxis hide domain={['auto', 'auto']} />
+                                <ReXAxis hide dataKey="x" />
+                                <ReArea
+                                  type="monotone"
+                                  dataKey="value"
+                                  stroke={colorHex}
+                                  fill={`url(#${gradientId})`}
+                                  strokeWidth={1.5}
+                                  dot={false}
+                                  isAnimationActive={false}
+                                  connectNulls
+                                />
+                              </ReAreaChart>
+                            </ResponsiveContainer>
                           </div>
                         </div>
                       )
@@ -1210,12 +1272,32 @@ export default function KpiCard({
                         return [ { x: 0, xLabel: '0', value: v * 0.96 }, { x: 1, xLabel: '1', value: v * 1.02 }, { x: 2, xLabel: '2', value: v * 1.00 } ]
                       })()
                       const data: SparkPoint[] = base.map((d: any) => ({ x: d.x, xLabel: (d.xLabel ?? formatXLabel(d.x)), value: d.value }))
-                      return sparkType === 'bar' ? (
-                        <BarChart key={`spark-${sizeKey}`} data={data} index="xLabel" categories={["value"]} colors={[color]} showLegend={false} showGridLines={false} showXAxis={false} showYAxis={false} valueFormatter={(v: number) => formatNumber(v as any)} className="h-[48px] text-[10px]" customTooltip={SparkTooltip as any} />
-                      ) : sparkType === 'area' ? (
-                        <AreaChart key={`spark-${sizeKey}`} data={data} index="xLabel" categories={["value"]} colors={[color]} showLegend={false} showGridLines={false} showXAxis={false} showYAxis={false} showGradient={false} valueFormatter={(v: number) => formatNumber(v as any)} className="h-[48px] text-[10px]" customTooltip={SparkTooltip as any} />
-                      ) : (
-                        <LineChart key={`spark-${sizeKey}`} data={data} index="xLabel" categories={["value"]} colors={[color]} showLegend={false} showGridLines={false} showXAxis={false} showYAxis={false} startEndOnly={true} autoMinValue={true} showGradient={false} valueFormatter={(v: number) => formatNumber(v as any)} className="h-[48px] text-[10px]" customTooltip={SparkTooltip as any} />
+                      const lineColor = deltaEnabled ? color : getColorFromTrend(data)
+                      const colorHex = tremorNameToHex(lineColor as any)
+                      const gradientId = `kpi-spark-single-${sizeKey}-${lineColor}`
+                      return (
+                        <ResponsiveContainer key={`spark-${sizeKey}`} width="100%" height="100%">
+                          <ReAreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor={colorHex} stopOpacity={0.3} />
+                                <stop offset="95%" stopColor={colorHex} stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <ReYAxis hide domain={['auto', 'auto']} />
+                            <ReXAxis hide dataKey="x" />
+                            <ReArea
+                              type="monotone"
+                              dataKey="value"
+                              stroke={colorHex}
+                              fill={`url(#${gradientId})`}
+                              strokeWidth={1.5}
+                              dot={false}
+                              isAnimationActive={false}
+                              connectNulls
+                            />
+                          </ReAreaChart>
+                        </ResponsiveContainer>
                       )
                     })()}
                   </div>
@@ -1225,7 +1307,8 @@ export default function KpiCard({
             if (preset === 'categoryBar') {
               // Top N by current period; visualize absolute values on bar, compute display percents separately
               const topN = (typeof options?.kpi?.topN === 'number' ? options.kpi.topN : 3) || 3
-              const legendField = (querySpec as any)?.legend as string | undefined
+              const legendRaw = (querySpec as any)?.legend
+              const legendField = (Array.isArray(legendRaw) && legendRaw.length > 0) ? legendRaw[0] : legendRaw
               const sourceMap: Record<string, { current: number; previous: number; absoluteDelta: number; percentChange: number }> | undefined = deltaEnabled
                 ? (kpi.data?.byLegend || kpi.data?.bySeries)
                 : (legendField ? Object.fromEntries(Object.entries(baseByLegend || {}).map(([k, v]) => [k, { current: Number(v||0), previous: 0, absoluteDelta: Number(v||0), percentChange: 0 }])) : undefined)
@@ -1300,7 +1383,9 @@ export default function KpiCard({
             if (preset === 'multiProgress') {
               // Render Top N rows with ProgressBar for each (percent-of-total)
               const topN = (typeof options?.kpi?.topN === 'number' ? options.kpi.topN : 3) || 3
-              const sourceMap: Record<string, { current: number; previous: number; absoluteDelta: number; percentChange: number }> | undefined = (kpi.data?.byLegend || kpi.data?.bySeries)
+              const sourceMap: Record<string, { current: number; previous: number; absoluteDelta: number; percentChange: number }> | undefined = deltaEnabled
+                ? (kpi.data?.byLegend || kpi.data?.bySeries)
+                : (Object.keys(baseByLegend || {}).length > 0 ? Object.fromEntries(Object.entries(baseByLegend || {}).map(([k, v]) => [k, { current: Number(v||0), previous: 0, absoluteDelta: 0, percentChange: 0 }])) : undefined)
               const entries = Object.entries(sourceMap || {})
               const sorted = entries.sort((a,b) => Number(b[1]?.current||0) - Number(a[1]?.current||0))
               const picked = sorted.slice(0, topN)
@@ -1308,7 +1393,8 @@ export default function KpiCard({
               const palette = getPresetPalette((options?.colorPreset || 'default') as any)
               const rowColors = getDefaultSeriesColors(picked.length, palette) as any
               // Legend filter toggle support
-              const legendField = (querySpec as any)?.legend as string | undefined
+              const legendRaw = (querySpec as any)?.legend
+              const legendField = (Array.isArray(legendRaw) && legendRaw.length > 0) ? legendRaw[0] : legendRaw
               const currentLegendSel: string[] = (() => {
                 if (!legendField) return []
                 const baseWhere = ((querySpec as any)?.where || {}) as Record<string, any>

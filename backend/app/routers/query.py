@@ -2146,8 +2146,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             # Direct table/view reference; quote per dialect (handles schema-qualified)
             base_from_sql = f" FROM {_q_source(spec.source)}"
         x_col = spec.x or (spec.select[0] if spec.select else None)
-        if not x_col:
-            # Fallback: simple total aggregation without x; label as 'total'
+        if not x_col and not spec.legend:
+            # Fallback: simple total aggregation without x and without legend; label as 'total'
             # Build value_expr robustly (support measure and DuckDB numeric-cleaning)
             if (agg in ("none", "count")) or ((not spec.y) and (not getattr(spec, 'measure', None))):
                 value_expr = "COUNT(*)"
@@ -2260,6 +2260,114 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 elif by == "value": order_seg = f" ORDER BY 2 {dir_}"
             sql_inner = inner + where_sql + order_seg
             eff_limit = min(int(limit_override or (lim or 1000)), int(lim or 1000)) if (limit_override or lim) else (limit_override or 1000)
+            q = QueryRequest(
+                sql=sql_inner,
+                datasourceId=(None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId),
+                limit=eff_limit,
+                offset=off or 0,
+                includeTotal=payload.includeTotal,
+                params=params or None,
+                preferLocalDuck=prefer_local,
+                preferLocalTable=spec.source,
+            )
+            return run_query(q, db)
+
+        # Special case: no X field but legend is present - group by legend only
+        if not x_col and spec.legend and agg and agg != "none":
+            # Build value expression
+            if spec.measure:
+                measure_str = str(spec.measure).strip()
+                if measure_str:
+                    try:
+                        measure_core = re.sub(r"\s+AS\s+.+$", "", measure_str, flags=re.IGNORECASE).strip() or measure_str
+                    except Exception:
+                        measure_core = measure_str
+                    agg_l = str(agg or "").lower()
+                    if agg_l == "count":
+                        value_expr = "COUNT(*)"
+                    elif agg_l == "distinct":
+                        value_expr = f"COUNT(DISTINCT {measure_core})"
+                    elif agg_l in ("sum", "avg", "min", "max"):
+                        if "duckdb" in ds_type:
+                            y_clean = f"COALESCE(try_cast(regexp_replace(CAST(({measure_core}) AS VARCHAR), '[^0-9\\.-]', '') AS DOUBLE), try_cast(({measure_core}) AS DOUBLE), 0.0)"
+                            value_expr = f"{agg_l.upper()}({y_clean})"
+                        else:
+                            value_expr = f"{agg_l.upper()}({measure_core})"
+                    else:
+                        value_expr = "COUNT(*)"
+                else:
+                    value_expr = "COUNT(*)"
+            elif agg == "count" and not spec.y:
+                value_expr = "COUNT(*)"
+            elif agg == "distinct" and spec.y:
+                value_expr = f"COUNT(DISTINCT {_q_ident(spec.y)})"
+            else:
+                if spec.y:
+                    if ("duckdb" in ds_type) and (agg in ("sum", "avg", "min", "max")):
+                        y_clean = (
+                            f"COALESCE("
+                            f"try_cast(regexp_replace(CAST({_q_ident(spec.y)} AS VARCHAR), '[^0-9\\.-]', '') AS DOUBLE), "
+                            f"try_cast({_q_ident(spec.y)} AS DOUBLE), 0.0)"
+                        )
+                        value_expr = f"{agg.upper()}({y_clean})"
+                    else:
+                        value_expr = f"{agg.upper()}({_q_ident(spec.y)})"
+                else:
+                    value_expr = "COUNT(*)"
+            
+            # Build legend expression (reuse logic from later section)
+            legend_expr_raw = spec.legend
+            # Handle legend as array or string
+            if isinstance(legend_expr_raw, (list, tuple)) and len(legend_expr_raw) > 0:
+                legend_expr_raw = legend_expr_raw[0]
+            legend_expr = _q_ident(str(legend_expr_raw)) if legend_expr_raw else None
+            
+            # Build WHERE clause
+            where_clauses = []
+            params: Dict[str, Any] = {}
+            if spec.where:
+                for k, v in spec.where.items():
+                    if k in ("start", "startDate", "end", "endDate"):
+                        continue
+                    if v is None:
+                        where_clauses.append(f"{_q_ident(k)} IS NULL")
+                    elif isinstance(v, (list, tuple)):
+                        if len(v) == 0:
+                            continue
+                        pnames = []
+                        for i, item in enumerate(v):
+                            pname = _pname(k, f"_{i}")
+                            params[pname] = item
+                            pnames.append(f":{pname}")
+                        where_clauses.append(f"{_q_ident(k)} IN ({', '.join(pnames)})")
+                    elif isinstance(k, str) and "__" in k:
+                        base, op = k.split("__", 1)
+                        opname = None
+                        if op == "gte": opname = ">="
+                        elif op == "gt": opname = ">"
+                        elif op == "lte": opname = "<="
+                        elif op == "lt": opname = "<"
+                        if opname:
+                            pname = _pname(base, f"_{op}")
+                            params[pname] = v
+                            where_clauses.append(f"{_q_ident(base)} {opname} :{pname}")
+                        else:
+                            pname = _pname(k)
+                            where_clauses.append(f"{_q_ident(k)} = :{pname}")
+                            params[pname] = v
+                    else:
+                        pname = _pname(k)
+                        where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
+                        params[pname] = v
+            where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+            
+            # Build SQL: SELECT legend, value GROUP BY legend
+            if ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                sql_inner = f"SELECT {legend_expr} as legend, {value_expr} as value {base_from_sql}{where_sql} GROUP BY {legend_expr} ORDER BY {legend_expr}"
+            else:
+                sql_inner = f"SELECT {legend_expr} as legend, {value_expr} as value {base_from_sql}{where_sql} GROUP BY 1 ORDER BY 1"
+            
+            eff_limit = lim or 1000
             q = QueryRequest(
                 sql=sql_inner,
                 datasourceId=(None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId),
@@ -2458,6 +2566,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
             # Legend: allow derived date-part syntax like "OrderDate (Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)"
             legend_expr_raw = spec.legend
+            # Handle legend as array or string
+            if isinstance(legend_expr_raw, (list, tuple)) and len(legend_expr_raw) > 0:
+                legend_expr_raw = legend_expr_raw[0]
             # Default: quote legend identifier to be dialect-safe (e.g., spaces or reserved keywords)
             legend_expr = _q_ident(str(legend_expr_raw)) if legend_expr_raw else None
             try:

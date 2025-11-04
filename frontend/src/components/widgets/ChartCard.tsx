@@ -894,7 +894,10 @@ export default function ChartCard({
           if (filters.endDate) {
             const d = new Date(`${filters.endDate}T00:00:00`)
             d.setDate(d.getDate() + 1)
-            const nextDay = d.toISOString().slice(0, 10)
+            const y = d.getFullYear()
+            const m = String(d.getMonth() + 1).padStart(2, '0')
+            const da = String(d.getDate()).padStart(2, '0')
+            const nextDay = `${y}-${m}-${da}`
             baseWhere[`${df}__lt`] = nextDay
           }
         }
@@ -1352,7 +1355,27 @@ export default function ChartCard({
           }
           // Single series or legend split (only when NO series array is configured)
           if (legendField && seriesArr.length === 0) {
-            // Categories are legend values
+            // If no X field is provided, create multiple series with a single "Total" x-category
+            if (!xField) {
+              const byLegend = new Map<any, Row[]>()
+              rowsToUse.forEach((r) => {
+                const lk = legendKeyOf(r) as any
+                const bucket = byLegend.get(lk) || []
+                bucket.push(r)
+                byLegend.set(lk, bucket)
+              })
+              const categories: string[] = []
+              const obj: any = { x: (querySpec as any)?.y || 'Total' }
+              byLegend.forEach((subset, lk) => {
+                const legendKey = String(lk)
+                categories.push(legendKey)
+                const field = String((querySpec as any).y)
+                const v = aggregate(subset, field, (querySpec as any).agg || 'count')
+                obj[legendKey] = v
+              })
+              return { columns: ['x', ...categories], rows: [obj], categories } as any
+            }
+            // Otherwise pivot into categories per legend for each X bucket
             const catsSet = new Set<string>()
             const outer = new Map<any, any>()
             keysSorted.forEach((k) => {
@@ -1425,15 +1448,93 @@ export default function ChartCard({
               order: ((querySpec as any)?.order as any),
             }
             if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-              try { console.debug('[ChartCard] branch=multi-series/agg', { where: mergedWhere, y: s.y, agg }) } catch {}
+              try { console.debug('[ChartCard] branch=multi-series/agg REQUEST', { spec: merged, where: mergedWhere, y: s.y, agg, legend: merged.legend, x: merged.x }) } catch {}
             }
             const mergedSafe = { ...merged, x: (Array.isArray((merged as any).x) ? (merged as any).x[0] : (merged as any).x) } as any
             return QueryApi.querySpec({ spec: mergedSafe, datasourceId, limit: mergedSafe.limit ?? 1000, offset: mergedSafe.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
           })
           const results = await Promise.all(promises)
+          
+          if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+            try {
+              console.debug('[ChartCard] multi-series RAW BACKEND RESPONSE', {
+                results: results.map((r, idx) => ({
+                  index: idx,
+                  columns: r?.columns,
+                  rowCount: r?.rows?.length,
+                  firstRow: r?.rows?.[0],
+                  lastRow: r?.rows?.[r.rows.length - 1]
+                }))
+              })
+            } catch {}
+          }
           const map = new Map<string | number, any>()
           const catsSet = new Set<string>()
           const virtualMeta: Record<string, { baseSeriesIndex: number; baseSeriesLabel: string; categoryLabel: string; agg?: string }> = {}
+          
+          // Check if any result has an X column
+          const hasXColumn = results.some((res) => {
+            const cols: string[] = ((res?.columns || []) as string[])
+            return cols.indexOf('x') >= 0
+          })
+          
+          // Check if all X values are the same (backend returns default 'x' when no X specified)
+          const allXValuesSame = (() => {
+            if (!hasXColumn || results.length === 0) return false
+            const xValues = new Set<any>()
+            results.forEach((res) => {
+              const cols: string[] = ((res?.columns || []) as string[])
+              const ix = cols.indexOf('x')
+              if (ix >= 0) {
+                res.rows.forEach((row: any[]) => {
+                  xValues.add(row[ix])
+                })
+              }
+            })
+            return xValues.size === 1
+          })()
+          
+          if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+            try {
+              console.debug('[ChartCard] multi-series no-X check', {
+                hasXColumn,
+                allXValuesSame,
+                legendPresent,
+                seriesCount: series.length,
+                resultColumns: results.map(r => ((r?.columns || []) as string[])),
+                resultRowCounts: results.map(r => r?.rows?.length || 0)
+              })
+            } catch {}
+          }
+          
+          // If no X column OR all X values are the same (backend default), but has legend, create single x-category with multiple series
+          if (((!hasXColumn || allXValuesSame) && legendPresent)) {
+            const obj: any = { x: (querySpec as any)?.y || (querySpec as any)?.measure || 'Total' }
+            results.forEach((res, idx) => {
+              const baseLabel = labelFor(series[idx], idx)
+              const cols: string[] = ((res?.columns || []) as string[])
+              // Default to column 0 if 'legend' column not found (backend returns actual field name like "Merchant")
+              const il = cols.indexOf('legend') !== -1 ? cols.indexOf('legend') : 0
+              const iv = cols.indexOf('value') >= 0 ? cols.indexOf('value') : 1
+              res.rows.forEach((row: any[]) => {
+                const v = Number(row[iv] ?? 0)
+                const cat = String(row[il])
+                const key = `${baseLabel} • ${cat}`
+                catsSet.add(key)
+                obj[key] = v
+                virtualMeta[key] = { baseSeriesIndex: idx, baseSeriesLabel: baseLabel, categoryLabel: cat, agg: String((series[idx] as any)?.agg ?? ((querySpec as any)?.agg ?? 'count')) }
+              })
+            })
+            const categories = Array.from(catsSet.values())
+            if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+              try {
+                console.debug('[ChartCard] multi-series no-X result', { obj, categories, virtualMeta })
+              } catch {}
+            }
+            return { columns: ['x', ...categories], rows: [obj], categories, virtualMeta } as any
+          }
+          
+          // Normal path with X column
           results.forEach((res, idx) => {
             const baseLabel = labelFor(series[idx], idx)
             const cols: string[] = ((res?.columns || []) as string[])
@@ -1560,13 +1661,35 @@ export default function ChartCard({
         }
         // Server single-agg path with legend (only when NO series array is configured)
         if (hasLegend && (!Array.isArray(series) || series.length === 0) && res?.rows?.length) {
-          // res.rows expected as [x, legend, value]
+          // Robustly map by column names; when x is absent, backend returns [legend, value]
+          const cols: string[] = ((res?.columns || []) as string[])
+          const ix = cols.indexOf('x')
+          const il = cols.indexOf('legend') !== -1 ? cols.indexOf('legend') : 0
+          let iv = cols.indexOf('value')
+          if (iv === -1) {
+            // pick the first numeric-like column different from legend/x; else fallback to 1
+            const candidates = cols.map((c, i) => i).filter((i) => i !== il && i !== ix)
+            iv = candidates.length ? candidates[0] : 1
+          }
+          // If there is no X column, create multiple series with a single "Total" x-category
+          if (ix === -1) {
+            const categories: string[] = []
+            const obj: any = { x: (querySpec as any)?.y || (querySpec as any)?.measure || 'Total' }
+            res.rows.forEach((r: any[]) => {
+              const legendKey = String(r[il] as any)
+              categories.push(legendKey)
+              const v = Number(r[iv] ?? 0)
+              obj[legendKey] = v
+            })
+            return { columns: ['x', ...categories], rows: [obj], categories } as any
+          }
+          // Otherwise, pivot into categories per legend for each X bucket
           const map = new Map<string | number, any>()
           const catsSet = new Set<string>()
           res.rows.forEach((r: any[]) => {
-            const x = r[0] as any
-            const legendVal = String(r[1])
-            const v = Number(r[2] ?? 0)
+            const x = r[ix] as any
+            const legendVal = String(r[il] as any)
+            const v = Number(r[iv] ?? 0)
             catsSet.add(legendVal)
             if (!map.has(x)) map.set(x, { x })
             // If 'none' agg is used with legend, take the first value per (x,legend)
@@ -1903,7 +2026,7 @@ export default function ChartCard({
 
   // Spark layout helpers (must be defined before rendering content)
   const sparkAreaRef = useRef<HTMLDivElement | null>(null)
-  const [sparkRowH, setSparkRowH] = useState<number>(46)
+  const [sparkRowH, setSparkRowH] = useState<number>(60)
   const [sparkSizeKey, setSparkSizeKey] = useState<number>(0)
   useEffect(() => {
     const measure = () => {
@@ -1913,7 +2036,7 @@ export default function ChartCard({
         const count = Math.max(1, (categories || []).length)
         const gap = 8 // px between rows
         const total = el.clientHeight
-        const h = Math.max(28, Math.floor((total - gap * (count - 1)) / count))
+        const h = Math.max(60, Math.floor((total - gap * (count - 1)) / count))
         setSparkRowH(h)
         setSparkSizeKey((k) => k + 1)
       } catch {}
@@ -2360,7 +2483,7 @@ export default function ChartCard({
     })
     const prevLabel = hasPrev ? applyXCase(String(xSeq[prevIdx])) : undefined
     const header = applyXCase(String(label))
-    return (<TooltipTable header={header} prevLabel={prevLabel} rows={rows} />)
+    return (<TooltipTable header={header} prevLabel={prevLabel} rows={rows} showDeltas={!!activeDeltaMode} />)
   }
 
   // Compute chart colors (Tremor tokens) and matching legend hex swatches
@@ -3043,7 +3166,7 @@ export default function ChartCard({
                     changeColor,
                   }
                 })
-                return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={hasPrev ? (prevLabel || undefined) : undefined} rows={rows} />)
+                return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={hasPrev ? (prevLabel || undefined) : undefined} rows={rows} showDeltas={!!activeDeltaMode} />)
               } catch { return '' }
             },
           }
@@ -3290,7 +3413,7 @@ export default function ChartCard({
                     changeColor,
                   }
                 })
-                return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={hasPrev ? prevLabel : undefined} rows={rows} />)
+                return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={hasPrev ? prevLabel : undefined} rows={rows} showDeltas={!!activeDeltaMode} />)
               } catch { return '' }
             }
           }
@@ -3498,6 +3621,7 @@ export default function ChartCard({
             queryMode={queryMode}
             querySpec={querySpec as any}
             widgetId={widgetId}
+            pivot={pivot as any}
           />
         </div>
       )
@@ -3856,7 +3980,7 @@ export default function ChartCard({
                 prevStr: hasPrev ? valueFormatter(prev) : '',
                 changeColor,
               }]
-              return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={prevLabel} rows={rows} />)
+              return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={prevLabel} rows={rows} showDeltas={!!activeDeltaMode} />)
             } catch { return '' }
           }
         },
@@ -4851,7 +4975,7 @@ export default function ChartCard({
           prevStr: hasPrev ? valueFormatter(prev) : '',
           changeColor,
         }]
-        return (<TooltipTable header={hdr} prevLabel={prevLabel} rows={rows} />)
+        return (<TooltipTable header={hdr} prevLabel={prevLabel} rows={rows} showDeltas={!!activeDeltaMode} />)
       }
       const multi = (categories?.length ?? 0) > 1
       if (multi) {
@@ -4863,12 +4987,15 @@ export default function ChartCard({
               const last = vals.length ? Number(vals[vals.length - 1] || 0) : 0
               const prevVal = vals.length > 1 ? Number(vals[vals.length - 2] || 0) : first
               const totalSum = vals.reduce((sum, v) => sum + (Number(v) || 0), 0)
-              const serverDelta = deltaFromServer(String(c))
+              // Extract legend value from virtual category key like "Deposit ID • AMAN Test" -> "AMAN Test"
+              const legendValue = String(c).includes(' • ') ? String(c).split(' • ').slice(1).join(' • ') : String(c)
+              const serverDelta = deltaFromServer(legendValue)
               const deltaVal = serverDelta !== null ? serverDelta : (last - prevVal)
               const previousBaseline = serverDelta !== null ? (totalSum - serverDelta) : prevVal
-              const pct = previousBaseline !== 0
+              // Calculate pct from trend when no server delta is available
+              const pct = (serverDelta !== null && previousBaseline !== 0)
                 ? ((deltaVal / Math.abs(previousBaseline)) * 100)
-                : (deltaVal === 0 ? 0 : (deltaVal > 0 ? 100 : -100))
+                : (last > first ? 50 : last < first ? -50 : 0) // Use simple trend comparison when no delta
               const toneText = textToneForPct(pct)
               const labelText = (options as any)?.legendLabelCase ? (/** same transformer as legend */ ((): string => { const s = String(c); return (options as any)?.legendLabelCase === 'lowercase' ? s.toLowerCase() : (options as any)?.legendLabelCase === 'capitalize' ? (s.toLowerCase().replace(/^(.)/, (m:any)=>m.toUpperCase())) : s.replace(/[_-]+/g,' ').split(/\s+/).map(w=>w? (w[0].toUpperCase()+w.slice(1).toLowerCase()) : w).join(' ') })()) : String(c)
               const colorKey = colorForPct(pct)
@@ -4940,9 +5067,10 @@ export default function ChartCard({
       const serverDelta = deltaFromServer('value') ?? deltaFromServer('Total')
       const deltaVal = serverDelta !== null ? serverDelta : (last - prevVal)
       const previousBaseline = serverDelta !== null ? (totalSum - serverDelta) : prevVal
-      const pct = previousBaseline !== 0
+      // Calculate pct from trend when no server delta is available
+      const pct = (serverDelta !== null && previousBaseline !== 0)
         ? ((deltaVal / Math.abs(previousBaseline)) * 100)
-        : (deltaVal === 0 ? 0 : (deltaVal > 0 ? 100 : -100))
+        : (last > first ? 50 : last < first ? -50 : 0) // Use simple trend comparison when no delta
       const toneText = textToneForPct(pct)
       const colorKey = colorForPct(pct)
       const colorHex = tremorNameToHex(colorKey as any)
@@ -5750,7 +5878,7 @@ export default function ChartCard({
                   const mergedWhere: Record<string, any> = (uiTruthWhere as any)
                   return (
                     <FilterbarRuleControl
-                      key={field}
+                      key={`${field}:${kind}`}
                       label={label}
                       kind={kind}
                       field={field}

@@ -787,21 +787,27 @@ function AdminSchedulesInner() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(tasksQ.data || []).filter((t) => t.inProgress).map((t, idx) => (
-                          <tr key={t.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
-                            <td className="px-2 py-1 font-mono">{t.destTableName}</td>
-                            <td className="px-2 py-1">{t.mode}</td>
-                            <td className="px-2 py-1">{typeof t.progressTotal === 'number' ? `${t.progressCurrent || 0}/${t.progressTotal}` : (t.progressCurrent || 0)}</td>
-                            <td className="px-2 py-1">
-                              <button
-                                className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                                onClick={() => abortOne.mutate(t.id)}
-                              >Abort</button>
-                            </td>
-                          </tr>
-                        ))}
-                        {runningCount === 0 && (
-                          <tr><td colSpan={4} className="px-2 py-2 text-muted-foreground">No running tasks.</td></tr>
+                        {!selectedId ? (
+                          <tr><td colSpan={4} className="px-2 py-2 text-muted-foreground">Please select a datasource from the dropdown above.</td></tr>
+                        ) : (
+                          <>
+                            {(tasksQ.data || []).filter((t) => t.inProgress).map((t, idx) => (
+                              <tr key={t.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
+                                <td className="px-2 py-1 font-mono">{t.destTableName}</td>
+                                <td className="px-2 py-1">{t.mode}</td>
+                                <td className="px-2 py-1">{typeof t.progressTotal === 'number' ? `${t.progressCurrent || 0}/${t.progressTotal}` : (t.progressCurrent || 0)}</td>
+                                <td className="px-2 py-1">
+                                  <button
+                                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() => abortOne.mutate(t.id)}
+                                  >Abort</button>
+                                </td>
+                              </tr>
+                            ))}
+                            {runningCount === 0 && (
+                              <tr><td colSpan={4} className="px-2 py-2 text-muted-foreground">No running tasks.</td></tr>
+                            )}
+                          </>
                         )}
                       </tbody>
                     </table>
@@ -832,18 +838,24 @@ function AdminSchedulesInner() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(tasksQ.data || []).filter((t) => !!t.scheduleCron).map((t, idx) => {
-                          const j = (jobsQ.data || []).find((x) => x.taskId === t.id)
-                          return (
-                            <tr key={t.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
-                              <td className="px-2 py-1 font-mono">{t.destTableName}</td>
-                              <td className="px-2 py-1">{t.scheduleCron}</td>
-                              <td className="px-2 py-1">{j?.nextRunAt ? new Date(j.nextRunAt).toLocaleString() : '—'}</td>
-                            </tr>
-                          )
-                        })}
-                        {scheduledCount === 0 && (
-                          <tr><td colSpan={3} className="px-2 py-2 text-muted-foreground">No scheduled tasks.</td></tr>
+                        {!selectedId ? (
+                          <tr><td colSpan={3} className="px-2 py-2 text-muted-foreground">Please select a datasource from the dropdown above.</td></tr>
+                        ) : (
+                          <>
+                            {(tasksQ.data || []).filter((t) => !!t.scheduleCron).map((t, idx) => {
+                              const j = (jobsQ.data || []).find((x) => x.taskId === t.id)
+                              return (
+                                <tr key={t.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
+                                  <td className="px-2 py-1 font-mono">{t.destTableName}</td>
+                                  <td className="px-2 py-1">{t.scheduleCron}</td>
+                                  <td className="px-2 py-1">{j?.nextRunAt ? new Date(j.nextRunAt).toLocaleString() : '—'}</td>
+                                </tr>
+                              )
+                            })}
+                            {scheduledCount === 0 && (
+                              <tr><td colSpan={3} className="px-2 py-2 text-muted-foreground">No scheduled tasks.</td></tr>
+                            )}
+                          </>
                         )}
                       </tbody>
                     </table>

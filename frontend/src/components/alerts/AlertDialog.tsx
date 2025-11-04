@@ -8,6 +8,14 @@ import { Api, QueryApi, type AlertOut, type AlertCreate, type AlertConfig, type 
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useTheme } from '@/components/providers/ThemeProvider'
 
+// Helper: format date as YYYY-MM-DD using local timezone (not UTC)
+function ymd(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const da = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${da}`
+}
+
 function parseCron(cron?: string) {
   try {
     const s = String(cron || '')
@@ -128,10 +136,10 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
     if (!b) return undefined
     const d = new Date(`${b}T00:00:00`); if (isNaN(d.getTime())) return undefined
     d.setDate(d.getDate() + 1)
-    return d.toISOString().slice(0, 10)
+    return ymd(d)
   }
   const [start, setStart] = React.useState<string>(a0 || '')
-  const [end, setEnd] = React.useState<string>(b0 ? (() => { const d = new Date(b0 + 'T00:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10) })() : '')
+  const [end, setEnd] = React.useState<string>(b0 ? (() => { const d = new Date(b0 + 'T00:00:00'); d.setDate(d.getDate() - 1); return ymd(d) })() : '')
   React.useEffect(() => {
     const patch: Record<string, any> = {}
     patch[`${field}__gte`] = start || undefined
@@ -976,20 +984,20 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
               const e = new Date(today); e.setDate(e.getDate()+1)
               delete (whereSel as any)[`${xFld}__gte`]
               delete (whereSel as any)[`${xFld}__gt`]
-              whereSel[`${xFld}__lt`] = e.toISOString().slice(0,10)
+              whereSel[`${xFld}__lt`] = ymd(e)
             } else if (advXPick === 'yesterday') {
               const e = today
               const s = new Date(today); s.setDate(s.getDate()-1)
-              whereSel[`${xFld}__gte`] = s.toISOString().slice(0,10)
-              whereSel[`${xFld}__lt`] = e.toISOString().slice(0,10)
+              whereSel[`${xFld}__gte`] = ymd(s)
+              whereSel[`${xFld}__lt`] = ymd(e)
             } else if (advXPick === 'this_month') {
               const s = new Date(today.getFullYear(), today.getMonth(), 1)
               const e = new Date(today.getFullYear(), today.getMonth()+1, 1)
-              whereSel[`${xFld}__gte`] = s.toISOString().slice(0,10)
-              whereSel[`${xFld}__lt`] = e.toISOString().slice(0,10)
+              whereSel[`${xFld}__gte`] = ymd(s)
+              whereSel[`${xFld}__lt`] = ymd(e)
             } else if (advXPick === 'range') {
               if (advXFrom) whereSel[`${xFld}__gte`] = advXFrom
-              if (advXTo) { const d = new Date(advXTo + 'T00:00:00'); d.setDate(d.getDate()+1); whereSel[`${xFld}__lt`] = d.toISOString().slice(0,10) }
+              if (advXTo) { const d = new Date(advXTo + 'T00:00:00'); d.setDate(d.getDate()+1); whereSel[`${xFld}__lt`] = ymd(d) }
             } else if (advXPick === 'custom' && advXValue) {
               whereSel[xFld] = [advXValue]
             }
@@ -1020,8 +1028,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           const vi = colsL.indexOf('value')
           const xi = colsL.indexOf('x')
           const selKey = (() => {
-            if (advXPick === 'today' || advXPick === 'yesterday') return new Date().toISOString().slice(0,10)
-            if (advXPick === 'this_month') return new Date().toISOString().slice(0,7)
+            if (advXPick === 'today' || advXPick === 'yesterday') return ymd(new Date())
+            if (advXPick === 'this_month') { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
             if (advXPick === 'custom' && advXValue) return String(advXValue)
             return ''
           })()
@@ -1089,20 +1097,20 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
             const e = new Date(today); e.setDate(e.getDate()+1)
             delete (whereSel as any)[`${xFld}__gte`]
             delete (whereSel as any)[`${xFld}__gt`]
-            whereSel[`${xFld}__lt`] = e.toISOString().slice(0,10)
+            whereSel[`${xFld}__lt`] = ymd(e)
           } else if (advXPick === 'yesterday') {
             const e = today
             const s = new Date(today); s.setDate(s.getDate()-1)
-            whereSel[`${xFld}__gte`] = s.toISOString().slice(0,10)
-            whereSel[`${xFld}__lt`] = e.toISOString().slice(0,10)
+            whereSel[`${xFld}__gte`] = ymd(s)
+            whereSel[`${xFld}__lt`] = ymd(e)
           } else if (advXPick === 'this_month') {
             const s = new Date(today.getFullYear(), today.getMonth(), 1)
             const e = new Date(today.getFullYear(), today.getMonth()+1, 1)
-            whereSel[`${xFld}__gte`] = s.toISOString().slice(0,10)
-            whereSel[`${xFld}__lt`] = e.toISOString().slice(0,10)
+            whereSel[`${xFld}__gte`] = ymd(s)
+            whereSel[`${xFld}__lt`] = ymd(e)
           } else if (advXPick === 'range') {
             if (advXFrom) whereSel[`${xFld}__gte`] = advXFrom
-            if (advXTo) { const d = new Date(advXTo + 'T00:00:00'); d.setDate(d.getDate()+1); whereSel[`${xFld}__lt`] = d.toISOString().slice(0,10) }
+            if (advXTo) { const d = new Date(advXTo + 'T00:00:00'); d.setDate(d.getDate()+1); whereSel[`${xFld}__lt`] = ymd(d) }
           } else if (advXPick === 'custom' && advXValue) {
             whereSel[xFld] = [advXValue]
           }
@@ -1119,7 +1127,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           const dims = rowsDims.length
           const xIdx = (includeX ? catDims : -1)
           const numIdx = dims
-          const selKey = (() => { if (advXPick === 'today' || advXPick === 'yesterday') return new Date().toISOString().slice(0,10); if (advXPick === 'this_month') return new Date().toISOString().slice(0,7); if (advXPick === 'custom' && advXValue) return String(advXValue); return '' })()
+          const selKey = (() => { if (advXPick === 'today' || advXPick === 'yesterday') return ymd(new Date()); if (advXPick === 'this_month') { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }; if (advXPick === 'custom' && advXValue) return String(advXValue); return '' })()
           const applyXMatch = !(advXPick === 'today' || advXPick === 'yesterday' || advXPick === 'this_month' || advXPick === 'range')
           const xMatches = (xv: any) => { const s = String(xv ?? ''); if (!selKey) return true; if (advXPick === 'this_month') return s.startsWith(selKey); return s.startsWith(selKey) }
           const check = (v: number) => {
@@ -2222,9 +2230,9 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                   if (m.x != null && m.x !== '') return String(m.x)
                   switch (advXPick) {
                     case 'custom': return advXValue || '—'
-                    case 'today': { const d = new Date(); return d.toISOString().slice(0,10) }
-                    case 'yesterday': { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10) }
-                    case 'this_month': { const d = new Date(); return d.toISOString().slice(0,7) }
+                    case 'today': { const d = new Date(); return ymd(d) }
+                    case 'yesterday': { const d = new Date(); d.setDate(d.getDate()-1); return ymd(d) }
+                    case 'this_month': { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
                     case 'range': return `${advXFrom || '—'}..${advXTo || '—'}`
                     case 'last':
                     case 'min':

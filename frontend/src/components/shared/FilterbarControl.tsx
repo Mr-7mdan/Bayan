@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { RiArrowDownSLine, RiCalendar2Line } from '@remixicon/react'
+import { RiArrowDownSLine, RiCalendar2Line, RiHashtag, RiTextWrap } from '@remixicon/react'
 
 export type FilterbarControlProps = {
   active?: string
@@ -25,13 +25,14 @@ export function FilterbarRuleControl(props: {
   loadDistinctAction?: (field: string) => void
 }) {
   const { label, kind, field, where, onPatchAction, className, disabled, distinctCache, loadDistinctAction } = props
+  const icon = kind === 'date' ? <RiCalendar2Line className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden /> : kind === 'number' ? <RiHashtag className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden /> : <RiTextWrap className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden />
   return (
-    <FilterbarShell label={label} className={className}>
+    <FilterbarShell label={label} icon={icon} className={className}>
       {kind === 'number' && (
-        <NumberRuleInline field={field} where={where} onPatchAction={onPatchAction} />
+        <NumberRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadDistinctAction={loadDistinctAction} />
       )}
       {kind === 'date' && (
-        <DateRuleInline field={field} where={where} onPatchAction={onPatchAction} />
+        <DateRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadDistinctAction={loadDistinctAction} />
       )}
       {kind === 'string' && (
         <StringRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadDistinctAction={loadDistinctAction} />
@@ -40,16 +41,20 @@ export function FilterbarRuleControl(props: {
   )
 }
 
-function NumberRuleInline({ field, where, onPatchAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void }) {
+function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadDistinctAction?: (field: string) => void }) {
   type NumberOp = 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'between'
+  type Mode = 'rule' | 'manual'
   const gte = (where as any)?.[`${field}__gte`] as number | undefined
   const lte = (where as any)?.[`${field}__lte`] as number | undefined
   const gt = (where as any)?.[`${field}__gt`] as number | undefined
   const lt = (where as any)?.[`${field}__lt`] as number | undefined
+  const ne = (where as any)?.[`${field}__ne`] as number | undefined
   const eqArr = (where as any)?.[field] as number[] | undefined
+  const initialArr = Array.isArray(eqArr) ? eqArr.map((v) => String(v)) : []
   const singleEq = (Array.isArray(eqArr) && eqArr.length === 1) ? Number(eqArr[0]) : undefined
   const initial: { op: NumberOp; a?: number | ''; b?: number | '' } = (() => {
     if (typeof singleEq === 'number') return { op: 'eq', a: singleEq }
+    if (typeof ne === 'number') return { op: 'ne', a: ne }
     if (typeof gt === 'number') return { op: 'gt', a: gt }
     if (typeof gte === 'number' && typeof lte === 'number') return { op: 'between', a: gte, b: lte }
     if (typeof gte === 'number') return { op: 'gte', a: gte }
@@ -57,10 +62,83 @@ function NumberRuleInline({ field, where, onPatchAction }: { field: string; wher
     if (typeof lte === 'number') return { op: 'lte', a: lte }
     return { op: 'eq', a: '' }
   })()
+  const [mode, setMode] = useState<Mode>(initialArr.length > 1 ? 'manual' : 'rule')
   const [op, setOp] = useState<NumberOp>(initial.op)
   const [a, setA] = useState<number|''>(initial.a ?? '')
   const [b, setB] = useState<number|''>(initial.b ?? '')
+  const [sel, setSel] = useState<string[]>(initialArr)
+  const [q, setQ] = useState<string>('')
+  const interactedRef = useRef(false)
+  
+  // Load distinct values for manual mode
   useEffect(() => {
+    if (mode !== 'manual') return
+    const arr = distinctCache?.[field]
+    if ((!arr || arr.length === 0) && typeof loadDistinctAction === 'function') {
+      loadDistinctAction(field)
+    }
+  }, [mode, field, distinctCache?.[field]])
+  
+  // Initialize with all values selected when entering manual mode
+  useEffect(() => {
+    if (mode !== 'manual') return
+    const opts = distinctCache?.[field] || []
+    if (opts.length > 0 && sel.length === 0) {
+      setSel(opts.map(v => String(v)))
+    }
+  }, [mode, distinctCache?.[field]])
+  
+  // Reflect external where for manual mode
+  useEffect(() => {
+    const arr = Array.isArray((where as any)?.[field]) ? ((where as any)?.[field] as any[]).map((v) => String(v)) : []
+    if (arr.length && JSON.stringify(arr) !== JSON.stringify(sel)) setSel(arr)
+  }, [field, JSON.stringify((where as any)?.[field] || [])])
+  
+  // Reflect external where changes for rule mode
+  useEffect(() => {
+    if (interactedRef.current || mode !== 'rule') return
+    const currentGte = (where as any)?.[`${field}__gte`] as number | undefined
+    const currentLte = (where as any)?.[`${field}__lte`] as number | undefined
+    const currentGt = (where as any)?.[`${field}__gt`] as number | undefined
+    const currentLt = (where as any)?.[`${field}__lt`] as number | undefined
+    const currentNe = (where as any)?.[`${field}__ne`] as number | undefined
+    const currentEqArr = (where as any)?.[field] as number[] | undefined
+    const currentEq = (Array.isArray(currentEqArr) && currentEqArr.length === 1) ? Number(currentEqArr[0]) : undefined
+    
+    if (typeof currentEq === 'number') {
+      if (op !== 'eq') setOp('eq')
+      if (a !== currentEq) setA(currentEq)
+      if (b !== '') setB('')
+    } else if (typeof currentNe === 'number') {
+      if (op !== 'ne') setOp('ne')
+      if (a !== currentNe) setA(currentNe)
+      if (b !== '') setB('')
+    } else if (typeof currentGt === 'number') {
+      if (op !== 'gt') setOp('gt')
+      if (a !== currentGt) setA(currentGt)
+      if (b !== '') setB('')
+    } else if (typeof currentGte === 'number' && typeof currentLte === 'number') {
+      if (op !== 'between') setOp('between')
+      if (a !== currentGte) setA(currentGte)
+      if (b !== currentLte) setB(currentLte)
+    } else if (typeof currentGte === 'number') {
+      if (op !== 'gte') setOp('gte')
+      if (a !== currentGte) setA(currentGte)
+      if (b !== '') setB('')
+    } else if (typeof currentLt === 'number') {
+      if (op !== 'lt') setOp('lt')
+      if (a !== currentLt) setA(currentLt)
+      if (b !== '') setB('')
+    } else if (typeof currentLte === 'number') {
+      if (op !== 'lte') setOp('lte')
+      if (a !== currentLte) setA(currentLte)
+      if (b !== '') setB('')
+    }
+  }, [field, (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lte`], (where as any)?.[`${field}__gt`], (where as any)?.[`${field}__lt`], (where as any)?.[`${field}__ne`], JSON.stringify((where as any)?.[field])])
+  
+  // Emit patch for rule mode
+  useEffect(() => {
+    if (mode !== 'rule') return
     const patch: Record<string, any> = { [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [field]: undefined, [`${field}__ne`] : undefined }
     const hasNum = (x: any) => typeof x === 'number' && !isNaN(x)
     switch (op) {
@@ -73,25 +151,95 @@ function NumberRuleInline({ field, where, onPatchAction }: { field: string; wher
       case 'between': if (hasNum(a)) patch[`${field}__gte`] = a; if (hasNum(b)) patch[`${field}__lte`] = b; break
     }
     onPatchAction(patch)
-  }, [op, a, b])
+  }, [mode, op, a, b])
+  
+  // Emit patch for manual mode
+  useEffect(() => {
+    if (mode !== 'manual') return
+    const patch: Record<string, any> = { [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [field]: undefined, [`${field}__ne`]: undefined }
+    patch[field] = sel.length ? sel : undefined
+    onPatchAction(patch)
+  }, [mode, JSON.stringify(sel)])
+  
+  // Smart sort for numbers
+  const opts = ((distinctCache?.[field] || []) as string[]).map((s) => String(s))
+  const sortedOpts = [...opts].sort((a, b) => {
+    const na = Number(a), nb = Number(b)
+    if (isNaN(na) && isNaN(nb)) return String(a).localeCompare(String(b))
+    if (isNaN(na)) return 1
+    if (isNaN(nb)) return -1
+    return na - nb
+  })
+  const filtered = sortedOpts.filter((s) => s.toLowerCase().includes(q.toLowerCase()))
+  
+  // Auto-select search results
+  useEffect(() => {
+    if (mode !== 'manual' || !q) return
+    const set = new Set<string>(sel)
+    filtered.forEach((v) => set.add(v))
+    setSel(Array.from(set.values()))
+  }, [q])
+  
+  const toggle = (v: string) => {
+    const exists = sel.includes(v)
+    setSel(exists ? sel.filter((x) => x !== v) : [...sel, v])
+  }
+  const selectAll = () => setSel([...sortedOpts])
+  const deselectAll = () => setSel([])
   return (
-    <div className="grid grid-cols-3 gap-2">
-      <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>setOp(e.target.value as NumberOp)}>
-        <option value="eq">Is equal to</option>
-        <option value="ne">Is not equal to</option>
-        <option value="gt">Is greater than</option>
-        <option value="gte">Is greater or equal</option>
-        <option value="lt">Is less than</option>
-        <option value="lte">Is less than or equal</option>
-        <option value="between">Is between</option>
-      </select>
-      {op !== 'between' ? (
-        <input type="number" className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={a} onChange={(e)=>setA(e.target.value === '' ? '' : Number(e.target.value))} />
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='rule'} onChange={()=> setMode('rule')} /> Rule</label>
+        <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='manual'} onChange={()=> setMode('manual')} /> Manual</label>
+      </div>
+      {mode === 'rule' ? (
+        <div className="grid grid-cols-3 gap-2">
+          <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{interactedRef.current = true; setOp(e.target.value as NumberOp)}}>
+            <option value="eq">Is equal to</option>
+            <option value="ne">Is not equal to</option>
+            <option value="gt">Is greater than</option>
+            <option value="gte">Is greater or equal</option>
+            <option value="lt">Is less than</option>
+            <option value="lte">Is less than or equal</option>
+            <option value="between">Is between</option>
+          </select>
+          {op !== 'between' ? (
+            <input type="number" className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={a} onChange={(e)=>{interactedRef.current = true; setA(e.target.value === '' ? '' : Number(e.target.value))}} />
+          ) : (
+            <>
+              <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Min" value={a} onChange={(e)=>{interactedRef.current = true; setA(e.target.value === '' ? '' : Number(e.target.value))}} />
+              <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Max" value={b} onChange={(e)=>{interactedRef.current = true; setB(e.target.value === '' ? '' : Number(e.target.value))}} />
+            </>
+          )}
+        </div>
       ) : (
-        <>
-          <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Min" value={a} onChange={(e)=>setA(e.target.value === '' ? '' : Number(e.target.value))} />
-          <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Max" value={b} onChange={(e)=>setB(e.target.value === '' ? '' : Number(e.target.value))} />
-        </>
+        <div className="space-y-2">
+          <input className="w-full h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Search values" value={q} onChange={(e)=>setQ(e.target.value)} />
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{sel.length} of {sortedOpts.length} selected</span>
+            <div className="flex gap-2">
+              <button className="hover:text-foreground" onClick={selectAll}>Select All</button>
+              <button className="hover:text-foreground" onClick={deselectAll}>Deselect All</button>
+            </div>
+          </div>
+          <div className="max-h-56 overflow-auto border rounded-md">
+            <ul className="p-2 space-y-1">
+              {filtered.map((v) => (
+                <li key={v} className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" className="size-3" checked={sel.includes(v)} onChange={()=>toggle(v)} />
+                  <span className="truncate" title={v}>{v}</span>
+                </li>
+              ))}
+              {filtered.length === 0 && (
+                <li className="text-xs text-muted-foreground">No values</li>
+              )}
+            </ul>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs" onClick={deselectAll}>Clear</button>
+            <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs font-medium" onClick={()=>{}}>Apply</button>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -106,6 +254,8 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
   const [val, setVal] = useState<string>('')
   const [sel, setSel] = useState<string[]>(initialArr)
   const [q, setQ] = useState<string>('')
+  const interactedRef = useRef(false)
+  
   // Ensure distinct values are available when needed
   useEffect(() => {
     try {
@@ -116,10 +266,44 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
       }
     } catch {}
   }, [mode, field, distinctCache?.[field]])
+  
+  // Reflect external where changes for manual mode
   useEffect(() => {
     const arr = Array.isArray((where as any)?.[field]) ? ((where as any)?.[field] as any[]).map((v) => String(v)) : []
     if (arr.length && JSON.stringify(arr) !== JSON.stringify(sel)) setSel(arr)
   }, [field, JSON.stringify((where as any)?.[field] || [])])
+  
+  // Reflect external where changes for criteria mode
+  useEffect(() => {
+    if (interactedRef.current || mode !== 'criteria') return
+    const eqArr = (where as any)?.[field]
+    const contains = (where as any)?.[`${field}__contains`]
+    const notcontains = (where as any)?.[`${field}__notcontains`]
+    const startswith = (where as any)?.[`${field}__startswith`]
+    const endswith = (where as any)?.[`${field}__endswith`]
+    const ne = (where as any)?.[`${field}__ne`]
+    
+    if (Array.isArray(eqArr) && eqArr.length === 1) {
+      if (op !== 'eq') setOp('eq')
+      const v = String(eqArr[0])
+      if (val !== v) setVal(v)
+    } else if (typeof ne === 'string') {
+      if (op !== 'ne') setOp('ne')
+      if (val !== ne) setVal(ne)
+    } else if (typeof contains === 'string') {
+      if (op !== 'contains') setOp('contains')
+      if (val !== contains) setVal(contains)
+    } else if (typeof notcontains === 'string') {
+      if (op !== 'not_contains') setOp('not_contains')
+      if (val !== notcontains) setVal(notcontains)
+    } else if (typeof startswith === 'string') {
+      if (op !== 'starts_with') setOp('starts_with')
+      if (val !== startswith) setVal(startswith)
+    } else if (typeof endswith === 'string') {
+      if (op !== 'ends_with') setOp('ends_with')
+      if (val !== endswith) setVal(endswith)
+    }
+  }, [mode, field, (where as any)?.[field], (where as any)?.[`${field}__contains`], (where as any)?.[`${field}__notcontains`], (where as any)?.[`${field}__startswith`], (where as any)?.[`${field}__endswith`], (where as any)?.[`${field}__ne`]])
   useEffect(() => {
     if (mode !== 'criteria') return
     const patch: Record<string, any> = { [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }
@@ -159,12 +343,8 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
     const exists = sel.includes(v)
     setSel(exists ? sel.filter((x) => x !== v) : [...sel, v])
   }
-  const selectResults = () => {
-    const set = new Set<string>(sel)
-    filtered.forEach((v) => set.add(v))
-    setSel(Array.from(set.values()))
-  }
-  const clearAll = () => setSel([])
+  const selectAll = () => setSel([...opts])
+  const deselectAll = () => setSel([])
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -173,7 +353,7 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
       </div>
       {mode === 'criteria' ? (
         <div className="grid grid-cols-3 gap-2">
-          <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>setOp(e.target.value as StrOp)}>
+          <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{interactedRef.current = true; setOp(e.target.value as StrOp)}}>
             <option value="contains">Contains</option>
             <option value="not_contains">Does not contain</option>
             <option value="eq">Is equal to</option>
@@ -181,14 +361,17 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
             <option value="starts_with">Starts with</option>
             <option value="ends_with">Ends with</option>
           </select>
-          <input className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Value" value={val} onChange={(e)=>setVal(e.target.value)} />
+          <input className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Value" value={val} onChange={(e)=>{interactedRef.current = true; setVal(e.target.value)}} />
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <input className="flex-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Search values" value={q} onChange={(e)=>setQ(e.target.value)} onKeyDown={(e)=>{ if (e.key==='Enter'){ e.preventDefault(); selectResults() } }} />
-            <button className="px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs" onClick={selectResults}>Select results</button>
-            <button className="px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs" onClick={clearAll}>Clear</button>
+          <input className="w-full h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Search values" value={q} onChange={(e)=>setQ(e.target.value)} />
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{sel.length} of {opts.length} selected</span>
+            <div className="flex gap-2">
+              <button className="hover:text-foreground" onClick={selectAll}>Select All</button>
+              <button className="hover:text-foreground" onClick={deselectAll}>Deselect All</button>
+            </div>
           </div>
           <div className="max-h-56 overflow-auto border rounded-md">
             <ul className="p-2 space-y-1">
@@ -203,25 +386,47 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
               )}
             </ul>
           </div>
+          <div className="flex items-center gap-2">
+            <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs" onClick={deselectAll}>Clear</button>
+            <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs font-medium" onClick={()=>{}}>Apply</button>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-function DateRuleInline({ field, where, onPatchAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void }) {
-  type Mode = 'preset'|'custom'
+function DateRuleInline({ field, where, onPatchAction, distinctCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadDistinctAction?: (field: string) => void }) {
+  type Mode = 'preset'|'custom'|'manual'
   type Preset = 'today'|'yesterday'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
   type CustomOp = 'after'|'before'|'between'
   const storageKey = `frc-date:${field}`
-  const [mode, setMode] = useState<Mode>('preset')
+  const initialArr = Array.isArray((where as any)?.[field]) ? ((where as any)?.[field] as any[]).map((v) => String(v)) : []
+  const [mode, setMode] = useState<Mode>(initialArr.length > 1 ? 'manual' : 'preset')
   const [preset, setPreset] = useState<Preset>('today')
   const [op, setOp] = useState<CustomOp>('between')
   const [a, setA] = useState<string>('')
   const [b, setB] = useState<string>('')
+  const [sel, setSel] = useState<string[]>(initialArr)
+  const [q, setQ] = useState<string>('')
   const interactedRef = useRef(false)
   const editingRef = useRef(false)
   const editTimerRef = useRef<number | null>(null)
+  
+  // Load distinct values for manual mode
+  useEffect(() => {
+    if (mode !== 'manual') return
+    const arr = distinctCache?.[field]
+    if ((!arr || arr.length === 0) && typeof loadDistinctAction === 'function') {
+      loadDistinctAction(field)
+    }
+  }, [mode, field, distinctCache?.[field]])
+  
+  // Reflect external where for manual mode
+  useEffect(() => {
+    const arr = Array.isArray((where as any)?.[field]) ? ((where as any)?.[field] as any[]).map((v) => String(v)) : []
+    if (arr.length && JSON.stringify(arr) !== JSON.stringify(sel)) setSel(arr)
+  }, [field, JSON.stringify((where as any)?.[field] || [])])
   const markEditing = () => {
     editingRef.current = true
     if (typeof window !== 'undefined') {
@@ -245,7 +450,7 @@ function DateRuleInline({ field, where, onPatchAction }: { field: string; where?
         else {
           setMode('custom')
           if (gte) setA(gte)
-          if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); setB(d.toISOString().slice(0,10)) }
+          if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); setB(ymd(d)) }
         }
       } else {
         const raw = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null
@@ -266,7 +471,12 @@ function DateRuleInline({ field, where, onPatchAction }: { field: string; where?
     if (!interactedRef.current) return
     try { if (typeof window !== 'undefined') localStorage.setItem(storageKey, JSON.stringify({ mode, preset, op, a, b })) } catch {}
   }, [storageKey, mode, preset, op, a, b])
-  function ymd(d: Date) { return d.toISOString().slice(0,10) }
+  function ymd(d: Date) {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const da = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${da}`
+  }
   function rangeForPreset(p: Preset): { gte?: string; lt?: string } {
     const now = new Date()
     const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
@@ -310,22 +520,23 @@ function DateRuleInline({ field, where, onPatchAction }: { field: string; where?
       if (hasG && hasL) {
         if (op !== 'between') setOp('between')
         if (a !== (gte || '')) setA(gte || '')
-        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const prev = d.toISOString().slice(0,10); if (b !== prev) setB(prev) } } catch {}
+        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const prev = ymd(d); if (b !== prev) setB(prev) } } catch {}
       } else if (hasG) {
         if (op !== 'after') setOp('after')
         if (a !== (gte || '')) setA(gte || '')
         if (b !== '') setB('')
       } else if (hasL) {
         if (op !== 'before') setOp('before')
-        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const prev = d.toISOString().slice(0,10); if (b !== prev) setB(prev) } } catch {}
+        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const prev = ymd(d); if (b !== prev) setB(prev) } } catch {}
         if (a !== '') setA('')
       }
     } catch {}
   }, [field, (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lt`]])
   const lastSigRef = useRef<string>('')
   useEffect(() => {
+    if (mode === 'manual') return // Manual mode handled separately
     if (!interactedRef.current) return
-    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }
+    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [field]: undefined }
     if (mode === 'preset') {
       const r = rangeForPreset(preset)
       patch[`${field}__gte`] = r.gte
@@ -345,11 +556,47 @@ function DateRuleInline({ field, where, onPatchAction }: { field: string; where?
     const sig = JSON.stringify(patch)
     if (sig !== lastSigRef.current) { lastSigRef.current = sig; onPatchAction(patch) }
   }, [mode, preset, op, a, b])
+  
+  // Emit patch for manual mode
+  useEffect(() => {
+    if (mode !== 'manual') return
+    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [field]: undefined }
+    patch[field] = sel.length ? sel : undefined
+    onPatchAction(patch)
+  }, [mode, JSON.stringify(sel)])
+  
+  // Smart sort for dates
+  const opts = ((distinctCache?.[field] || []) as string[]).map((s) => String(s))
+  const sortedOpts = [...opts].sort((a, b) => {
+    const da = new Date(a), db = new Date(b)
+    const ta = da.getTime(), tb = db.getTime()
+    if (isNaN(ta) && isNaN(tb)) return String(a).localeCompare(String(b))
+    if (isNaN(ta)) return 1
+    if (isNaN(tb)) return -1
+    return ta - tb
+  })
+  const filtered = sortedOpts.filter((s) => s.toLowerCase().includes(q.toLowerCase()))
+  
+  // Auto-select search results
+  useEffect(() => {
+    if (mode !== 'manual' || !q) return
+    const set = new Set<string>(sel)
+    filtered.forEach((v) => set.add(v))
+    setSel(Array.from(set.values()))
+  }, [q])
+  
+  const toggle = (v: string) => {
+    const exists = sel.includes(v)
+    setSel(exists ? sel.filter((x) => x !== v) : [...sel, v])
+  }
+  const selectAll = () => setSel([...sortedOpts])
+  const deselectAll = () => setSel([])
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={()=>{ interactedRef.current = true; markEditing(); setMode('preset') }} /> Preset</label>
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='custom'} onChange={()=>{ interactedRef.current = true; markEditing(); setMode('custom') }} /> Custom</label>
+        <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='manual'} onChange={()=>{ interactedRef.current = true; markEditing(); setMode('manual') }} /> Manual</label>
       </div>
       {mode==='preset' ? (
         <select className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={preset} onChange={(e)=>{ interactedRef.current = true; markEditing(); setPreset(e.target.value as Preset) }}>
@@ -362,7 +609,7 @@ function DateRuleInline({ field, where, onPatchAction }: { field: string; where?
           <option value="this_year">This Year</option>
           <option value="last_year">Last Year</option>
         </select>
-      ) : (
+      ) : mode==='custom' ? (
         <div className="grid grid-cols-3 gap-2">
           <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{ interactedRef.current = true; markEditing(); setOp(e.target.value as CustomOp) }}>
             <option value="after">After</option>
@@ -377,6 +624,34 @@ function DateRuleInline({ field, where, onPatchAction }: { field: string; where?
               <input type="date" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="End" value={b} onChange={(e)=>{ interactedRef.current = true; markEditing(); setB(e.target.value) }} />
             </>
           )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <input className="w-full h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Search values" value={q} onChange={(e)=>setQ(e.target.value)} />
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{sel.length} of {sortedOpts.length} selected</span>
+            <div className="flex gap-2">
+              <button className="hover:text-foreground" onClick={selectAll}>Select All</button>
+              <button className="hover:text-foreground" onClick={deselectAll}>Deselect All</button>
+            </div>
+          </div>
+          <div className="max-h-56 overflow-auto border rounded-md">
+            <ul className="p-2 space-y-1">
+              {filtered.map((v) => (
+                <li key={v} className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" className="size-3" checked={sel.includes(v)} onChange={()=>toggle(v)} />
+                  <span className="truncate" title={v}>{v}</span>
+                </li>
+              ))}
+              {filtered.length === 0 && (
+                <li className="text-xs text-muted-foreground">No values</li>
+              )}
+            </ul>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs" onClick={deselectAll}>Clear</button>
+            <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs font-medium" onClick={()=>{}}>Apply</button>
+          </div>
         </div>
       )}
     </div>
@@ -409,7 +684,7 @@ export function FilterbarShell(props: { label: string; icon?: ReactNode; classNa
     }
   }, [open])
   return (
-    <div ref={containerRef} className={`group relative z-10 inline-flex items-center rounded-tremor-small text-[12px] leading-none font-medium shadow-tremor-input ${className||''}`}>
+    <div ref={containerRef} className={`group relative z-10 inline-flex items-center rounded-tremor-small text-[12px] leading-none font-medium shadow-tremor-input ${className||''}`} onClick={(e) => e.stopPropagation()}>
       <span className="inline-flex items-center h-8 rounded-l-tremor-small border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 text-[hsl(var(--muted-foreground))] transition-colors group-hover:bg-[hsl(var(--muted))] focus:z-10 cursor-pointer">
         {icon || <RiCalendar2Line className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden />}
       </span>
@@ -418,7 +693,7 @@ export function FilterbarShell(props: { label: string; icon?: ReactNode; classNa
         className="-ml-px inline-flex items-center gap-x-2 h-8 rounded-r-tremor-small border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))] group-hover:bg-[hsl(var(--muted))] focus:z-10 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:border-[hsl(var(--ring))] cursor-pointer"
         aria-expanded={open}
         aria-haspopup="menu"
-        onClick={() => setOpen(v => !v)}
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}
       >
         {label}
         <RiArrowDownSLine className="-mr-1 size-4 shrink-0" aria-hidden />
@@ -428,6 +703,7 @@ export function FilterbarShell(props: { label: string; icon?: ReactNode; classNa
           className="filterbar-popover z-[80] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] text-[12px] shadow-none p-2"
           style={{ position: 'absolute', top: pos.top, left: pos.left, width: menuWidth ? `${Math.max(menuWidth, 300)}px` : '300px', maxWidth: '480px' }}
           role="menu"
+          onClick={(e) => e.stopPropagation()}
         >
           {children}
         </div>,
@@ -464,7 +740,7 @@ export default function FilterbarControl(props: any) {
   }, [open])
   const activeLabel = (active && labels[active]) ? labels[active] : Object.values(labels)[0] || 'Select'
   return (
-    <div ref={containerRef} className={`group relative z-10 inline-flex items-center rounded-tremor-small text-[12px] leading-none font-medium shadow-tremor-input dark:shadow-dark-tremor-input ${className||''} ${disabled?'opacity-60 cursor-not-allowed':''}`}>
+    <div ref={containerRef} className={`group relative z-10 inline-flex items-center rounded-tremor-small text-[12px] leading-none font-medium shadow-tremor-input dark:shadow-dark-tremor-input ${className||''} ${disabled?'opacity-60 cursor-not-allowed':''}`} onClick={(e) => e.stopPropagation()}>
       <span className="inline-flex items-center h-8 rounded-l-tremor-small border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 text-[hsl(var(--muted-foreground))] transition-colors ${disabled?'':'group-hover:bg-[hsl(var(--muted))]'} focus:z-10 ${disabled?'cursor-not-allowed':'cursor-pointer'}">
         <RiCalendar2Line className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden />
       </span>
@@ -473,7 +749,7 @@ export default function FilterbarControl(props: any) {
         className="-ml-px inline-flex items-center gap-x-2 h-8 rounded-r-tremor-small border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 text-[hsl(var(--foreground))] transition-colors ${disabled?'':'hover:bg-[hsl(var(--muted))] group-hover:bg-[hsl(var(--muted))]'} focus:z-10 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:border-[hsl(var(--ring))] ${disabled?'cursor-not-allowed':'cursor-pointer'}"
         aria-expanded={open}
         aria-haspopup="menu"
-        onClick={() => { if (disabled) return; setOpen(v => !v) }}
+        onClick={(e) => { e.stopPropagation(); if (disabled) return; setOpen(v => !v) }}
         disabled={!!disabled}
         aria-disabled={!!disabled}
       >
@@ -485,6 +761,7 @@ export default function FilterbarControl(props: any) {
           className="filterbar-popover z-[80] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] text-[12px] shadow-none p-1 whitespace-normal break-words"
           style={{ position: 'absolute', top: pos.top, left: pos.left, width: menuWidth ? `${Math.max(menuWidth, 220)}px` : '240px', maxWidth: '320px' }}
           role="menu"
+          onClick={(e) => e.stopPropagation()}
         >
           {options.map((opt) => (
             <button

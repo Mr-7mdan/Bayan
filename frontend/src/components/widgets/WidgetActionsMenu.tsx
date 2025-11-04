@@ -386,18 +386,34 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
     }
   }, [nav.join('|')])
 
+  // Determine widget type and available features
+  const widgetType = cfg?.type || 'chart'
+  const chartType = (cfg as any)?.chartType || 'line'
+  
+  // Feature availability by widget type
+  // Widget types: chart, table, tremorTable, kpi, text, etc.
+  // Chart types: line, bar, area, column, donut, badges, progress, tracker, scatter, etc.
+  const hasFilter = ['chart', 'table', 'tremorTable'].includes(widgetType)
+  const hasSort = ['chart', 'table', 'tremorTable'].includes(widgetType)
+  const hasFormat = true // All widgets support formatting
+  const hasGrid = ['chart'].includes(widgetType) && !['donut', 'badges', 'progress', 'tracker'].includes(chartType) // Charts with axes
+  const hasAxis = ['chart'].includes(widgetType) && !['donut', 'badges', 'progress', 'tracker'].includes(chartType) // Charts with axes
+  const hasTooltip = ['chart', 'table'].includes(widgetType)
+  const hasLegend = ['chart'].includes(widgetType) && !['badges', 'progress', 'tracker'].includes(chartType) // Charts with series
+  const hasAlerts = true // All widgets can have alerts
+
   const makeRootPane = (): Pane => ({
     title: 'Actions',
     content: (
       <MenuList>
-        <MenuItem label="Filter" icon={<RiFilter3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['filter'])} />
-        <MenuItem label="Sort" icon={<RiArrowUpDownLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['sort'])} />
-        <MenuItem label="Format" icon={<RiBrushLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['format'])} />
-        <MenuItem label="Grid" icon={<RiGridLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['grid'])} />
-        <MenuItem label="Axis" icon={<RiRulerLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['axis'])} />
-        <MenuItem label="Tooltip" icon={<RiChat3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['tooltip'])} />
-        <MenuItem label="Legend" icon={<RiPriceTag3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['legend'])} />
-        <MenuItem label={existingAlert ? (`Edit ${existingAlert.kind === 'notification' ? 'Notification' : 'Alert'}`) : 'Set Notification/Alert'} icon={<RiNotification3Line className="h-4 w-4" aria-hidden="true" />} onClick={() => setAlertsOpen(true)} />
+        {hasFilter && <MenuItem label="Filter" icon={<RiFilter3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['filter'])} />}
+        {hasSort && <MenuItem label="Sort" icon={<RiArrowUpDownLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['sort'])} />}
+        {hasFormat && <MenuItem label="Format" icon={<RiBrushLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['format'])} />}
+        {hasGrid && <MenuItem label="Grid" icon={<RiGridLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['grid'])} />}
+        {hasAxis && <MenuItem label="Axis" icon={<RiRulerLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['axis'])} />}
+        {hasTooltip && <MenuItem label="Tooltip" icon={<RiChat3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['tooltip'])} />}
+        {hasLegend && <MenuItem label="Legend" icon={<RiPriceTag3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['legend'])} />}
+        {hasAlerts && <MenuItem label={existingAlert ? (`Edit ${existingAlert.kind === 'notification' ? 'Notification' : 'Alert'}`) : 'Set Notification/Alert'} icon={<RiNotification3Line className="h-4 w-4" aria-hidden="true" />} onClick={() => setAlertsOpen(true)} />}
       </MenuList>
     )
   })
@@ -674,15 +690,6 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
     }
   }
 
-  const makeSimplePane = (title: string, options: string[]): Pane => ({
-    title,
-    content: (
-      <MenuList>
-        {options.map((o) => (<MenuItem key={o} label={o} onClick={() => { /* stub */ }} />))}
-      </MenuList>
-    )
-  })
-
   const makeLegendPane = (): Pane => ({
     title: 'Legend',
     content: (
@@ -889,6 +896,32 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
             )}
           </div>
         </MenuGroup>
+        <MenuGroup title="Vertical (X axis grid)">
+          <div className="px-2 py-1">
+            <div className="text-[11px] font-medium text-muted-foreground mb-1">Main</div>
+            <div className="grid grid-cols-2 gap-2 items-center mb-2">
+              <label className="text-xs text-muted-foreground">Mode</label>
+              <FieldSelect value={String(((optChartGrid().vertical || {}).main || {}).mode || 'default')} onValueChangeAction={(v: string) => patchGridNode('vertical','main',{ mode: (v === 'custom' ? 'custom' : 'default') })}>
+                <CSelectItem value="default">default</CSelectItem>
+                <CSelectItem value="custom">custom</CSelectItem>
+              </FieldSelect>
+            </div>
+            {String(((optChartGrid().vertical || {}).main || {}).mode || 'default') === 'custom' && (
+              <div className="grid grid-cols-2 gap-2 items-center border rounded-md p-2">
+                <label className="text-xs text-muted-foreground">Show</label>
+                <input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={!!(((optChartGrid().vertical || {}).main || {}).show)} onChange={(e) => patchGridNode('vertical','main',{ show: e.target.checked })} />
+                <label className="text-xs text-muted-foreground">Type</label>
+                <FieldSelect value={String((((optChartGrid().vertical || {}).main || {}).type || 'solid'))} onValueChangeAction={(v: string) => patchGridNode('vertical','main',{ type: v })}>
+                  {['solid','dashed','dotted'].map((t) => (<CSelectItem key={t} value={t}>{t}</CSelectItem>))}
+                </FieldSelect>
+                <label className="text-xs text-muted-foreground">Width</label>
+                <FieldSelect value={String((((optChartGrid().vertical || {}).main || {}).width || '1'))} onValueChangeAction={(v: string) => patchGridNode('vertical','main',{ width: Number(v) })}>
+                  {['1','2','3'].map((t) => (<CSelectItem key={t} value={t}>{t}px</CSelectItem>))}
+                </FieldSelect>
+              </div>
+            )}
+          </div>
+        </MenuGroup>
       </MenuList>
     )
   })
@@ -897,13 +930,15 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
   const pane: Pane = (() => {
     const k = nav[0]
     if (!k) return makeRootPane()
-    if (k === 'filter') return makeFilterPane(nav)
-    if (k === 'sort') return makeSortPane(nav)
-    if (k === 'format') return makeFormatPane(nav)
-    if (k === 'grid') return makeGridPane()
-    if (k === 'axis') return makeAxisPane()
-    if (k === 'tooltip') return makeTooltipPane()
-    if (k === 'legend') return makeLegendPane()
+    // Guard against accessing unavailable features
+    if (k === 'filter' && hasFilter) return makeFilterPane(nav)
+    if (k === 'sort' && hasSort) return makeSortPane(nav)
+    if (k === 'format' && hasFormat) return makeFormatPane(nav)
+    if (k === 'grid' && hasGrid) return makeGridPane()
+    if (k === 'axis' && hasAxis) return makeAxisPane()
+    if (k === 'tooltip' && hasTooltip) return makeTooltipPane()
+    if (k === 'legend' && hasLegend) return makeLegendPane()
+    // Fallback to root if feature not available
     return makeRootPane()
   })()
 
@@ -1015,12 +1050,6 @@ function MenuItem({ label, icon, hasSubmenu, active, onHover, onClick, children,
   )
 }
 
-function SubMenu({ children }: { children: React.ReactNode }) {
-  return (
-    <>{children}</>
-  )
-}
-
 function SwitchRow({ label, checked, onChangeAction, defaultChecked }: { label: string; checked?: boolean; onChangeAction?: (v: boolean) => void; defaultChecked?: boolean }) {
   const [local, setLocal] = React.useState<boolean>(!!defaultChecked)
   useEffect(() => { if (checked != null) setLocal(!!checked) }, [checked])
@@ -1054,29 +1083,5 @@ function FieldSelect({ className, children, value, onValueChangeAction, onValueC
 function FieldInput({ className, ...rest }: any) {
   return (
     <TextInput {...rest} className={`w-full rounded-lg border border-[hsl(var(--border))] bg-transparent ${className || ''}`} />
-  )
-}
-
-// Simple comma-separated values editor used in Filter pane
-function ManualValuesEditor({ field, initial, onApply }: { field: string; initial?: string[]; onApply: (vals: string[]) => void }) {
-  const [text, setText] = React.useState<string>((initial || []).join(', '))
-  React.useEffect(() => { setText((initial || []).join(', ')) }, [Array.isArray(initial) ? initial.join('|') : ''])
-  const parse = (s: string): string[] => {
-    return s.split(',').map((x) => x.trim()).filter((x) => x.length > 0)
-  }
-  return (
-    <div className="space-y-2">
-      <input
-        type="text"
-        className="w-full h-8 px-2 rounded-lg border border-[hsl(var(--border))] bg-transparent"
-        placeholder={`Enter ${field} values (e.g. A, B, C)`}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <div className="flex items-center gap-2">
-        <button type="button" className="h-8 px-2 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => onApply(parse(text))}>Apply</button>
-        <button type="button" className="h-8 px-2 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => { setText(''); onApply([]) }}>Clear</button>
-      </div>
-    </div>
   )
 }

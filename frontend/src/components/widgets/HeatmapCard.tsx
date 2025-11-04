@@ -10,6 +10,7 @@ import { Api, QueryApi } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/Tabs'
+import { FilterbarRuleControl } from '@/components/shared/FilterbarControl'
 // no preset helpers needed
 
 // ECharts client-only wrapper
@@ -75,6 +76,56 @@ function fmtXLabel(raw: any, options?: WidgetConfig['options'], querySpec?: Quer
     case 'capitalize': { const lower = s.toLowerCase(); return lower.length ? (lower[0].toUpperCase()+lower.slice(1)) : lower }
     case 'proper': default: return s.replace(/[_-]+/g,' ').split(/\s+/).map(w=>w? (w[0].toUpperCase()+w.slice(1).toLowerCase()):w).join(' ')
   }
+}
+
+// Helper: load distinct string values for a field (omitting self constraint)
+function useDistinctStrings(
+  source?: string,
+  datasourceId?: string,
+  baseWhere?: Record<string, any>,
+  customCols?: Array<{ name: string; formula: string }>,
+) {
+  const [cache, setCache] = useState<Record<string, string[]>>({})
+  useEffect(() => { setCache({}) }, [source, datasourceId, JSON.stringify(baseWhere || {}), JSON.stringify(customCols || [])])
+  const load = async (field: string) => {
+    try {
+      if (!source) return
+      const omit = { ...(baseWhere || {}) }
+      Object.keys(omit).forEach((k) => { if (k === field || k.startsWith(`${field}__`)) delete (omit as any)[k] })
+      try {
+        if (typeof (Api as any).distinct === 'function') {
+          const res = await (Api as any).distinct({ source: String(source), field: String(field), where: Object.keys(omit).length ? omit : undefined, datasourceId })
+          const arr = ((res?.values || []) as any[]).map((v) => (v != null ? String(v) : null)).filter((v) => v != null) as string[]
+          const dedup = Array.from(new Set(arr).values()).sort()
+          setCache((prev) => ({ ...prev, [field]: dedup }))
+          return
+        }
+      } catch {}
+      const pageSize = 5000
+      let offset = 0
+      const setVals = new Set<string>()
+      while (true) {
+        const spec: any = { source, select: [field], where: Object.keys(omit).length ? omit : undefined, limit: pageSize, offset }
+        const res = await QueryApi.querySpec({ spec, datasourceId, limit: pageSize, offset, includeTotal: false })
+        const cols = ((res?.columns || []) as string[])
+        const idx = cols.indexOf(field)
+        const rows = ((res?.rows || []) as any[])
+        rows.forEach((row: any) => {
+          let v: any
+          if (idx >= 0) v = Array.isArray(row) ? row[idx] : (row?.[field])
+          else if (Array.isArray(row)) v = row[0]
+          else v = row?.[field]
+          if (v !== null && v !== undefined) setVals.add(String(v))
+        })
+        if (rows.length === 0 || rows.length < pageSize) break
+        offset += pageSize
+        if (offset >= 500000) break
+      }
+      const arr = Array.from(setVals.values()).sort()
+      setCache((prev) => ({ ...prev, [field]: arr }))
+    } catch {}
+  }
+  return { cache, load }
 }
 
 function buildTooltipHtml(header: string, lines: Array<{ label: string; value: string; right?: string }>) {
@@ -191,6 +242,115 @@ export default function HeatmapCard({
   const { filters } = useFilters()
   const { user } = useAuth()
   const containerRef = useRef<HTMLDivElement | null>(null)
+  
+  // Local UI-driven filters (Filterbars) merged into where
+  const [uiWhere, setUiWhere] = useState<Record<string, any>>({})
+  const setUiWhereLocal = (patch: Record<string, any>, emit = true) => {
+    setUiWhere((prev) => {
+      const next = { ...prev }
+      Object.entries(patch).forEach(([k, v]) => {
+        if (v === undefined) delete (next as any)[k]
+        else (next as any)[k] = v
+      })
+      return next
+    })
+    if (emit && typeof window !== 'undefined' && widgetId) {
+      try { window.dispatchEvent(new CustomEvent('heatmap-where-change', { detail: { widgetId, patch } } as any)) } catch {}
+    }
+  }
+  const setUiWhereAndEmit = (patch: Record<string, any>) => setUiWhereLocal(patch, true)
+  const setUiWhereAndDontEmit = (patch: Record<string, any>) => setUiWhereLocal(patch, false)
+  
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent).detail as { widgetId?: string; patch?: Record<string, any> }
+      if (!d?.widgetId || d.widgetId !== widgetId) return
+      const patch = d.patch || {}
+      setUiWhereAndDontEmit(patch)
+    }
+    if (typeof window !== 'undefined') window.addEventListener('config-where-change', handler as EventListener)
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('config-where-change', handler as EventListener) }
+  }, [widgetId])
+  
+  // Compute exposed fields from config overrides
+  const fieldsExposed = useMemo(() => {
+    const candidate = new Set<string>()
+    const ex = (options?.filtersExpose || {})
+    Object.keys(ex).forEach((k) => { if (ex[k]) candidate.add(k) })
+    const shouldExpose = (f: string) => (
+      (options?.filtersExpose && typeof options.filtersExpose[f] === 'boolean')
+        ? !!options.filtersExpose[f]
+        : ((options?.filtersUI === 'filterbars'))
+    )
+    return Array.from(candidate).filter(shouldExpose)
+  }, [options?.filtersUI, options?.filtersExpose])
+  
+  // Helper: UI is source of truth for exposed fields
+  const mergeUiAsTruth = (base: Record<string, any>): Record<string, any> => {
+    const effective: Record<string, any> = { ...base }
+    const rmKeysFor = (f: string) => {
+      if (tabbedGuard && tabbedField && String(f) === String(tabbedField)) return
+      delete effective[f]
+      delete effective[`${f}__gte`]
+      delete effective[`${f}__lte`]
+      delete effective[`${f}__gt`]
+      delete effective[`${f}__lt`]
+      delete effective[`${f}__ne`]
+      delete effective[`${f}__contains`]
+      delete effective[`${f}__notcontains`]
+      delete effective[`${f}__startswith`]
+      delete effective[`${f}__endswith`]
+    }
+    fieldsExposed.forEach((f) => {
+      rmKeysFor(f)
+      const val = (uiWhere as any)[f]
+      const gte = (uiWhere as any)[`${f}__gte`]
+      const lte = (uiWhere as any)[`${f}__lte`]
+      const gt = (uiWhere as any)[`${f}__gt`]
+      const lt = (uiWhere as any)[`${f}__lt`]
+      const ne = (uiWhere as any)[`${f}__ne`]
+      const contains = (uiWhere as any)[`${f}__contains`]
+      const notcontains = (uiWhere as any)[`${f}__notcontains`]
+      const startswith = (uiWhere as any)[`${f}__startswith`]
+      const endswith = (uiWhere as any)[`${f}__endswith`]
+      if (tabbedGuard && tabbedField && String(f) === String(tabbedField)) return
+      if (Array.isArray(val) && val.length > 0) (effective as any)[f] = val
+      if (gte != null) (effective as any)[`${f}__gte`] = gte
+      if (lte != null) (effective as any)[`${f}__lte`] = lte
+      if (gt != null) (effective as any)[`${f}__gt`] = gt
+      if (lt != null) (effective as any)[`${f}__lt`] = lt
+      if (ne != null) (effective as any)[`${f}__ne`] = ne
+      if (contains != null) (effective as any)[`${f}__contains`] = contains
+      if (notcontains != null) (effective as any)[`${f}__notcontains`] = notcontains
+      if (startswith != null) (effective as any)[`${f}__startswith`] = startswith
+      if (endswith != null) (effective as any)[`${f}__endswith`] = endswith
+    })
+    return effective
+  }
+  const uiTruthWhere = useMemo(
+    () => querySpec ? mergeUiAsTruth((((querySpec as any)?.where || {}) as Record<string, any>)) : {},
+    [JSON.stringify((querySpec as any)?.where || {}), JSON.stringify(uiWhere), JSON.stringify(fieldsExposed), querySpec]
+  )
+  
+  // Hydrate UI state from base where for exposed fields
+  useEffect(() => {
+    if (!querySpec) return
+    const baseWhere = ((querySpec as any)?.where || {}) as Record<string, any>
+    setUiWhere((prev) => {
+      const next = { ...prev }
+      fieldsExposed.forEach((f) => {
+        if (next[f] === undefined && Array.isArray(baseWhere[f]) && (baseWhere[f] as any[]).length > 0) next[f] = baseWhere[f]
+        ;['gte','lte','gt','lt','ne','contains','notcontains','startswith','endswith'].forEach((op) => {
+          const k = `${f}__${op}`
+          if (next[k] === undefined && baseWhere[k] != null) (next as any)[k] = baseWhere[k]
+        })
+      })
+      return next
+    })
+  }, [JSON.stringify((querySpec as any)?.where || {}), JSON.stringify(fieldsExposed), querySpec])
+  
+  // Helper hook for distinct values for string filters
+  const { cache: distinctCache, load: loadDistinct } = useDistinctStrings((querySpec as any)?.source, datasourceId, uiTruthWhere, [])
   const [visible, setVisible] = useState(false)
   useEffect(() => {
     const el = containerRef.current
@@ -254,7 +414,7 @@ export default function HeatmapCard({
         const where: Record<string, any> = { ...(base.where || {}) }
         if (df && !ignoreGlobal) {
           if (filters.startDate) where[`${df}__gte`] = filters.startDate
-          if (filters.endDate) { const d = new Date(`${filters.endDate}T00:00:00`); d.setDate(d.getDate() + 1); where[`${df}__lt`] = d.toISOString().slice(0,10) }
+          if (filters.endDate) { const d = new Date(`${filters.endDate}T00:00:00`); d.setDate(d.getDate() + 1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); where[`${df}__lt`] = `${y}-${m}-${da}` }
         }
         const spec: any = { source, select: [tabsField], where: Object.keys(where).length ? where : undefined, limit: 1000, offset: 0 }
         const res = await QueryApi.querySpec({ spec, datasourceId, limit: 1000, offset: 0, includeTotal: false })
@@ -279,20 +439,23 @@ export default function HeatmapCard({
   const debSpecKey = useDebounced(specKey, 350)
   const debFiltersKey = useDebounced(filtersKey, 350)
   const presetKeyForQuery = useMemo(() => String(((options as any)?.heatmap?.preset) || 'calendarMonthly'), [ (options as any)?.heatmap?.preset ])
+  const uiWhereKey = useMemo(() => JSON.stringify(uiWhere), [uiWhere])
+  const debUiWhereKey = useDebounced(uiWhereKey, 350)
   const q = useQuery({
-    queryKey: ['heatmap', title, sql, datasourceId, presetKeyForQuery, queryMode, debSpecKey, debFiltersKey, breakSeq],
+    queryKey: ['heatmap', title, sql, datasourceId, presetKeyForQuery, queryMode, debSpecKey, debFiltersKey, breakSeq, debUiWhereKey],
     placeholderData: (prev) => prev as any,
     queryFn: async () => {
       if (queryMode === 'spec' && querySpec) {
-        // Start from base spec and attach date bounds
+        // Start from base spec and attach date bounds, use uiTruthWhere for exposed filters
         const base: any = { ...querySpec }
         const df = (options as any)?.deltaDateField as string | undefined
-        const where: Record<string, any> = { ...(base.where || {}) }
+        const where: Record<string, any> = { ...(uiTruthWhere || base.where || {}) }
         if (df && !ignoreGlobal) {
           if (filters.startDate) where[`${df}__gte`] = filters.startDate
           if (filters.endDate) {
             const d = new Date(`${filters.endDate}T00:00:00`); d.setDate(d.getDate() + 1)
-            where[`${df}__lt`] = d.toISOString().slice(0, 10)
+            const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0')
+            where[`${df}__lt`] = `${y}-${m}-${da}`
           }
         }
         // Calendar presets: constrain to month/year (client aggregates by day)
@@ -770,6 +933,64 @@ export default function HeatmapCard({
 
   const keyBase = `${preset}|${(namedRows || []).length}|${wantTabs ? 'tabs' : 'no-tabs'}`
 
+  // Render filterbars UI
+  const filterbarsUI = fieldsExposed.length > 0 ? (
+    <div className="flex-none flex items-center justify-between gap-2 mb-1">
+      <div className="min-w-0" />
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {fieldsExposed.map((field) => {
+          // Determine type by sampling distincts, fallback to current query rows
+          if (!distinctCache[field]) { void loadDistinct(field) }
+          let sample: any[] = (distinctCache[field] || []).slice(0, 12)
+          if (sample.length === 0) {
+            try {
+              const rows = (Array.isArray((q.data as any)?.rows) ? ((q.data as any).rows as any[]) : [])
+              const cols = ((q.data as any)?.columns as string[]) || []
+              const idx = cols.indexOf(field)
+              const vals = rows.slice(0, 48).map((r: any) => (Array.isArray(r) && idx>=0) ? r[idx] : (r?.[field]))
+              sample = vals.filter((v) => v !== null && v !== undefined).slice(0, 12).map((v) => String(v))
+            } catch {}
+          }
+          let kind: 'string'|'number'|'date' = 'string'
+          const numHits = sample.filter((s) => Number.isFinite(Number(s))).length
+          const dateHits = sample.filter((s) => { const d = parseDateLoose(s); return !!d }).length
+          if (numHits >= Math.max(1, Math.ceil(sample.length/2))) kind = 'number'
+          else if (dateHits >= Math.max(1, Math.ceil(sample.length/2))) kind = 'date'
+
+          const sel = uiWhere[field] as any
+          const label = (() => {
+            if (kind === 'string') {
+              const arr: any[] = Array.isArray(sel) ? sel : []
+              return arr && arr.length ? `${field} (${arr.length})` : field
+            }
+            if (kind === 'date') {
+              const a = (uiWhere[`${field}__gte`] as string|undefined)
+              const b = (uiWhere[`${field}__lt`] as string|undefined)
+              return (a||b) ? `${field} (${a||''}–${b||''})` : field
+            }
+            const ops = ['gte','lte','gt','lt'] as const
+            const exp = ops.map(op => (uiWhere[`${field}__${op}`])).some(v => v!=null)
+            return exp ? `${field} (filtered)` : field
+          })()
+
+          const mergedWhere: Record<string, any> = (uiTruthWhere as any)
+          return (
+            <FilterbarRuleControl
+              key={`${field}:${kind}`}
+              label={label}
+              kind={kind}
+              field={field}
+              where={mergedWhere}
+              distinctCache={distinctCache as any}
+              loadDistinctAction={loadDistinct as any}
+              onPatchAction={(patch: Record<string, any>) => setUiWhereAndEmit(patch)}
+            />
+          )
+        })}
+      </div>
+    </div>
+  ) : null
+
   // Render Tabs after all hooks to keep hook order stable
   if (wantTabs) {
     const shown = tabsMaxItems > 0 ? tabVals.slice(0, tabsMaxItems) : tabVals
@@ -778,6 +999,7 @@ export default function HeatmapCard({
     return (
       <ErrorBoundary name="HeatmapCard@Tabs">
         <div className="h-full flex flex-col" ref={containerRef}>
+          {filterbarsUI}
           <Tabs defaultValue={initial} className="flex-1 min-h-0 flex flex-col">
             <TabsList variant={tabsVariant} className={`justify-start overflow-x-auto shrink-0 relative z-10`}>
               {tabsShowAll && (
@@ -833,7 +1055,8 @@ export default function HeatmapCard({
 
   if (preset === 'calendarMonthly') {
     const allPairs = (monthlyData || []) as Array<[string, number]>
-    const month = options?.heatmap?.calendarMonthly?.month || (allPairs[0]?.[0] ? allPairs[0][0].slice(0,7) : new Date().toISOString().slice(0,7))
+    const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth() + 1).padStart(2, '0'); const fallbackMonth = `${y}-${m}`
+    const month = options?.heatmap?.calendarMonthly?.month || (allPairs[0]?.[0] ? allPairs[0][0].slice(0,7) : fallbackMonth)
     const pairs = allPairs.filter(([d]) => typeof d === 'string' && d.startsWith(`${month}-`))
     const vals = pairs.map(([, v]) => Number(v)).filter(Number.isFinite)
     const sorted = vals.slice().sort((a,b)=>a-b)
@@ -890,8 +1113,11 @@ export default function HeatmapCard({
     }
     return (
       <ErrorBoundary name="HeatmapCard@Monthly">
-        <div key={keyBase} className="relative h-full w-full" ref={containerRef}>
-          <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+        <div className="h-full flex flex-col" ref={containerRef}>
+          {filterbarsUI}
+          <div key={keyBase} className="relative flex-1 min-h-0 w-full">
+            <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+          </div>
         </div>
       </ErrorBoundary>
     )
@@ -951,8 +1177,11 @@ export default function HeatmapCard({
     }
     return (
       <ErrorBoundary name="HeatmapCard@Annual">
-        <div key={keyBase} className="relative h-full w-full" ref={containerRef}>
-          <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+        <div className="h-full flex flex-col" ref={containerRef}>
+          {filterbarsUI}
+          <div key={keyBase} className="relative flex-1 min-h-0 w-full">
+            <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+          </div>
         </div>
       </ErrorBoundary>
     )
@@ -1019,11 +1248,19 @@ export default function HeatmapCard({
     }
     return (
       <ErrorBoundary name="HeatmapCard@WeekdayHour">
-        <div key={keyBase} className="relative h-full w-full" ref={containerRef}>
-          <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+        <div className="h-full flex flex-col" ref={containerRef}>
+          {filterbarsUI}
+          <div key={keyBase} className="relative flex-1 min-h-0 w-full">
+            <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+          </div>
         </div>
       </ErrorBoundary>
     )
   }
-  return (<div ref={containerRef} className="text-sm text-muted-foreground">No data</div>)
+  return (
+    <div className="h-full flex flex-col" ref={containerRef}>
+      {filterbarsUI}
+      <div className="text-sm text-muted-foreground">No data</div>
+    </div>
+  )
 }

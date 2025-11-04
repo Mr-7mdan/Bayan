@@ -81,6 +81,8 @@ export type TableOptions = {
   pivotMaxRows?: number
   // Server-side pivot toggle (uses /query/pivot instead of client aggregation)
   serverPivot?: boolean
+  // Show Expand All / Collapse All / Download Excel controls for pivot matrix
+  showControls?: boolean
   theme?: 'quartz' | 'balham' | 'material' | 'alpine'
   density?: 'comfortable' | 'compact'
   rowHeight?: number
@@ -301,6 +303,9 @@ export type WidgetConfig = {
       categoryField?: string
       startField?: string
       endField?: string
+      durationField?: string
+      durationUnit?: 'seconds' | 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
+      mode?: 'startEnd' | 'startDuration' // Determines which fields to use
       colorField?: string
       barHeight?: number
     }
