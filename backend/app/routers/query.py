@@ -3471,6 +3471,24 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             except Exception:
                 ds_type = ""
     route_duck = (datasource_id is None) or (ds_type == "duckdb")
+    
+    # Auto-detect local DuckDB datasource when datasourceId is None (same logic as run_query_spec)
+    if datasource_id is None and not ds:
+        try:
+            from sqlalchemy import select
+            stmt = select(Datasource).where(Datasource.type == "duckdb")
+            local_ds_candidates = list(db.execute(stmt).scalars())
+            for candidate in local_ds_candidates:
+                if not candidate.connection_encrypted:
+                    ds = candidate
+                    ds_type = "duckdb"
+                    break
+            if not ds and local_ds_candidates:
+                ds = local_ds_candidates[0]
+                ds_type = "duckdb"
+        except Exception:
+            pass
+    
     y = payload.get("y")
     measure = payload.get("measure")
     agg = (payload.get("agg") or "count").lower()
