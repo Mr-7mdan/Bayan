@@ -1,6 +1,7 @@
 "use client"
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Api, type SyncTaskOut } from '@/lib/api'
 
 declare global {
@@ -47,6 +48,7 @@ export function useProgressToast() {
 
 export default function ProgressToastProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<ProgressToastState>({ visible: false })
+  const queryClient = useQueryClient()
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const LS_KEY = 'progress_toast_active'
@@ -122,7 +124,8 @@ export default function ProgressToastProvider({ children }: { children: React.Re
           return next
         })
         if (!tasks.some((t) => t.inProgress)) {
-          // Done
+          // Done - invalidate query cache so UI updates
+          void queryClient.invalidateQueries({ queryKey: ['sync-tasks', datasourceId] })
           setState((s: ProgressToastState) => ({ ...s, visible: true, title: 'Sync complete', message: 'All tasks finished', percent: 1, phase: null }))
           if (timerRef.current) {
             clearInterval(timerRef.current as unknown as number)
@@ -152,7 +155,7 @@ export default function ProgressToastProvider({ children }: { children: React.Re
         return { ...s, elapsedSec: el }
       })
     }, 1000)
-  }, [computeProgress, hide])
+  }, [computeProgress, hide, queryClient])
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current as unknown as number)

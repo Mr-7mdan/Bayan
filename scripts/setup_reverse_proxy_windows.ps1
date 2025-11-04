@@ -137,7 +137,7 @@ if (-not [string]::IsNullOrWhiteSpace($email)) {
 $siteHeader = if ([string]::IsNullOrWhiteSpace($domain)) { ":80 {`n  auto_https off" } elseif ($useHttps -match '^(?i:y|yes)$') { "$domain {" } else { "$domain {`n  auto_https off" }
 $tlsLine = ''
 if (-not [string]::IsNullOrWhiteSpace($domain) -and -not ($useHttps -match '^(?i:y|yes)$') -and ($useLocalCert -match '^(?i:y|yes)$')) {
-  $tlsLine = "  tls \"$certPath\" \"$keyPath\""
+  $tlsLine = "  tls `"$certPath`" `"$keyPath`""
 }
 $caddyContent = @"
 ${caddyGlobal}${siteHeader}
