@@ -75,8 +75,27 @@ fi
 CHANGES="$(git status --porcelain || true)"
 if [ -n "$CHANGES" ]; then
   echo "[push] Committing pending changes"
+  
+  # Temporarily backup and remove sensitive tokens from .env
+  ENV_FILE="backend/.env"
+  ENV_BACKUP=""
+  if [ -f "$ENV_FILE" ]; then
+    echo "[push] Temporarily removing sensitive tokens from ${ENV_FILE}"
+    ENV_BACKUP=$(mktemp)
+    cp "$ENV_FILE" "$ENV_BACKUP"
+    # Remove lines containing GitHub tokens (starting with ghp_, github_pat_, etc)
+    sed -i.bak '/^[A-Z_]*=.*\(ghp_\|github_pat_\)/d' "$ENV_FILE"
+    rm -f "${ENV_FILE}.bak"
+  fi
+  
   git add -A
   git commit -m "chore: release ${VER} - include pending changes" || true
+  
+  # Restore .env file
+  if [ -n "$ENV_BACKUP" ] && [ -f "$ENV_BACKUP" ]; then
+    echo "[push] Restoring ${ENV_FILE}"
+    mv "$ENV_BACKUP" "$ENV_FILE"
+  fi
 fi
 
 REWROTE=false
