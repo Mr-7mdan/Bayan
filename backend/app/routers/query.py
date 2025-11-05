@@ -507,6 +507,28 @@ def _filter_by_basecols(ds_tr: dict, base_cols: set[str]) -> dict:
     dfl = ds_tr.get('defaults') or {}
 
     allowed: set[str] = set(base_l)
+    # Seed with columns produced by joins (aliases or names), so downstream
+    # custom columns / transforms can reference them
+    try:
+        for j in (joins or []):
+            try:
+                agg = (j or {}).get('aggregate') or None
+                if isinstance(agg, dict):
+                    al = str(agg.get('alias') or '').strip()
+                    if al:
+                        allowed.add(_norm_name(al))
+                cols = (j or {}).get('columns') or []
+                for c in cols:
+                    try:
+                        nm = str((c or {}).get('alias') or (c or {}).get('name') or '').strip()
+                        if nm:
+                            allowed.add(_norm_name(nm))
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+    except Exception:
+        pass
     accepted_cc: list[dict] = []
     accepted_tr: list[dict] = []
     taken_cc: list[bool] = [False] * len(ccs)
@@ -3480,17 +3502,21 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
     # Auto-detect local DuckDB datasource when datasourceId is None (same logic as run_query_spec)
     if datasource_id is None and not ds:
         try:
-            from sqlalchemy import select
-            stmt = select(Datasource).where(Datasource.type == "duckdb")
-            local_ds_candidates = list(db.execute(stmt).scalars())
-            for candidate in local_ds_candidates:
-                if not candidate.connection_encrypted:
-                    ds = candidate
-                    ds_type = "duckdb"
-                    break
-            if not ds and local_ds_candidates:
-                ds = local_ds_candidates[0]
-                ds_type = "duckdb"
+            # Case-insensitive match on type startswith 'duckdb'
+            candidates = db.query(Datasource).all()
+            duck_list = [c for c in (candidates or []) if str(getattr(c, 'type', '') or '').lower().startswith('duckdb')]
+            # Prefer the one without external connection (local shared DuckDB)
+            for candidate in duck_list:
+                try:
+                    if not getattr(candidate, 'connection_encrypted', None):
+                        ds = candidate
+                        ds_type = 'duckdb'
+                        break
+                except Exception:
+                    continue
+            if not ds and duck_list:
+                ds = duck_list[0]
+                ds_type = 'duckdb'
         except Exception:
             pass
     
@@ -3785,7 +3811,73 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             opts = json.loads(ds.options_json or "{}")
         except Exception:
             opts = {}
-        ds_transforms = (opts or {}).get("transforms") or {}
+        # Apply scope filtering: only transforms/customColumns/joins matching this table or datasource-level, or widget-level when widgetId matches
+        def _matches_table(_scope_table: str, _source_name: str) -> bool:
+            def _norm(_s: str) -> str:
+                _s = (_s or '').strip().strip('[]').strip('"').strip('`')
+                _parts = _s.split('.')
+                return _parts[-1].lower()
+            return _norm(_scope_table) == _norm(_source_name)
+        def _apply_scope(_ds_tr: dict, _source_name: str) -> dict:
+            if not isinstance(_ds_tr, dict):
+                return {}
+            def _filt(arr):
+                out = []
+                for it in (arr or []):
+                    sc = (it or {}).get('scope')
+                    if not sc:
+                        out.append(it); continue
+                    lvl = str(sc.get('level') or '').lower()
+                    if lvl == 'datasource':
+                        out.append(it)
+                    elif lvl == 'table' and sc.get('table') and _matches_table(str(sc.get('table')), _source_name):
+                        out.append(it)
+                    elif lvl == 'widget':
+                        try:
+                            wid = str((sc or {}).get('widgetId') or '').strip()
+                            if wid and str(payload.get('widgetId') or '').strip() == wid:
+                                out.append(it)
+                        except Exception:
+                            pass
+                return out
+            return {
+                'customColumns': _filt(_ds_tr.get('customColumns')),
+                'transforms': _filt(_ds_tr.get('transforms')),
+                'joins': _filt(_ds_tr.get('joins')),
+                'defaults': _ds_tr.get('defaults') or {},
+            }
+        ds_tr_all = _apply_scope((opts or {}).get("transforms") or {}, str(source))
+        # Detect if legend references an alias produced by datasource transforms; if so, retain all transforms
+        def _collect_aliases(_ds_tr: dict) -> set[str]:
+            out: set[str] = set()
+            try:
+                for cc in (_ds_tr.get('customColumns') or []):
+                    nm = str((cc or {}).get('name') or '').strip()
+                    if nm: out.add(_norm_name(nm))
+            except Exception:
+                pass
+            try:
+                for tr in (_ds_tr.get('transforms') or []):
+                    t = str((tr or {}).get('type') or '').lower()
+                    nm = ''
+                    if t == 'computed': nm = str((tr or {}).get('name') or '')
+                    elif t in {'case','replace','translate','nullhandling'}: nm = str((tr or {}).get('target') or '')
+                    if nm: out.add(_norm_name(nm))
+            except Exception:
+                pass
+            try:
+                for j in (_ds_tr.get('joins') or []):
+                    agg = (j or {}).get('aggregate') or None
+                    if isinstance(agg, dict):
+                        al = str(agg.get('alias') or '').strip()
+                        if al: out.add(_norm_name(al))
+                    for c in ((j or {}).get('columns') or []):
+                        nm = str((c or {}).get('alias') or (c or {}).get('name') or '').strip()
+                        if nm: out.add(_norm_name(nm))
+            except Exception:
+                pass
+            return out
+        _alias_all = _collect_aliases(ds_tr_all)
         try:
             dialect = ds_type or dialect_name
         except Exception:
@@ -3827,7 +3919,29 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         
         _base_cols = _list_source_columns()
         # Drop transforms/custom columns that reference columns not present on base
-        ds_transforms = _filter_by_basecols(ds_transforms, _base_cols)
+        ds_transforms = _filter_by_basecols(ds_tr_all, _base_cols)
+        # If legend is a plain alias present in transforms, but got filtered out, keep all transforms
+        try:
+            def _norm_legend_token(x: str) -> str:
+                s = str(x or '').strip().strip('"').strip('`').strip('[]')
+                if '.' in s and '(' not in s and ')' not in s:
+                    try:
+                        s = s.split('.')[-1]
+                    except Exception:
+                        pass
+                return s.lower()
+            legend_names: set[str] = set()
+            if isinstance(legend, (list, tuple)):
+                for it in legend:
+                    legend_names.add(_norm_legend_token(str(it)))
+            elif isinstance(legend, str) and legend:
+                legend_names.add(_norm_legend_token(legend))
+            # compute aliases produced after filtering
+            _alias_filtered = _collect_aliases(ds_transforms)
+            if legend_names and any((nm in _alias_all) for nm in legend_names) and not any((nm in _alias_filtered) for nm in legend_names):
+                ds_transforms = ds_tr_all
+        except Exception:
+            pass
         
         base_sql, _unused_cols, _warns = build_sql(
             dialect=ds_type or dialect,
@@ -3857,13 +3971,14 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
 
         # Quote identifiers safely
         def quote_ident(name: str) -> str:
-            s = str(name).strip()
-            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", s):
+            s = str(name or '').strip()
+            if not s:
                 return s
             if ("mssql" in dialect_name) or ("sqlserver" in dialect_name):
                 return "[" + s.replace("]", "]]" ) + "]"
             if "mysql" in dialect_name:
                 return "`" + s.replace("`", "``") + "`"
+            # Default (DuckDB/Postgres/SQLite): always double-quote to preserve case and match subquery aliases
             return '"' + s.replace('"', '""') + '"'
 
         # Map derived date-part like "OrderDate (Year)" to SQL expression per dialect
