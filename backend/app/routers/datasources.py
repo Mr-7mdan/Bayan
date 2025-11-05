@@ -14,7 +14,7 @@ try:
 except Exception:  # pragma: no cover
     _duckdb = None
 
-from ..models import SessionLocal, Datasource, init_db, create_datasource, NewDatasourceInput, User, SyncTask, SyncState, SyncRun, SyncLock
+from ..models import SessionLocal, Datasource, init_db, create_datasource, NewDatasourceInput, User, SyncTask, SyncState, SyncRun, SyncLock, DatasourceShare
 from ..db import get_duckdb_engine, get_engine_from_dsn, run_sequence_sync, run_snapshot_sync, open_duck_native, get_active_duck_path
 from ..api_ingest import run_api_sync
 from ..db import dispose_engine_by_key, dispose_all_engines, dispose_duck_engine
@@ -23,6 +23,8 @@ from ..schemas import (
     DatasourceOut,
     DatasourceDetailOut,
     DatasourceUpdate,
+    DatasourceShareAddRequest,
+    DatasourceShareOut,
     IntrospectResponse,
     SchemaInfo,
     TableInfo,
@@ -263,17 +265,32 @@ def _task_to_out(db: Session, t: SyncTask) -> SyncTaskOut:
 
 @router.get("", response_model=list[DatasourceOut])
 def list_ds(userId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
-    # If admin with no userId: list all. If userId provided: filter strictly to that user. Otherwise: show only dev_user sample.
     if _is_admin(db, actorId) and (userId is None or (str(userId).strip().lower() in {"", "undefined", "null"})):
         q = db.query(Datasource)
-    elif userId is None or (str(userId).strip().lower() in {"", "undefined", "null"}):
-        from sqlalchemy import or_ as _or
-        q = db.query(Datasource).filter(_or(Datasource.user_id == "dev_user", Datasource.user_id.is_(None)))
+        rows = q.order_by(Datasource.created_at.desc()).all()
+        return [DatasourceOut.model_validate(r) for r in rows]
+    if userId is None or (str(userId).strip().lower() in {"", "undefined", "null"}):
+        uid = (actorId or "").strip()
     else:
         uid = str(userId).strip()
-        q = db.query(Datasource).filter(Datasource.user_id == uid)
-    rows = q.order_by(Datasource.created_at.desc()).all()
-    return [DatasourceOut.model_validate(r) for r in rows]
+    if not uid:
+        from sqlalchemy import or_ as _or
+        q = db.query(Datasource).filter(_or(Datasource.user_id == "dev_user", Datasource.user_id.is_(None)))
+        rows = q.order_by(Datasource.created_at.desc()).all()
+        return [DatasourceOut.model_validate(r) for r in rows]
+    owned = db.query(Datasource).filter(Datasource.user_id == uid)
+    share_ids = [s.datasource_id for s in db.query(DatasourceShare).filter(DatasourceShare.user_id == uid).all()]
+    shared = db.query(Datasource).filter(Datasource.id.in_(share_ids)) if share_ids else []
+    owned_rows = owned.all()
+    shared_rows = (shared.all() if share_ids else [])
+    seen: set[str] = set()
+    all_rows: list[Datasource] = []
+    for r in sorted(owned_rows + shared_rows, key=lambda x: x.created_at, reverse=True):
+        if r.id in seen:
+            continue
+        seen.add(r.id)
+        all_rows.append(r)
+    return [DatasourceOut.model_validate(r) for r in all_rows]
 
 
 @router.get("/{ds_id}", response_model=DatasourceDetailOut)
@@ -281,14 +298,14 @@ def get_ds(ds_id: str, actorId: str | None = Query(default=None), db: Session = 
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    # Permission: owner or admin can view details. Additionally, allow anyone to view local DuckDB datasource details
-    # (type='duckdb' with no connectionUri), but keep write toggles permissioned elsewhere.
     if not _is_admin(db, actorId):
         actor = (actorId or "").strip()
         t = str(ds.type or '').lower()
         is_public_duck = (t == 'duckdb') and not bool(ds.connection_encrypted)
         if (ds.user_id is not None and ds.user_id != actor) and (not is_public_duck):
-            raise HTTPException(status_code=403, detail="Forbidden")
+            share = db.query(DatasourceShare).filter(DatasourceShare.datasource_id == ds.id, DatasourceShare.user_id == actor).first()
+            if not share:
+                raise HTTPException(status_code=403, detail="Forbidden")
     # Decrypt connection
     conn = None
     if ds.connection_encrypted:
@@ -341,6 +358,67 @@ def patch_ds(ds_id: str, payload: DatasourceUpdate, db: Session = Depends(get_db
     return DatasourceOut.model_validate(ds)
 
 
+@router.get("/{ds_id}/shares", response_model=list[DatasourceShareOut])
+def list_ds_shares(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if not _is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if ds.user_id and ds.user_id != actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    shares = db.query(DatasourceShare).filter(DatasourceShare.datasource_id == ds_id).all()
+    user_ids = [s.user_id for s in shares]
+    users = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    umap = {u.id: u for u in users}
+    out: list[DatasourceShareOut] = []
+    for s in shares:
+        u = umap.get(s.user_id)
+        out.append(DatasourceShareOut(userId=s.user_id, name=(u.name if u else None), email=(u.email if u else None), permission=s.permission, createdAt=s.created_at))
+    return out
+
+
+@router.post("/{ds_id}/shares", response_model=DatasourceShareOut)
+def add_ds_share(ds_id: str, payload: DatasourceShareAddRequest, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if not _is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if ds.user_id and ds.user_id != actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    tgt = db.get(User, str(payload.userId).strip())
+    if not tgt:
+        raise HTTPException(status_code=404, detail="User not found")
+    existing = db.query(DatasourceShare).filter(DatasourceShare.datasource_id == ds_id, DatasourceShare.user_id == tgt.id).first()
+    if existing:
+        existing.permission = (payload.permission or existing.permission)
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        return DatasourceShareOut(userId=existing.user_id, name=tgt.name, email=tgt.email, permission=existing.permission, createdAt=existing.created_at)
+    from uuid import uuid4
+    s = DatasourceShare(id=str(uuid4()), datasource_id=ds_id, user_id=tgt.id, permission=(payload.permission or "ro"))
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return DatasourceShareOut(userId=s.user_id, name=tgt.name, email=tgt.email, permission=s.permission, createdAt=s.created_at)
+
+
+@router.delete("/{ds_id}/shares/{user_id}")
+def remove_ds_share(ds_id: str, user_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if not _is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if ds.user_id and ds.user_id != actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    db.query(DatasourceShare).filter(DatasourceShare.datasource_id == ds_id, DatasourceShare.user_id == str(user_id).strip()).delete()
+    db.commit()
+    return {"ok": True}
+
+
 @router.put("/{ds_id}", response_model=DatasourceOut)
 def put_ds(ds_id: str, payload: DatasourceUpdate, db: Session = Depends(get_db)):
     # Same semantics as PATCH for now
@@ -376,7 +454,6 @@ def activate_ds(ds_id: str, actorId: str | None = Query(default=None), db: Sessi
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    # Only owner or admin can toggle active
     if not _is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:

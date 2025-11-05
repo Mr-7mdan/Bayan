@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Select, SelectItem } from '@tremor/react'
-import { Api, type DatasourceOut } from '@/lib/api'
+import { Api, type DatasourceOut, type UserRowOut, type DatasourceShareOut } from '@/lib/api'
 import * as Popover from '@radix-ui/react-popover'
 import * as Dialog from '@radix-ui/react-dialog'
 import { RiBuildingLine, RiMapPin2Line, RiUserLine, RiMore2Line, RiCheckLine } from '@remixicon/react'
@@ -32,8 +32,29 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive }: { ds:
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [busy, setBusy] = useState<'delete' | null>(null)
   const { user } = useAuth()
+  // Share dialog state
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shares, setShares] = useState<DatasourceShareOut[]>([])
+  const [users, setUsers] = useState<UserRowOut[]>([])
+  const [selectedUserId, setSelectedUserId] = useState<string>('')
+  const [perm, setPerm] = useState<'ro'|'rw'>('ro')
+  const [shareError, setShareError] = useState<string>('')
+  async function refreshShares() {
+    try { const s = await Api.listDatasourceShares(ds.id, user?.id); setShares(Array.isArray(s) ? s : []) } catch { setShares([]) }
+  }
+  async function loadUsers() {
+    if (!user?.id) return
+    try { const rows = await Api.adminListUsers(user.id); setUsers(rows || []) } catch { setUsers([]) }
+  }
+  function openShare() {
+    setMenuOpen(false)
+    setShareOpen(true)
+    void refreshShares()
+    void loadUsers()
+  }
   return (
-    <Card className={`group p-2 rounded-2xl border border-[hsl(var(--border))] ring-1 ring-inset ring-[hsl(var(--border))] bg-[hsl(var(--card))] elev-bottom cursor-pointer hover:ring-[hsl(var(--ring))] focus-visible:ring-[hsl(var(--ring))] outline-none ${confirmOpen ? 'pointer-events-none' : ''}`} onClick={() => { if (menuOpen || confirmOpen) return; onOpen(ds) }} role="button" tabIndex={0}>
+    <Card className={`group p-2 rounded-2xl border border-[hsl(var(--border))] ring-1 ring-inset ring-[hsl(var(--border))] bg-[hsl(var(--card))] elev-bottom cursor-pointer hover:ring-[hsl(var(--ring))] focus-visible:ring-[hsl(var(--ring))] outline-none ${confirmOpen ? 'pointer-events-none' : ''}`} onClick={() => { if (menuOpen || confirmOpen || shareOpen) return; onOpen(ds) }} role="button" tabIndex={0}>
       <div className={`relative hover-cover rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] p-4 transition-transform duration-150 ring-1 ring-inset ring-[hsl(var(--border))] group-hover:ring-[hsl(var(--ring))] group-hover:border-[hsl(var(--ring))] ${menuOpen ? '' : 'group-hover:-translate-y-[1px]'}`}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -48,8 +69,11 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive }: { ds:
               </button>
             </Popover.Trigger>
             <Popover.Portal>
-            <Popover.Content side="bottom" align="end" className="z-50 w-48 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--popover))] shadow-none p-1">
+            <Popover.Content side="bottom" align="end" className="z-50 w-56 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--popover))] shadow-none p-1">
               <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>Edit</button>
+              {(user?.role === 'admin') && (
+                <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); openShare() }}>Share with…</button>
+              )}
               <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); try {
                 const data = await Api.exportDatasource(ds.id, true, user?.id)
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -104,12 +128,69 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive }: { ds:
       <Dialog.Root open={confirmOpen} onOpenChange={setConfirmOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/40" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card">
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
             <Dialog.Title className="text-lg font-semibold">Delete datasource?</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground mt-1">This action cannot be undone. This will permanently delete "{ds.name}".</Dialog.Description>
             <div className="mt-4 flex items-center justify-end gap-2">
               <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button></Dialog.Close>
               <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-red-50 text-red-600" disabled={busy === 'delete'} onClick={async () => { setBusy('delete'); try { await onDelete(ds) } finally { setBusy(null); setConfirmOpen(false) } }}>{busy === 'delete' ? 'Deleting…' : 'Delete'}</button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      {/* Share dialog */}
+      <Dialog.Root open={shareOpen} onOpenChange={setShareOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/40" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+            <Dialog.Title className="text-lg font-semibold">Share datasource</Dialog.Title>
+            <Dialog.Description className="text-sm text-muted-foreground mt-1">Grant access to another user. Only admins can share.</Dialog.Description>
+            {/* Add share */}
+            <div className="mt-4 grid grid-cols-[1fr_auto_auto] gap-2 items-end">
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">User</div>
+                <select className="w-full text-sm px-2 py-1.5 rounded-md border bg-background" value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
+                  <option value="">Select user…</option>
+                  {users.filter(u => !shares.some(s => s.userId === u.id)).map(u => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Permission</div>
+                <select className="text-sm px-2 py-1.5 rounded-md border bg-background" value={perm} onChange={(e) => setPerm((e.target.value as 'ro'|'rw') || 'ro')}>
+                  <option value="ro">Read‑only</option>
+                  <option value="rw">Read‑write</option>
+                </select>
+              </div>
+              <div className="pb-1">
+                <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted disabled:opacity-50" disabled={shareBusy || !selectedUserId} onClick={async () => {
+                  setShareBusy(true); setShareError('')
+                  try { await Api.addDatasourceShare(ds.id, { userId: selectedUserId, permission: perm }, user?.id); setSelectedUserId(''); await refreshShares() } catch (e: any) { setShareError(e?.message || 'Failed') } finally { setShareBusy(false) }
+                }}>{shareBusy ? 'Adding…' : 'Add'}</button>
+              </div>
+            </div>
+            {!!shareError && <div className="mt-2 text-sm text-red-600">{shareError}</div>}
+            {/* Existing shares */}
+            <div className="mt-4">
+              <div className="text-sm font-medium mb-1">Shared with</div>
+              <div className="rounded-md border divide-y">
+                {shares.length === 0 ? (
+                  <div className="px-2 py-2 text-sm text-muted-foreground">No shares yet.</div>
+                ) : shares.map((s) => (
+                  <div key={s.userId} className="px-2 py-2 flex items-center justify-between gap-2">
+                    <div className="text-sm">
+                      <span className="font-medium">{s.name || s.userId}</span>
+                      {s.email && <span className="ml-2 text-muted-foreground">{s.email}</span>}
+                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded border">{s.permission.toUpperCase()}</span>
+                    </div>
+                    <button className="px-2 py-0.5 rounded-md border hover:bg-muted" onClick={async () => { try { await Api.deleteDatasourceShare(ds.id, s.userId, user?.id); await refreshShares() } catch {} }}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Close</button></Dialog.Close>
             </div>
           </Dialog.Content>
         </Dialog.Portal>

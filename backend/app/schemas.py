@@ -77,6 +77,19 @@ class DatasourceUpdate(BaseModel):
     active: Optional[bool] = None
 
 
+class DatasourceShareAddRequest(BaseModel):
+    userId: str
+    permission: Optional[str] = Field(default="ro")
+
+
+class DatasourceShareOut(BaseModel):
+    userId: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    permission: str
+    createdAt: datetime
+
+
 class ColumnInfo(BaseModel):
     name: str
     type: Optional[str] = None

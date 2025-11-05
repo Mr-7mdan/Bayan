@@ -122,6 +122,14 @@ export type ShareEntryOut = {
   email?: string | null
 }
 
+export type DatasourceShareOut = {
+  userId: string
+  name?: string | null
+  email?: string | null
+  permission: 'ro' | 'rw'
+  createdAt: string
+}
+
 // --- Export / Import types ---
 export type DatasourceExportItem = {
   id: string
@@ -542,6 +550,12 @@ export const Api = {
   deleteShare: (dashId: string, userId: string, actorId?: string) =>
     http<{ deleted: number }>(`/dashboards/${encodeURIComponent(dashId)}/shares/${encodeURIComponent(userId)}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'DELETE' }),
   getDatasource: (id: string, actorId?: string) => http<DatasourceDetailOut>(`/datasources/${id}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`),
+  listDatasourceShares: (id: string, actorId?: string) =>
+    http<DatasourceShareOut[]>(`/datasources/${encodeURIComponent(id)}/shares${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`),
+  addDatasourceShare: (id: string, payload: { userId: string; permission?: 'ro'|'rw' }, actorId?: string) =>
+    http<DatasourceShareOut>(`/datasources/${encodeURIComponent(id)}/shares${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST', body: JSON.stringify(payload) }),
+  deleteDatasourceShare: (id: string, userId: string, actorId?: string) =>
+    http<{ ok: boolean }>(`/datasources/${encodeURIComponent(id)}/shares/${encodeURIComponent(userId)}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'DELETE' }),
   createDatasource: (payload: DatasourceCreate) =>
     http<DatasourceOut>('/datasources', { method: 'POST', body: JSON.stringify(payload) }),
   updateDatasource: async (id: string, payload: DatasourceUpdate) => {

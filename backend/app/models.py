@@ -69,6 +69,18 @@ class Datasource(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+# Per-user datasource shares (read-only or read-write)
+class DatasourceShare(Base):
+    __tablename__ = "datasource_shares"
+    __table_args__ = (UniqueConstraint("datasource_id", "user_id", name="uq_ds_share"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    datasource_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    permission: Mapped[str] = mapped_column(String, nullable=False, default="ro")  # 'ro' or 'rw'
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 # Per-user dashboard permissions (read-only or read-write)
 class SharePermission(Base):
     __tablename__ = "share_permissions"
@@ -183,6 +195,14 @@ def init_db() -> None:
             conn.execute(text("CREATE TABLE IF NOT EXISTS share_permissions (id TEXT PRIMARY KEY, dashboard_id TEXT NOT NULL, user_id TEXT NOT NULL, permission TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"))
             # add unique index if not exists
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_perm_dash_user ON share_permissions(dashboard_id, user_id)"))
+            # ensure datasource_shares table exists and has required columns
+            conn.execute(text("CREATE TABLE IF NOT EXISTS datasource_shares (id TEXT PRIMARY KEY, datasource_id TEXT NOT NULL, user_id TEXT NOT NULL, permission TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"))
+            # backfill missing columns if table was created without 'permission'
+            info_shares = conn.execute(text("PRAGMA table_info(datasource_shares)")).fetchall()
+            cols_sh = {row[1] for row in info_shares}
+            if "permission" not in cols_sh:
+                conn.execute(text("ALTER TABLE datasource_shares ADD COLUMN permission TEXT NOT NULL DEFAULT 'ro'"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_ds_share ON datasource_shares(datasource_id, user_id)"))
             # ensure 'active' column exists on users
             info_users = conn.execute(text("PRAGMA table_info(users)")).fetchall()
             cols_users = {row[1] for row in info_users}

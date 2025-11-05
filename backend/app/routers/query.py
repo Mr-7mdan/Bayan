@@ -7,6 +7,7 @@ import binascii
 import re
 
 import os
+import sys
 import math
 import threading
 
@@ -19,7 +20,7 @@ from ..db import get_duckdb_engine, get_engine_from_dsn, open_duck_native
 from ..sqlgen import build_sql, build_distinct_sql
 import json
 from dateutil import parser as date_parser
-from ..models import SessionLocal, Datasource, User, get_share_link_by_public, verify_share_link_token
+from ..models import SessionLocal, Datasource, User, DatasourceShare, get_share_link_by_public, verify_share_link_token
 from ..schemas import QueryRequest, QueryResponse, QuerySpecRequest, DistinctRequest, DistinctResponse, PivotRequest
 from ..security import decrypt_text
 from ..config import settings
@@ -246,12 +247,14 @@ def _engine_for_datasource(db: Session, datasource_id: Optional[str], actor_id: 
             "options_json": ds_obj.options_json,
         }
         _ds_cache_set(str(datasource_id), ds_info)
-    # Enforce that only owner or admin can access this datasource when actor is provided
+    # Enforce that only owner, admin, or shared users can access when actor is provided
     if actor_id:
         u = db.get(User, str(actor_id).strip())
         is_admin = bool(u and (u.role or "user").lower() == "admin")
         if not is_admin and (str(ds_info.get("user_id") or "").strip() != str(actor_id).strip()):
-            raise HTTPException(status_code=403, detail="Not allowed to query this datasource")
+            share = db.query(DatasourceShare).filter(DatasourceShare.datasource_id == str(datasource_id), DatasourceShare.user_id == str(actor_id).strip()).first()
+            if not share:
+                raise HTTPException(status_code=403, detail="Not allowed to query this datasource")
     if not ds_info.get("connection_encrypted"):
         # Special-case: DuckDB datasource records can intentionally omit a connection URI
         # to indicate use of the local analytical store. Route to the local DuckDB engine.
@@ -1837,7 +1840,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             u = db.get(User, str(actorId).strip())
             is_admin = bool(u and (u.role or "user").lower() == "admin")
             if not is_admin and (ds.user_id or "").strip() != str(actorId).strip():
-                raise HTTPException(status_code=403, detail="Not allowed to query this datasource")
+                s = db.query(DatasourceShare).filter(DatasourceShare.datasource_id == ds.id, DatasourceShare.user_id == str(actorId).strip()).first()
+                if not s:
+                    raise HTTPException(status_code=403, detail="Not allowed to query this datasource")
     else:
         # Auto-detect local DuckDB datasource to load transforms/custom columns
         import sys
@@ -3789,14 +3794,35 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         # Probe source table to get base columns for validation
         def _list_source_columns() -> set[str]:
             try:
-                with engine.connect() as conn:
-                    if (ds_type or '').lower() in ("mssql", "mssql+pymssql", "mssql+pyodbc"):
-                        probe = text(f"SELECT TOP 0 * FROM {_q_source_local(str(source))} AS s")
-                    else:
-                        probe = text(f"SELECT * FROM {_q_source_local(str(source))} WHERE 1=0")
-                    res = conn.execute(probe)
-                    return set([str(c) for c in res.keys()])
-            except Exception:
+                # For DuckDB, use native DuckDB connection
+                if ds_type == "duckdb" and _duckdb is not None:
+                    db_path = settings.duckdb_path
+                    if ds and getattr(ds, "connection_encrypted", None):
+                        try:
+                            dsn = decrypt_text(ds.connection_encrypted)
+                            p = urlparse(dsn) if dsn else None
+                            if p and (p.scheme or "").startswith("duckdb"):
+                                _p = unquote(p.path or "")
+                                if _p.startswith("///"):
+                                    _p = _p[2:]
+                                db_path = _p or db_path
+                        except Exception:
+                            pass
+                    with open_duck_native(db_path) as conn:
+                        probe_sql = f"SELECT * FROM {_q_source_local(str(source))} WHERE 1=0"
+                        res = conn.execute(probe_sql)
+                        return set([str(c) for c in res.keys()])
+                else:
+                    # For other datasources, use SQLAlchemy engine
+                    with engine.connect() as conn:
+                        if (ds_type or '').lower() in ("mssql", "mssql+pymssql", "mssql+pyodbc"):
+                            probe = text(f"SELECT TOP 0 * FROM {_q_source_local(str(source))} AS s")
+                        else:
+                            probe = text(f"SELECT * FROM {_q_source_local(str(source))} WHERE 1=0")
+                        res = conn.execute(probe)
+                        return set([str(c) for c in res.keys()])
+            except Exception as e:
+                print(f"[WARN] Failed to probe source columns: {e}", file=sys.stderr)
                 return set()
         
         _base_cols = _list_source_columns()
