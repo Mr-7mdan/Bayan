@@ -3902,8 +3902,22 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                             pass
                     with open_duck_native(db_path) as conn:
                         probe_sql = f"SELECT * FROM {_q_source_local(str(source))} WHERE 1=0"
-                        res = conn.execute(probe_sql)
-                        return set([str(c) for c in res.keys()])
+                        _cur = conn.execute(probe_sql)
+                        # DuckDB native cursor follows DB-API: column metadata on .description
+                        cols: set[str] = set()
+                        try:
+                            desc = getattr(conn, 'description', None) or getattr(_cur, 'description', None)
+                            if desc:
+                                for d in desc:
+                                    try:
+                                        name = d[0] if isinstance(d, (list, tuple)) else getattr(d, 'name', None)
+                                        if name is not None:
+                                            cols.add(str(name))
+                                    except Exception:
+                                        continue
+                        except Exception:
+                            pass
+                        return cols
                 else:
                     # For other datasources, use SQLAlchemy engine
                     with engine.connect() as conn:
