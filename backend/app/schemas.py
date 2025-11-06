@@ -154,6 +154,8 @@ class PivotRequest(BaseModel):
     limit: Optional[int] = Field(default=None, description="Optional cap on number of group rows returned")
     widgetId: Optional[str] = None
     requestId: Optional[str] = None
+    groupBy: Optional[str] = Field(default=None, description="none|day|week|month|quarter|year for time bucketing")
+    weekStart: Optional[str] = Field(default=None, description="mon|sun for week grouping")
 
 
 # --- Dashboards ---

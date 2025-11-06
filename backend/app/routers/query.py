@@ -976,8 +976,38 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
         return out
     r_dims = _clean_dims(payload.rows)
     c_dims = _clean_dims(payload.cols)
+    
+    # Apply groupBy time bucketing to first row dimension if specified
+    gb = (getattr(payload, 'groupBy', None) or 'none').lower()
+    week_start = (getattr(payload, 'weekStart', None) or 'mon').lower()
+    
     # Use original names as aliases (quoted per dialect) so UI can match config fields directly
-    r_exprs = [(_derived_lhs(n), _q_ident(n)) for i, n in enumerate(r_dims)]
+    r_exprs = []
+    for i, n in enumerate(r_dims):
+        # Apply groupBy bucketing to first dimension if it's a date field
+        if i == 0 and gb in ("day","week","month","quarter","year"):
+            # Check if it's a raw date column (not derived)
+            is_derived = bool(re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(n), flags=re.IGNORECASE))
+            if not is_derived:
+                # Apply DATE_TRUNC bucketing
+                col_name = n
+                if "duckdb" in ds_type or "postgres" in ds_type:
+                    if "duckdb" in ds_type:
+                        col_ts = f"COALESCE(try_cast({_q_ident(col_name)} AS TIMESTAMP), CAST(try_cast({_q_ident(col_name)} AS DATE) AS TIMESTAMP))"
+                    else:
+                        col_ts = _q_ident(col_name)
+                    if gb == 'week':
+                        if week_start == 'sun':
+                            expr = f"DATE_TRUNC('week', {col_ts} + INTERVAL '1 day') - INTERVAL '1 day'" if "duckdb" in ds_type else f"date_trunc('week', {col_ts} + interval '1 day') - interval '1 day'"
+                        else:
+                            expr = f"DATE_TRUNC('week', {col_ts})" if "duckdb" in ds_type else f"date_trunc('week', {col_ts})"
+                    else:
+                        expr = f"DATE_TRUNC('{gb}', {col_ts})" if "duckdb" in ds_type else f"date_trunc('{gb}', {col_ts})"
+                    r_exprs.append((expr, _q_ident(n)))
+                    continue
+        # Default: use derived_lhs for any derived patterns
+        r_exprs.append((_derived_lhs(n), _q_ident(n)))
+    
     c_exprs = [(_derived_lhs(n), _q_ident(n)) for i, n in enumerate(c_dims)]
 
     # Aggregator
@@ -1369,7 +1399,38 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
         return out
     r_dims = _clean_dims(payload.rows)
     c_dims = _clean_dims(payload.cols)
-    r_exprs = [(_derived_lhs(n), _q_ident(n)) for i, n in enumerate(r_dims)]
+    
+    # Apply groupBy time bucketing to first row dimension if specified
+    gb = (getattr(payload, 'groupBy', None) or 'none').lower()
+    week_start = (getattr(payload, 'weekStart', None) or 'mon').lower()
+    
+    # Use original names as aliases (quoted per dialect) so UI can match config fields directly
+    r_exprs = []
+    for i, n in enumerate(r_dims):
+        # Apply groupBy bucketing to first dimension if it's a date field
+        if i == 0 and gb in ("day","week","month","quarter","year"):
+            # Check if it's a raw date column (not derived)
+            is_derived = bool(re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(n), flags=re.IGNORECASE))
+            if not is_derived:
+                # Apply DATE_TRUNC bucketing
+                col_name = n
+                if "duckdb" in ds_type or "postgres" in ds_type:
+                    if "duckdb" in ds_type:
+                        col_ts = f"COALESCE(try_cast({_q_ident(col_name)} AS TIMESTAMP), CAST(try_cast({_q_ident(col_name)} AS DATE) AS TIMESTAMP))"
+                    else:
+                        col_ts = _q_ident(col_name)
+                    if gb == 'week':
+                        if week_start == 'sun':
+                            expr = f"DATE_TRUNC('week', {col_ts} + INTERVAL '1 day') - INTERVAL '1 day'" if "duckdb" in ds_type else f"date_trunc('week', {col_ts} + interval '1 day') - interval '1 day'"
+                        else:
+                            expr = f"DATE_TRUNC('week', {col_ts})" if "duckdb" in ds_type else f"date_trunc('week', {col_ts})"
+                    else:
+                        expr = f"DATE_TRUNC('{gb}', {col_ts})" if "duckdb" in ds_type else f"date_trunc('{gb}', {col_ts})"
+                    r_exprs.append((expr, _q_ident(n)))
+                    continue
+        # Default: use derived_lhs for any derived patterns
+        r_exprs.append((_derived_lhs(n), _q_ident(n)))
+    
     c_exprs = [(_derived_lhs(n), _q_ident(n)) for i, n in enumerate(c_dims)]
 
     # Aggregator
@@ -2096,6 +2157,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
     # If chart semantics are provided, build an aggregated SQL (generic) and delegate to /query
     spec = payload.spec
+    print(f"[DEBUG] run_query_spec: spec.x={spec.x}, spec.groupBy={spec.groupBy}, type(spec.x)={type(spec.x)}", file=sys.stderr)
     legend_orig = spec.legend
     agg = (spec.agg or "none").lower()
     has_chart_semantics = bool(spec.x or spec.y or spec.measure or spec.legend or (spec.groupBy and spec.groupBy != "none") or (agg and agg != "none"))
@@ -2161,7 +2223,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             except Exception:
                 continue
 
-        base_sql, _cols_unused, _warns = build_sql(
+        base_sql, _actual_cols, _warns = build_sql(
             dialect=ds_type,
             source=spec.source,
             base_select=eff_select,
@@ -2193,6 +2255,24 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         def _pname(base: str, suffix: str = "") -> str:
             core = re.sub(r"[^A-Za-z0-9_]", "_", str(base or ''))
             return f"w_{core}{suffix}"
+        def _coerce_filter_value(key: str, val: Any) -> Any:
+            """Convert filter values to match the type returned by the derived column."""
+            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+            if not m:
+                return val
+            part = m.group(2).strip().lower()
+            if part in ('year', 'quarter', 'month', 'week', 'day'):
+                try:
+                    return int(val)
+                except (ValueError, TypeError):
+                    return val
+            return str(val) if val is not None else val
+        def _where_lhs(key: str) -> str:
+            """Get SQL expression for WHERE clause. Use quoted column if it exists in transformed base."""
+            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+            if m and ds_transforms and _actual_cols and key in _actual_cols:
+                return _q_ident(key)
+            return _derived_lhs(key)
         where_clauses = []
         params: Dict[str, Any] = {}
         if payload.spec.where:
@@ -2200,16 +2280,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 if k in ("start", "startDate", "end", "endDate"):
                     continue
                 if v is None:
-                    where_clauses.append(f"{_derived_lhs(k)} IS NULL")
+                    where_clauses.append(f"{_where_lhs(k)} IS NULL")
                 elif isinstance(v, (list, tuple)):
                     if len(v) == 0:
                         continue
                     pnames = []
                     for i, item in enumerate(v):
                         pname = _pname(k, f"_{i}")
-                        params[pname] = item
+                        params[pname] = _coerce_filter_value(k, item)
                         pnames.append(f":{pname}")
-                    where_clauses.append(f"{_derived_lhs(k)} IN ({', '.join(pnames)})")
+                    where_clauses.append(f"{_where_lhs(k)} IN ({', '.join(pnames)})")
                 elif isinstance(k, str) and "__" in k:
                     base, op = k.split("__", 1)
                     opname = None
@@ -2219,16 +2299,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     elif op == "lt": opname = "<"
                     if opname:
                         pname = _pname(base, f"_{op}")
-                        params[pname] = v
-                        where_clauses.append(f"{_derived_lhs(base)} {opname} :{pname}")
+                        params[pname] = _coerce_filter_value(base, v)
+                        where_clauses.append(f"{_where_lhs(base)} {opname} :{pname}")
                     else:
                         pname = _pname(k)
-                        where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
-                        params[pname] = v
+                        where_clauses.append(f"{_where_lhs(k)} = :{pname}")
+                        params[pname] = _coerce_filter_value(k, v)
                 else:
                     pname = _pname(k)
-                    where_clauses.append(f"{_q_ident(k)} = :{pname}")
-                    params[pname] = v
+                    where_clauses.append(f"{_where_lhs(k)} = :{pname}")
+                    params[pname] = _coerce_filter_value(k, v)
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         sql_inner = f"SELECT * FROM ({base_sql}) AS _base{where_sql}"
         q = QueryRequest(
@@ -2371,6 +2451,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         continue
                     # Extract base column name (remove __ operators like ClientType__in)
                     base_col = k.split("__")[0] if "__" in k else k
+                    # Preserve derived date part filters (e.g., "OrderDate (Year)")
+                    if re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(base_col), flags=re.IGNORECASE):
+                        _validated_where[k] = v
+                        continue
                     col_norm = _norm_name(base_col)
                     if col_norm in available_cols:
                         _validated_where[k] = v
@@ -2457,6 +2541,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         _validated_where[k] = v
                         continue
                     base_col = k.split("__")[0] if "__" in k else k
+                    # Preserve derived date part filters (e.g., "OrderDate (Year)")
+                    if re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(base_col), flags=re.IGNORECASE):
+                        _validated_where[k] = v
+                        continue
                     if _norm_name(base_col) in available_cols_direct:
                         _validated_where[k] = v
             else:
@@ -2468,7 +2556,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 'legend': _validated_legend,
                 'where': _validated_where
             })
-        x_col = spec.x or (spec.select[0] if spec.select else None)
+        # Handle x as either string or array (extract first element if array)
+        x_raw = spec.x or (spec.select[0] if spec.select else None)
+        if isinstance(x_raw, (list, tuple)) and len(x_raw) > 0:
+            x_col = x_raw[0]
+        else:
+            x_col = x_raw
         if not x_col and not (spec.legend or legend_orig):
             # Fallback: simple total aggregation without x and without legend; label as 'total'
             # Build value_expr robustly (support measure and DuckDB numeric-cleaning)
@@ -2525,6 +2618,25 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         value_expr = f"{agg.upper()}({_q_ident(spec.y)})"
             inner = f"SELECT 'total' as x, {value_expr} as value{base_from_sql}"
             # Reuse helpers from above scope
+            def _coerce_filter_value(key: str, val: Any) -> Any:
+                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+                if not m:
+                    return val
+                part = m.group(2).strip().lower()
+                if part in ('year', 'quarter', 'month', 'week', 'day'):
+                    try:
+                        return int(val)
+                    except (ValueError, TypeError):
+                        return val
+                return str(val) if val is not None else val
+            
+            def _where_lhs(key: str) -> str:
+                """Get SQL expression for WHERE clause. Use quoted column if it exists in transformed base."""
+                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+                if m and ds_transforms and _actual_cols and key in _actual_cols:
+                    return _q_ident(key)
+                return _derived_lhs(key)
+            
             where_clauses = []
             params: Dict[str, Any] = {}
             if spec.where:
@@ -2533,7 +2645,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     if k in ("start", "startDate", "end", "endDate"):
                         continue
                     if v is None:
-                        where_clauses.append(f"{_q_ident(k)} IS NULL")
+                        where_clauses.append(f"{_where_lhs(k)} IS NULL")
                     elif isinstance(v, (list, tuple)):
                         if len(v) == 0:
                             # Ignore empty lists: no-op filter (UI chip added but no values selected)
@@ -2541,9 +2653,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         pnames = []
                         for i, item in enumerate(v):
                             pname = _pname(k, f"_{i}")
-                            params[pname] = item
+                            params[pname] = _coerce_filter_value(k, item)
                             pnames.append(f":{pname}")
-                        where_clauses.append(f"{_q_ident(k)} IN ({', '.join(pnames)})")
+                        where_clauses.append(f"{_where_lhs(k)} IN ({', '.join(pnames)})")
                     elif isinstance(k, str) and "__" in k:
                         base, op = k.split("__", 1)
                         opname = None
@@ -2553,16 +2665,32 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         elif op == "lt": opname = "<"
                         if opname:
                             pname = _pname(base, f"_{op}")
-                            params[pname] = v
-                            where_clauses.append(f"{_q_ident(base)} {opname} :{pname}")
+                            params[pname] = _coerce_filter_value(base, v)
+                            where_clauses.append(f"{_where_lhs(base)} {opname} :{pname}")
+                        elif op == "ne":
+                            pname = _pname(base, "_ne")
+                            params[pname] = _coerce_filter_value(base, v)
+                            where_clauses.append(f"{_where_lhs(base)} <> :{pname}")
+                        elif op in {"contains", "notcontains", "startswith", "endswith"}:
+                            if op == "notcontains":
+                                cmp = "NOT LIKE"; patt = f"%{v}%"
+                            elif op == "contains":
+                                cmp = "LIKE"; patt = f"%{v}%"
+                            elif op == "startswith":
+                                cmp = "LIKE"; patt = f"{v}%"
+                            else:
+                                cmp = "LIKE"; patt = f"%{v}"
+                            pname = _pname(base, "_like")
+                            params[pname] = patt
+                            where_clauses.append(f"{_where_lhs(base)} {cmp} :{pname}")
                         else:
-                            pname = _pname(k)
-                            where_clauses.append(f"{_q_ident(k)} = :{pname}")
-                            params[pname] = v
+                            pname = _pname(base, "_eq")
+                            where_clauses.append(f"{_where_lhs(base)} = :{pname}")
+                            params[pname] = _coerce_filter_value(base, v)
                     else:
                         pname = _pname(k)
-                        where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
-                        params[pname] = v
+                        where_clauses.append(f"{_where_lhs(k)} = :{pname}")
+                        params[pname] = _coerce_filter_value(k, v)
             where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
             # Apply datasource defaults (order/TopN) when present
             order_seg = " ORDER BY 1"  # only x column exists in this branch
@@ -2650,6 +2778,18 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             print(f"[DEBUG] Legend-only: legend_expr_raw={legend_expr_raw}, legend_expr={legend_expr}, base_from_sql={base_from_sql[:100]}", file=sys.stderr)
             
             # Build WHERE clause
+            def _coerce_filter_value(key: str, val: Any) -> Any:
+                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+                if not m:
+                    return val
+                part = m.group(2).strip().lower()
+                if part in ('year', 'quarter', 'month', 'week', 'day'):
+                    try:
+                        return int(val)
+                    except (ValueError, TypeError):
+                        return val
+                return str(val) if val is not None else val
+            
             where_clauses = []
             params: Dict[str, Any] = {}
             if spec.where:
@@ -2657,16 +2797,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     if k in ("start", "startDate", "end", "endDate"):
                         continue
                     if v is None:
-                        where_clauses.append(f"{_q_ident(k)} IS NULL")
+                        where_clauses.append(f"{_derived_lhs(k)} IS NULL")
                     elif isinstance(v, (list, tuple)):
                         if len(v) == 0:
                             continue
                         pnames = []
                         for i, item in enumerate(v):
                             pname = _pname(k, f"_{i}")
-                            params[pname] = item
+                            params[pname] = _coerce_filter_value(k, item)
                             pnames.append(f":{pname}")
-                        where_clauses.append(f"{_q_ident(k)} IN ({', '.join(pnames)})")
+                        where_clauses.append(f"{_derived_lhs(k)} IN ({', '.join(pnames)})")
                     elif isinstance(k, str) and "__" in k:
                         base, op = k.split("__", 1)
                         opname = None
@@ -2676,26 +2816,30 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         elif op == "lt": opname = "<"
                         if opname:
                             pname = _pname(base, f"_{op}")
-                            params[pname] = v
-                            where_clauses.append(f"{_q_ident(base)} {opname} :{pname}")
+                            params[pname] = _coerce_filter_value(base, v)
+                            where_clauses.append(f"{_derived_lhs(base)} {opname} :{pname}")
                         else:
                             pname = _pname(k)
-                            where_clauses.append(f"{_q_ident(k)} = :{pname}")
-                            params[pname] = v
+                            where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
+                            params[pname] = _coerce_filter_value(k, v)
                     else:
                         pname = _pname(k)
                         where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
-                        params[pname] = v
-            where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+                        params[pname] = _coerce_filter_value(k, v)
+            # Filter out NULL legend values
+            legend_filter_clauses = list(where_clauses) if where_clauses else []
+            if legend_expr:
+                legend_filter_clauses.append(f"{legend_expr} IS NOT NULL")
+            where_sql_with_legend = f" WHERE {' AND '.join(legend_filter_clauses)}" if legend_filter_clauses else ""
             
             # Build SQL: For legend-only, return x='Total', legend=<category>, value=<count>
             # This allows the frontend to render as a bar/column chart with legend series
             if ("mssql" in ds_type) or ("sqlserver" in ds_type):
-                sql_inner = f"SELECT 'Total' as x, {legend_expr} as legend, {value_expr} as value {base_from_sql}{where_sql} GROUP BY {legend_expr} ORDER BY {legend_expr}"
+                sql_inner = f"SELECT 'Total' as x, {legend_expr} as legend, {value_expr} as value {base_from_sql}{where_sql_with_legend} GROUP BY {legend_expr} ORDER BY {legend_expr}"
             else:
                 # GROUP BY positions 2,3 (skip the constant 'Total' in position 1, group by legend and value expression)
                 # Actually, value_expr is an aggregate, so we only group by legend (position 2)
-                sql_inner = f"SELECT 'Total' as x, {legend_expr} as legend, {value_expr} as value {base_from_sql}{where_sql} GROUP BY 2 ORDER BY 2"
+                sql_inner = f"SELECT 'Total' as x, {legend_expr} as legend, {value_expr} as value {base_from_sql}{where_sql_with_legend} GROUP BY 2 ORDER BY 2"
             
             eff_limit = lim or 1000
             q = QueryRequest(
@@ -2766,6 +2910,38 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     value_expr = "COUNT(*)"
 
             # Reuse helpers from above scope
+            def _coerce_filter_value(key: str, val: Any) -> Any:
+                """Convert filter values to match the type returned by _derived_lhs() for the given key."""
+                # Check if key is a derived date part
+                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+                if not m:
+                    return val
+                part = m.group(2).strip().lower()
+                # Numeric parts: Year, Quarter, Month, Week, Day return integers
+                if part in ('year', 'quarter', 'month', 'week', 'day'):
+                    try:
+                        return int(val)
+                    except (ValueError, TypeError):
+                        return val
+                # String parts: Month Name, Month Short, Day Name, Day Short return strings
+                return str(val) if val is not None else val
+            
+            def _where_lhs(key: str) -> str:
+                """Get SQL expression for WHERE clause left-hand side.
+                If transforms created a derived column, use it directly instead of extracting."""
+                # Check if this is a derived date part
+                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+                if m and ds_transforms:
+                    # Check if the derived column exists in transformed base
+                    if _actual_cols and key in _actual_cols:
+                        return _q_ident(key)
+                # Fall back to extraction or simple quoting
+                return _derived_lhs(key)
+            
+            def _is_string_filter(key: str) -> bool:
+                """Check if filter is for a string field (not a derived date part)."""
+                return not re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+            
             where_clauses = []
             params: Dict[str, Any] = {}
             if spec.where:
@@ -2773,16 +2949,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     if k in ("start", "startDate", "end", "endDate"):
                         continue
                     if v is None:
-                        where_clauses.append(f"{_q_ident(k)} IS NULL")
-                    elif isinstance(v, (list, tuple)):
-                        if len(v) == 0:
-                            continue
-                        pnames = []
-                        for i, item in enumerate(v):
-                            pname = _pname(k, f"_{i}")
-                            params[pname] = item
-                            pnames.append(f":{pname}")
-                        where_clauses.append(f"{_q_ident(k)} IN ({', '.join(pnames)})")
+                        where_clauses.append(f"{_where_lhs(k)} IS NULL")
                     elif isinstance(k, str) and "__" in k:
                         base, op = k.split("__", 1)
                         opname = None
@@ -2791,34 +2958,135 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         elif op == "lte": opname = "<="
                         elif op == "lt": opname = "<"
                         if opname:
+                            # Numeric comparisons stay as-is
                             pname = _pname(base, f"_{op}")
-                            params[pname] = v
-                            where_clauses.append(f"{_q_ident(base)} {opname} :{pname}")
+                            params[pname] = _coerce_filter_value(base, v)
+                            where_clauses.append(f"{_where_lhs(base)} {opname} :{pname}")
+                        elif op == "ne":
+                            is_str = _is_string_filter(base)
+                            col_expr = f"LOWER({_where_lhs(base)})" if is_str else _where_lhs(base)
+                            # Support array for multiple ne values (AND logic: not A and not B)
+                            if isinstance(v, (list, tuple)):
+                                ne_conds = []
+                                for i, item in enumerate(v):
+                                    pname = _pname(base, f"_ne_{i}")
+                                    params[pname] = _coerce_filter_value(base, str(item).lower() if is_str and isinstance(item, str) else item)
+                                    ne_conds.append(f"{col_expr} <> :{pname}")
+                                where_clauses.append(f"({' AND '.join(ne_conds)})")
+                            else:
+                                pname = _pname(base, "_ne")
+                                params[pname] = _coerce_filter_value(base, str(v).lower() if is_str and isinstance(v, str) else v)
+                                where_clauses.append(f"{col_expr} <> :{pname}")
+                        elif op in {"contains", "notcontains", "startswith", "endswith"}:
+                            # LIKE operators: case-insensitive with LOWER(), support arrays with OR logic
+                            col_expr = f"LOWER({_where_lhs(base)})"
+                            # Support array for multiple values (OR logic: contains A or contains B)
+                            vals = v if isinstance(v, (list, tuple)) else [v]
+                            like_conds = []
+                            for i, item in enumerate(vals):
+                                if op == "notcontains":
+                                    cmp = "NOT LIKE"; patt = f"%{str(item).lower()}%"
+                                elif op == "contains":
+                                    cmp = "LIKE"; patt = f"%{str(item).lower()}%"
+                                elif op == "startswith":
+                                    cmp = "LIKE"; patt = f"{str(item).lower()}%"
+                                else:
+                                    cmp = "LIKE"; patt = f"%{str(item).lower()}"
+                                pname = _pname(base, f"_like_{i}")
+                                params[pname] = patt
+                                like_conds.append(f"{col_expr} {cmp} :{pname}")
+                            # OR for contains/startswith/endswith, AND for notcontains
+                            join_op = " AND " if op == "notcontains" else " OR "
+                            where_clauses.append(f"({join_op.join(like_conds)})")
                         else:
-                            pname = _pname(k)
-                            where_clauses.append(f"{_q_ident(k)} = :{pname}")
-                            params[pname] = v
+                            is_str = _is_string_filter(base)
+                            pname = _pname(base, "_eq")
+                            params[pname] = _coerce_filter_value(base, str(v).lower() if is_str and isinstance(v, str) else v)
+                            col_expr = f"LOWER({_where_lhs(base)})" if is_str else _where_lhs(base)
+                            where_clauses.append(f"{col_expr} = :{pname}")
+                    elif isinstance(v, (list, tuple)):
+                        # Regular field with multiple values (IN clause)
+                        if len(v) == 0:
+                            continue
+                        pnames = []
+                        is_str = _is_string_filter(k)
+                        for i, item in enumerate(v):
+                            pname = _pname(k, f"_{i}")
+                            params[pname] = _coerce_filter_value(k, str(item).lower() if is_str and isinstance(item, str) else item)
+                            pnames.append(f":{pname}")
+                        col_expr = f"LOWER({_where_lhs(k)})" if is_str else _where_lhs(k)
+                        where_clauses.append(f"{col_expr} IN ({', '.join(pnames)})")
                     else:
+                        is_str = _is_string_filter(k)
                         pname = _pname(k)
-                        where_clauses.append(f"{_q_ident(k)} = :{pname}")
-                        params[pname] = v
+                        params[pname] = _coerce_filter_value(k, str(v).lower() if is_str and isinstance(v, str) else v)
+                        col_expr = f"LOWER({_where_lhs(k)})" if is_str else _where_lhs(k)
+                        where_clauses.append(f"{col_expr} = :{pname}")
             where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+            
+            # Filter out NULL legend values when legend is present
+            if spec.legend:
+                legend_filter_clauses = list(where_clauses) if where_clauses else []
+                # Note: legend_expr will be defined later, so we'll add this filter after legend_expr is set
+                where_sql_base = where_sql  # Save base WHERE for later
 
-            # Apply optional groupBy to x (dialect-aware)
+            # Apply either: (a) derived x token like "OrderDate (Month Short)" or
+            # (b) groupBy time-bucketing on raw x.
             x_expr = _q_ident(x_col)
+            x_order_expr = None
             gb = (spec.groupBy or 'none').lower()
             week_start = (getattr(spec, 'weekStart', None) or 'mon').lower()
-            if gb in ("day","week","month","quarter","year"):
+            print(f"[DEBUG] groupBy transformation: x_col={x_col}, gb={gb}, ds_type={ds_type}", file=sys.stderr)
+            # Detect derived x pattern (Month/Month Name/Month Short/etc.) and compute a label + order expr
+            _m_x = None
+            try:
+                _m_x = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(x_col or ''), flags=re.IGNORECASE)
+            except Exception:
+                _m_x = None
+            if _m_x:
+                base = _m_x.group(1).strip()
+                kind = _m_x.group(2).strip().lower()
+                col = _q_ident(base)
+                if ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                    if kind == 'month name': x_expr, x_order_expr = f"DATENAME(month, {col})", f"MONTH({col})"
+                    elif kind == 'month short': x_expr, x_order_expr = f"LEFT(DATENAME(month, {col}), 3)", f"MONTH({col})"
+                    elif kind == 'month': x_expr, x_order_expr = f"MONTH({col})", f"MONTH({col})"
+                    elif kind == 'year': x_expr, x_order_expr = f"CAST(YEAR({col}) AS varchar(10))", f"YEAR({col})"
+                    else: x_expr = col
+                elif ("duckdb" in ds_type):
+                    if kind == 'month name': x_expr, x_order_expr = f"strftime({col}, '%B')", f"EXTRACT(month FROM {col})"
+                    elif kind == 'month short': x_expr, x_order_expr = f"strftime({col}, '%b')", f"EXTRACT(month FROM {col})"
+                    elif kind == 'month': x_expr, x_order_expr = f"EXTRACT(month FROM {col})", f"EXTRACT(month FROM {col})"
+                    elif kind == 'year': x_expr, x_order_expr = f"strftime({col}, '%Y')", f"CAST(EXTRACT(year FROM {col}) AS INTEGER)"
+                    else: x_expr = col
+                elif ("postgres" in ds_type) or ("postgre" in ds_type):
+                    if kind == 'month name': x_expr, x_order_expr = f"to_char({col}, 'FMMonth')", f"EXTRACT(month FROM {col})"
+                    elif kind == 'month short': x_expr, x_order_expr = f"to_char({col}, 'Mon')", f"EXTRACT(month FROM {col})"
+                    elif kind == 'month': x_expr, x_order_expr = f"EXTRACT(month FROM {col})", f"EXTRACT(month FROM {col})"
+                    elif kind == 'year': x_expr, x_order_expr = f"to_char({col}, 'YYYY')", f"EXTRACT(year FROM {col})"
+                    else: x_expr = col
+                elif ("mysql" in ds_type):
+                    if kind == 'month name': x_expr, x_order_expr = f"DATE_FORMAT({col}, '%M')", f"MONTH({col})"
+                    elif kind == 'month short': x_expr, x_order_expr = f"DATE_FORMAT({col}, '%b')", f"MONTH({col})"
+                    elif kind == 'month': x_expr, x_order_expr = f"MONTH({col})", f"MONTH({col})"
+                    elif kind == 'year': x_expr, x_order_expr = f"DATE_FORMAT({col}, '%Y')", f"YEAR({col})"
+                    else: x_expr = col
+                elif ("sqlite" in ds_type):
+                    if kind == 'month name': x_expr, x_order_expr = f"CASE CAST(strftime('%m', {col}) AS INTEGER) WHEN 1 THEN 'January' WHEN 2 THEN 'February' WHEN 3 THEN 'March' WHEN 4 THEN 'April' WHEN 5 THEN 'May' WHEN 6 THEN 'June' WHEN 7 THEN 'July' WHEN 8 THEN 'August' WHEN 9 THEN 'September' WHEN 10 THEN 'October' WHEN 11 THEN 'November' ELSE 'December' END", f"CAST(strftime('%m', {col}) AS INTEGER)"
+                    elif kind == 'month short': x_expr, x_order_expr = f"CASE CAST(strftime('%m', {col}) AS INTEGER) WHEN 1 THEN 'Jan' WHEN 2 THEN 'Feb' WHEN 3 THEN 'Mar' WHEN 4 THEN 'Apr' WHEN 5 THEN 'May' WHEN 6 THEN 'Jun' WHEN 7 THEN 'Jul' WHEN 8 THEN 'Aug' WHEN 9 THEN 'Sep' WHEN 10 THEN 'Oct' WHEN 11 THEN 'Nov' ELSE 'Dec' END", f"CAST(strftime('%m', {col}) AS INTEGER)"
+                    elif kind == 'month': x_expr, x_order_expr = f"CAST(strftime('%m', {col}) AS INTEGER)", f"CAST(strftime('%m', {col}) AS INTEGER)"
+                    elif kind == 'year': x_expr, x_order_expr = f"strftime('%Y', {col})", f"CAST(strftime('%Y', {col}) AS INTEGER)"
+                    else: x_expr = col
+                else:
+                    x_expr = col
+            elif gb in ("day","week","month","quarter","year"):
                 if ("mssql" in ds_type) or ("sqlserver" in ds_type):
                     if gb == "day":
                         x_expr = f"CAST({_q_ident(x_col)} AS date)"
                     elif gb == "week":
-                        # Week start control: 'sun' vs 'mon'
                         if week_start == 'sun':
-                            # Sunday start-of-week at 00:00
                             x_expr = f"DATEADD(week, DATEDIFF(week, 0, {_q_ident(x_col)}), 0)"
                         else:
-                            # Monday start-of-week: shift by -1 day, truncate to week, then +1 day
                             x_expr = f"DATEADD(day, 1, DATEADD(week, DATEDIFF(week, 0, DATEADD(day, -1, {_q_ident(x_col)})), 0))"
                     elif gb == "month":
                         x_expr = f"DATEADD(month, DATEDIFF(month, 0, {_q_ident(x_col)}), 0)"
@@ -2827,15 +3095,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     elif gb == "year":
                         x_expr = f"DATEADD(year, DATEDIFF(year, 0, {_q_ident(x_col)}), 0)"
                 elif ("duckdb" in ds_type) or ("postgres" in ds_type):
-                    # For DuckDB, some sources store dates as VARCHAR. Cast safely before date_trunc.
-                    # Use try_cast to avoid binder errors; NULLs propagate safely through DATE_TRUNC.
                     if "duckdb" in ds_type:
                         col_ts = f"COALESCE(try_cast({_q_ident(x_col)} AS TIMESTAMP), CAST(try_cast({_q_ident(x_col)} AS DATE) AS TIMESTAMP))"
                     else:
                         col_ts = _q_ident(x_col)
                     if gb == 'week':
                         if week_start == 'sun':
-                            # Adjust so Sunday is start-of-week
                             if "duckdb" in ds_type:
                                 x_expr = f"DATE_TRUNC('week', {col_ts} + INTERVAL 1 day) - INTERVAL 1 day"
                             else:
@@ -2854,7 +3119,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     if gb == "day":
                         x_expr = f"DATE({_q_ident(x_col)})"
                     elif gb == "week":
-                        # Week start control
                         if week_start == 'sun':
                             x_expr = f"DATE_SUB(DATE({_q_ident(x_col)}), INTERVAL (DAYOFWEEK({_q_ident(x_col)})-1) DAY)"
                         else:
@@ -2869,8 +3133,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     if gb == "day":
                         x_expr = f"date({_q_ident(x_col)})"
                     elif gb == "week":
-                        # Compute start-of-week date using strftime('%w'): 0=Sun..6=Sat
-                        # sun: subtract w days; mon: subtract (w+6)%7 days
                         if week_start == 'sun':
                             x_expr = f"date({_q_ident(x_col)}, '-' || CAST(strftime('%w', {_q_ident(x_col)}) AS INTEGER) || ' days')"
                         else:
@@ -2878,7 +3140,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     elif gb == "month":
                         x_expr = f"date(strftime('%Y-%m-01', {_q_ident(x_col)}))"
                     elif gb == "quarter":
-                        # Map to first day of quarter
                         x_expr = (
                             f"CASE "
                             f"WHEN CAST(strftime('%m', {_q_ident(x_col)}) AS INTEGER) BETWEEN 1 AND 3 THEN date(strftime('%Y-01-01', {_q_ident(x_col)})) "
@@ -2891,7 +3152,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     else:
                         x_expr = _q_ident(x_col)
                 else:
-                    # Fallback: pass-through (caller should pre-aggregate appropriately)
                     x_expr = _q_ident(x_col)
 
             # Legend: allow derived date-part syntax like "OrderDate (Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)"
@@ -2983,7 +3243,41 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     return col
                 legend_expr = _legend_datepart_expr(_q_ident(base_col), kind)
 
+                # Special-case: groupBy=month and legend is Year of the same column as x =>
+                # use month label (Jan..Dec) for x with numeric month for ordering to yield 12 unique x categories.
+                try:
+                    same_col = str(base_col) == str(x_col)
+                except Exception:
+                    same_col = False
+                if gb == 'month' and same_col and kind == 'year':
+                    col = _q_ident(base_col)
+                    if ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                        # Label: short month, Order: numeric month
+                        x_expr = f"LEFT(DATENAME(month, {col}), 3)"
+                        x_order_expr = f"MONTH({col})"
+                    elif ("duckdb" in ds_type):
+                        col_ts = f"COALESCE(try_cast({col} AS TIMESTAMP), CAST(try_cast({col} AS DATE) AS TIMESTAMP))"
+                        x_expr = f"strftime({col_ts}, '%b')"
+                        x_order_expr = f"EXTRACT(month FROM {col_ts})"
+                    elif ("postgres" in ds_type) or ("postgre" in ds_type):
+                        x_expr = f"to_char({col}, 'Mon')"
+                        x_order_expr = f"EXTRACT(month FROM {col})"
+                    elif ("mysql" in ds_type):
+                        x_expr = f"DATE_FORMAT({col}, '%b')"
+                        x_order_expr = f"MONTH({col})"
+                    elif ("sqlite" in ds_type):
+                        x_expr = (
+                            f"CASE CAST(strftime('%m', {col}) AS INTEGER) WHEN 1 THEN 'Jan' WHEN 2 THEN 'Feb' WHEN 3 THEN 'Mar' WHEN 4 THEN 'Apr' WHEN 5 THEN 'May' WHEN 6 THEN 'Jun' WHEN 7 THEN 'Jul' WHEN 8 THEN 'Aug' WHEN 9 THEN 'Sep' WHEN 10 THEN 'Oct' WHEN 11 THEN 'Nov' ELSE 'Dec' END"
+                        )
+                        x_order_expr = f"CAST(strftime('%m', {col}) AS INTEGER)"
+
             if spec.legend:
+                print(f"[DEBUG] Taking LEGEND path: x_expr={x_expr[:100] if len(str(x_expr)) > 100 else x_expr}, legend_expr={legend_expr}", file=sys.stderr)
+                # Filter out NULL legend values
+                if legend_expr and 'legend_filter_clauses' in locals():
+                    legend_filter_clauses.append(f"{legend_expr} IS NOT NULL")
+                    where_sql = f" WHERE {' AND '.join(legend_filter_clauses)}" if legend_filter_clauses else ""
+                
                 # Determine ordering for Top-N ranking with legend: value is column 3
                 _by = str((getattr(spec, 'orderBy', None) or '')).lower()
                 _dir = str((getattr(spec, 'order', None) or ('desc' if _by == 'value' else 'asc'))).upper()
@@ -2997,16 +3291,31 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 else:
                     order_seg_mssql = " ORDER BY 1,2"
                     order_seg_std = " ORDER BY 1,2"
-                if ("mssql" in ds_type) or ("sqlserver" in ds_type):
-                    sql_inner = (
-                        f"SELECT {x_expr} as x, {legend_expr} as legend, {value_expr} as value "
-                        f"{base_from_sql}{where_sql} GROUP BY {x_expr}, {legend_expr}{order_seg_mssql}"
-                    )
+                if x_order_expr:
+                    # Use a subquery to compute a stable numeric month order to avoid GROUP BY issues
+                    if ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                        sql_inner = (
+                            f"SELECT x, legend, value FROM ("
+                            f"SELECT {x_expr} as x, {legend_expr} as legend, {value_expr} as value, {x_order_expr} as _xo "
+                            f"{base_from_sql}{where_sql} GROUP BY {x_expr}, {legend_expr}, {x_order_expr}) _t ORDER BY _xo, legend"
+                        )
+                    else:
+                        sql_inner = (
+                            f"SELECT x, legend, value FROM ("
+                            f"SELECT {x_expr} as x, {legend_expr} as legend, {value_expr} as value, {x_order_expr} as _xo "
+                            f"{base_from_sql}{where_sql} GROUP BY 1,2,4) _t ORDER BY _xo, 2"
+                        )
                 else:
-                    sql_inner = (
-                        f"SELECT {x_expr} as x, {legend_expr} as legend, {value_expr} as value "
-                        f"{base_from_sql}{where_sql} GROUP BY 1,2{order_seg_std}"
-                    )
+                    if ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                        sql_inner = (
+                            f"SELECT {x_expr} as x, {legend_expr} as legend, {value_expr} as value "
+                            f"{base_from_sql}{where_sql} GROUP BY {x_expr}, {legend_expr}{order_seg_mssql}"
+                        )
+                    else:
+                        sql_inner = (
+                            f"SELECT {x_expr} as x, {legend_expr} as legend, {value_expr} as value "
+                            f"{base_from_sql}{where_sql} GROUP BY 1,2{order_seg_std}"
+                        )
                 # For non-MSSQL, apply LIMIT on inner query so ORDER BY is respected before pagination
                 if not (("mssql" in ds_type) or ("sqlserver" in ds_type)) and lim:
                     try:
@@ -3027,16 +3336,30 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 else:
                     order_seg_mssql = " ORDER BY 1"
                     order_seg_std = " ORDER BY 1"
-                if ("mssql" in ds_type) or ("sqlserver" in ds_type):
-                    sql_inner = (
-                        f"SELECT {x_expr} as x, {value_expr} as value "
-                        f"{base_from_sql}{where_sql} GROUP BY {x_expr}{order_seg_mssql}"
-                    )
+                if x_order_expr:
+                    if ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                        sql_inner = (
+                            f"SELECT x, value FROM ("
+                            f"SELECT {x_expr} as x, {value_expr} as value, {x_order_expr} as _xo "
+                            f"{base_from_sql}{where_sql} GROUP BY {x_expr}, {x_order_expr}) _t ORDER BY _xo"
+                        )
+                    else:
+                        sql_inner = (
+                            f"SELECT x, value FROM ("
+                            f"SELECT {x_expr} as x, {value_expr} as value, {x_order_expr} as _xo "
+                            f"{base_from_sql}{where_sql} GROUP BY 1,3) _t ORDER BY _xo"
+                        )
                 else:
-                    sql_inner = (
-                        f"SELECT {x_expr} as x, {value_expr} as value "
-                        f"{base_from_sql}{where_sql} GROUP BY 1{order_seg_std}"
-                    )
+                    if ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                        sql_inner = (
+                            f"SELECT {x_expr} as x, {value_expr} as value "
+                            f"{base_from_sql}{where_sql} GROUP BY {x_expr}{order_seg_mssql}"
+                        )
+                    else:
+                        sql_inner = (
+                            f"SELECT {x_expr} as x, {value_expr} as value "
+                            f"{base_from_sql}{where_sql} GROUP BY 1{order_seg_std}"
+                        )
                 # For non-MSSQL, apply LIMIT on inner query so ORDER BY is respected before pagination
                 if not (("mssql" in ds_type) or ("sqlserver" in ds_type)) and lim:
                     try:
@@ -3063,6 +3386,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             return run_query(q, db)
 
         # agg == 'none': passthrough raw columns via select/x/y, but derive/quote when needed
+        print(f"[DEBUG] Taking NON-AGGREGATED path: agg={agg}, x_col={x_col}", file=sys.stderr)
         def _select_part(c: str) -> str:
             s = str(c or '').strip()
             # If derived pattern, use expression and alias back to original token (quoted)
@@ -3087,6 +3411,25 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         if spec.y:
             cols.append(_select_part(str(spec.y)))
         # Reuse helpers from above scope
+        def _coerce_filter_value(key: str, val: Any) -> Any:
+            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+            if not m:
+                return val
+            part = m.group(2).strip().lower()
+            if part in ('year', 'quarter', 'month', 'week', 'day'):
+                try:
+                    return int(val)
+                except (ValueError, TypeError):
+                    return val
+            return str(val) if val is not None else val
+        
+        def _where_lhs(key: str) -> str:
+            """Get SQL expression for WHERE clause. Use quoted column if it exists in transformed base."""
+            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+            if m and ds_transforms and _actual_cols and key in _actual_cols:
+                return _q_ident(key)
+            return _derived_lhs(key)
+        
         where_clauses = []
         params: Dict[str, Any] = {}
         if spec.where:
@@ -3094,16 +3437,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 if k in ("start", "startDate", "end", "endDate"):
                     continue
                 if v is None:
-                    where_clauses.append(f"{_q_ident(k)} IS NULL")
+                    where_clauses.append(f"{_where_lhs(k)} IS NULL")
                 elif isinstance(v, (list, tuple)):
                     if len(v) == 0:
                         continue
                     pnames = []
                     for i, item in enumerate(v):
                         pname = _pname(k, f"_{i}")
-                        params[pname] = item
+                        params[pname] = _coerce_filter_value(k, item)
                         pnames.append(f":{pname}")
-                    where_clauses.append(f"{_q_ident(k)} IN ({', '.join(pnames)})")
+                    where_clauses.append(f"{_where_lhs(k)} IN ({', '.join(pnames)})")
                 elif isinstance(k, str) and "__" in k:
                     base, op = k.split("__", 1)
                     opname = None
@@ -3113,12 +3456,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     elif op == "lt": opname = "<"
                     if opname:
                         pname = _pname(base, f"_{op}")
-                        params[pname] = v
-                        where_clauses.append(f"{_q_ident(base)} {opname} :{pname}")
+                        params[pname] = _coerce_filter_value(base, v)
+                        where_clauses.append(f"{_where_lhs(base)} {opname} :{pname}")
                     elif op == "ne":
                         pname = _pname(base, "_ne")
-                        params[pname] = v
-                        where_clauses.append(f"{_q_ident(base)} <> :{pname}")
+                        params[pname] = _coerce_filter_value(base, v)
+                        where_clauses.append(f"{_where_lhs(base)} <> :{pname}")
                     elif op in {"contains", "notcontains", "startswith", "endswith"}:
                         like = "LIKE"
                         if op == "notcontains":
@@ -3131,15 +3474,15 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                             cmp = "LIKE"; patt = f"%{v}"
                         pname = _pname(base, "_like")
                         params[pname] = patt
-                        where_clauses.append(f"{_q_ident(base)} {cmp} :{pname}")
+                        where_clauses.append(f"{_where_lhs(base)} {cmp} :{pname}")
                     else:
                         pname = _pname(base, "_eq")
-                        where_clauses.append(f"{_q_ident(base)} = :{pname}")
-                        params[pname] = v
+                        where_clauses.append(f"{_where_lhs(base)} = :{pname}")
+                        params[pname] = _coerce_filter_value(base, v)
                 else:
                     pname = _pname(k)
-                    where_clauses.append(f"{_q_ident(k)} = :{pname}")
-                    params[pname] = v
+                    where_clauses.append(f"{_where_lhs(k)} = :{pname}")
+                    params[pname] = _coerce_filter_value(k, v)
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         sql_inner = f"SELECT {', '.join(cols)}{base_from_sql}{where_sql}"
         q = QueryRequest(

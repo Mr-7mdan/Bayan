@@ -534,49 +534,74 @@ function StringRuleDetails({ field, where, onPatch }: { field: string; where?: R
       const endswith = (where as any)?.[`${field}__endswith`]
       const ne = (where as any)?.[`${field}__ne`]
       
-      if (Array.isArray(eqArr) && eqArr.length === 1) {
+      if (Array.isArray(eqArr) && eqArr.length >= 1) {
         if (op !== 'eq') setOp('eq')
-        const v = String(eqArr[0])
+        const v = eqArr.map(x => String(x)).join(', ')
         if (val !== v) setVal(v)
-      } else if (typeof ne === 'string') {
+      } else if (ne !== undefined) {
         if (op !== 'ne') setOp('ne')
-        if (val !== ne) setVal(ne)
-      } else if (typeof contains === 'string') {
+        const v = Array.isArray(ne) ? ne.map(x => String(x)).join(', ') : String(ne)
+        if (val !== v) setVal(v)
+      } else if (contains !== undefined) {
         if (op !== 'contains') setOp('contains')
-        if (val !== contains) setVal(contains)
-      } else if (typeof notcontains === 'string') {
+        const v = Array.isArray(contains) ? contains.map(x => String(x)).join(', ') : String(contains)
+        if (val !== v) setVal(v)
+      } else if (notcontains !== undefined) {
         if (op !== 'not_contains') setOp('not_contains')
-        if (val !== notcontains) setVal(notcontains)
-      } else if (typeof startswith === 'string') {
+        const v = Array.isArray(notcontains) ? notcontains.map(x => String(x)).join(', ') : String(notcontains)
+        if (val !== v) setVal(v)
+      } else if (startswith !== undefined) {
         if (op !== 'starts_with') setOp('starts_with')
-        if (val !== startswith) setVal(startswith)
-      } else if (typeof endswith === 'string') {
+        const v = Array.isArray(startswith) ? startswith.map(x => String(x)).join(', ') : String(startswith)
+        if (val !== v) setVal(v)
+      } else if (endswith !== undefined) {
         if (op !== 'ends_with') setOp('ends_with')
-        if (val !== endswith) setVal(endswith)
+        const v = Array.isArray(endswith) ? endswith.map(x => String(x)).join(', ') : String(endswith)
+        if (val !== v) setVal(v)
       }
     } catch {}
   }, [field, (where as any)?.[field], (where as any)?.[`${field}__contains`], (where as any)?.[`${field}__notcontains`], (where as any)?.[`${field}__startswith`], (where as any)?.[`${field}__endswith`], (where as any)?.[`${field}__ne`]])
   
-  useEffect(() => {
-    if (!interactedRef.current) return
+  const handleApply = () => {
     const patch: Record<string, any> = { [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }
     const v = String(val || '').trim()
     if (!v) { onPatch(patch); return }
+    // Support comma-separated multi-values with OR logic: "Bank, Retail" -> ["Bank", "Retail"]
+    const values = v.split(',').map(s => s.trim()).filter(s => s.length > 0)
+    const valuesOrSingle = values.length > 0 ? values : [v]
+    
     switch (op) {
-      case 'eq': patch[field] = [v]; break
-      case 'ne': patch[`${field}__ne`] = v; break
-      case 'contains': patch[`${field}__contains`] = v; break
-      case 'not_contains': patch[`${field}__notcontains`] = v; break
-      case 'starts_with': patch[`${field}__startswith`] = v; break
-      case 'ends_with': patch[`${field}__endswith`] = v; break
+      case 'eq': 
+        patch[field] = valuesOrSingle
+        break
+      case 'ne': 
+        // For ne, use array if multiple values (OR logic: not A and not B)
+        patch[`${field}__ne`] = valuesOrSingle
+        break
+      case 'contains': 
+        patch[`${field}__contains`] = valuesOrSingle
+        break
+      case 'not_contains': 
+        patch[`${field}__notcontains`] = valuesOrSingle
+        break
+      case 'starts_with': 
+        patch[`${field}__startswith`] = valuesOrSingle
+        break
+      case 'ends_with': 
+        patch[`${field}__endswith`] = valuesOrSingle
+        break
     }
     onPatch(patch)
-  }, [op, val])
+  }
+
   return (
     <div className="rounded-md border bg-card p-2">
       <div className="flex items-center justify-between">
         <div className="text-xs font-medium">String rule: {field}</div>
-        <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('contains'); setVal(''); onPatch({ [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
+        <div className="flex items-center gap-2">
+          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted bg-primary text-primary-foreground" onClick={handleApply}>Apply</button>
+          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('contains'); setVal(''); onPatch({ [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
+        </div>
       </div>
       <div className="grid grid-cols-3 gap-2 mt-2 items-center">
         <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{interactedRef.current = true; setOp(e.target.value as StrOp)}}>
@@ -587,7 +612,7 @@ function StringRuleDetails({ field, where, onPatch }: { field: string; where?: R
           <option value="starts_with">Starts with</option>
           <option value="ends_with">Ends with</option>
         </select>
-        <input className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Value" value={val} onChange={(e)=>{interactedRef.current = true; setVal(e.target.value)}} />
+        <input className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Value (comma-separated for OR logic)" value={val} onChange={(e)=>{interactedRef.current = true; setVal(e.target.value)}} />
       </div>
     </div>
   )
@@ -1612,16 +1637,16 @@ function NumberFilterDetails({ field, where, onPatch }: { field: string; where?:
     onPatch(patch)
   }
 
-  useEffect(() => {
-    if (!interactedRef.current) return
+  const handleApply = () => {
     emit(op, a, b)
-  }, [op, a, b])
+  }
 
   return (
     <div className="rounded-md border bg-card p-2">
       <div className="flex items-center justify-between">
         <div className="text-xs font-medium">Value filter: {field}</div>
         <div className="flex items-center gap-2">
+          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted bg-primary text-primary-foreground" onClick={handleApply}>Apply</button>
           <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
         </div>
       </div>

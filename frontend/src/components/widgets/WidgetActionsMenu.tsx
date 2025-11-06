@@ -565,6 +565,9 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
             {sortGroupsDyn.map((g) => (
               <MenuItem key={g.key as any} label={g.label as any} hasSubmenu onClick={() => setNav(['sort', g.key as any])} />
             ))}
+            <MenuGroup title="Data Filtering">
+              <SwitchRow label="Exclude zero values" checked={opt('excludeZeroValues', false)} onChangeAction={(v) => emitOptions({ excludeZeroValues: v })} />
+            </MenuGroup>
           </MenuList>
         )
       }

@@ -534,6 +534,8 @@ export default function TableCard({
             aggregator: agg,
             where: effective,
             widgetId: widgetId,
+            groupBy: (querySpec as any)?.groupBy || undefined,
+            weekStart: (options as any)?.xWeekStart || (querySpec as any)?.weekStart || undefined,
             ...(maxRowsCfg != null ? { limit: Number(maxRowsCfg) } : {}),
           }, undefined, sig).promise
         })
@@ -549,6 +551,8 @@ export default function TableCard({
               aggregator: m.agg,
               where: effective,
               widgetId: widgetId,
+              groupBy: (querySpec as any)?.groupBy || undefined,
+              weekStart: (options as any)?.xWeekStart || (querySpec as any)?.weekStart || undefined,
               __label: m.label,
             }))
             window.dispatchEvent(new CustomEvent('widget-pivot-payloads', { detail: { widgetId, payloads } } as any))
@@ -937,7 +941,14 @@ export default function TableCard({
           </div>
         </div>
       ) : q.error ? (
-        <div className="text-sm text-red-600">Failed to load table</div>
+        <div className="text-sm text-red-600">
+          Failed to load table
+          {typeof window !== 'undefined' && process.env.NODE_ENV !== 'production' && (
+            <div className="mt-2 text-xs font-mono whitespace-pre-wrap">
+              {String((q.error as any)?.message || q.error)}
+            </div>
+          )}
+        </div>
       ) : rows.length === 0 ? (
         <div className="text-sm text-muted-foreground">No data</div>
       ) : (

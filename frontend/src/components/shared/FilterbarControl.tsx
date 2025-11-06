@@ -283,25 +283,30 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
     const endswith = (where as any)?.[`${field}__endswith`]
     const ne = (where as any)?.[`${field}__ne`]
     
-    if (Array.isArray(eqArr) && eqArr.length === 1) {
+    if (Array.isArray(eqArr) && eqArr.length >= 1) {
       if (op !== 'eq') setOp('eq')
-      const v = String(eqArr[0])
+      const v = eqArr.map(x => String(x)).join(', ')
       if (val !== v) setVal(v)
-    } else if (typeof ne === 'string') {
+    } else if (ne !== undefined) {
       if (op !== 'ne') setOp('ne')
-      if (val !== ne) setVal(ne)
-    } else if (typeof contains === 'string') {
+      const v = Array.isArray(ne) ? ne.map(x => String(x)).join(', ') : String(ne)
+      if (val !== v) setVal(v)
+    } else if (contains !== undefined) {
       if (op !== 'contains') setOp('contains')
-      if (val !== contains) setVal(contains)
-    } else if (typeof notcontains === 'string') {
+      const v = Array.isArray(contains) ? contains.map(x => String(x)).join(', ') : String(contains)
+      if (val !== v) setVal(v)
+    } else if (notcontains !== undefined) {
       if (op !== 'not_contains') setOp('not_contains')
-      if (val !== notcontains) setVal(notcontains)
-    } else if (typeof startswith === 'string') {
+      const v = Array.isArray(notcontains) ? notcontains.map(x => String(x)).join(', ') : String(notcontains)
+      if (val !== v) setVal(v)
+    } else if (startswith !== undefined) {
       if (op !== 'starts_with') setOp('starts_with')
-      if (val !== startswith) setVal(startswith)
-    } else if (typeof endswith === 'string') {
+      const v = Array.isArray(startswith) ? startswith.map(x => String(x)).join(', ') : String(startswith)
+      if (val !== v) setVal(v)
+    } else if (endswith !== undefined) {
       if (op !== 'ends_with') setOp('ends_with')
-      if (val !== endswith) setVal(endswith)
+      const v = Array.isArray(endswith) ? endswith.map(x => String(x)).join(', ') : String(endswith)
+      if (val !== v) setVal(v)
     }
   }, [mode, field, (where as any)?.[field], (where as any)?.[`${field}__contains`], (where as any)?.[`${field}__notcontains`], (where as any)?.[`${field}__startswith`], (where as any)?.[`${field}__endswith`], (where as any)?.[`${field}__ne`]])
   useEffect(() => {
@@ -309,13 +314,30 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
     const patch: Record<string, any> = { [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }
     const v = String(val || '').trim()
     if (!v) { onPatchAction(patch); return }
+    // Support comma-separated multi-values with OR logic: "Bank, Retail" -> ["Bank", "Retail"]
+    const values = v.split(',').map(s => s.trim()).filter(s => s.length > 0)
+    const valuesOrSingle = values.length > 0 ? values : [v]
+    
     switch (op) {
-      case 'eq': patch[field] = [v]; break
-      case 'ne': patch[`${field}__ne`] = v; break
-      case 'contains': patch[`${field}__contains`] = v; break
-      case 'not_contains': patch[`${field}__notcontains`] = v; break
-      case 'starts_with': patch[`${field}__startswith`] = v; break
-      case 'ends_with': patch[`${field}__endswith`] = v; break
+      case 'eq': 
+        patch[field] = valuesOrSingle
+        break
+      case 'ne': 
+        // For ne, use array if multiple values (AND logic: not A and not B)
+        patch[`${field}__ne`] = valuesOrSingle
+        break
+      case 'contains': 
+        patch[`${field}__contains`] = valuesOrSingle
+        break
+      case 'not_contains': 
+        patch[`${field}__notcontains`] = valuesOrSingle
+        break
+      case 'starts_with': 
+        patch[`${field}__startswith`] = valuesOrSingle
+        break
+      case 'ends_with': 
+        patch[`${field}__endswith`] = valuesOrSingle
+        break
     }
     onPatchAction(patch)
   }, [mode, op, val])
@@ -361,7 +383,7 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
             <option value="starts_with">Starts with</option>
             <option value="ends_with">Ends with</option>
           </select>
-          <input className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Value" value={val} onChange={(e)=>{interactedRef.current = true; setVal(e.target.value)}} />
+          <input className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Value (comma-separated for OR)" value={val} onChange={(e)=>{interactedRef.current = true; setVal(e.target.value)}} />
         </div>
       ) : (
         <div className="space-y-2">

@@ -918,10 +918,11 @@ export default function ChartCard({
         const DERIVED_RE = /^(.*) \((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/
         const hasDerivedWhere = whereKeys.some((k) => DERIVED_RE.test(k))
         const hasCustomWhere = whereKeys.some((k) => customNames.has(k))
-        // Build a server-safe subset of mergedWhere (exclude derived/custom keys)
+        // Build a server-safe subset of mergedWhere (exclude only custom columns; derived filters are now supported server-side)
         const serverWhere: Record<string, any> = {}
-        whereKeys.forEach((k) => { if (!DERIVED_RE.test(k) && !customNames.has(k)) (serverWhere as any)[k] = (mergedWhere as any)[k] })
-        const requireClientWhere = hasDerivedWhere || hasCustomWhere
+        whereKeys.forEach((k) => { if (!customNames.has(k)) (serverWhere as any)[k] = (mergedWhere as any)[k] })
+        // Only custom column filters require client-side fallback now
+        const requireClientWhere = hasCustomWhere
         if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
           try {
             // eslint-disable-next-line no-console
@@ -1171,10 +1172,9 @@ export default function ChartCard({
             }
           }
           // Only apply client-side filtering for keys that cannot be pushed down to the server:
-          // - Derived date-part keys (e.g., "order_date (Month)")
-          // - Custom column names
+          // - Custom column names (derived filters are now handled server-side)
           const whereAny = (mergedWhere as any) as Record<string, any>
-          const whereKeys2 = Object.keys(whereAny).filter((k) => DERIVED_RE.test(k) || customNames.has(k))
+          const whereKeys2 = Object.keys(whereAny).filter((k) => customNames.has(k))
           const rowsFiltered = whereKeys2.length === 0 ? rows : rows.filter((r) => {
             for (const k of whereKeys2) {
               const rawVal = whereAny[k]
@@ -1553,7 +1553,9 @@ export default function ChartCard({
             })
           })
           const categories = Array.from(catsSet.values())
-          return { columns: ['x', ...categories], rows: Array.from(map.values()).map((o) => categories.map((c) => (o[c] ?? 0)).reduce((acc, _, i) => o, o)), categories, virtualMeta } as any
+          // Do not force 0s; ensure keys exist but keep nulls for missing points
+          const rowsShaped = Array.from(map.values()).map((o) => { categories.forEach((c) => { if (o[c] === undefined) o[c] = null }) ; return o })
+          return { columns: ['x', ...categories], rows: rowsShaped, categories, virtualMeta } as any
         }
         if (!hasLegend && Array.isArray(series) && series.length > 0) {
           const labelFor = (s: any, idx: number) => s.label || s.y || s.measure || `series_${idx + 1}`
@@ -1697,7 +1699,8 @@ export default function ChartCard({
           })
           let categories = Array.from(catsSet)
           // Safety net: enforce legend filter client-side if present
-          const legendField = ((querySpec as any)?.legend || (pivot as any)?.legend) as string | undefined
+          const legendFieldRaw = ((querySpec as any)?.legend || (pivot as any)?.legend)
+          const legendField = (Array.isArray(legendFieldRaw) ? legendFieldRaw[0] : legendFieldRaw) as string | undefined
           const legendFilterArr = legendField ? (mergedWhere as any)?.[legendField] as any[] | undefined : undefined
           if (legendField && Array.isArray(legendFilterArr) && legendFilterArr.length > 0) {
             const allowed = new Set<string>(legendFilterArr.map((v) => String(v)))
@@ -1890,8 +1893,8 @@ export default function ChartCard({
             byX.set(x, obj)
           })
           const out = Array.from(byX.values())
-          // Fill missing categories with 0 so charts don't see undefined/NaN
-          out.forEach((o) => { (categories || []).forEach((c) => { if (o[c] == null) o[c] = 0 }) })
+          // Preserve gaps: keep missing (x, legend) pairs as null so lines don't drop to 0
+          out.forEach((o) => { (categories || []).forEach((c) => { if (o[c] == null) o[c] = null }) })
           return out
         }
         // Otherwise, map arrays by column names if present
@@ -1903,15 +1906,27 @@ export default function ChartCard({
           })
         }
       }
-      // Ensure object rows have all categories filled and numeric
+      // Ensure object rows have all categories present but preserve nulls for missing values
       const out = rows as any[]
       out.forEach((o) => {
         (categories || []).forEach((c) => {
           const v = (o as any)[c]
-          ;(o as any)[c] = toNum(v, 0)
+          if (v === undefined || v === null || v === '') {
+            (o as any)[c] = null
+          } else {
+            const num = Number(v)
+            ;(o as any)[c] = Number.isFinite(num) ? num : null
+          }
         })
-        // Some AI variants might emit 'value' alongside named categories; coerce too
-        if ((o as any).value != null) (o as any).value = toNum((o as any).value, 0)
+        if ((o as any).value !== undefined) {
+          const vv = (o as any).value
+          if (vv === null || vv === '') {
+            (o as any).value = null
+          } else {
+            const num = Number(vv)
+            ;(o as any).value = Number.isFinite(num) ? num : null
+          }
+        }
       })
       return out
     }
@@ -1941,6 +1956,9 @@ export default function ChartCard({
 
   const displayData = useMemo(() => {
     try {
+      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        try { console.debug('[ChartCard] displayData.useMemo', { excludeZeroValues: (options as any)?.excludeZeroValues, dataLen: (data as any[])?.length }) } catch {}
+      }
       // Step 1: apply optional X label casing
       const mode = (options as any)?.xLabelCase as ('lowercase'|'capitalize'|'proper') | undefined
       let arr: any[] = Array.isArray(data) ? (data as any[]) : []
@@ -1977,8 +1995,20 @@ export default function ChartCard({
       const catsList = (categories || []) as string[]
       arr = arr.map((row) => {
         const r: any = { ...row }
-        catsList.forEach((c) => { r[c] = Number.isFinite(Number(r[c])) ? Number(r[c]) : 0 })
-        if (r.value !== undefined) r.value = Number.isFinite(Number(r.value)) ? Number(r.value) : 0
+        catsList.forEach((c) => {
+          const v = r[c]
+          if (v === undefined || v === null || v === '') {
+            r[c] = null
+          } else {
+            const num = Number(v)
+            r[c] = Number.isFinite(num) ? num : null
+          }
+        })
+        if (r.value !== undefined) {
+          const vv = r.value
+          if (vv === null || vv === '') r.value = null
+          else { const num = Number(vv); r.value = Number.isFinite(num) ? num : null }
+        }
         return r
       }).filter((r) => {
         const x = (r as any).x
@@ -1986,9 +2016,61 @@ export default function ChartCard({
         if (typeof x === 'number' && !Number.isFinite(x)) return false
         return true
       })
+      // Filter out rows where all values are zero if option is enabled
+      if ((options as any)?.excludeZeroValues) {
+        const beforeLen = arr.length
+        // Check if categories exist as actual columns in the data (pivot format)
+        const firstRow = arr[0] || {}
+        const hasCategoryColumns = catsList.length > 0 && catsList.every((c) => c in firstRow)
+        
+        arr = arr.filter((r) => {
+          // For multi-series with category columns (e.g., pivot table format)
+          if (isMulti && hasCategoryColumns) {
+            const categoryValues = catsList.map((c) => {
+              const raw = r[c]
+              // Treat null, undefined, and 0 as "no value"
+              const isEmpty = raw === null || raw === undefined || Number(raw) === 0
+              return { cat: c, raw, isEmpty }
+            })
+            const hasNonZero = categoryValues.some((cv) => !cv.isEmpty)
+            const allEmpty = categoryValues.every((cv) => cv.isEmpty)
+            
+            // Debug: log rows with all empty values
+            if (allEmpty && typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+              try { console.debug('[ChartCard] Row with all null/zero:', { x: r.x, values: categoryValues }) } catch {}
+            }
+            
+            return hasNonZero
+          }
+          // For single series or legend-based charts (row format), check the value field
+          if (r.value !== null && r.value !== undefined) {
+            return Number(r.value) !== 0
+          }
+          // Fallback: keep the row if we can't determine
+          return true
+        })
+        if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+          try { 
+            const allXValues = arr.map((r) => r.x)
+            const firstFive = allXValues.slice(0, 5)
+            const lastFive = allXValues.slice(-5)
+            console.debug('[ChartCard] excludeZeroValues:', { 
+              before: beforeLen, 
+              after: arr.length, 
+              filtered: beforeLen - arr.length, 
+              isMulti, 
+              hasCategoryColumns, 
+              catsList: catsList.length,
+              firstRow: arr[0],
+              lastRow: arr[arr.length - 1],
+              xRange: { first: firstFive, last: lastFive, total: allXValues.length }
+            }) 
+          } catch {}
+        }
+      }
       return arr
     } catch { return data }
-  }, [data, options?.xLabelCase, applyXCase, options?.dataDefaults, isMulti, JSON.stringify(categories)])
+  }, [data, options?.xLabelCase, applyXCase, options?.dataDefaults, isMulti, JSON.stringify(categories), (options as any)?.excludeZeroValues])
 
   const chartInstanceKey = useMemo(() => {
     try {
@@ -2722,6 +2804,9 @@ export default function ChartCard({
 
         const rawValues = (displayData as any[]).map((d) => toNum((d as any)[c] ?? (c === 'value' ? (d as any).value : 0)))
         const seriesType = (type === 'line' || type === 'area') ? 'line' : 'bar'
+        // Check if we're using time-series mode
+        const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
+        const isTimeSeries = gb && gb !== 'none'
         const seriesData = (() => {
           if (wantValueGrad) {
             return rawValues.map((v, i) => {
@@ -2730,11 +2815,12 @@ export default function ChartCard({
                 ? (rowTotals[i] > 0 ? (v / rowTotals[i]) : 0)
                 : ((seriesMax[c] > 0) ? (v / seriesMax[c]) : 0)
               const colorHex = override || saturateHexBy(baseHexVG, Math.max(0, Math.min(1, pct)))
-              return { value: v, itemStyle: { color: colorHex, ...(seriesType === 'bar' ? { borderRadius: rounded } : {}) } }
+              const baseVal = isTimeSeries ? [xLabels[i], v] : v
+              return { value: baseVal, itemStyle: { color: colorHex, ...(seriesType === 'bar' ? { borderRadius: rounded } : {}) } }
             })
           }
           if (seriesType === 'bar' && rules.length > 0) {
-            return rawValues.map((v) => {
+            return rawValues.map((v, i) => {
               const override = calcColor(v)
               const useColor = override ? (options?.barGradient ? {
                 type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -2743,10 +2829,12 @@ export default function ChartCard({
                   { offset: 1, color: hexToRgba(override, 1) },
                 ],
               } : override) : gradient
-              return { value: v, itemStyle: { color: useColor, borderRadius: rounded } }
+              const baseVal = isTimeSeries ? [xLabels[i], v] : v
+              return { value: baseVal, itemStyle: { color: useColor, borderRadius: rounded } }
             })
           }
-          return rawValues
+          // For time-series, return [x, y] pairs; otherwise just y values
+          return isTimeSeries ? rawValues.map((v, i) => [xLabels[i], v]) : rawValues
         })()
 
         // Stack mapping: series item stackId OR options.seriesStackMap[c]
@@ -3548,7 +3636,7 @@ export default function ChartCard({
                   { type: 'value', axisLabel: { fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor) }, position: 'top', ...(buildAxisGrid('x') as any) },
                 ]
               : { type: 'value', axisLabel: { fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) })
-          : { type: 'category', data: xLabelsFmt, axisLabel: { rotate: xRotate, interval: (xInterval as any), fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) },
+          : ((() => { const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase(); const isTimeSeries = gb && gb !== 'none'; return isTimeSeries ? { type: 'time', axisLabel: { rotate: xRotate, fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => { try { return fmtXLabel(val) } catch { return String(val ?? '') } } }, ...(buildAxisGrid('x') as any) } : { type: 'category', data: xLabelsFmt, axisLabel: { rotate: xRotate, interval: (xInterval as any), fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) } })()),
         yAxis: (type === 'bar')
           ? { type: 'category', data: xLabelsFmt, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGrid('y') as any) }
           : (hasSecondaryY

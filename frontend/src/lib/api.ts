@@ -1051,6 +1051,8 @@ export type PivotRequest = {
   datasourceId?: string
   limit?: number
   widgetId?: string
+  groupBy?: string
+  weekStart?: string
 }
 
 export type PivotSqlResponse = { sql?: string }

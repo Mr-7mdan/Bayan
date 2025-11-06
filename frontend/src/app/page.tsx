@@ -270,6 +270,7 @@ export default function HomePage() {
   const [vvh, setVvh] = useState<number | null>(null)
   const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [gridInteracting, setGridInteracting] = useState(false) // Track grid drag/resize to gate configurator
   const leftTimerRef = useRef<any>(null)
   const rightTimerRef = useRef<any>(null)
   const collapseDelayMs = 200
@@ -681,6 +682,8 @@ export default function HomePage() {
                 aggregator: (p?.aggregator as any) || 'count',
                 where: (p?.where || cfg?.querySpec?.where || undefined) as Record<string, any> | undefined,
                 widgetId: cfg?.id,
+                groupBy: (cfg?.querySpec?.groupBy || cfg?.xAxis?.groupBy || undefined) as string | undefined,
+                weekStart: (cfg?.options?.xWeekStart || cfg?.querySpec?.weekStart || undefined) as string | undefined,
               }
               const res = await Api.pivotSql(req)
               const sql = String((res as any)?.sql || '').trim()
@@ -730,6 +733,8 @@ export default function HomePage() {
                 aggregator,
                 where: (cfg.querySpec.where || undefined),
                 widgetId: cfg.id,
+                groupBy: (cfg.querySpec.groupBy || cfg.xAxis?.groupBy || undefined),
+                weekStart: (cfg.options?.xWeekStart || cfg.querySpec?.weekStart || undefined),
               })
               const sql = String((res as any)?.sql || '').trim()
               const label = String(chip?.label || chip?.field || chip?.measureId || `Value ${i+1}`)
@@ -1229,13 +1234,17 @@ export default function HomePage() {
               draggableHandle=".widget-title"
               draggableCancel=".no-drag, .widget-title button"
               onLayoutChange={(ly: any) => setLayoutState(ly as RGLLayout[])}
+              onDragStart={() => setGridInteracting(true)}
               onDragStop={(ly: any) => {
+                setGridInteracting(false)
                 userEditedRef.current = true
                 const next = ly as RGLLayout[]
                 setLayoutState(next)
                 scheduleServerSave({ layout: next, widgets: configs })
               }}
+              onResizeStart={() => setGridInteracting(true)}
               onResizeStop={(ly: any) => {
+                setGridInteracting(false)
                 userEditedRef.current = true
                 const next = ly as RGLLayout[]
                 setLayoutState(next)
@@ -1416,7 +1425,7 @@ export default function HomePage() {
         {selectedConfig && (
           <div className="hidden lg:block">
             <div
-              className={`fixed rounded-lg border shadow-card bg-card z-50 flex flex-col overflow-visible ${rightCollapsed ? '' : 'px-0'}`}
+              className={`fixed rounded-lg border shadow-card bg-card z-50 flex flex-col overflow-visible ${rightCollapsed ? '' : 'px-0'} ${gridInteracting ? 'pointer-events-none' : ''}`}
               style={{
                 width: rightCollapsed ? 44 : 360,
                 height: vvh ? Math.max(240, vvh - (panelPos?.y ?? 0) - 24) : undefined,
