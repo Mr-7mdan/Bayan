@@ -1930,7 +1930,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         # Auto-detect local DuckDB datasource to load transforms/custom columns
         import sys
         base_source_raw = payload.spec.source or ""
-        print(f"[DEBUG] Auto-detect: source={base_source_raw}, has_table={_duck_has_table(base_source_raw)}, actorId={actorId}", file=sys.stderr)
         if base_source_raw:
             # Look for a DuckDB datasource that matches the local store
             from sqlalchemy import select
@@ -1939,35 +1938,28 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 # Filter by actorId or admin
                 u = db.get(User, str(actorId).strip())
                 is_admin = bool(u and (u.role or "user").lower() == "admin")
-                print(f"[DEBUG] actorId={actorId}, is_admin={is_admin}", file=sys.stderr)
                 if not is_admin:
                     stmt = stmt.where(Datasource.user_id == str(actorId).strip())
             # Note: If actorId is None, allow any DuckDB datasource (local store is shared)
             local_ds_candidates = list(db.execute(stmt).scalars())
-            print(f"[DEBUG] Found {len(local_ds_candidates)} DuckDB datasource candidates", file=sys.stderr)
-            for i, candidate in enumerate(local_ds_candidates):
-                print(f"[DEBUG]   Candidate {i}: id={candidate.id}, user_id={candidate.user_id}, has_conn={bool(candidate.connection_encrypted)}", file=sys.stderr)
             # Prefer datasource with no connection URI (the default local one) or one matching settings.duckdb_path
             for candidate in local_ds_candidates:
                 if not candidate.connection_encrypted:
                     ds = candidate
-                    print(f"[DEBUG] Selected datasource (no conn): {ds.id}", file=sys.stderr)
                     break
                 try:
                     dsn = decrypt_text(candidate.connection_encrypted or "")
                     if dsn and settings.duckdb_path in dsn:
                         ds = candidate
-                        print(f"[DEBUG] Selected datasource (path match): {ds.id}", file=sys.stderr)
                         break
                 except Exception:
                     continue
             # Fallback: use first candidate if any
             if not ds and local_ds_candidates:
                 ds = local_ds_candidates[0]
-                print(f"[DEBUG] Selected datasource (first fallback): {ds.id}", file=sys.stderr)
             if not ds:
                 # No datasource found - log warning but continue (transforms won't be applied)
-                print(f"[WARN] No DuckDB datasource found for table {base_source_raw}. Custom columns will not be available.", file=sys.stderr)
+                pass
 
     # Global or per-request preference to route to local DuckDB when base table exists (tri-state)
     if getattr(payload, 'preferLocalDuck', None) is True:
@@ -2157,7 +2149,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
     # If chart semantics are provided, build an aggregated SQL (generic) and delegate to /query
     spec = payload.spec
-    print(f"[DEBUG] run_query_spec: spec.x={spec.x}, spec.groupBy={spec.groupBy}, type(spec.x)={type(spec.x)}", file=sys.stderr)
     legend_orig = spec.legend
     agg = (spec.agg or "none").lower()
     has_chart_semantics = bool(spec.x or spec.y or spec.measure or spec.legend or (spec.groupBy and spec.groupBy != "none") or (agg and agg != "none"))
@@ -2326,12 +2317,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     if has_chart_semantics:
         # Load datasource-level transforms if any; prepare a FROM fragment
         import sys
-        print(f"[DEBUG] has_chart_semantics=True, ds={'None' if ds is None else ds.id}", file=sys.stderr)
         ds_transforms = {}
         if ds is not None:
             try:
                 opts = json.loads(ds.options_json or "{}")
-                print(f"[DEBUG] Loaded datasource options, has transforms: {bool(opts.get('transforms'))}", file=sys.stderr)
             except Exception:
                 opts = {}
             ds_transforms = _apply_scope((opts or {}).get("transforms") or {}, spec.source)
@@ -2775,7 +2764,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             if isinstance(legend_expr_raw, (list, tuple)) and len(legend_expr_raw) > 0:
                 legend_expr_raw = legend_expr_raw[0]
             legend_expr = _q_ident(str(legend_expr_raw)) if legend_expr_raw else None
-            print(f"[DEBUG] Legend-only: legend_expr_raw={legend_expr_raw}, legend_expr={legend_expr}, base_from_sql={base_from_sql[:100]}", file=sys.stderr)
             
             # Build WHERE clause
             def _coerce_filter_value(key: str, val: Any) -> Any:
@@ -3036,7 +3024,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             x_order_expr = None
             gb = (spec.groupBy or 'none').lower()
             week_start = (getattr(spec, 'weekStart', None) or 'mon').lower()
-            print(f"[DEBUG] groupBy transformation: x_col={x_col}, gb={gb}, ds_type={ds_type}", file=sys.stderr)
             # Detect derived x pattern (Month/Month Name/Month Short/etc.) and compute a label + order expr
             _m_x = None
             try:
@@ -3272,7 +3259,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         x_order_expr = f"CAST(strftime('%m', {col}) AS INTEGER)"
 
             if spec.legend:
-                print(f"[DEBUG] Taking LEGEND path: x_expr={x_expr[:100] if len(str(x_expr)) > 100 else x_expr}, legend_expr={legend_expr}", file=sys.stderr)
                 # Filter out NULL legend values
                 if legend_expr and 'legend_filter_clauses' in locals():
                     legend_filter_clauses.append(f"{legend_expr} IS NOT NULL")
@@ -3386,7 +3372,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             return run_query(q, db)
 
         # agg == 'none': passthrough raw columns via select/x/y, but derive/quote when needed
-        print(f"[DEBUG] Taking NON-AGGREGATED path: agg={agg}, x_col={x_col}", file=sys.stderr)
         def _select_part(c: str) -> str:
             s = str(c or '').strip()
             # If derived pattern, use expression and alias back to original token (quoted)
