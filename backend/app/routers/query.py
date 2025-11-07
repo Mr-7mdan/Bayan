@@ -381,10 +381,12 @@ def _coerce_date_like(v: Any) -> Any:
             return v
         try:
             dt = date_parser.parse(s)
-            # Normalize to naive local time without microseconds
+            # Keep UTC time, don't convert to local timezone
             if getattr(dt, 'tzinfo', None) is not None:
                 try:
-                    dt = dt.astimezone().replace(tzinfo=None)
+                    # Convert to UTC and make naive (removes timezone info but keeps UTC time)
+                    import datetime
+                    dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
                 except Exception:
                     dt = dt.replace(tzinfo=None)
             if dt.hour == 0 and dt.minute == 0 and dt.second == 0 and dt.microsecond == 0:
@@ -2150,7 +2152,33 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     # If chart semantics are provided, build an aggregated SQL (generic) and delegate to /query
     spec = payload.spec
     legend_orig = spec.legend
+    
+    # Extract agg and y from series[0] if not present at root level
+    agg_eff = spec.agg
+    y_eff = spec.y
+    measure_eff = getattr(spec, 'measure', None)
+    
+    series_arr = getattr(spec, 'series', None)
+    if series_arr and isinstance(series_arr, list) and len(series_arr) > 0:
+        s0 = series_arr[0]
+        if isinstance(s0, dict):
+            if not agg_eff and s0.get('agg'):
+                agg_eff = s0.get('agg')
+            if not y_eff and s0.get('y'):
+                y_eff = s0.get('y')
+            if not measure_eff and s0.get('measure'):
+                measure_eff = s0.get('measure')
+    
+    # Override spec with effective values
+    if agg_eff or y_eff or measure_eff:
+        spec = payload.spec.model_copy(update={
+            'agg': agg_eff or spec.agg,
+            'y': y_eff or spec.y,
+            'measure': measure_eff or getattr(spec, 'measure', None)
+        })
+    
     agg = (spec.agg or "none").lower()
+    print(f"[BACKEND] /query/spec agg extraction: spec.agg={spec.agg}, agg={agg}, spec.y={spec.y}, spec.series={getattr(spec, 'series', None)}")
     has_chart_semantics = bool(spec.x or spec.y or spec.measure or spec.legend or (spec.groupBy and spec.groupBy != "none") or (agg and agg != "none"))
     # If there are no chart semantics at all, treat it as a plain SELECT
     if not has_chart_semantics:
@@ -3302,6 +3330,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                             f"SELECT {x_expr} as x, {legend_expr} as legend, {value_expr} as value "
                             f"{base_from_sql}{where_sql} GROUP BY 1,2{order_seg_std}"
                         )
+                    print(f"[BACKEND] Built SQL with agg={agg}, value_expr={value_expr}, sql_inner={sql_inner[:200]}")
                 # For non-MSSQL, apply LIMIT on inner query so ORDER BY is respected before pagination
                 if not (("mssql" in ds_type) or ("sqlserver" in ds_type)) and lim:
                     try:
@@ -3963,7 +3992,8 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         elif agg in ("avg", "sum", "min", "max") and qy:
             # For DuckDB, cast string numerics (e.g., "1,234.50 ILS") before aggregation
             if route_duck:
-                y_clean = f"COALESCE(try_cast(regexp_replace({qy}, '[^0-9\\.-]', '') AS DOUBLE), try_cast({qy} AS DOUBLE), 0.0)"
+                # Try direct cast first; if it's a string, clean it with regexp_replace
+                y_clean = f"COALESCE(try_cast({qy} AS DOUBLE), try_cast(regexp_replace(CAST({qy} AS VARCHAR), '[^0-9\\.-]', '') AS DOUBLE), 0.0)"
                 value_expr = f"{agg.upper()}({y_clean})"
             else:
                 # Probe numeric for MSSQL only; other engines will error if non-numeric
@@ -3983,7 +4013,8 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             # Default to SUM on y if present, else COUNT(*)
             if qy:
                 if route_duck:
-                    y_clean = f"COALESCE(try_cast(regexp_replace({qy}, '[^0-9\\.-]', '') AS DOUBLE), try_cast({qy} AS DOUBLE), 0.0)"
+                    # Try direct cast first; if it's a string, clean it with regexp_replace
+                    y_clean = f"COALESCE(try_cast({qy} AS DOUBLE), try_cast(regexp_replace(CAST({qy} AS VARCHAR), '[^0-9\\.-]', '') AS DOUBLE), 0.0)"
                     value_expr = f"SUM({y_clean})"
                 else:
                     value_expr = f"SUM({qy})"
@@ -4029,7 +4060,21 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             if part == 'day name': return f"DATENAME(weekday, {col})"
             if part == 'day short': return f"LEFT(DATENAME(weekday, {col}), 3)"
             return col
-        if ("duckdb" in dialect_name) or ("postgres" in dialect_name) or ("postgre" in dialect_name):
+        if ("duckdb" in dialect_name):
+            # Return string tokens to safely compare against incoming date-like strings
+            if part == 'year': return f"strftime({col}, '%Y')"
+            if part == 'quarter': return f"concat(strftime({col}, '%Y'), '-Q', CAST(EXTRACT(QUARTER FROM {col}) AS INTEGER))"
+            if part == 'month': return f"strftime({col}, '%Y-%m')"
+            if part == 'month name': return f"strftime({col}, '%B')"
+            if part == 'month short': return f"strftime({col}, '%b')"
+            if part == 'week':
+                fmt_week = "%U" if str(payload.get("weekStart") or "mon").lower() == 'sun' else "%W"
+                return f"concat(strftime({col}, '%Y'), '-W', substr('00' || strftime({col}, '{fmt_week}'), -2))"
+            if part == 'day': return f"strftime({col}, '%Y-%m-%d')"
+            if part == 'day name': return f"strftime({col}, '%A')"
+            if part == 'day short': return f"strftime({col}, '%a')"
+            return col
+        if ("postgres" in dialect_name) or ("postgre" in dialect_name):
             if part == 'year': return f"EXTRACT(year FROM {col})"
             if part == 'quarter': return f"EXTRACT(quarter FROM {col})"
             if part == 'month': return f"EXTRACT(month FROM {col})"
@@ -4095,7 +4140,8 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
     def _pname2(base: str, suffix: str = "") -> str:
         return "w_" + re.sub(r"[^A-Za-z0-9_]", "_", str(base or '')) + suffix
 
-    where_clauses = [f"{_quote_ident(date_field)} >= :_start", f"{_quote_ident(date_field)} < :_end"]
+    # Cast to TIMESTAMP for DuckDB to ensure proper date comparison
+    where_clauses = [f"{_quote_ident(date_field)} >= CAST(:_start AS TIMESTAMP)", f"{_quote_ident(date_field)} < CAST(:_end AS TIMESTAMP)"]
     params: Dict[str, Any] = {"_start": _coerce_date_like(start), "_end": _coerce_date_like(end)}
     for k, v in base_where.items():
         if v is None:
@@ -4470,8 +4516,15 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         pass
     _pt_start = time.perf_counter()
     cache_key = _cache_key("pt", payload.get("datasourceId"), sql_inner, params)
+    
+    # Debug: Log request details before cache check
+    import sys
+    print(f"[DEBUG period_totals] Request: start={start}, end={end}, y={y}, agg={agg}", file=sys.stderr)
+    print(f"[DEBUG period_totals] Params: {params}", file=sys.stderr)
+    
     cached = _cache_get(cache_key)
     if cached:
+        print(f"[DEBUG period_totals] CACHE HIT - returning cached data: {cached}", file=sys.stderr)
         cols, rows = cached
         if legend:
             try:
@@ -4538,8 +4591,13 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                 except Exception:
                     pass
             with open_duck_native(db_path) as conn:
+                # Debug: Log SQL and params
+                import sys
+                print(f"[DEBUG period_totals] Params: {vals}", file=sys.stderr)
+                print(f"[DEBUG period_totals] Date range: {start} to {end}", file=sys.stderr)
                 cur = conn.execute(sql_qm, vals)
                 rows = cur.fetchall()
+                print(f"[DEBUG period_totals] Rows returned: {len(rows)}, First row: {rows[0] if rows else 'None'}", file=sys.stderr)
             if legend:
                 out = {"totals": {str(r[0]): float(r[1] or 0) for r in rows}}
                 try:

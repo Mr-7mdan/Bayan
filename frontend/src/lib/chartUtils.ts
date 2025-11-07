@@ -17,25 +17,26 @@ export type AvailableChartColorsKeys =
 export type ColorPreset = 'default' | 'muted' | 'vibrant' | 'corporate'
 
 // Default palette order we cycle through. First 5 represent our token mapping 1..5
+// Optimized for maximum visual contrast: blue, orange, green, purple, pink, cyan, yellow-green
 export const chartColors: AvailableChartColorsKeys[] = [
-  'blue',
-  'rose',
-  'amber',
-  'violet',
-  'emerald',
-  'cyan',
-  'fuchsia',
-  'lime',
-  'indigo',
-  'pink',
-  'gray',
+  'blue',      // #3b82f6 - bright blue
+  'amber',     // #f59e0b - orange (high contrast with blue)
+  'emerald',   // #10b981 - green (distinct from blue/orange)
+  'violet',    // #8b5cf6 - purple (distinct hue)
+  'rose',      // #f43f5e - pink/red (warm contrast)
+  'cyan',      // #06b6d4 - cyan (cool contrast)
+  'lime',      // #84cc16 - yellow-green (bright contrast)
+  'fuchsia',   // #d946ef - magenta (distinct)
+  'pink',      // #ec4899 - hot pink
+  'indigo',    // #6366f1 - purple-blue (similar to blue - moved to end)
+  'gray',      // #6b7280 - neutral fallback
 ]
 
 const presetPalettes: Record<ColorPreset, AvailableChartColorsKeys[]> = {
   default: chartColors,
-  muted: ['gray', 'emerald', 'amber', 'indigo', 'rose', 'cyan', 'violet', 'lime', 'pink', 'blue', 'fuchsia'],
-  vibrant: ['rose', 'emerald', 'amber', 'violet', 'cyan', 'fuchsia', 'lime', 'indigo', 'pink', 'blue', 'gray'],
-  corporate: ['blue', 'amber', 'indigo', 'emerald', 'rose', 'cyan', 'violet', 'gray', 'lime', 'fuchsia', 'pink'],
+  muted: ['gray', 'emerald', 'amber', 'violet', 'cyan', 'rose', 'lime', 'pink', 'blue', 'fuchsia', 'indigo'],
+  vibrant: ['rose', 'emerald', 'amber', 'violet', 'cyan', 'fuchsia', 'lime', 'pink', 'blue', 'indigo', 'gray'],
+  corporate: ['blue', 'amber', 'emerald', 'violet', 'rose', 'cyan', 'gray', 'lime', 'fuchsia', 'pink', 'indigo'],
 }
 
 export function getPresetPalette(preset: ColorPreset = 'default'): AvailableChartColorsKeys[] {
@@ -45,18 +46,18 @@ export function getPresetPalette(preset: ColorPreset = 'default'): AvailableChar
 // Map the first five to numeric tokens (used by our pivot values)
 const tokenMap: Record<1 | 2 | 3 | 4 | 5, AvailableChartColorsKeys> = {
   1: 'blue',
-  2: 'rose',
-  3: 'amber',
+  2: 'amber',
+  3: 'emerald',
   4: 'violet',
-  5: 'emerald',
+  5: 'rose',
 }
 
 const inverseTokenMap: Record<AvailableChartColorsKeys, 1 | 2 | 3 | 4 | 5 | undefined> = {
   blue: 1,
-  rose: 2,
-  amber: 3,
+  amber: 2,
+  emerald: 3,
   violet: 4,
-  emerald: 5,
+  rose: 5,
   gray: undefined,
   cyan: undefined,
   pink: undefined,

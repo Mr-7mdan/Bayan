@@ -5475,7 +5475,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                   const val = e.target.value
                   let nextFmt: any
                   if (val === 'none') nextFmt = undefined
-                  else if (val === 'custom') nextFmt = (local.options as any)?.xDateFormat || ''
+                  else if (val === 'custom') nextFmt = (local.options as any)?.xDateFormat || 'MM-YYYY'
                   else nextFmt = val as any
                   const opts = { ...(local.options || {}), xDateFormat: nextFmt }
                   const next = { ...local, options: opts }

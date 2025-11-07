@@ -349,7 +349,7 @@ export default function ChartCard({
   type = 'line',
   options,
   queryMode = 'sql',
-  querySpec,
+  querySpec: querySpecRaw,
   customColumns,
   widgetId,
   pivot,
@@ -374,6 +374,23 @@ export default function ChartCard({
   tabbedGuard?: boolean
   tabbedField?: string
 }) {
+  // Normalize querySpec: strip root-level agg when series is defined (backend prioritizes root-level agg)
+  const querySpec = useMemo(() => {
+    const qs = querySpecRaw as any
+    if (!qs) return qs
+    if (Array.isArray(qs.series) && qs.series.length > 0 && qs.agg) {
+      const { agg, ...rest } = qs
+      if (typeof window !== 'undefined') {
+        try { console.log('[ChartCard] Normalized querySpec - stripped root agg', { originalAgg: agg, series: qs.series, before: qs, after: rest }) } catch {}
+      }
+      return rest as QuerySpec
+    }
+    if (typeof window !== 'undefined') {
+      try { console.log('[ChartCard] querySpec NOT normalized', { hasAgg: !!qs.agg, hasSeries: Array.isArray(qs.series), seriesLength: Array.isArray(qs.series) ? qs.series.length : 0, qs }) } catch {}
+    }
+    return qs
+  }, [querySpecRaw])
+  
   const { env } = useEnvironment()
   const { filters } = useFilters()
   const { user } = useAuth()
@@ -620,7 +637,7 @@ export default function ChartCard({
     })
   }, [JSON.stringify((querySpec as any)?.where || {}), JSON.stringify(fieldsExposed)])
   const specReadySingle = queryMode === 'spec' && !!querySpec && !!(querySpec as any).source && Array.isArray((querySpec as any).select) && ((querySpec as any).select as any[]).length > 0
-  const specReadyMulti = queryMode === 'spec' && !!querySpec && !!(querySpec as any).source && Array.isArray(series) && series.length > 0 && (!!(querySpec as any).x || series.some((s) => !!s.x))
+  const specReadyMulti = queryMode === 'spec' && !!querySpec && !!(querySpec as any).source && Array.isArray(series) && series.length > 0 && (!!(querySpec as any).x || (series || []).some((s) => !!s.x))
   const specReadyAggish = queryMode === 'spec' && !!querySpec && !!(querySpec as any).source && (!!(querySpec as any).x || !!(querySpec as any).y || !!(querySpec as any).measure || !!(querySpec as any).legend)
   const uiKey = useMemo(() => JSON.stringify(uiTruthWhere), [uiTruthWhere])
   const debouncedUiKey = useDebounced(uiKey, 350)
@@ -782,7 +799,11 @@ export default function ChartCard({
         const pageSize = isPreview ? 100 : 2000
         let offset = 0
         while (true) {
-          const res = await QueryApi.querySpec({ spec: { ...(querySpec as any), select: selectBase, where: Object.keys(uiTruthWhere || {}).length ? (uiTruthWhere as any) : undefined } as any, datasourceId, limit: pageSize, offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+          const specToSend = { ...(querySpec as any), select: selectBase, where: Object.keys(uiTruthWhere || {}).length ? (uiTruthWhere as any) : undefined } as any
+          if (typeof window !== 'undefined') {
+            try { console.log('[ChartCard] Sending query to backend', { hasRootAgg: !!specToSend.agg, hasSeries: !!specToSend.series, spec: specToSend }) } catch {}
+          }
+          const res = await QueryApi.querySpec({ spec: specToSend, datasourceId, limit: pageSize, offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
           const cols = (res?.columns || []) as string[]
           const rows = (res?.rows || []) as any[]
           rows.forEach((arr: any[]) => {
@@ -860,7 +881,7 @@ export default function ChartCard({
   const [activeTab, setActiveTab] = useState<string>(defaultTabValue)
   useEffect(() => { if (defaultTabValue) setActiveTab(defaultTabValue) }, [defaultTabValue])
   const q = useQuery({
-    queryKey: ['chart', sql, datasourceId, type, options, queryMode, querySpec, customColumns, filters, debouncedUiKey, adaptiveGb, breakSeq],
+    queryKey: ['chart', sql, datasourceId, type, options, queryMode, querySpec, customColumns, filters, debouncedUiKey, adaptiveGb, breakSeq, (querySpec as any)?.series?.[0]?.agg],
     enabled: visible && (queryMode === 'spec' ? (specReadySingle || specReadyMulti || specReadyAggish) : true),
     placeholderData: (prev) => prev as any,
     queryFn: async () => {
@@ -887,7 +908,9 @@ export default function ChartCard({
         if (!df) {
           const gb = (((querySpec as any)?.groupBy) || 'none') as string
           const xFmtDatetime = ((options as any)?.xLabelFormat || 'none') === 'datetime'
-          if (xField && (gb !== 'none' || xFmtDatetime)) df = String(xField)
+          // If xField is a derived label like "Date (Month)" use the base column as delta date field
+          const xBaseForDelta = (() => { try { const m = String(xField || '').match(/^(.*)\s\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/); return m ? m[1] : xField } catch { return xField } })()
+          if (xBaseForDelta && (gb !== 'none' || xFmtDatetime)) df = String(xBaseForDelta)
         }
         if (df && !ignoreGlobal) {
           if (filters.startDate) baseWhere[`${df}__gte`] = filters.startDate
@@ -1306,7 +1329,8 @@ export default function ChartCard({
               const obj: any = { x: k }
               seriesArr.forEach((s, i) => {
                 const baseLabel = labelFor(s, i)
-                const aggLabel = String(s.agg || 'count')
+                const aggEff = (s.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+                const aggLabel = String(aggEff)
                 // group by composite legend inside this partition
                 const byLegend = new Map<any, Row[]>()
                 arr.forEach((r) => {
@@ -1317,7 +1341,7 @@ export default function ChartCard({
                 })
                 byLegend.forEach((subset, lk) => {
                   const cat = String(lk)
-                  const v = aggregate(subset, String(s.y), s.agg || 'count')
+                  const v = aggregate(subset, String(s.y), aggEff)
                   const virtualKey = `${baseLabel} • ${cat}`
                   catsSet.add(virtualKey)
                   obj[virtualKey] = v
@@ -1337,7 +1361,8 @@ export default function ChartCard({
             const virtualMeta: Record<string, { baseSeriesIndex: number; baseSeriesLabel: string; agg?: string }> = {}
             seriesArr.forEach((s, i) => {
               const label = labelFor(s, i)
-              virtualMeta[label] = { baseSeriesIndex: i, baseSeriesLabel: label, agg: String((s as any)?.agg ?? ((querySpec as any)?.agg ?? 'count')) }
+              const aggEff = ((s as any)?.agg ?? ((querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count')))
+              virtualMeta[label] = { baseSeriesIndex: i, baseSeriesLabel: label, agg: String(aggEff) }
             })
             const outMap = new Map<any, any>()
             keysSorted.forEach((k) => {
@@ -1346,7 +1371,8 @@ export default function ChartCard({
               seriesArr.forEach((s, i) => {
                 const label = labelFor(s, i)
                 const field = String(s.y)
-                const v = aggregate(arr, field, s.agg || 'count')
+                const aggEff = (s.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+                const v = aggregate(arr, field, aggEff)
                 obj[label] = v
               })
               outMap.set(k, obj)
@@ -1370,7 +1396,9 @@ export default function ChartCard({
                 const legendKey = String(lk)
                 categories.push(legendKey)
                 const field = String((querySpec as any).y)
-                const v = aggregate(subset, field, (querySpec as any).agg || 'count')
+                const seriesAgg = (Array.isArray((querySpec as any)?.series) && (querySpec as any).series.length > 0) ? (querySpec as any).series[0]?.agg : undefined
+                const aggEff = seriesAgg || (querySpec as any).agg || (field ? 'sum' : 'count')
+                const v = aggregate(subset, field, aggEff)
                 obj[legendKey] = v
               })
               return { columns: ['x', ...categories], rows: [obj], categories } as any
@@ -1392,7 +1420,10 @@ export default function ChartCard({
               byLegend.forEach((subset, lk) => {
                 catsSet.add(String(lk))
                 const field = String((querySpec as any).y)
-                const v = aggregate(subset, field, (querySpec as any).agg || 'count')
+                // Use series[0].agg if available, fallback to querySpec.agg, then y-based default
+                const seriesAgg = (Array.isArray((querySpec as any)?.series) && (querySpec as any).series.length > 0) ? (querySpec as any).series[0]?.agg : undefined
+                const aggEff = seriesAgg || (querySpec as any).agg || (field ? 'sum' : 'count')
+                const v = aggregate(subset, field, aggEff)
                 obj[String(lk)] = v
               })
               outer.set(k, obj)
@@ -1400,21 +1431,8 @@ export default function ChartCard({
             const categories = Array.from(catsSet.values())
             return { columns: ['x', ...categories], rows: Array.from(outer.values()), categories } as any
           }
-          // Single series, no legend: reduce to [x, value]
-          const outRows: any[] = []
-          keysSorted.forEach((k) => {
-            const arr = partitions.get(k) || []
-            const field = String((querySpec as any).y)
-            const v = aggregate(arr, field, (querySpec as any).agg || 'count')
-            outRows.push([k, v])
-          })
-          return { columns: ['x', 'value'], rows: outRows } as any
-        }
-        // Multi-series WITH legend (server path): request legend grouping and virtualize categories per series -> "Series • Category"
-        if (hasLegend && Array.isArray(series) && series.length > 0) {
-          const labelFor = (s: any, idx: number) => s.label || s.y || s.measure || `series_${idx + 1}`
           const legendVal = (() => { try { const lg: any = (querySpec as any)?.legend; return Array.isArray(lg) ? (lg[0] as any) : lg } catch { return (querySpec as any)?.legend } })()
-          const promises = series.map((s) => {
+          const promises = (series || []).map((s) => {
             // Important: use the per-series aggregator only; do not fall back to querySpec.agg here,
             // because querySpec.agg may reflect a single-agg spec compiled from the first value.
             const agg = (s.agg ?? 'count') as any
@@ -1470,13 +1488,18 @@ export default function ChartCard({
           }
           const map = new Map<string | number, any>()
           const catsSet = new Set<string>()
-          const virtualMeta: Record<string, { baseSeriesIndex: number; baseSeriesLabel: string; categoryLabel: string; agg?: string }> = {}
-          
-          // Check if any result has an X column
+          const labelFor = (s: any, idx: number) => s?.label || s?.y || s?.measure || `series_${idx + 1}`
+          const legendPresent = results.some((res) => {
+            const cols: string[] = ((res?.columns || []) as string[])
+            return cols.indexOf('legend') >= 0
+          })
           const hasXColumn = results.some((res) => {
             const cols: string[] = ((res?.columns || []) as string[])
             return cols.indexOf('x') >= 0
           })
+          const virtualMeta: Record<string, { baseSeriesIndex: number; baseSeriesLabel: string; categoryLabel: string; agg?: string }> = {}
+          
+          // Check if any result has an X column
           
           // Check if all X values are the same (backend returns default 'x' when no X specified)
           const allXValuesSame = (() => {
@@ -1500,7 +1523,7 @@ export default function ChartCard({
                 hasXColumn,
                 allXValuesSame,
                 legendPresent,
-                seriesCount: series.length,
+                seriesCount: (series || []).length,
                 resultColumns: results.map(r => ((r?.columns || []) as string[])),
                 resultRowCounts: results.map(r => r?.rows?.length || 0)
               })
@@ -1511,7 +1534,7 @@ export default function ChartCard({
           if (((!hasXColumn || allXValuesSame) && legendPresent)) {
             const obj: any = { x: (querySpec as any)?.y || (querySpec as any)?.measure || 'Total' }
             results.forEach((res, idx) => {
-              const baseLabel = labelFor(series[idx], idx)
+              const baseLabel = labelFor((series || [])[idx], idx)
               const cols: string[] = ((res?.columns || []) as string[])
               // Default to column 0 if 'legend' column not found (backend returns actual field name like "Merchant")
               const il = cols.indexOf('legend') !== -1 ? cols.indexOf('legend') : 0
@@ -1522,7 +1545,7 @@ export default function ChartCard({
                 const key = `${baseLabel} • ${cat}`
                 catsSet.add(key)
                 obj[key] = v
-                virtualMeta[key] = { baseSeriesIndex: idx, baseSeriesLabel: baseLabel, categoryLabel: cat, agg: String((series[idx] as any)?.agg ?? ((querySpec as any)?.agg ?? 'count')) }
+                virtualMeta[key] = { baseSeriesIndex: idx, baseSeriesLabel: baseLabel, categoryLabel: cat, agg: String(((series || [])[idx] as any)?.agg ?? ((querySpec as any)?.agg ?? 'count')) }
               })
             })
             const categories = Array.from(catsSet.values())
@@ -1536,7 +1559,7 @@ export default function ChartCard({
           
           // Normal path with X column
           results.forEach((res, idx) => {
-            const baseLabel = labelFor(series[idx], idx)
+            const baseLabel = labelFor((series || [])[idx], idx)
             const cols: string[] = ((res?.columns || []) as string[])
             const ix = Math.max(0, cols.indexOf('x'))
             const il = cols.indexOf('legend')
@@ -1549,7 +1572,7 @@ export default function ChartCard({
               catsSet.add(key)
               if (!map.has(x)) map.set(x, { x })
               if (map.get(x)![key] === undefined) map.get(x)![key] = v
-              virtualMeta[key] = { baseSeriesIndex: idx, baseSeriesLabel: baseLabel, categoryLabel: (il >= 0 ? cat : baseLabel), agg: String((series[idx] as any)?.agg ?? ((querySpec as any)?.agg ?? 'count')) }
+              virtualMeta[key] = { baseSeriesIndex: idx, baseSeriesLabel: baseLabel, categoryLabel: (il >= 0 ? cat : baseLabel), agg: String(((series || [])[idx] as any)?.agg ?? ((querySpec as any)?.agg ?? (((series || [])[idx] as any)?.y || ((series || [])[idx] as any)?.measure ? 'sum' : 'count'))) }
             })
           })
           const categories = Array.from(catsSet.values())
@@ -1558,8 +1581,7 @@ export default function ChartCard({
           return { columns: ['x', ...categories], rows: rowsShaped, categories, virtualMeta } as any
         }
         if (!hasLegend && Array.isArray(series) && series.length > 0) {
-          const labelFor = (s: any, idx: number) => s.label || s.y || s.measure || `series_${idx + 1}`
-          const promises = series.map((s) => {
+          const promises = (series || []).map((s) => {
             const agg = (s.agg ?? 'count') as any
             if (agg === 'none') {
               const sel: string[] = []
@@ -1589,12 +1611,13 @@ export default function ChartCard({
           })
           const results = await Promise.all(promises)
           const map = new Map<string | number, any>()
-          const categories = series.map((s, i) => labelFor(s, i))
+          const labelFor = (s: any, idx: number) => s?.label || s?.y || s?.measure || `series_${idx + 1}`
+          const categories = (series || []).map((s, i) => labelFor(s, i))
           results.forEach((res, idx) => {
-            const label = labelFor(series[idx], idx)
+            const label = labelFor((series || [])[idx], idx)
             const cols: string[] = ((res?.columns || []) as string[])
             const ix = Math.max(0, cols.indexOf('x'))
-            const iv = cols.indexOf('value') !== -1 ? cols.indexOf('value') : (series[idx]?.y ? cols.indexOf(String(series[idx]?.y)) : 1)
+            const iv = cols.indexOf('value') !== -1 ? cols.indexOf('value') : ((series || [])[idx]?.y ? cols.indexOf(String((series || [])[idx]?.y)) : 1)
             res.rows.forEach((row: any[]) => {
               const x = row[ix] as any
               const v = Number(row[iv] ?? 0)
@@ -1610,11 +1633,35 @@ export default function ChartCard({
         const effectiveLegendAny = (((querySpec as any)?.legend) ?? (pivot as any)?.legend) as any
         const effectiveLegend = Array.isArray(effectiveLegendAny) ? ((effectiveLegendAny as any[]).length > 0 ? effectiveLegendAny : undefined) : effectiveLegendAny
         const inferredAgg = (() => {
+          // Check series[0].agg first (for single-series with legend)
+          const seriesAgg = (Array.isArray((querySpec as any)?.series) && (querySpec as any).series.length > 0) ? (querySpec as any).series[0]?.agg : undefined
+          if (typeof window !== 'undefined') {
+            try { console.log('[ChartCard] inferredAgg resolution', { 
+              hasSeries: Array.isArray((querySpec as any)?.series), 
+              seriesLength: Array.isArray((querySpec as any)?.series) ? (querySpec as any).series.length : 0,
+              series0: (querySpec as any)?.series?.[0],
+              seriesAgg, 
+              rootAgg: (querySpec as any)?.agg,
+              hasLegend: !!effectiveLegend
+            }) } catch {}
+          }
+          if (seriesAgg) {
+            if (typeof window !== 'undefined') {
+              try { console.log('[ChartCard] inferredAgg using series[0].agg:', seriesAgg) } catch {}
+            }
+            return String(seriesAgg).toLowerCase() as any
+          }
+          
           const cur = String(((querySpec as any)?.agg || 'none') as any).toLowerCase()
           if (cur && cur !== 'none') return cur as any
           const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
           const legendBool = Array.isArray(effectiveLegend) ? (effectiveLegend.length > 0) : !!effectiveLegend
-          if ((gb && gb !== 'none') || legendBool) return 'count' as any
+          if ((gb && gb !== 'none') || legendBool) {
+            if (typeof window !== 'undefined') {
+              try { console.log('[ChartCard] inferredAgg defaulting to count (legend/groupBy present)') } catch {}
+            }
+            return 'count' as any
+          }
           return 'none' as any
         })()
         const merged: QuerySpec = {
@@ -1627,8 +1674,11 @@ export default function ChartCard({
           orderBy: ((querySpec as any)?.orderBy as any),
           order: ((querySpec as any)?.order as any),
         }
+        if (typeof window !== 'undefined') {
+          try { console.log('[ChartCard] merged query spec', { inferredAgg, mergedAgg: (merged as any).agg, merged, hasLegend }) } catch {}
+        }
         // If agg === 'none' (and no series, no legend), fetch raw select [x,y]
-        if (!hasLegend && (!Array.isArray(series) || series.length === 0) && (merged as any).agg === 'none' && (merged as any).x && (merged as any).y) {
+        if (!hasLegend && (!Array.isArray(series) || (series || []).length === 0) && (merged as any).agg === 'none' && (merged as any).x && (merged as any).y) {
           const sel: string[] = []
           if ((merged as any).x) sel.push(String((merged as any).x))
           if ((merged as any).y) sel.push(String((merged as any).y))
@@ -1662,7 +1712,7 @@ export default function ChartCard({
           } catch {}
         }
         // Server single-agg path with legend (only when NO series array is configured)
-        if (hasLegend && (!Array.isArray(series) || series.length === 0) && res?.rows?.length) {
+        if (hasLegend && (!Array.isArray(series) || (series || []).length === 0) && res?.rows?.length) {
           // Robustly map by column names; when x is absent, backend returns [legend, value]
           const cols: string[] = ((res?.columns || []) as string[])
           const ix = cols.indexOf('x')
@@ -1746,7 +1796,7 @@ export default function ChartCard({
 
   // Transform rows -> Tremor format: first column as index key 'x', second column as category 'value'
   type XType = string | number | Date
-  const isMulti = (Array.isArray(series) && series.length > 0 && !!(querySpec as any)?.source) || hasLegend
+  const isMulti = (Array.isArray(series) && (series || []).length > 0 && !!(querySpec as any)?.source) || hasLegend
   // Infer categories robustly when missing
   const categories: string[] = useMemo(() => {
     const got = (q.data as any)?.categories as string[] | undefined
@@ -2136,11 +2186,56 @@ export default function ChartCard({
   const preconfiguredMode = options?.deltaMode && options.deltaMode !== 'off' ? options.deltaMode : undefined
   const [filterbarMode, setFilterbarMode] = useState<'TD_YSTD'|'TW_LW'|'MONTH_LMONTH'|'MTD_LMTD'|'TY_LY'|'YTD_LYTD'|'TQ_LQ'|undefined>(preconfiguredMode as any)
   const activeDeltaMode = (deltaUI === 'filterbar' ? filterbarMode : preconfiguredMode)
-  const deltaDateField = options?.deltaDateField
+  const deltaDateField = useMemo(() => {
+    try {
+      if ((options as any)?.deltaDateField) return String((options as any).deltaDateField)
+      // Derive from x when grouped/time-labeled
+      const seriesArr = Array.isArray(series) ? series : []
+      const rawXField = (querySpec as any)?.x || seriesArr.find((s) => !!s?.x)?.x
+      const xField = (Array.isArray(rawXField) ? (rawXField[0] as any) : rawXField) as string | undefined
+      const gb = String(((querySpec as any)?.groupBy || 'none')).toLowerCase()
+      const xFmtDatetime = ((options as any)?.xLabelFormat || 'none') === 'datetime'
+      if (!xField) return undefined
+      const m = String(xField).match(/^(.*)\s\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/)
+      const base = m ? m[1] : xField
+      if (gb !== 'none' || xFmtDatetime) return String(base)
+      return undefined
+    } catch { return undefined }
+  }, [options?.deltaDateField, JSON.stringify((querySpec as any)?.x || ''), (querySpec as any)?.groupBy, (options as any)?.xLabelFormat, JSON.stringify(series || [])])
   const deltaWeekStart = (options?.deltaWeekStart || env.weekStart) as 'sat'|'sun'|'mon'
+  const effectiveDeltaMode = useMemo(() => {
+    if (activeDeltaMode) return activeDeltaMode
+    try {
+      const s = (filters as any)?.startDate as string | undefined
+      const e = (filters as any)?.endDate as string | undefined
+      if (!s) return undefined
+      const now = new Date()
+      const y = now.getFullYear()
+      const sYear = Number(String(s).slice(0, 4))
+      if (sYear === y) {
+        const fullYear = !e || /^\d{4}-12-31$/.test(String(e))
+        return (fullYear ? 'TY_LY' : 'YTD_LYTD') as any
+      }
+      return undefined
+    } catch { return undefined }
+  }, [activeDeltaMode, (filters as any)?.startDate, (filters as any)?.endDate])
   const prevTotalsCacheRef = useRef<Record<string, Record<string, number>>>({})
   const inflightPrevFetchesRef = useRef<Record<string, boolean>>({})
   const tzOffsetMinutes = (typeof window !== 'undefined') ? new Date().getTimezoneOffset() : 0
+
+  // Shift by active/effective delta mode
+  function shiftByMode(date: Date): Date | null {
+    switch (effectiveDeltaMode as any) {
+      case 'TD_YSTD': { const x = new Date(date); x.setDate(x.getDate()-1); return x }
+      case 'TW_LW': { const x = new Date(date); x.setDate(x.getDate()-7); return x }
+      case 'MONTH_LMONTH': { const x = new Date(date); x.setMonth(x.getMonth()-1); return x }
+      case 'MTD_LMTD': { const x = new Date(date); x.setMonth(x.getMonth()-1); return x }
+      case 'TQ_LQ': { const x = new Date(date); x.setMonth(x.getMonth()-3); return x }
+      case 'TY_LY': { const x = new Date(date); x.setFullYear(x.getFullYear()-1); return x }
+      case 'YTD_LYTD': { const x = new Date(date); x.setFullYear(x.getFullYear()-1); return x }
+      default: return null
+    }
+  }
 
   // Compute bucket [start,end) for a given date and groupBy
   function bucketRangeForDate(d: Date, gb: string, weekStart: 'sat'|'sun'|'mon') {
@@ -2186,25 +2281,23 @@ export default function ChartCard({
       }
     }
   }
-
-  // Shift by active delta mode
-  function shiftByMode(date: Date): Date | null {
-    switch (activeDeltaMode as any) {
-      case 'TD_YSTD': { const x = new Date(date); x.setDate(x.getDate()-1); return x }
-      case 'TW_LW': { const x = new Date(date); x.setDate(x.getDate()-7); return x }
-      case 'MONTH_LMONTH':
-      case 'MTD_LMTD': { const x = new Date(date); x.setMonth(x.getMonth()-1); return x }
-      case 'TQ_LQ': { const x = new Date(date); x.setMonth(x.getMonth()-3); return x }
-      case 'TY_LY':
-      case 'YTD_LYTD': { const x = new Date(date); x.setFullYear(x.getFullYear()-1); return x }
-      default: return null
-    }
-  }
-
   function prevRangeForRawX(rawX: any): { start: string; end: string } | null {
     try {
       const s = String(rawX ?? '')
-      const d = parseDateLoose(s)
+      let d = parseDateLoose(s)
+      // If parsing fails and we're in month groupBy, try to reconstruct from formatted month name
+      if (!d) {
+        const gb = String((querySpec as any)?.groupBy || 'day').toLowerCase()
+        if (gb === 'month' && typeof rawX === 'string') {
+          const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+          const monthIdx = months.indexOf(rawX)
+          if (monthIdx >= 0) {
+            const year = filters.startDate ? new Date(filters.startDate).getFullYear() : new Date().getFullYear()
+            const reconstructed = `${year}-${String(monthIdx + 1).padStart(2, '0')}-01`
+            d = parseDateLoose(reconstructed)
+          }
+        }
+      }
       if (!d) return null
       const prev = shiftByMode(d)
       if (!prev) return null
@@ -2218,36 +2311,73 @@ export default function ChartCard({
   // Prefetch prev totals for any x bucket whose prev lies outside history (per-series)
   useEffect(() => {
     try {
-      if (!activeDeltaMode) return
-      if (!deltaDateField) return
-      const xSeq = Array.isArray(displayData) ? (displayData as any[]).map((d:any)=>d?.x) : []
-      if (xSeq.length === 0) return
+      if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevPrefetch] effect start') } catch {} }
+      if (typeof window !== 'undefined') {
+        try { console.log('[ChartCard] [PrevPrefetch] ctx', { effectiveDeltaMode, deltaDateField, haveDisplayData: Array.isArray(displayData), displayCount: Array.isArray(displayData) ? (displayData as any[]).length : 0, filters: { startDate: (filters as any)?.startDate, endDate: (filters as any)?.endDate } }) } catch {}
+      }
+      if (!effectiveDeltaMode) {
+        if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevPrefetch] gated: no effectiveDeltaMode') } catch {} }
+        return
+      }
+      if (!deltaDateField) {
+        if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevPrefetch] gated: no deltaDateField') } catch {} }
+        return
+      }
+      // Reconstruct actual date values from formatted x values using groupBy and filter range
+      const rawData = Array.isArray(data) ? (data as any[]) : []
+      const gb = String((querySpec as any)?.groupBy || 'day').toLowerCase()
+      const xSeq = rawData.map((d:any)=> {
+        const x = d?.x
+        // Try to parse as date first
+        const parsed = parseDateLoose(String(x ?? ''))
+        if (parsed) return x
+        // For formatted values like "Jan", "Feb", reconstruct ISO date from filter range
+        if (gb === 'month' && typeof x === 'string') {
+          const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+          const monthIdx = months.indexOf(x)
+          if (monthIdx >= 0) {
+            const year = filters.startDate ? new Date(filters.startDate).getFullYear() : new Date().getFullYear()
+            return `${year}-${String(monthIdx + 1).padStart(2, '0')}-01`
+          }
+        }
+        return x
+      })
+      if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevPrefetch] xSeq', { count: xSeq.length, sample: xSeq.slice(0, 3), rawDataCount: rawData.length, groupBy: gb }) } catch {} }
+      if (xSeq.length === 0) {
+        if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevPrefetch] gated: empty xSeq') } catch {} }
+        return
+      }
       // Build per-series contexts for agg/y/measure
       const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
       const seriesCtxs = (seriesDefs.length > 0)
         ? seriesDefs.map((s: any, i: number) => ({
             label: (s?.label || s?.y || s?.measure || `series_${i+1}`),
-            agg: (s?.agg ?? (querySpec as any)?.agg ?? 'count') as any,
+            agg: (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count')) as any,
             y: s?.y as any,
             measure: s?.measure as any,
           }))
-        : [{ label: (querySpec as any)?.y || (querySpec as any)?.measure || 'value', agg: (((querySpec as any)?.agg || 'count') as any), y: (querySpec as any)?.y as any, measure: (querySpec as any)?.measure as any }]
+        : [{ label: (querySpec as any)?.y || (querySpec as any)?.measure || 'value', agg: (((querySpec as any)?.agg ?? (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')) as any), y: (querySpec as any)?.y as any, measure: (querySpec as any)?.measure as any }]
       // Collect missing composite keys
       const missingKeys: Array<{ rangeKey: string; start: string; end: string; agg: any; y?: any; measure?: any }> = []
       xSeq.forEach((x:any, i:number) => {
-        if (resolvePrevIndex(i, xSeq) >= 0) return
+        const prevIdx = resolvePrevIndex(i, xSeq)
+        if (typeof window !== 'undefined' && i < 3) { try { console.log('[ChartCard] [PrevPrefetch] checking x', { x, i, prevIdx, hasPrev: prevIdx >= 0 }) } catch {} }
+        if (prevIdx >= 0) return
         const r = prevRangeForRawX(x)
-        if (!r) return
+        if (!r) {
+          if (typeof window !== 'undefined' && i < 3) { try { console.log('[ChartCard] [PrevPrefetch] no range for x', { x, i }) } catch {} }
+          return
+        }
         const baseRangeKey = `${r.start}..${r.end}`
+        if (typeof window !== 'undefined' && i < 3) { try { console.log('[ChartCard] [PrevPrefetch] adding missing key', { x, i, rangeKey: baseRangeKey, seriesCount: seriesCtxs.length }) } catch {} }
         for (const ctx of seriesCtxs) {
           const cacheKey = `${baseRangeKey}::${ctx.agg}|${ctx.y || ''}|${ctx.measure || ''}`
           if (!prevTotalsCacheRef.current[cacheKey]) missingKeys.push({ rangeKey: baseRangeKey, start: r.start, end: r.end, agg: ctx.agg, y: ctx.y, measure: ctx.measure })
         }
       })
+      if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevPrefetch] after loop', { missingKeysCount: missingKeys.length, xSeqSample: xSeq.slice(0, 3) }) } catch {} }
       if (missingKeys.length === 0) return
-      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-        try { console.debug('[ChartCard] [PrevPrefetch] missingKeys', { count: missingKeys.length, items: missingKeys.slice(0, 10) }) } catch {}
-      }
+      if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevPrefetch] missingKeys', { count: missingKeys.length, sample: missingKeys.slice(0, 5) }) } catch {} }
       const fetchAll = async () => {
         const gb = String((querySpec as any)?.groupBy || 'none').toLowerCase()
         const xField = (querySpec as any)?.x as string | undefined
@@ -2260,15 +2390,53 @@ export default function ChartCard({
           try {
             const w: any = { ...(uiTruthWhere || {}) }
             const df = deltaDateField as string | undefined
-            if (df) { delete w[df]; delete w[`${df}__gte`]; delete w[`${df}__lte`]; delete w[`${df}__gt`]; delete w[`${df}__lt`] }
+            // Strip ALL filters referencing deltaDateField or its derived parts (e.g., "OrderDate (Year)")
+            if (df) {
+              const keysToDelete = Object.keys(w).filter((k) => {
+                const key = String(k)
+                // Match exact field or derived expressions like "OrderDate (Year)"
+                return key === df || key.startsWith(`${df} (`) || key.startsWith(`${df}__`)
+              })
+              keysToDelete.forEach((k) => delete w[k])
+            }
+            // Strip filters for x-axis field (base and derived)
+            const xBaseField = (X_DER ? X_DER.base : xField) as string | undefined
+            if (xBaseField) {
+              const keysToDelete = Object.keys(w).filter((k) => {
+                const key = String(k)
+                return key === xBaseField || key.startsWith(`${xBaseField} (`) || key.startsWith(`${xBaseField}__`)
+              })
+              keysToDelete.forEach((k) => delete w[k])
+            }
+            // Strip xPartExpr if different from xBaseField
+            const xPart = xPartExpr as string | undefined
+            if (xPart && xPart !== xBaseField) {
+              const keysToDelete = Object.keys(w).filter((k) => String(k) === xPart || String(k).startsWith(`${xPart}__`))
+              keysToDelete.forEach((k) => delete w[k])
+            }
             return Object.keys(w).length ? w : undefined
           } catch { return undefined }
         })()
         const requests = missingKeys.map((r) => {
+          // Pass legend to get per-legend prev totals (e.g., per customer type)
+          // Only strip legend items that are derived from x-axis field
+          const legendAny = (querySpec as any)?.legend
           let legendArg: any = undefined
-          if (hasLegend) {
-            if (Array.isArray(legendAny)) { const arr = legendAny.slice(); if (xPartExpr) arr.push(xPartExpr); legendArg = arr }
-            else { legendArg = xPartExpr ? [legendAny, xPartExpr] : legendAny }
+          const xf = (X_DER ? X_DER.base : xField) as string | undefined
+          if (Array.isArray(legendAny) && legendAny.length > 0) {
+            const filtered = legendAny.filter((item: any) => {
+              const s = String(item || '')
+              // Keep legend unless it's the x-axis field or derived from it
+              if (xf && (s === xf || s.startsWith(`${xf} (`))) return false
+              return true
+            })
+            legendArg = filtered.length > 0 ? filtered : undefined
+          } else if (typeof legendAny === 'string' && legendAny.trim()) {
+            const s = String(legendAny)
+            // Keep unless it's x-axis derived
+            if (!(xf && (s === xf || s.startsWith(`${xf} (`)))) {
+              legendArg = legendAny
+            }
           }
           const key = `${r.rangeKey}::${r.agg}|${r.y || ''}|${r.measure || ''}`
           return {
@@ -2292,18 +2460,21 @@ export default function ChartCard({
           Object.entries(results).forEach(([key, val]) => {
             const map: Record<string, number> = { ...((val?.totals as any) || {}) }
             const t = Number(val?.total)
-            if (Number.isFinite(t)) map['__total__'] = t
+            if (Number.isFinite(t)) {
+              map['__total__'] = t
+            } else {
+              const sum = Object.values(map || {}).reduce((a: number, b: any) => a + (Number(b) || 0), 0)
+              map['__total__'] = sum
+            }
             prevTotalsCacheRef.current[key] = map
           })
-          if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-            try { console.debug('[ChartCard] [PrevPrefetch] batch response', { keys: Object.keys(results || {}) }) } catch {}
-          }
+          if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevPrefetch] batch response', { keys: Object.keys(results || {}) }) } catch {} }
         } catch {}
       }
       void fetchAll()
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify((displayData || []).map((d:any)=>d?.x)), activeDeltaMode, deltaWeekStart, deltaDateField, datasourceId, JSON.stringify(uiTruthWhere || {}), JSON.stringify((querySpec || {})), JSON.stringify(((querySpec as any)?.series || []))])
+  }, [JSON.stringify((data || []).map((d:any)=>d?.x)), effectiveDeltaMode, deltaWeekStart, deltaDateField, datasourceId, JSON.stringify(uiTruthWhere || {}), JSON.stringify((querySpec || {})), JSON.stringify(((querySpec as any)?.series || []))])
   // Auto-select a sensible delta mode from global date filters when using filterbar
   useEffect(() => {
     if (deltaUI !== 'filterbar') return
@@ -2340,15 +2511,57 @@ export default function ChartCard({
   const deltaKey = useMemo(() => JSON.stringify(uiTruthWhere), [uiTruthWhere])
   const deltaQ = useQuery({
     queryKey: ['delta', title, datasourceId, queryMode, querySpec, activeDeltaMode, deltaDateField, deltaWeekStart, deltaKey],
-    enabled: !!activeDeltaMode && !!deltaDateField && queryMode === 'spec' && !!(querySpec as any)?.source,
+    enabled: (() => {
+      const isEnabled = !!activeDeltaMode && !!deltaDateField && queryMode === 'spec' && !!(querySpec as any)?.source
+      if (typeof window !== 'undefined') {
+        try { console.log('[ChartCard] [DeltaQ] enabled check', { isEnabled, activeDeltaMode, deltaDateField, queryMode, hasSource: !!(querySpec as any)?.source, effectiveDeltaMode }) } catch {}
+      }
+      return isEnabled
+    })(),
     queryFn: async () => {
-      const mode = activeDeltaMode as any
+      if (typeof window !== 'undefined') {
+        try { console.log('[ChartCard] [DeltaQ] queryFn running', { activeDeltaMode, effectiveDeltaMode, deltaDateField }) } catch {}
+      }
+      const mode = effectiveDeltaMode as any
       const source = (querySpec as any).source as string
+      // Build whereEff: strip dateField and x/xPart filters to avoid conflicts in prev compare
+      const gb = String((querySpec as any)?.groupBy || 'none').toLowerCase()
+      const xField = (querySpec as any)?.x as string | undefined
+      const partTitle = gb === 'year' ? 'Year' : gb === 'quarter' ? 'Quarter' : gb === 'month' ? 'Month' : gb === 'week' ? 'Week' : gb === 'day' ? 'Day' : undefined
+      const X_DER = (() => { try { const m = String(xField || '').match(/^(.*)\s\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/); return m ? { base: m[1], part: m[2] } : null } catch { return null } })()
+      const xPartExpr = X_DER ? String(xField) : ((xField && partTitle) ? `${xField} (${partTitle})` : undefined)
+      const whereEff = (() => {
+        try {
+          const w: any = { ...(uiTruthWhere || {}) }
+          const df = deltaDateField as string | undefined
+          if (df) {
+            const keysToDelete = Object.keys(w).filter((k) => {
+              const key = String(k)
+              return key === df || key.startsWith(`${df} (`) || key.startsWith(`${df}__`)
+            })
+            keysToDelete.forEach((k) => delete w[k])
+          }
+          const xBaseField = (X_DER ? X_DER.base : xField) as string | undefined
+          if (xBaseField) {
+            const keysToDelete = Object.keys(w).filter((k) => {
+              const key = String(k)
+              return key === xBaseField || key.startsWith(`${xBaseField} (`) || key.startsWith(`${xBaseField}__`)
+            })
+            keysToDelete.forEach((k) => delete w[k])
+          }
+          const xPart = xPartExpr as string | undefined
+          if (xPart && xPart !== xBaseField) {
+            const keysToDelete = Object.keys(w).filter((k) => String(k) === xPart || String(k).startsWith(`${xPart}__`))
+            keysToDelete.forEach((k) => delete w[k])
+          }
+          return Object.keys(w).length ? w : undefined
+        } catch { return uiTruthWhere as any }
+      })()
       return computePeriodDeltas({
         source,
         datasourceId,
         dateField: deltaDateField!,
-        where: uiTruthWhere as any,
+        where: whereEff as any,
         legend: (querySpec as any)?.legend as any,
         series: (Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : undefined) as any,
         agg: ((querySpec as any)?.agg || 'count') as any,
@@ -2399,7 +2612,7 @@ export default function ChartCard({
     try {
       if (!Array.isArray(xArr) || xArr.length === 0) return -1
       if (curIdx <= 0) return -1
-      const mode = (activeDeltaMode || 'off') as any
+      const mode = (effectiveDeltaMode || 'off') as any
       if (!mode || mode === 'off') return -1
 
       // Determine effective groupBy
@@ -2409,7 +2622,7 @@ export default function ChartCard({
       const gbLocal = String(seriesGb || (querySpec as any)?.groupBy || 'none')
 
       const raw = xArr[curIdx]
-      if (raw == null) return curIdx - 1
+      if (raw == null) return -1
       const s = String(raw)
 
       const toDate = (val: any): Date | null => {
@@ -2468,7 +2681,7 @@ export default function ChartCard({
       }
 
       const curDate = toDate(raw)
-      if (!curDate) return curIdx - 1
+      if (!curDate) return -1
       const shifted = (() => {
         switch (mode) {
           case 'TD_YSTD': return shiftDate(curDate, { days: -1 })
@@ -2481,7 +2694,7 @@ export default function ChartCard({
           default: return null
         }
       })()
-      if (!shifted) return curIdx - 1
+      if (!shifted) return -1
 
       // Find entry in xArr that matches shifted at the current granularity
       const prevIdx = xArr.findIndex((x: any) => {
@@ -2494,8 +2707,15 @@ export default function ChartCard({
 
   // Custom tooltip (smaller font, themed background; no glow)
   const renderTooltip = ({ active, payload, label }: any) => {
+    if (typeof window !== 'undefined') {
+      try { console.log('[ChartCard] [Tooltip] RECHARTS renderTooltip called', { active, payloadLength: payload?.length, label }) } catch {}
+    }
     if (!active || !payload || payload.length === 0) return null
     const idx = Array.isArray(displayData) ? (displayData as any[]).findIndex((d) => String((d as any)?.x) === String(label)) : -1
+    if (typeof window !== 'undefined') {
+      const dataPoint = Array.isArray(displayData) && idx >= 0 ? displayData[idx] : null
+      try { console.log('[ChartCard] [Tooltip] RECHARTS processing', { label, idx, displayDataCount: Array.isArray(displayData) ? displayData.length : 0, dataPoint }) } catch {}
+    }
     const applyXCase = (s: string) => {
       const mode = (options as any)?.xLabelCase as 'lowercase'|'capitalize'|'uppercase'|'capitalcase'|'proper'|undefined
       const str = String(s ?? '')
@@ -2536,21 +2756,178 @@ export default function ChartCard({
     const hasPrev = prevIdx >= 0
     const rows: TooltipRow[] = items.map((p: any) => {
       const v = Number(p.value ?? 0)
-      const prev = hasPrev ? Number((displayData as any[])[prevIdx]?.[p.name] ?? 0) : 0
+      const rawName = String(p.name)
+      if (typeof window !== 'undefined') {
+        try { console.log('[ChartCard] [Tooltip] RECHARTS row data', { rawName, payloadValue: p.value, payloadColor: p.color, payload: p }) } catch {}
+      }
+      const prevFromIndex = hasPrev ? Number((displayData as any[])[prevIdx]?.[rawName] ?? 0) : 0
+      const rawX = String(label ?? '')
+      const rk = prevRangeKeyForRawX(rawX)
+      // Resolve agg/y/measure for this series
+      const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
+      if (typeof window !== 'undefined') {
+        try { console.log('[ChartCard] [Tooltip] RECHARTS seriesDefs check', { 
+          rawName, 
+          hasQuerySpec: !!(querySpec as any),
+          hasSeries: Array.isArray((querySpec as any)?.series),
+          seriesLength: seriesDefs.length,
+          series: (querySpec as any)?.series,
+          querySpec: querySpec
+        }) } catch {}
+      }
+      let sAgg: any = (vmeta[rawName]?.agg as any) || ((querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count'))
+      let sY: any = (querySpec as any)?.y as any
+      let sMeasure: any = (querySpec as any)?.measure as any
+      if (seriesDefs.length > 0) {
+        // If there's only one series definition but legend splits it into multiple lines, use that series for all
+        if (seriesDefs.length === 1) {
+          const s = seriesDefs[0]
+          if (typeof window !== 'undefined') {
+            try { console.log('[ChartCard] [Tooltip] RECHARTS single series', { rawName, s, sAgg_before: sAgg, s_agg: s?.agg, s_y: s?.y, s_measure: s?.measure }) } catch {}
+          }
+          sAgg = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+          sY = s?.y
+          sMeasure = s?.measure
+          if (typeof window !== 'undefined') {
+            try { console.log('[ChartCard] [Tooltip] RECHARTS after single series', { sAgg, sY, sMeasure }) } catch {}
+          }
+        } else {
+          // Multiple series - match by label
+          const base = String(rawName).split(' • ')[0].trim()
+          for (let i = 0; i < seriesDefs.length; i++) {
+            const s = seriesDefs[i]
+            const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
+            if (String(lab).trim() === base) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count')); sY = s?.y; sMeasure = s?.measure; break }
+          }
+        }
+      }
+      const ck = rk ? `${rk}::${sAgg}|${sY || ''}|${sMeasure || ''}` : null
+      const totals = ck ? (prevTotalsCacheRef.current[ck] || {}) : {}
+      if (typeof window !== 'undefined') {
+        try { console.log('[ChartCard] [Tooltip] RECHARTS cache lookup', { rawX, rawName, rk, sAgg, sY, sMeasure, ck, totalsKeys: Object.keys(totals), allCacheKeys: Object.keys(prevTotalsCacheRef.current), querySpec, vmeta, vmetaForThis: vmeta[rawName] }) } catch {}
+      }
+      // Compute legend/server keys to resolve prev total
+      const baseCandidates = (() => {
+        try {
+          const rn = String(rawName)
+          const partsSplit = rn.includes(' • ') ? rn.split(' • ') : (rn.includes(' · ') ? rn.split(' · ') : rn.split(' • '))
+          const a = (partsSplit[0] || '').trim()
+          const b = String((vmeta as any)?.[rawName]?.baseSeriesLabel || a)
+          const legendPart = partsSplit.slice(1).join(' • ').trim()
+          const list: string[] = []
+          if (legendPart) list.push(a)
+          if (!list.includes(b)) list.push(b)
+          return list.length ? list : [a]
+        } catch { return [String(rawName)] }
+      })()
+      const serverPart = (() => {
+        try {
+          const cur = parseDateLoose(String(rawX))
+          if (!cur) return ''
+          const pv = shiftByMode(cur)
+          if (!pv) return ''
+          const pad = (n:number)=>String(n).padStart(2,'0')
+          const gb = String((querySpec as any)?.groupBy || 'none').toLowerCase()
+          if (gb === 'year') return `${pv.getFullYear()}`
+          if (gb === 'quarter') { const q = Math.floor(pv.getMonth()/3)+1; return `${pv.getFullYear()}-Q${q}` }
+          if (gb === 'month') return `${pv.getFullYear()}-${pad(pv.getMonth()+1)}`
+          if (gb === 'day') return `${pv.getFullYear()}-${pad(pv.getMonth()+1)}-${pad(pv.getDate())}`
+          if (gb === 'week') {
+            const ws = (deltaWeekStart || 'mon')
+            const date = new Date(Date.UTC(pv.getFullYear(), pv.getMonth(), pv.getDate()))
+            if (ws === 'sun') {
+              const onejan = new Date(pv.getFullYear(),0,1)
+              const week = Math.ceil((((pv as any)- (onejan as any))/86400000 + onejan.getDay()+1)/7)
+              return `${pv.getFullYear()}-W${pad(week)}`
+            } else {
+              const dayNr = (date.getUTCDay() + 6) % 7
+              date.setUTCDate(date.getUTCDate() - dayNr + 3)
+              const firstThursday = new Date(Date.UTC(date.getUTCFullYear(),0,4))
+              const week = 1 + Math.round(((date.getTime() - firstThursday.getTime())/86400000 - 3) / 7)
+              return `${date.getUTCFullYear()}-W${pad(week)}`
+            }
+          }
+          return ''
+        } catch { return '' }
+      })()
+      const resolvePrevFromCache = (): number => {
+        try {
+          if (!ck || !Object.keys(totals || {}).length) return 0
+          if (typeof window !== 'undefined') {
+            try { console.log('[ChartCard] [Tooltip] RECHARTS resolvePrevFromCache', { rawName, baseCandidates, serverPart, totals, totalsKeys: Object.keys(totals) }) } catch {}
+          }
+          for (const b of baseCandidates) {
+            const keyVirtual = serverPart ? `${b} • ${serverPart}` : b
+            const seq = [keyVirtual, b, '__total__']
+            if (typeof window !== 'undefined') {
+              try { console.log('[ChartCard] [Tooltip] RECHARTS trying keys', { b, keyVirtual, seq }) } catch {}
+            }
+            for (const k of seq) {
+              const n = Number((totals as any)?.[k] ?? 0)
+              if (Number.isFinite(n) && (k === '__total__' ? true : (k in (totals as any)))) {
+                if (typeof window !== 'undefined') {
+                  try { console.log('[ChartCard] [Tooltip] RECHARTS found prev', { key: k, value: n }) } catch {}
+                }
+                return n
+              }
+            }
+          }
+          return 0
+        } catch { return 0 }
+      }
+      const prev = hasPrev ? prevFromIndex : resolvePrevFromCache()
       const delta = v - prev
       const gk = groupKeyOf(String(p.name))
       const tot = Number(groupTotals[gk] || 0)
       const shareStr = tot > 0 ? `${((v / tot) * 100).toFixed(1)}%` : '0.0%'
       const changePct = computeChangePercent(v, prev)
-      const changeStr = hasPrev ? `${changePct >= 0 ? '+' : '-'}${Math.abs(changePct).toFixed(1)}%` : ''
+      const changeStr = (hasPrev || prev > 0) ? `${changePct >= 0 ? '+' : '-'}${Math.abs(changePct).toFixed(1)}%` : ''
       const invert = !!(options as any)?.downIsGood
       const changeColor = invert
         ? ((changePct < 0) ? '#22c55e' : (changePct > 10 ? '#ef4444' : '#9CA3AF'))
         : ((changePct < 0) ? '#ef4444' : (changePct > 10 ? '#22c55e' : '#9CA3AF'))
-      const deltaStr = hasPrev ? `${delta >= 0 ? '+' : '-'}${formatNumber(Math.abs(delta), (options?.yAxisFormat || 'none') as any)}` : ''
-      const rawName = String(p.name)
+      const deltaStr = (hasPrev || prev > 0) ? `${delta >= 0 ? '+' : '-'}${formatNumber(Math.abs(delta), (options?.yAxisFormat || 'none') as any)}` : ''
       const name = formatHeaderCase(rawName)
-      const aggLabel = vmeta[rawName]?.agg || toProperCase(String((querySpec as any)?.agg || ((querySpec as any)?.y ? 'sum' : 'count')))
+      const aggLabel = (() => {
+        const fromMeta = (vmeta[rawName]?.agg as any)
+        if (fromMeta) {
+          if (typeof window !== 'undefined') {
+            try { console.log('[ChartCard] [Tooltip] RECHARTS aggLabel from vmeta', { rawName, fromMeta }) } catch {}
+          }
+          return toProperCase(String(fromMeta))
+        }
+        try {
+          if (seriesDefs.length > 0) {
+            // If there's only one series, use it for all legend-split lines
+            if (seriesDefs.length === 1) {
+              const s = seriesDefs[0]
+              const ag = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+              if (typeof window !== 'undefined') {
+                try { console.log('[ChartCard] [Tooltip] RECHARTS aggLabel from single series', { rawName, seriesDef: s, ag }) } catch {}
+              }
+              return toProperCase(String(ag))
+            }
+            // Multiple series - match by label
+            const base = String(rawName).split(' • ')[0].trim()
+            for (let i = 0; i < seriesDefs.length; i++) {
+              const s = seriesDefs[i]
+              const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
+              if (String(lab).trim() === base) {
+                const ag = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+                if (typeof window !== 'undefined') {
+                  try { console.log('[ChartCard] [Tooltip] RECHARTS aggLabel from matched series', { rawName, base, seriesDef: s, ag }) } catch {}
+                }
+                return toProperCase(String(ag))
+              }
+            }
+          }
+        } catch {}
+        const fallback = (querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')
+        if (typeof window !== 'undefined') {
+          try { console.log('[ChartCard] [Tooltip] RECHARTS aggLabel fallback', { rawName, qsAgg: (querySpec as any)?.agg, qsY: (querySpec as any)?.y, qsMeasure: (querySpec as any)?.measure, fallback }) } catch {}
+        }
+        return toProperCase(String(fallback))
+      })()
       return {
         color: String(p.color || '#94a3b8'),
         name,
@@ -2559,13 +2936,54 @@ export default function ChartCard({
         aggLabel,
         changeStr,
         deltaStr,
-        prevStr: hasPrev ? formatNumber(prev, (options?.yAxisFormat || 'none') as any) : '',
+        prevStr: (hasPrev || prev > 0) ? formatNumber(prev, (options?.yAxisFormat || 'none') as any) : '',
         changeColor,
       }
     })
-    const prevLabel = hasPrev ? applyXCase(String(xSeq[prevIdx])) : undefined
+    const prevLabel = (() => {
+      if (hasPrev) return applyXCase(String(xSeq[prevIdx]))
+      // Derive fallback prev label from current label when in delta mode
+      try {
+        if (!effectiveDeltaMode) return undefined
+        const cur = parseDateLoose(String(label))
+        if (!cur) return undefined
+        const pv = (() => {
+          switch (effectiveDeltaMode as any) {
+            case 'TD_YSTD': { const d = new Date(cur); d.setDate(d.getDate()-1); return d }
+            case 'TW_LW': { const d = new Date(cur); d.setDate(d.getDate()-7); return d }
+            case 'MONTH_LMONTH': { const d = new Date(cur); d.setMonth(d.getMonth()-1); return d }
+            case 'MTD_LMTD': { const d = new Date(cur); d.setMonth(d.getMonth()-1); return d }
+            case 'TQ_LQ': { const d = new Date(cur); d.setMonth(d.getMonth()-3); return d }
+            case 'TY_LY': { const d = new Date(cur); d.setFullYear(d.getFullYear()-1); return d }
+            case 'YTD_LYTD': { const d = new Date(cur); d.setFullYear(d.getFullYear()-1); return d }
+            default: return null
+          }
+        })()
+        if (!pv) return undefined
+        const gb = String((querySpec as any)?.groupBy || 'none').toLowerCase()
+        const pad = (n:number)=>String(n).padStart(2,'0')
+        const fmt = (options as any)?.xDateFormat
+          || (gb === 'year' ? 'YYYY'
+            : gb === 'quarter' ? 'YYYY-[Q]q'
+            : gb === 'month' ? 'MMM-YYYY'
+            : gb === 'week' ? 'YYYY-[W]ww'
+            : 'YYYY-MM-DD')
+        // Basic formatter to avoid bringing moment: match existing simple formats
+        const monthShort = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][pv.getMonth()]
+        const q = Math.floor(pv.getMonth()/3)+1
+        const isoWeek = (() => { const d=new Date(Date.UTC(pv.getFullYear(), pv.getMonth(), pv.getDate())); d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7)); const yStart=new Date(Date.UTC(d.getUTCFullYear(),0,1)); return Math.ceil((((d.getTime()-yStart.getTime())/86400000)+1)/7) })()
+        const str = fmt
+          .replace('YYYY', String(pv.getFullYear()))
+          .replace('[Q]q', `Q${q}`)
+          .replace('MMM', monthShort)
+          .replace('MM', pad(pv.getMonth()+1))
+          .replace('DD', pad(pv.getDate()))
+          .replace('[W]ww', `W${pad(isoWeek)}`)
+        return applyXCase(str)
+      } catch { return undefined }
+    })()
     const header = applyXCase(String(label))
-    return (<TooltipTable header={header} prevLabel={prevLabel} rows={rows} showDeltas={!!activeDeltaMode} />)
+    return (<TooltipTable header={header} prevLabel={prevLabel} rows={rows} showDeltas={!!effectiveDeltaMode} />)
   }
 
   // Compute chart colors (Tremor tokens) and matching legend hex swatches
@@ -2770,7 +3188,7 @@ export default function ChartCard({
         const rounded = options?.barRounded ? (type === 'bar' ? [0, 6, 6, 0] : [6, 6, 0, 0]) : 0
         // Per-series overrides: resolve by base series label when categories are virtualized ("Series • Cat")
         const baseLabelForMeta = (vmetaColor[nameC]?.baseSeriesLabel || String(nameC).split(' • ')[0])
-        const sMeta: any = Array.isArray(series) ? (metaByName.get(String(baseLabelForMeta)) || series[idx]) : undefined
+        const sMeta: any = Array.isArray(series) ? (metaByName.get(String(baseLabelForMeta)) || series?.[idx]) : undefined
         const gradientWanted = ((type === 'bar' || type === 'column') ? !!options?.barGradient : false)
         const style = (sMeta?.style as any) || (gradientWanted ? 'gradient' : 'solid')
         const gradient = style === 'gradient'
@@ -2963,27 +3381,54 @@ export default function ChartCard({
                 const idx = params?.[0]?.dataIndex ?? 0
                 const rawX = xLabels[idx]
                 const xLabel = fmtXLabel(rawX)
-                const filtered = (options?.tooltipHideZeros ? params.filter((p:any)=>Number(p?.value?.value ?? p?.value ?? 0)!==0) : params)
+                // Resolve values from data row first, fallback to param.value when needed
                 const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
                 const hasSeriesSpecs = seriesDefs.length > 0
                 const vmeta = (((q?.data as any)?.virtualMeta) || {}) as Record<string, { baseSeriesLabel: string; agg?: string }>
                 const groupKeyOf = (rawName: string) => (vmeta[rawName]?.baseSeriesLabel || (hasSeriesSpecs ? rawName : '__legend__'))
+                const getValAt = (p:any, i:number): number => {
+                  const rawName = String(p?.seriesName ?? '')
+                  const row = i >= 0 && i < (displayData as any[]).length ? (displayData as any[])[i] : undefined
+                  // Prefer the exact series key present in the shaped row (e.g. "Base • Legend")
+                  const vKeyFirst = row
+                    ? (Array.isArray(categories) && (categories as any[]).length > 0
+                        ? (row as any)?.[rawName]
+                        : (row as any)?.value)
+                    : undefined
+                  let vFromData = Number(vKeyFirst)
+                  if (!Number.isFinite(vFromData)) {
+                    // Fallback: try the base series label if available
+                    const baseKey = String(vmeta[rawName]?.baseSeriesLabel || '')
+                    if (baseKey && row && Array.isArray(categories) && (categories as any[]).length > 0) {
+                      const alt = Number((row as any)?.[baseKey])
+                      if (Number.isFinite(alt)) vFromData = alt
+                    }
+                  }
+                  const valAny = (p?.value as any)
+                  const vFromParam = Array.isArray(valAny)
+                    ? Number(valAny?.[1] ?? 0)
+                    : Number((valAny as any)?.value ?? valAny ?? 0)
+                  return Number.isFinite(vFromData) ? vFromData : (Number.isFinite(vFromParam) ? vFromParam : 0)
+                }
+                const withValues = params.map((p:any)=>({ p, v: getValAt(p, idx) }))
+                const filtered = (options?.tooltipHideZeros ? withValues.filter((x:any)=>Number(x.v)!==0) : withValues)
                 const groupTotals: Record<string, number> = {}
                 filtered.forEach((pp:any) => {
-                  const vv = Number(pp.value?.value ?? pp.value ?? 0)
-                  const gk = groupKeyOf(String(pp.seriesName))
+                  const p = pp.p
+                  const vv = Number(pp.v ?? 0)
+                  const gk = groupKeyOf(String(p.seriesName))
                   groupTotals[gk] = (groupTotals[gk] || 0) + vv
                 })
                 const xSeq = xLabels
                 const prevIdx = resolvePrevIndex(idx, xSeq)
                 const hasPrev = prevIdx >= 0
-                const prevLabel = hasPrev ? fmtXLabel(xSeq[prevIdx]) : (() => {
+                const prevLabel = (() => {
                   try {
                     const s = String(rawX ?? '')
                     const d = parseDateLoose(s)
                     if (!d) return null
                     const shifted = (() => {
-                      switch (activeDeltaMode as any) {
+                      switch (effectiveDeltaMode as any) {
                         case 'TD_YSTD': { const x = new Date(d); x.setDate(x.getDate()-1); return x }
                         case 'TW_LW': { const x = new Date(d); x.setDate(x.getDate()-7); return x }
                         case 'MONTH_LMONTH':
@@ -3000,8 +3445,9 @@ export default function ChartCard({
                     return fmtXLabel(rawShift)
                   } catch { return null }
                 })()
-                const rows: TooltipRow[] = filtered.map((p:any) => {
-                  const v = Number(p.value?.value ?? p.value ?? 0)
+                const rows: TooltipRow[] = filtered.map((pp:any) => {
+                  const p = pp.p
+                  const v = Number(pp.v ?? 0)
                   const rawName = String(p.seriesName)
                   const prev = hasPrev ? (() => {
                     const prevRow = (displayData as any[])[prevIdx] as any
@@ -3017,18 +3463,30 @@ export default function ChartCard({
                     // Determine per-series agg/y/measure based on the series label prefix
                     const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
                     const sLabelBase = String(rawName).split(' • ')[0].trim()
-                    let sAgg: any = (((querySpec as any)?.agg || 'count') as any)
+                    let sAgg: any = ((vmeta[rawName]?.agg as any) || ((querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')) as any)
                     let sY: any = (querySpec as any)?.y as any
                     let sMeasure: any = (querySpec as any)?.measure as any
                     if (seriesDefs.length > 0) {
-                      for (let i = 0; i < seriesDefs.length; i++) {
-                        const s = seriesDefs[i]
-                        const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
-                        if (String(lab).trim() === sLabelBase) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? 'count'); sY = s?.y; sMeasure = s?.measure; break }
+                      // If there's only one series, use it for all legend-split lines
+                      if (seriesDefs.length === 1) {
+                        const s = seriesDefs[0]
+                        sAgg = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+                        sY = s?.y
+                        sMeasure = s?.measure
+                      } else {
+                        // Multiple series - match by label
+                        for (let i = 0; i < seriesDefs.length; i++) {
+                          const s = seriesDefs[i]
+                          const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
+                          if (String(lab).trim() === sLabelBase) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? sAgg); sY = s?.y; sMeasure = s?.measure; break }
+                        }
                       }
                     }
                     const cacheKey = `${rk}::${sAgg}|${sY || ''}|${sMeasure || ''}`
                     const totals = prevTotalsCacheRef.current[cacheKey] || {}
+                    if (typeof window !== 'undefined') {
+                      try { console.log('[ChartCard] [Tooltip] cache lookup', { rawX, rawName, sLabelBase, rk, sAgg, sY, sMeasure, cacheKey, totalsKeys: Object.keys(totals), cacheKeys: Object.keys(prevTotalsCacheRef.current) }) } catch {}
+                    }
                     // If cache is empty, trigger an on-demand fetch for this specific range to warm the cache.
                     if (Object.keys(totals).length === 0) {
                       const r = prevRangeForRawX(rawX)
@@ -3045,19 +3503,33 @@ export default function ChartCard({
                         let legendArg: any = undefined
                         const hasLegend = (Array.isArray(legendAny) ? legendAny.length > 0 : (typeof legendAny === 'string' && legendAny.trim() !== ''))
                         if (hasLegend) {
-                          if (Array.isArray(legendAny)) {
-                            const arr = legendAny.slice()
-                            if (xPartExpr) arr.push(xPartExpr)
-                            legendArg = arr
-                          } else {
-                            legendArg = xPartExpr ? [legendAny, xPartExpr] : legendAny
-                          }
+                          if (Array.isArray(legendAny)) { const arr = legendAny.slice(); if (xPartExpr) arr.push(xPartExpr); legendArg = arr }
+                          else { legendArg = xPartExpr ? [legendAny, xPartExpr] : legendAny }
                         }
                         const whereEff = (() => {
                           try {
                             const w: any = { ...(uiTruthWhere || {}) }
                             const df = deltaDateField as string | undefined
-                            if (df) { delete w[df]; delete w[`${df}__gte`]; delete w[`${df}__lte`]; delete w[`${df}__gt`]; delete w[`${df}__lt`] }
+                            if (df) {
+                              const keysToDelete = Object.keys(w).filter((k) => {
+                                const key = String(k)
+                                return key === df || key.startsWith(`${df} (`) || key.startsWith(`${df}__`)
+                              })
+                              keysToDelete.forEach((k) => delete w[k])
+                            }
+                            const xBaseField = (X_DER ? X_DER.base : xField) as string | undefined
+                            if (xBaseField) {
+                              const keysToDelete = Object.keys(w).filter((k) => {
+                                const key = String(k)
+                                return key === xBaseField || key.startsWith(`${xBaseField} (`) || key.startsWith(`${xBaseField}__`)
+                              })
+                              keysToDelete.forEach((k) => delete w[k])
+                            }
+                            const xPart = xPartExpr as string | undefined
+                            if (xPart && xPart !== xBaseField) {
+                              const keysToDelete = Object.keys(w).filter((k) => String(k) === xPart || String(k).startsWith(`${xPart}__`))
+                              keysToDelete.forEach((k) => delete w[k])
+                            }
                             return Object.keys(w).length ? w : undefined
                           } catch { return undefined }
                         })()
@@ -3077,18 +3549,14 @@ export default function ChartCard({
                               agg: sAgg as any,
                               y: sY as any,
                               measure: sMeasure as any,
+                              weekStart: (deltaWeekStart as any) || undefined,
                             })
                             const map: Record<string, number> = { ...(resp?.totals || {}) } as any
                             const t = Number((resp as any)?.total)
                             if (Number.isFinite(t)) map['__total__'] = t
                             prevTotalsCacheRef.current[cacheKey] = map
-                            if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-                              try { console.debug('[ChartCard] [PrevFallback] ondemand response', { cacheKey, rangeKey: rk, totalsKeys: Object.keys(map || {}), total: t }) } catch {}
-                            }
-                          } catch {
-                          } finally {
-                            inflightPrevFetchesRef.current[cacheKey] = false
-                          }
+                            if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevFallback] ondemand response', { cacheKey, rangeKey: rk, totalsKeys: Object.keys(map || {}), total: t }) } catch {} }
+                          } catch {} finally { inflightPrevFetchesRef.current[cacheKey] = false }
                         })()
                       }
                     }
@@ -3171,9 +3639,9 @@ export default function ChartCard({
                       return 0
                     }
                     const cand = resolveFromTotals()
-                    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+                    if (typeof window !== 'undefined') {
                       try {
-                        console.debug('[ChartCard] [PrevFallback] resolve', {
+                        console.log('[ChartCard] [PrevFallback] resolve', {
                           x: String(rawX ?? ''),
                           rangeKey: rk,
                           baseCandidates,
@@ -3197,14 +3665,14 @@ export default function ChartCard({
                       const partsSplit = partsRN.includes(' • ') ? partsRN.split(' • ') : (partsRN.includes(' · ') ? partsRN.split(' · ') : partsRN.split(' • '))
                       const sLabelBase = (partsSplit[0] || '').trim()
                       const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
-                      let sAgg: any = (((querySpec as any)?.agg || 'count') as any)
+                      let sAgg: any = ((vmeta[rawName]?.agg as any) || ((querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')) as any)
                       let sY: any = (querySpec as any)?.y as any
                       let sMeasure: any = (querySpec as any)?.measure as any
                       if (seriesDefs.length > 0) {
                         for (let i = 0; i < seriesDefs.length; i++) {
                           const s = seriesDefs[i]
                           const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
-                          if (String(lab).trim() === sLabelBase) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? 'count'); sY = s?.y; sMeasure = s?.measure; break }
+                          if (String(lab).trim() === sLabelBase) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? sAgg); sY = s?.y; sMeasure = s?.measure; break }
                         }
                       }
                       const _rk = prevRangeKeyForRawX(rawX)
@@ -3222,22 +3690,43 @@ export default function ChartCard({
                   const name = legendDisplayName(rawName)
                   const aggLabel = (() => {
                     const fromMeta = (vmeta[rawName]?.agg as any)
-                    if (fromMeta) return toProperCase(String(fromMeta))
+                    if (fromMeta) {
+                      if (typeof window !== 'undefined') {
+                        try { console.log('[ChartCard] [Tooltip] aggLabel from vmeta', { rawName, fromMeta }) } catch {}
+                      }
+                      return toProperCase(String(fromMeta))
+                    }
                     try {
                       const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
                       if (seriesDefs.length > 0) {
+                        // If there's only one series, use it for all legend-split lines
+                        if (seriesDefs.length === 1) {
+                          const s = seriesDefs[0]
+                          const ag = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+                          if (typeof window !== 'undefined') {
+                            try { console.log('[ChartCard] [Tooltip] aggLabel from single series', { rawName, seriesDef: s, ag }) } catch {}
+                          }
+                          return toProperCase(String(ag))
+                        }
+                        // Multiple series - match by label
                         const base = String(rawName).split(' • ')[0].trim()
                         for (let i = 0; i < seriesDefs.length; i++) {
                           const s = seriesDefs[i]
                           const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
                           if (String(lab).trim() === base) {
                             const ag = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+                            if (typeof window !== 'undefined') {
+                              try { console.log('[ChartCard] [Tooltip] aggLabel from matched series', { rawName, base, seriesDef: s, ag }) } catch {}
+                            }
                             return toProperCase(String(ag))
                           }
                         }
                       }
                     } catch {}
                     const fallback = (querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')
+                    if (typeof window !== 'undefined') {
+                      try { console.log('[ChartCard] [Tooltip] aggLabel fallback', { rawName, qsAgg: (querySpec as any)?.agg, qsY: (querySpec as any)?.y, qsMeasure: (querySpec as any)?.measure, fallback }) } catch {}
+                    }
                     return toProperCase(String(fallback))
                   })()
                   const idxC = Array.isArray(categories) ? Math.max(0, (categories as string[]).indexOf(rawName)) : 0
@@ -3250,11 +3739,11 @@ export default function ChartCard({
                     aggLabel,
                     changeStr,
                     deltaStr,
-                    prevStr: havePrevVal ? valueFormatter(prev) : '',
+                    prevStr: hasPrev ? valueFormatter(prev) : '',
                     changeColor,
                   }
                 })
-                return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={hasPrev ? (prevLabel || undefined) : undefined} rows={rows} showDeltas={!!activeDeltaMode} />)
+                return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={prevLabel || undefined} rows={rows} showDeltas={!!effectiveDeltaMode} />)
               } catch { return '' }
             },
           }
@@ -3295,13 +3784,13 @@ export default function ChartCard({
                 const xSeq = xLabels
                 const prevIdx = resolvePrevIndex(idx, xSeq)
                 const hasPrev = prevIdx >= 0
-                const prevLabel = hasPrev ? fmtXLabel(xSeq[prevIdx]) : (() => {
+                const prevLabel = (() => {
                   try {
                     const s = String(rawX ?? '')
                     const d = parseDateLoose(s)
                     if (!d) return undefined
                     const shifted = (() => {
-                      switch (activeDeltaMode as any) {
+                      switch (effectiveDeltaMode as any) {
                         case 'TD_YSTD': { const x = new Date(d); x.setDate(x.getDate()-1); return x }
                         case 'TW_LW': { const x = new Date(d); x.setDate(x.getDate()-7); return x }
                         case 'MONTH_LMONTH':
@@ -3309,7 +3798,7 @@ export default function ChartCard({
                         case 'TQ_LQ': { const x = new Date(d); x.setMonth(x.getMonth()-3); return x }
                         case 'TY_LY':
                         case 'YTD_LYTD': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
-                        default: return undefined
+                        default: return null
                       }
                     })()
                     if (!shifted) return undefined
@@ -3318,8 +3807,9 @@ export default function ChartCard({
                     return fmtXLabel(rawShift)
                   } catch { return undefined }
                 })()
-                const rows: TooltipRow[] = filtered.map((p:any) => {
-                  const v = Number(p.value?.value ?? p.value ?? 0)
+                const rows: TooltipRow[] = filtered.map((pp:any) => {
+                  const p = pp.p
+                  const v = Number(pp.v ?? 0)
                   const rawName = String(p.seriesName)
                   const prev = hasPrev ? (() => {
                     const prevRow = (displayData as any[])[prevIdx] as any
@@ -3338,14 +3828,14 @@ export default function ChartCard({
                     const partsRN = String(rawName)
                     const partsSplit = partsRN.includes(' • ') ? partsRN.split(' • ') : (partsRN.includes(' · ') ? partsRN.split(' · ') : partsRN.split(' • '))
                     const sLabelBase = (partsSplit[0] || '').trim()
-                    let sAgg: any = (((querySpec as any)?.agg || 'count') as any)
+                    let sAgg: any = ((vmeta[rawName]?.agg as any) || ((querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')) as any)
                     let sY: any = (querySpec as any)?.y as any
                     let sMeasure: any = (querySpec as any)?.measure as any
                     if (seriesDefs.length > 0) {
                       for (let i = 0; i < seriesDefs.length; i++) {
                         const s = seriesDefs[i]
                         const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
-                        if (String(lab).trim() === sLabelBase) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? 'count'); sY = s?.y; sMeasure = s?.measure; break }
+                        if (String(lab).trim() === sLabelBase) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? sAgg); sY = s?.y; sMeasure = s?.measure; break }
                       }
                     }
                     const cacheKey = `${rk}::${sAgg}|${sY || ''}|${sMeasure || ''}`
@@ -3366,8 +3856,34 @@ export default function ChartCard({
                         if (Array.isArray(legendAny)) { const arr = legendAny.slice(); if (xPartExpr) arr.push(xPartExpr); legendArg = arr }
                         else if (typeof legendAny === 'string' && legendAny.trim()) { legendArg = xPartExpr ? [legendAny, xPartExpr] : legendAny }
                         else if (xPartExpr) { legendArg = xPartExpr }
-                        const whereEff = (() => { try { const w: any = { ...(uiTruthWhere || {}) }; const df = deltaDateField as string | undefined; if (df) { delete w[df]; delete w[`${df}__gte`]; delete w[`${df}__lte`]; delete w[`${df}__gt`]; delete w[`${df}__lt`] } return Object.keys(w).length ? w : undefined } catch { return undefined } })()
-                        if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') { try { console.debug('[ChartCard] [PrevFallbackAxis] ondemand request', { cacheKey, rangeKey: rk, start: r.start, end: r.end, dateField: deltaDateField, legend: legendArg, agg: sAgg, y: sY, measure: sMeasure, where: whereEff }) } catch {} }
+                        const whereEff = (() => {
+                          try {
+                            const w: any = { ...(uiTruthWhere || {}) }
+                            const df = deltaDateField as string | undefined
+                            if (df) {
+                              const keysToDelete = Object.keys(w).filter((k) => {
+                                const key = String(k)
+                                return key === df || key.startsWith(`${df} (`) || key.startsWith(`${df}__`)
+                              })
+                              keysToDelete.forEach((k) => delete w[k])
+                            }
+                            const xBaseField = (X_DER ? X_DER.base : xField) as string | undefined
+                            if (xBaseField) {
+                              const keysToDelete = Object.keys(w).filter((k) => {
+                                const key = String(k)
+                                return key === xBaseField || key.startsWith(`${xBaseField} (`) || key.startsWith(`${xBaseField}__`)
+                              })
+                              keysToDelete.forEach((k) => delete w[k])
+                            }
+                            const xPart = xPartExpr as string | undefined
+                            if (xPart && xPart !== xBaseField) {
+                              const keysToDelete = Object.keys(w).filter((k) => String(k) === xPart || String(k).startsWith(`${xPart}__`))
+                              keysToDelete.forEach((k) => delete w[k])
+                            }
+                            return Object.keys(w).length ? w : undefined
+                          } catch { return undefined }
+                        })()
+                        if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevFallbackAxis] ondemand request', { cacheKey, rangeKey: rk, start: r.start, end: r.end, dateField: deltaDateField, legend: legendArg, agg: sAgg, y: sY, measure: sMeasure, where: whereEff }) } catch {} }
                         void (async () => {
                           try {
                             const resp = await Api.periodTotals({ source, datasourceId, dateField: deltaDateField!, start: r.start, end: r.end, where: whereEff as any, legend: legendArg, agg: (sAgg as any), y: (sY as any), measure: (sMeasure as any) })
@@ -3375,7 +3891,7 @@ export default function ChartCard({
                             const t = Number((resp as any)?.total)
                             if (Number.isFinite(t)) map['__total__'] = t
                             prevTotalsCacheRef.current[cacheKey] = map
-                            if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') { try { console.debug('[ChartCard] [PrevFallbackAxis] ondemand response', { cacheKey, rangeKey: rk, totalsKeys: Object.keys(map || {}), total: t }) } catch {} }
+                            if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevFallbackAxis] ondemand response', { cacheKey, rangeKey: rk, totalsKeys: Object.keys(map || {}), total: t }) } catch {} }
                           } catch {} finally { inflightPrevFetchesRef.current[cacheKey] = false }
                         })()
                       }
@@ -3451,9 +3967,7 @@ export default function ChartCard({
                       return 0
                     }
                     const cand = resolveFromTotals()
-                    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-                      try { console.debug('[ChartCard] [PrevFallbackAxis] resolve', { x: String(rawX ?? ''), rangeKey: rk, cacheKey, baseCandidates, prevLabel: pLabel, serverPart, totalsKeys: Object.keys(totals || {}), resolved: Number.isFinite(cand) ? cand : 0 }) } catch {}
-                    }
+                    if (typeof window !== 'undefined') { try { console.log('[ChartCard] [PrevFallbackAxis] resolve', { x: String(rawX ?? ''), rangeKey: rk, cacheKey, baseCandidates, prevLabel: pLabel, serverPart, totalsKeys: Object.keys(totals || {}), resolved: Number.isFinite(cand) ? cand : 0 }) } catch {} }
                     return Number.isFinite(cand) ? cand : 0
                   })()
                   const delta = v - prev
@@ -3461,7 +3975,27 @@ export default function ChartCard({
                   const tot = Number(groupTotals[gk] || 0)
                   const shareStr = tot > 0 ? `${((v / tot) * 100).toFixed(1)}%` : '0.0%'
                   const changePct = computeChangePercent(v, prev)
-                  const totalsPresentForRange = (() => { try { const _rk = prevRangeKeyForRawX(rawX); return !!(_rk && Object.keys(prevTotalsCacheRef.current[_rk] || {}).length) } catch { return false } })()
+                  const totalsPresentForRange = (() => {
+                    try {
+                      const partsRN = String(rawName)
+                      const partsSplit = partsRN.includes(' • ') ? partsRN.split(' • ') : (partsRN.includes(' · ') ? partsRN.split(' · ') : partsRN.split(' • '))
+                      const sLabelBase = (partsSplit[0] || '').trim()
+                      const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
+                      let sAgg: any = ((vmeta[rawName]?.agg as any) || ((querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')) as any)
+                      let sY: any = (querySpec as any)?.y as any
+                      let sMeasure: any = (querySpec as any)?.measure as any
+                      if (seriesDefs.length > 0) {
+                        for (let i = 0; i < seriesDefs.length; i++) {
+                          const s = seriesDefs[i]
+                          const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
+                          if (String(lab).trim() === sLabelBase) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? sAgg); sY = s?.y; sMeasure = s?.measure; break }
+                        }
+                      }
+                      const _rk = prevRangeKeyForRawX(rawX)
+                      const _ck = _rk ? `${_rk}::${sAgg}|${sY || ''}|${sMeasure || ''}` : null
+                      return !!(_ck && Object.keys(prevTotalsCacheRef.current[_ck] || {}).length)
+                    } catch { return false }
+                  })()
                   const havePrevVal = hasPrev || totalsPresentForRange || Number(prev) !== 0
                   const changeStr = havePrevVal ? `${changePct >= 0 ? '+' : '-'}${Math.abs(changePct).toFixed(1)}%` : ''
                   const changeColor = (changePct < 0) ? '#ef4444' : (changePct > 10 ? '#22c55e' : '#9CA3AF')
@@ -3497,11 +4031,11 @@ export default function ChartCard({
                     aggLabel,
                     changeStr,
                     deltaStr,
-                    prevStr: havePrevVal ? valueFormatter(prev) : '',
+                    prevStr: hasPrev ? valueFormatter(prev) : '',
                     changeColor,
                   }
                 })
-                return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={hasPrev ? prevLabel : undefined} rows={rows} showDeltas={!!activeDeltaMode} />)
+                return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={prevLabel || undefined} rows={rows} showDeltas={!!effectiveDeltaMode} />)
               } catch { return '' }
             }
           }
@@ -3928,6 +4462,9 @@ export default function ChartCard({
       const option = {
         tooltip: { show: (Array.isArray(data) && data.length > 0), trigger: 'item', backgroundColor: 'transparent', borderColor: 'transparent', textStyle: { color: undefined as any }, extraCssText: 'border:1px solid hsl(var(--border));background:hsl(var(--card));color:hsl(var(--foreground));padding:4px 8px;border-radius:6px;box-shadow:none;',
           formatter: (p: any) => {
+            if (typeof window !== 'undefined') {
+              try { console.log('[ChartCard] [Tooltip] ITEM formatter triggered', { p, isTime, querySpec }) } catch {}
+            }
             try {
               // 1) X label (formatted) and index resolution
               const xLabel = (() => {
@@ -3955,7 +4492,7 @@ export default function ChartCard({
                       case 'dddd': return d.toLocaleDateString('en-US', { weekday: 'long' })
                       case 'MMMM': return d.toLocaleDateString('en-US', { month: 'long' })
                       case 'MMM-YYYY': return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-')
-                      default: return String(d.toISOString())
+                      default: return formatDatePattern(d, String(fmt))
                     }
                   }
                   return d.toLocaleString()
@@ -3986,7 +4523,7 @@ export default function ChartCard({
                       case 'dddd': return d.toLocaleDateString('en-US', { weekday: 'long' })
                       case 'MMMM': return d.toLocaleDateString('en-US', { month: 'long' })
                       case 'MMM-YYYY': return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-')
-                      default: return s
+                      default: return formatDatePattern(d, String(fmt))
                     }
                   }
                   const mode = (options as any)?.xLabelCase as 'lowercase'|'capitalize'|'proper'|undefined
@@ -4015,9 +4552,37 @@ export default function ChartCard({
                 return arr.indexOf(target)
               }
               const idx = resolveIndex()
+              const rawX = idx >= 0 && idx < (data as any[]).length ? ((data as any[])[idx] as any)?.x : undefined
 
               const rawName = String(p?.seriesName)
-              const v = Number(p?.value?.[1] ?? p?.value ?? 0)
+              if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+                const dataRow = idx >= 0 && idx < (data as any[]).length ? (data as any[])[idx] : null
+                console.debug('[ChartCard] Tooltip value debug:', { 
+                  pValue: p?.value, 
+                  pValue0: p?.value?.[0],
+                  pValue1: p?.value?.[1],
+                  pData: p?.data,
+                  seriesName: rawName,
+                  idx,
+                  dataRow,
+                  dataRowKeys: dataRow ? Object.keys(dataRow) : [],
+                  hasCategories: Array.isArray(categories) && (categories as any[]).length > 0,
+                  categories: categories,
+                  valueFromDataRow: dataRow ? dataRow[rawName] : 'N/A',
+                  valueFromDataRowValue: dataRow ? dataRow.value : 'N/A'
+                })
+              }
+              // Extract current value: try from data array first (matches prev logic), then from p.value
+              const vFromData = idx >= 0 && idx < (data as any[]).length
+                ? (Array.isArray(categories) && (categories as any[]).length > 0
+                    ? Number(((data as any[])[idx] as any)?.[rawName] ?? 0)
+                    : Number(((data as any[])[idx] as any)?.value ?? 0))
+                : 0
+              const vFromParam = Number(p?.value?.[1] ?? p?.value ?? 0)
+              const v = vFromData || vFromParam
+              if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+                console.debug('[ChartCard] Extracted values:', { vFromData, vFromParam, finalV: v })
+              }
               const xSeq = xVals
               const prevIdx = resolvePrevIndex(idx, xSeq)
               const hasPrev = prevIdx >= 0
@@ -4051,11 +4616,71 @@ export default function ChartCard({
                 : ((changePct < 0) ? '#ef4444' : (changePct > 10 ? '#22c55e' : '#9CA3AF'))
               const deltaStr = hasPrev ? `${(v - prev) >= 0 ? '+' : '-'}${valueFormatter(Math.abs(v - prev))}` : ''
 
-              // Prev label (simple): we rely on x pre-formatting elsewhere
-              const prevLabel = hasPrev ? String(xVals[prevIdx]) : undefined
+              // Prev label derived from effective delta mode (ignore immediate previous neighbor)
+              const prevLabel = (() => {
+                try {
+                  if (!effectiveDeltaMode) return undefined
+                  const s = String(rawX ?? '')
+                  const d = parseDateLoose(s)
+                  if (!d) return undefined
+                  const pv = (() => {
+                    switch (effectiveDeltaMode as any) {
+                      case 'TD_YSTD': { const x = new Date(d); x.setDate(x.getDate()-1); return x }
+                      case 'TW_LW': { const x = new Date(d); x.setDate(x.getDate()-7); return x }
+                      case 'MONTH_LMONTH':
+                      case 'MTD_LMTD': { const x = new Date(d); x.setMonth(x.getMonth()-1); return x }
+                      case 'TQ_LQ': { const x = new Date(d); x.setMonth(x.getMonth()-3); return x }
+                      case 'TY_LY':
+                      case 'YTD_LYTD': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
+                      default: return null
+                    }
+                  })()
+                  if (!pv) return undefined
+                  const pad = (n:number)=>String(n).padStart(2,'0')
+                  const gb = String((querySpec as any)?.groupBy || 'none').toLowerCase()
+                  if (gb === 'year') return String(pv.getFullYear())
+                  if (gb === 'quarter') { const q = Math.floor(pv.getMonth()/3)+1; return `${pv.getFullYear()}-Q${q}` }
+                  if (gb === 'month') return `${pv.getFullYear()}-${pad(pv.getMonth()+1)}`
+                  if (gb === 'week') {
+                    const date = new Date(Date.UTC(pv.getFullYear(), pv.getMonth(), pv.getDate()))
+                    const ws = (deltaWeekStart || 'mon')
+                    if (ws === 'sun') {
+                      const onejan = new Date(pv.getFullYear(),0,1)
+                      const week = Math.ceil((((pv as any)- (onejan as any))/86400000 + onejan.getDay()+1)/7)
+                      return `${pv.getFullYear()}-W${pad(week)}`
+                    } else {
+                      const dayNr = (date.getUTCDay() + 6) % 7
+                      date.setUTCDate(date.getUTCDate() - dayNr + 3)
+                      const firstThursday = new Date(Date.UTC(date.getUTCFullYear(),0,4))
+                      const week = 1 + Math.round(((date.getTime() - firstThursday.getTime())/86400000 - 3) / 7)
+                      return `${date.getUTCFullYear()}-W${pad(week)}`
+                    }
+                  }
+                  return `${pv.getFullYear()}-${pad(pv.getMonth()+1)}-${pad(pv.getDate())}`
+                } catch { return undefined }
+              })()
 
               // Build row
-              const aggLabel = vmeta[rawName]?.agg || toProperCase(String((querySpec as any)?.agg || ((querySpec as any)?.y ? 'sum' : 'count')))
+              const aggLabel = (() => {
+                const fromMeta = (vmeta[rawName]?.agg as any)
+                if (fromMeta) return toProperCase(String(fromMeta))
+                try {
+                  const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
+                  if (seriesDefs.length > 0) {
+                    const base = String(rawName).split(' • ')[0].trim()
+                    for (let i = 0; i < seriesDefs.length; i++) {
+                      const s = seriesDefs[i]
+                      const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
+                      if (String(lab).trim() === base) {
+                        const ag = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+                        return toProperCase(String(ag))
+                      }
+                    }
+                  }
+                } catch {}
+                const fallback = (querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')
+                return toProperCase(String(fallback))
+              })()
               const name = (typeof formatHeader === 'function') ? formatHeader(rawName) : rawName
               const rows: TooltipRow[] = [{
                 color: String(p?.color || '#94a3b8'),
@@ -4068,12 +4693,12 @@ export default function ChartCard({
                 prevStr: hasPrev ? valueFormatter(prev) : '',
                 changeColor,
               }]
-              return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={prevLabel} rows={rows} showDeltas={!!activeDeltaMode} />)
+              return ReactDOMServer.renderToString(<TooltipTable header={xLabel} prevLabel={prevLabel} rows={rows} showDeltas={!!effectiveDeltaMode} />)
             } catch { return '' }
           }
         },
         legend: { show: false },
-        grid: { left: 40, right: 16, top: 10, bottom: 24 + (dataZoom ? 48 : 0) },
+        grid: { left: 40, right: 16, top: 10, bottom: 24 + (dataZoom ? 48 : 0), containLabel: true },
         xAxis: isTime
           ? { type: 'time', axisLabel: { fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => {
                 const s = String(val ?? '')
@@ -4099,7 +4724,7 @@ export default function ChartCard({
                     case 'dddd': return d.toLocaleDateString('en-US', { weekday: 'long' })
                     case 'MMMM': return d.toLocaleDateString('en-US', { month: 'long' })
                     case 'MMM-YYYY': return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-')
-                    default: return s
+                    default: return formatDatePattern(d, String(fmt))
                   }
                 }
                 const mode = (options as any)?.xLabelCase as 'lowercase'|'capitalize'|'proper'|undefined
@@ -4137,7 +4762,7 @@ export default function ChartCard({
                       case 'dddd': return d.toLocaleDateString('en-US', { weekday: 'long' })
                       case 'MMMM': return d.toLocaleDateString('en-US', { month: 'long' })
                       case 'MMM-YYYY': return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-')
-                      default: return s
+                      default: return formatDatePattern(d, String(fmt))
                     }
                   }
                   const mode = (options as any)?.xLabelCase as 'lowercase'|'capitalize'|'proper'|undefined
@@ -4771,6 +5396,9 @@ export default function ChartCard({
           textStyle: { color: undefined as any },
           extraCssText: 'border:1px solid hsl(var(--border));background:hsl(var(--card));color:hsl(var(--foreground));padding:4px 8px;border-radius:6px;box-shadow:none;',
           formatter: (paramsAny: any) => {
+            if (typeof window !== 'undefined') {
+              try { console.log('[ChartCard] [Tooltip] AXIS formatter triggered', { paramsAny, querySpec }) } catch {}
+            }
             const params = Array.isArray(paramsAny) ? paramsAny : (paramsAny ? [paramsAny] : [])
             if (!params.length) return ''
             const idx = params?.[0]?.dataIndex ?? 0
@@ -4807,7 +5435,7 @@ export default function ChartCard({
                   case 'dddd': return d.toLocaleDateString('en-US', { weekday: 'long' })
                   case 'MMMM': return d.toLocaleDateString('en-US', { month: 'long' })
                   case 'MMM-YYYY': return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-')
-                  default: return s
+                  default: return formatDatePattern(d, String(fmt))
                 }
               }
               const mode = (options as any)?.xLabelCase as 'lowercase'|'capitalize'|'proper'|undefined
@@ -4819,14 +5447,36 @@ export default function ChartCard({
                 case 'proper': default: return str.replace(/[_-]+/g,' ').split(/\s+/).map(w=>w? (w[0].toUpperCase()+w.slice(1).toLowerCase()):w).join(' ')
               }
             })()
-            const filtered = (options?.tooltipHideZeros ? params.filter((p:any)=>Number(p?.value ?? 0)!==0) : params)
-            const total = filtered.reduce((sum:number,p:any)=> sum + Number(p.value ?? 0), 0)
+            const getValAt = (p:any, i:number): number => {
+              const rawName = String(p?.seriesName ?? '')
+              const vmeta = (((q?.data as any)?.virtualMeta) || {}) as Record<string, { baseSeriesLabel: string; agg?: string }>
+              const keyName = (vmeta[rawName]?.baseSeriesLabel) ? String(vmeta[rawName].baseSeriesLabel) : rawName
+              const row = i >= 0 && i < (data as any[]).length ? (data as any[])[i] : undefined
+              const vFromData = row
+                ? (Array.isArray(categories) && (categories as any[]).length > 0
+                    ? Number((row as any)?.[keyName] ?? 0)
+                    : Number((row as any)?.value ?? 0))
+                : NaN
+              const valAny = (p?.value as any)
+              const vFromParam = Array.isArray(valAny)
+                ? Number(valAny?.[1] ?? 0)
+                : Number((valAny as any)?.value ?? valAny ?? 0)
+              return Number.isFinite(vFromData) ? vFromData : (Number.isFinite(vFromParam) ? vFromParam : 0)
+            }
+            const withValues = params.map((p:any) => ({ p, v: getValAt(p, idx) }))
+            const filtered = (options?.tooltipHideZeros ? withValues.filter((x:any)=>Number(x.v)!==0) : withValues)
+            const total = filtered.reduce((sum:number,x:any)=> sum + Number(x.v ?? 0), 0)
             let html = `<div style=\"font-weight:600;margin-bottom:4px\">${xLabel}</div>`
             const prevIdx = resolvePrevIndex(idx, xLabels)
-            filtered.forEach((p:any)=>{
-              const v = Number(p.value ?? 0)
+            // Debug: log first param to see value format
+            if (filtered.length > 0 && typeof console !== 'undefined') {
+              console.log('[ChartCard] Tooltip param:', { idx, p: filtered[0]?.p, v: filtered[0]?.v, dataRow: (data as any[])[idx], allParams: params })
+            }
+            filtered.forEach((pp:any)=>{
+              const p = pp.p
+              const v = Number(pp.v ?? 0)
               const pct = total > 0 ? ((v / total) * 100).toFixed(1) : '0.0'
-              const prev = prevIdx >= 0 ? Number((data as any[])[prevIdx]?.[p.seriesName] ?? 0) : 0
+              const prev = prevIdx >= 0 ? getValAt(p, prevIdx) : 0
               const delta = v - prev
               const color = p.color
               const showPct = !!options?.tooltipShowPercent
@@ -4981,16 +5631,186 @@ export default function ChartCard({
         const xSeq = Array.isArray(displayData) ? (displayData as any[]).map((r:any)=>r?.x) : []
         const prevIdx = resolvePrevIndex(datumIdx, xSeq)
         const hasPrev = prevIdx >= 0
-        const prev = hasPrev ? Number((displayData as any[])[prevIdx]?.[seriesKey] ?? 0) : 0
+        const prevFromIndex = hasPrev ? Number((displayData as any[])[prevIdx]?.[seriesKey] ?? 0) : 0
+        // Try cached prev totals for prev period when the previous x bucket isn't present
+        const rawX = String(label ?? '')
+        const rk = prevRangeKeyForRawX(rawX)
+        const vmeta = (((q?.data as any)?.virtualMeta) || {}) as Record<string, { baseSeriesLabel?: string; agg?: string }>
+        const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
+        let sAgg: any = (vmeta[seriesKey]?.agg as any) || ((querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count'))
+        let sY: any = (querySpec as any)?.y as any
+        let sMeasure: any = (querySpec as any)?.measure as any
+        if (seriesDefs.length > 0) {
+          const base = String(seriesKey).split(' • ')[0].trim()
+          for (let i = 0; i < seriesDefs.length; i++) {
+            const s = seriesDefs[i]
+            const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
+            if (String(lab).trim() === base) { sAgg = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count')); sY = s?.y; sMeasure = s?.measure; break }
+          }
+        }
+        const ck = rk ? `${rk}::${sAgg}|${sY || ''}|${sMeasure || ''}` : null
+        const totals = ck ? (prevTotalsCacheRef.current[ck] || {}) : {}
+        if (ck && Object.keys(totals).length === 0) {
+          try {
+            const r = prevRangeForRawX(rawX)
+            const source = (querySpec as any)?.source as string | undefined
+            if (r && deltaDateField && source && !inflightPrevFetchesRef.current[ck]) {
+              inflightPrevFetchesRef.current[ck] = true
+              const gb = String((querySpec as any)?.groupBy || 'none').toLowerCase()
+              const xField = (querySpec as any)?.x as string | undefined
+              const partTitle = gb === 'year' ? 'Year' : gb === 'quarter' ? 'Quarter' : gb === 'month' ? 'Month' : gb === 'week' ? 'Week' : gb === 'day' ? 'Day' : undefined
+              const X_DER = (() => { try { const m = String(xField || '').match(/^(.*)\s\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/); return m ? { base: m[1], part: m[2] } : null } catch { return null } })()
+              const xPartExpr = X_DER ? String(xField) : ((xField && partTitle) ? `${xField} (${partTitle})` : undefined)
+              const legendAny = (querySpec as any)?.legend as any
+              let legendArg: any = undefined
+              const hasLegend = (Array.isArray(legendAny) ? legendAny.length > 0 : (typeof legendAny === 'string' && legendAny.trim() !== ''))
+              if (hasLegend) {
+                if (Array.isArray(legendAny)) { const arr = legendAny.slice(); if (xPartExpr) arr.push(xPartExpr); legendArg = arr }
+                else { legendArg = xPartExpr ? [legendAny, xPartExpr] : legendAny }
+              } else if (xPartExpr) { legendArg = xPartExpr }
+              const whereEff = (() => {
+                try {
+                  const w: any = { ...(uiTruthWhere || {}) }
+                  const df = deltaDateField as string | undefined
+                  if (df) {
+                    const keysToDelete = Object.keys(w).filter((k) => {
+                      const key = String(k)
+                      return key === df || key.startsWith(`${df} (`) || key.startsWith(`${df}__`)
+                    })
+                    keysToDelete.forEach((k) => delete w[k])
+                  }
+                  const xBaseField = (X_DER ? X_DER.base : xField) as string | undefined
+                  if (xBaseField) {
+                    const keysToDelete = Object.keys(w).filter((k) => {
+                      const key = String(k)
+                      return key === xBaseField || key.startsWith(`${xBaseField} (`) || key.startsWith(`${xBaseField}__`)
+                    })
+                    keysToDelete.forEach((k) => delete w[k])
+                  }
+                  const xPart = xPartExpr as string | undefined
+                  if (xPart && xPart !== xBaseField) {
+                    const keysToDelete = Object.keys(w).filter((k) => String(k) === xPart || String(k).startsWith(`${xPart}__`))
+                    keysToDelete.forEach((k) => delete w[k])
+                  }
+                  return Object.keys(w).length ? w : undefined
+                } catch { return undefined }
+              })()
+              void (async () => {
+                try {
+                  const resp = await Api.periodTotals({
+                    source,
+                    datasourceId,
+                    dateField: deltaDateField!,
+                    start: r.start,
+                    end: r.end,
+                    where: whereEff as any,
+                    legend: legendArg,
+                    agg: sAgg as any,
+                    y: sY as any,
+                    measure: sMeasure as any,
+                    weekStart: (deltaWeekStart as any) || undefined,
+                  })
+                  const map: Record<string, number> = { ...(resp?.totals || {}) } as any
+                  const t = Number((resp as any)?.total)
+                  if (Number.isFinite(t)) map['__total__'] = t
+                  prevTotalsCacheRef.current[ck] = map
+                } catch {} finally { inflightPrevFetchesRef.current[ck] = false }
+              })()
+            }
+          } catch {}
+        }
+        const serverPart = (() => {
+          try {
+            const cur = parseDateLoose(String(label))
+            if (!cur) return ''
+            const pv = shiftByMode(cur)
+            if (!pv) return ''
+            const pad = (n:number)=>String(n).padStart(2,'0')
+            const gb = String((querySpec as any)?.groupBy || 'none').toLowerCase()
+            if (gb === 'year') return `${pv.getFullYear()}`
+            if (gb === 'quarter') { const q = Math.floor(pv.getMonth()/3)+1; return `${pv.getFullYear()}-Q${q}` }
+            if (gb === 'month') return `${pv.getFullYear()}-${pad(pv.getMonth()+1)}`
+            if (gb === 'day') return `${pv.getFullYear()}-${pad(pv.getMonth()+1)}-${pad(pv.getDate())}`
+            if (gb === 'week') {
+              const ws = (deltaWeekStart || 'mon')
+              const date = new Date(Date.UTC(pv.getFullYear(), pv.getMonth(), pv.getDate()))
+              if (ws === 'sun') {
+                const onejan = new Date(pv.getFullYear(),0,1)
+                const week = Math.ceil((((pv as any)- (onejan as any))/86400000 + onejan.getDay()+1)/7)
+                return `${pv.getFullYear()}-W${pad(week)}`
+              } else {
+                const dayNr = (date.getUTCDay() + 6) % 7
+                date.setUTCDate(date.getUTCDate() - dayNr + 3)
+                const firstThursday = new Date(Date.UTC(date.getUTCFullYear(),0,4))
+                const week = 1 + Math.round(((date.getTime() - firstThursday.getTime())/86400000 - 3) / 7)
+                return `${date.getUTCFullYear()}-W${pad(week)}`
+              }
+            }
+            return ''
+          } catch { return '' }
+        })()
+        const baseCandidates = (() => {
+          try {
+            const rn = String(seriesKey)
+            const parts = rn.includes(' • ') ? rn.split(' • ') : (rn.includes(' · ') ? rn.split(' · ') : rn.split(' • '))
+            const a = (parts[0] || '').trim()
+            const b = String((vmeta as any)?.[seriesKey]?.baseSeriesLabel || a)
+            const legendPart = parts.slice(1).join(' • ').trim()
+            const list: string[] = []
+            if (legendPart) list.push(a)
+            if (!list.includes(b)) list.push(b)
+            return list.length ? list : [a]
+          } catch { return [String(seriesKey)] }
+        })()
+        const prevFromCache = (() => {
+          try {
+            if (!ck || !Object.keys(totals || {}).length) return 0
+            for (const b of baseCandidates) {
+              const keyVirtual = serverPart ? `${b} • ${serverPart}` : b
+              const seq = [keyVirtual, b, '__total__']
+              for (const k of seq) {
+                const n = Number((totals as any)?.[k] ?? 0)
+                if (Number.isFinite(n) && (k === '__total__' ? true : (k in (totals as any)))) return n
+              }
+            }
+            return 0
+          } catch { return 0 }
+        })()
+        const prev = hasPrev ? prevFromIndex : prevFromCache
         const rowPayload = payload[0]?.payload || {}
         const rowTotal = cats.length > 0 ? cats.reduce((sum, key) => sum + Number(rowPayload?.[key] ?? 0), 0) : Number(rowPayload?.[seriesKey] ?? v)
         const shareStr = rowTotal > 0 ? `${((v / rowTotal) * 100).toFixed(1)}%` : '0.0%'
         const changePct = computeChangePercent(v, prev)
-        const changeStr = hasPrev ? `${changePct >= 0 ? '+' : '-'}${Math.abs(changePct).toFixed(1)}%` : ''
+        const havePrevVal = hasPrev || Number(prev) !== 0
+        const changeStr = havePrevVal ? `${changePct >= 0 ? '+' : '-'}${Math.abs(changePct).toFixed(1)}%` : ''
         const changeColor = (changePct < 0) ? '#ef4444' : (changePct > 10 ? '#22c55e' : '#9CA3AF')
-        const deltaStr = hasPrev ? `${(v - prev) >= 0 ? '+' : '-'}${valueFormatter(Math.abs(v - prev))}` : ''
+        const deltaStr = havePrevVal ? `${(v - prev) >= 0 ? '+' : '-'}${valueFormatter(Math.abs(v - prev))}` : ''
         const name = (options as any)?.legendLabelCase ? ((): string => { const s = String(seriesKey); return (options as any)?.legendLabelCase === 'lowercase' ? s.toLowerCase() : (options as any)?.legendLabelCase === 'capitalize' ? (s.toLowerCase().replace(/^(.)/, (m:any)=>m.toUpperCase())) : s.replace(/[_-]+/g,' ').split(/\s+/).map(w=>w? (w[0].toUpperCase()+w.slice(1).toLowerCase()) : w).join(' ') })() : String(seriesKey)
-        const aggLabel = toProperCase(String((querySpec as any)?.agg || ((querySpec as any)?.y ? 'sum' : 'count')))
+        const aggLabel = (() => {
+          const fromMeta = (vmeta[seriesKey]?.agg as any)
+          if (fromMeta) return toProperCase(String(fromMeta))
+          try {
+            const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
+            if (seriesDefs.length > 0) {
+              const base = String(seriesKey).split(' • ')[0].trim()
+              for (let i = 0; i < seriesDefs.length; i++) {
+                const s = seriesDefs[i]
+                const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
+                if (String(lab).trim() === base) {
+                  const ag = (s?.agg ?? (querySpec as any)?.agg ?? ((s?.y || s?.measure) ? 'sum' : 'count'))
+                  return toProperCase(String(ag))
+                }
+              }
+            }
+          } catch {}
+          const fallback = (querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')
+          // If any series defines a numeric measure/y, prefer SUM for the Total spark display
+          try {
+            const seriesDefsArr: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
+            if (!fallback && seriesDefsArr.some((s:any)=>!!(s?.y || s?.measure))) return 'Sum'
+          } catch {}
+          return toProperCase(String(fallback))
+        })()
         // Header and prev label
         const hdr = (() => {
           const s = String(label ?? '')
@@ -5016,7 +5836,7 @@ export default function ChartCard({
               case 'dddd': return d.toLocaleDateString('en-US', { weekday: 'long' })
               case 'MMMM': return d.toLocaleDateString('en-US', { month: 'long' })
               case 'MMM-YYYY': return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-')
-              default: return s
+              default: return formatDatePattern(d, String(fmt))
             }
           }
           return String(label)
@@ -5047,11 +5867,56 @@ export default function ChartCard({
               case 'dddd': return d.toLocaleDateString('en-US', { weekday: 'long' })
               case 'MMMM': return d.toLocaleDateString('en-US', { month: 'long' })
               case 'MMM-YYYY': return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-')
-              default: return s
+              default: return formatDatePattern(d, String(fmt))
             }
           }
           return String(prevX)
-        })() : undefined
+        })() : (() => {
+          try {
+            if (!effectiveDeltaMode) return undefined
+            const s = String(label ?? '')
+            const d = parseDateLoose(s)
+            if (!d) return undefined
+            const pv = (() => {
+              switch (effectiveDeltaMode as any) {
+                case 'TD_YSTD': { const x = new Date(d); x.setDate(x.getDate()-1); return x }
+                case 'TW_LW': { const x = new Date(d); x.setDate(x.getDate()-7); return x }
+                case 'MONTH_LMONTH':
+                case 'MTD_LMTD': { const x = new Date(d); x.setMonth(x.getMonth()-1); return x }
+                case 'TQ_LQ': { const x = new Date(d); x.setMonth(x.getMonth()-3); return x }
+                case 'TY_LY':
+                case 'YTD_LYTD': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
+                default: return null
+              }
+            })()
+            if (!pv) return undefined
+            const fmt = (options as any)?.xDateFormat
+              || (((querySpec as any)?.groupBy === 'year') ? 'YYYY'
+                : ((querySpec as any)?.groupBy === 'quarter') ? 'YYYY-[Q]q'
+                : ((querySpec as any)?.groupBy === 'month') ? 'MMM-YYYY'
+                : ((querySpec as any)?.groupBy === 'week') ? 'YYYY-[W]ww'
+                : ((querySpec as any)?.groupBy === 'day') ? 'YYYY-MM-DD'
+                : undefined)
+            const pad = (n: number) => String(n).padStart(2, '0')
+            const isoWeek = (date: Date) => { const _d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())); _d.setUTCDate(_d.getUTCDate() + 4 - (_d.getUTCDay() || 7)); const yearStart = new Date(Date.UTC(_d.getUTCFullYear(),0,1)); return Math.ceil((((_d.getTime()-yearStart.getTime())/86400000)+1)/7) }
+            const quarter = (date: Date) => (Math.floor(date.getMonth()/3)+1)
+            if (fmt) {
+              switch (fmt) {
+                case 'YYYY': return String(pv.getFullYear())
+                case 'YYYY-[Q]q': return `${pv.getFullYear()}-Q${quarter(pv)}`
+                case 'YYYY-[W]ww': { const jan1 = new Date(pv.getFullYear(), 0, 1); const day0 = Math.floor((new Date(pv.getFullYear(), pv.getMonth(), pv.getDate()).getTime() - jan1.getTime()) / 86400000); const wnSun = Math.floor((day0 + jan1.getDay()) / 7) + 1; const useSun = (((options as any)?.xWeekStart || (querySpec as any)?.weekStart || 'mon') === 'sun'); const wn = useSun ? wnSun : isoWeek(pv); return `${pv.getFullYear()}-W${String(wn).padStart(2,'0')}` }
+                case 'YYYY-MM': return `${pv.getFullYear()}-${pad(pv.getMonth()+1)}`
+                case 'YYYY-MM-DD': return `${pv.getFullYear()}-${pad(pv.getMonth()+1)}-${pad(pv.getDate())}`
+                case 'h:mm a': { let h = pv.getHours(); const m = pad(pv.getMinutes()); const am = h < 12; h = h % 12 || 12; return `${h}:${m} ${am ? 'AM' : 'PM'}` }
+                case 'dddd': return pv.toLocaleDateString('en-US', { weekday: 'long' })
+                case 'MMMM': return pv.toLocaleDateString('en-US', { month: 'long' })
+                case 'MMM-YYYY': return pv.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-')
+                default: return formatDatePattern(pv, String(fmt))
+              }
+            }
+            return String(pv)
+          } catch { return undefined }
+        })()
         const rows: TooltipRow[] = [{
           color: (payload && payload[0] && payload[0].color) ? String(payload[0].color) : '#94a3b8',
           name,
@@ -5063,7 +5928,7 @@ export default function ChartCard({
           prevStr: hasPrev ? valueFormatter(prev) : '',
           changeColor,
         }]
-        return (<TooltipTable header={hdr} prevLabel={prevLabel} rows={rows} showDeltas={!!activeDeltaMode} />)
+        return (<TooltipTable header={hdr} prevLabel={prevLabel} rows={rows} showDeltas={!!effectiveDeltaMode} />)
       }
       const multi = (categories?.length ?? 0) > 1
       if (multi) {

@@ -771,7 +771,7 @@ export const Api = {
       '/periods/resolve',
       { method: 'POST', body: JSON.stringify(payload) }
     ),
-  periodTotals: (payload: { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; where?: Record<string, unknown>; legend?: string | string[] }) =>
+  periodTotals: (payload: { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' }) =>
     http<{ total?: number; totals?: Record<string, number> }>('/query/period-totals', { method: 'POST', body: JSON.stringify(payload) }),
   periodTotalsBatch: (payload: { requests: Array<({ key?: string } & { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' })> }) =>
     http<{ results: Record<string, { total?: number; totals?: Record<string, number> }> }>('/query/period-totals/batch', { method: 'POST', body: JSON.stringify(payload) }),
