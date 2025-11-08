@@ -527,7 +527,7 @@ export default function HeatmapCard({
             // If x is a derived part like "<field> (Day)", extract the base field name
             try {
               const m = String(xField || '').match(/^(.*)\s\((Year|Quarter|Month(?: Name| Short)?|Week|Day(?: Name| Short)?)\)$/)
-              if (m) xField = m[1]
+              if (m && m[1]) xField = m[1]
             } catch {}
             // Prefer explicit widget valueField if provided
             const yField = options?.heatmap?.weekdayHour?.valueField || base.y || base.measure || s0?.y || s0?.measure
