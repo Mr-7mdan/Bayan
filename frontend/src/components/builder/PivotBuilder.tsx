@@ -135,9 +135,9 @@ export function PivotBuilder({
       ])
       if (taken.has(a)) return // avoid conflicts silently
       const cc: any = { name: a, expr: `[${base}]` }
-      // default alias scope: widget if available; else table if source is known; otherwise datasource
-      if (widgetId) cc.scope = { level: 'widget', widgetId }
-      else if (source) cc.scope = { level: 'table', table: source }
+      // default alias scope: table (preferred), widget if widgetId is set, datasource only as last resort
+      if (source) cc.scope = { level: 'table', table: source }
+      else if (widgetId) cc.scope = { level: 'widget', widgetId }
       else cc.scope = { level: 'datasource' }
       const next = { ...model, customColumns: [...(model.customColumns || []), cc] }
       await Api.saveDatasourceTransforms(String(datasourceId), next as any)

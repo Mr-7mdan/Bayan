@@ -436,13 +436,32 @@ export default function HeatmapCard({
 
   const specKey = useMemo(() => JSON.stringify(querySpec || {}), [querySpec])
   const filtersKey = useMemo(() => JSON.stringify(filters || {}), [filters])
-  const debSpecKey = useDebounced(specKey, 350)
-  const debFiltersKey = useDebounced(filtersKey, 350)
+  const debSpecKey = useDebounced(specKey, 150)
+  const debFiltersKey = useDebounced(filtersKey, 150)
   const presetKeyForQuery = useMemo(() => String(((options as any)?.heatmap?.preset) || 'calendarMonthly'), [ (options as any)?.heatmap?.preset ])
+  // Include all heatmap-specific config in query key so changes trigger refetch
+  const heatmapConfigKey = useMemo(() => JSON.stringify({
+    preset: (options as any)?.heatmap?.preset,
+    calendarMonth: (options as any)?.heatmap?.calendarMonthly?.month,
+    calendarYear: (options as any)?.heatmap?.calendarAnnual?.year,
+    dateField: (options as any)?.heatmap?.calendarMonthly?.dateField || (options as any)?.heatmap?.weekdayHour?.timeField,
+    valueField: (options as any)?.heatmap?.calendarMonthly?.valueField || (options as any)?.heatmap?.weekdayHour?.valueField,
+    aggregation: (options as any)?.heatmap?.calendarMonthly?.aggregation || (options as any)?.heatmap?.weekdayHour?.aggregation,
+  }), [
+    (options as any)?.heatmap?.preset,
+    (options as any)?.heatmap?.calendarMonthly?.month,
+    (options as any)?.heatmap?.calendarAnnual?.year,
+    (options as any)?.heatmap?.calendarMonthly?.dateField,
+    (options as any)?.heatmap?.weekdayHour?.timeField,
+    (options as any)?.heatmap?.calendarMonthly?.valueField,
+    (options as any)?.heatmap?.weekdayHour?.valueField,
+    (options as any)?.heatmap?.calendarMonthly?.aggregation,
+    (options as any)?.heatmap?.weekdayHour?.aggregation,
+  ])
   const uiWhereKey = useMemo(() => JSON.stringify(uiWhere), [uiWhere])
   const debUiWhereKey = useDebounced(uiWhereKey, 350)
   const q = useQuery({
-    queryKey: ['heatmap', title, sql, datasourceId, presetKeyForQuery, queryMode, debSpecKey, debFiltersKey, breakSeq, debUiWhereKey],
+    queryKey: ['heatmap', title, sql, datasourceId, presetKeyForQuery, queryMode, debSpecKey, debFiltersKey, breakSeq, debUiWhereKey, heatmapConfigKey],
     placeholderData: (prev) => prev as any,
     queryFn: async () => {
       if (queryMode === 'spec' && querySpec) {
@@ -485,7 +504,7 @@ export default function HeatmapCard({
           // Prefer RAW rows for calendar presets so we can aggregate by day client-side
           if (base?.source) {
             try {
-              let tField: any = options?.heatmap?.calendarMonthly?.dateField || base.x || (Array.isArray(base.x) ? base.x[0] : undefined)
+              let tField: any = options?.heatmap?.calendarMonthly?.dateField || (Array.isArray(base.x) ? base.x[0] : base.x)
               try {
                 const m = String(tField || '').match(/^(.*)\s\((Year|Quarter|Month(?: Name| Short)?|Week|Day(?: Name| Short)?)\)$/)
                 if (m) tField = m[1]
@@ -498,7 +517,9 @@ export default function HeatmapCard({
           }
         }
         // Weekday × Hour: try server pre-bucketing with SQL when source/x/y exist
-        if (preset === 'weekdayHour' && base?.source) {
+        // DISABLED: SQL generation is hardcoded for SQL Server, doesn't support other dialects
+        // Fall through to spec-based path which handles dialects correctly
+        if (false && preset === 'weekdayHour' && base?.source) {
           try {
             const seriesArr: any[] = Array.isArray(base.series) ? base.series as any[] : []
             const s0 = seriesArr.find((s)=>s?.y || s?.measure || s?.x) || null
@@ -571,7 +592,7 @@ export default function HeatmapCard({
         // Default: fetch as-is, but for weekdayHour prefer RAW rows (remove groupBy/agg and derive base time field)
         if (preset === 'weekdayHour') {
           try {
-            let tField: any = options?.heatmap?.weekdayHour?.timeField || base.x || (Array.isArray(base.x) ? base.x[0] : undefined)
+            let tField: any = options?.heatmap?.weekdayHour?.timeField || (Array.isArray(base.x) ? base.x[0] : base.x)
             try {
               const m = String(tField || '').match(/^(.*)\s\((Year|Quarter|Month(?: Name| Short)?|Week|Day(?: Name| Short)?)\)$/)
               if (m) tField = m[1]
@@ -1056,8 +1077,19 @@ export default function HeatmapCard({
   if (preset === 'calendarMonthly') {
     const allPairs = (monthlyData || []) as Array<[string, number]>
     const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth() + 1).padStart(2, '0'); const fallbackMonth = `${y}-${m}`
-    const month = options?.heatmap?.calendarMonthly?.month || (allPairs[0]?.[0] ? allPairs[0][0].slice(0,7) : fallbackMonth)
+    // Default to latest month in data instead of first for better UX
+    const latestMonth = allPairs.length > 0 ? allPairs[allPairs.length - 1][0].slice(0, 7) : fallbackMonth
+    const month = options?.heatmap?.calendarMonthly?.month || latestMonth
     const pairs = allPairs.filter(([d]) => typeof d === 'string' && d.startsWith(`${month}-`))
+    
+    // Month selector handler
+    const handleMonthChange = (newMonth: string) => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('heatmap-month-change', { 
+          detail: { widgetId, month: newMonth } 
+        }))
+      }
+    }
     const vals = pairs.map(([, v]) => Number(v)).filter(Number.isFinite)
     const sorted = vals.slice().sort((a,b)=>a-b)
     const idx = Math.max(0, Math.min(sorted.length-1, Math.floor(sorted.length * 0.99)))
@@ -1115,8 +1147,21 @@ export default function HeatmapCard({
       <ErrorBoundary name="HeatmapCard@Monthly">
         <div className="h-full flex flex-col" ref={containerRef}>
           {filterbarsUI}
+          <div className="flex items-center gap-2 px-3 py-2 border-b">
+            <label className="text-xs font-medium text-muted-foreground">Month:</label>
+            <input
+              type="month"
+              className="px-2 py-1 rounded text-xs border bg-[hsl(var(--card))]"
+              value={month}
+              onChange={(e) => handleMonthChange(e.target.value)}
+            />
+          </div>
           <div key={keyBase} className="relative flex-1 min-h-0 w-full">
-            <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+            {pairs.length > 0 ? (
+              <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
+            )}
           </div>
         </div>
       </ErrorBoundary>
@@ -1124,8 +1169,18 @@ export default function HeatmapCard({
   }
   if (preset === 'calendarAnnual') {
     const allPairs = (annualData || []) as Array<[string, number]>
-    const year = options?.heatmap?.calendarAnnual?.year || (allPairs[0]?.[0] ? allPairs[0][0].slice(0,4) : String(new Date().getFullYear()))
+    // Default to current year instead of first data year for better UX
+    const year = options?.heatmap?.calendarAnnual?.year || String(new Date().getFullYear())
     const pairs = allPairs.filter(([d]) => typeof d === 'string' && d.startsWith(`${year}-`))
+    
+    // Year selector handler
+    const handleYearChange = (newYear: string) => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('heatmap-year-change', { 
+          detail: { widgetId, year: newYear } 
+        }))
+      }
+    }
     const vals = pairs.map(([, v]) => Number(v)).filter(Number.isFinite)
     const sorted = vals.slice().sort((a,b)=>a-b)
     const idx = Math.max(0, Math.min(sorted.length-1, Math.floor(sorted.length * 0.99)))
@@ -1179,8 +1234,23 @@ export default function HeatmapCard({
       <ErrorBoundary name="HeatmapCard@Annual">
         <div className="h-full flex flex-col" ref={containerRef}>
           {filterbarsUI}
+          <div className="flex items-center gap-2 px-3 py-2 border-b">
+            <label className="text-xs font-medium text-muted-foreground">Year:</label>
+            <input
+              type="number"
+              className="px-2 py-1 rounded text-xs border bg-[hsl(var(--card))] w-24"
+              value={year}
+              min="2000"
+              max="2100"
+              onChange={(e) => handleYearChange(e.target.value)}
+            />
+          </div>
           <div key={keyBase} className="relative flex-1 min-h-0 w-full">
-            <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+            {pairs.length > 0 ? (
+              <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
+            )}
           </div>
         </div>
       </ErrorBoundary>
@@ -1251,7 +1321,11 @@ export default function HeatmapCard({
         <div className="h-full flex flex-col" ref={containerRef}>
           {filterbarsUI}
           <div key={keyBase} className="relative flex-1 min-h-0 w-full">
-            <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+            {dataForSeries.length > 0 ? (
+              <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
+            )}
           </div>
         </div>
       </ErrorBoundary>

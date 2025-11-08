@@ -34,14 +34,28 @@ export default function DateFieldMappingDialog({
   const parseSource = (src?: string): { schema?: string; table?: string } => {
     try {
       if (!src) return {}
-      // Remove alias: take first token before whitespace
-      const base = String(src).trim().split(/\s+/)[0]
-      // Split by dots not inside quotes/brackets
+      const raw = String(src).trim()
+      
+      // For simple dot-separated names without quotes/brackets, handle directly
+      // This handles both "main.TableName" and "schema.table with spaces"
+      if (!raw.includes('[') && !raw.includes('"') && !raw.includes('`') && !raw.includes("'")) {
+        const dotIdx = raw.indexOf('.')
+        if (dotIdx === -1) {
+          // No schema, just table name (possibly with spaces)
+          return { table: raw }
+        }
+        // Schema.Table - everything after first dot is table name
+        const schema = raw.substring(0, dotIdx)
+        const table = raw.substring(dotIdx + 1)
+        return { schema, table }
+      }
+      
+      // Complex case: quoted identifiers - parse carefully
       const parts: string[] = []
       let buf = ''
       let inSq = false, inDq = false, inBq = false, inBr = false
-      for (let i = 0; i < base.length; i++) {
-        const ch = base[i]
+      for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i]
         if (ch === "'" && !inDq && !inBq && !inBr) { inSq = !inSq; buf += ch; continue }
         if (ch === '"' && !inSq && !inBq && !inBr) { inDq = !inDq; buf += ch; continue }
         if (ch === '`' && !inSq && !inDq && !inBr) { inBq = !inBq; buf += ch; continue }
@@ -59,12 +73,16 @@ export default function DateFieldMappingDialog({
   const isDateLike = (c: { name: string; type?: string | null }): boolean => {
     try {
       const t = String(c.type || '').toLowerCase()
-      if (t && (t.includes('date') || t.includes('time'))) return true
       const n = String(c.name || '').toLowerCase()
-      // DuckDB sometimes omits specific type info; use common name patterns as fallback
+      
+      // Check type first (most reliable)
+      if (t && (t.includes('date') || t.includes('time') || t.includes('timestamp'))) return true
+      
+      // Fallback to name patterns
       if (/date|time|timestamp/.test(n)) return true
-      if (/(^|_)created(_|$)|(^|_)updated(_|$)|(^|_)inserted(_|$)|(^|_)modified(_|$)/.test(n)) return true
-      if (/(^|_)dt(_|$)|(^|_)ymd(_|$)/.test(n)) return true
+      if (/(^|_)(created|updated|inserted|modified|deleted)(_|$)/.test(n)) return true
+      if (/(^|_)(dt|ymd)(_|$)/.test(n)) return true
+      
       return false
     } catch { return false }
   }
@@ -128,8 +146,8 @@ export default function DateFieldMappingDialog({
                       rows.filter(r => (r.datasourceId || '__local__') === dsKey).forEach((rw) => {
                         const { schema: sch, table } = parseSource((rw.querySpec as any)?.source)
                         const cols = resolveColumns(fresh, sch, table) as Array<{ name: string; type?: string | null }>
-                        const opts = (cols || []).filter(isDateLike).map((c) => c.name)
-                        out[rw.id] = opts
+                        const dateCols = (cols || []).filter(isDateLike).map((c) => c.name)
+                        out[rw.id] = dateCols
                       })
                       return out
                     } catch { return prev }
@@ -140,8 +158,16 @@ export default function DateFieldMappingDialog({
             const schema = cache[dsKey]
             const { schema: sch, table } = parseSource(source)
             const cols = resolveColumns(schema, sch, table) as Array<{ name: string; type?: string | null }>
-            const opts = (cols || []).filter(isDateLike).map((c) => c.name)
-            map[w.id] = opts
+            // Filter for date-like columns (by type OR name pattern)
+            const dateCols = (cols || []).filter(isDateLike).map((c) => c.name)
+            // Debug logging
+            if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+              console.log('[DateFieldMapping] Widget:', w.id, 'Source:', source, 'ParsedSchema:', sch, 'ParsedTable:', table)
+              console.log('[DateFieldMapping] Schema available?', !!schema, 'Tables in schema:', schema?.schemas?.length)
+              console.log('[DateFieldMapping] Cols:', cols?.length, 'DateCols:', dateCols)
+              if (cols?.length > 0) console.log('[DateFieldMapping] First col:', cols[0])
+            }
+            map[w.id] = dateCols
           } catch {
             map[w.id] = []
           }
@@ -162,6 +188,7 @@ export default function DateFieldMappingDialog({
           <Dialog.Title className="text-lg font-semibold">Map date fields for global filters</Dialog.Title>
           <Dialog.Description className="text-sm text-muted-foreground mb-3">
             Choose the date/datetime column for each widget. Global Start/End will restrict that column.
+            {loading && <span className="ml-2 text-xs">(Loading schema...)</span>}
           </Dialog.Description>
 
           <div className="space-y-2">

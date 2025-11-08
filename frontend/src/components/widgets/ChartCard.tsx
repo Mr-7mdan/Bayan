@@ -3182,6 +3182,9 @@ export default function ChartCard({
           })
         } catch {}
       })()
+      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        try { console.debug('[ChartCard] Building seriesList', { type, categories, displayDataLen: (displayData as any[]).length, xLabelsLen: xLabels.length }) } catch {}
+      }
       const seriesList = (categories || []).map((c, idx) => {
         const nameC = String(c)
         const baseHex = wantValueGrad ? baseHexVG : tremorNameToHex(chartColorsTokens[idx % chartColorsTokens.length])
@@ -3225,6 +3228,9 @@ export default function ChartCard({
         // Check if we're using time-series mode
         const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
         const isTimeSeries = gb && gb !== 'none'
+        // For horizontal bars and area charts (which use category axis), use simple values
+        // Only line and column charts can use [x,y] pairs with time axis
+        const useTimeSeriesFormat = isTimeSeries && type !== 'bar' && type !== 'area'
         const seriesData = (() => {
           if (wantValueGrad) {
             return rawValues.map((v, i) => {
@@ -3233,7 +3239,7 @@ export default function ChartCard({
                 ? (rowTotals[i] > 0 ? (v / rowTotals[i]) : 0)
                 : ((seriesMax[c] > 0) ? (v / seriesMax[c]) : 0)
               const colorHex = override || saturateHexBy(baseHexVG, Math.max(0, Math.min(1, pct)))
-              const baseVal = isTimeSeries ? [xLabels[i], v] : v
+              const baseVal = useTimeSeriesFormat ? [xLabels[i], v] : v
               return { value: baseVal, itemStyle: { color: colorHex, ...(seriesType === 'bar' ? { borderRadius: rounded } : {}) } }
             })
           }
@@ -3247,12 +3253,12 @@ export default function ChartCard({
                   { offset: 1, color: hexToRgba(override, 1) },
                 ],
               } : override) : gradient
-              const baseVal = isTimeSeries ? [xLabels[i], v] : v
+              const baseVal = useTimeSeriesFormat ? [xLabels[i], v] : v
               return { value: baseVal, itemStyle: { color: useColor, borderRadius: rounded } }
             })
           }
-          // For time-series, return [x, y] pairs; otherwise just y values
-          return isTimeSeries ? rawValues.map((v, i) => [xLabels[i], v]) : rawValues
+          // For time-series (except horizontal bars), return [x, y] pairs; otherwise just y values
+          return useTimeSeriesFormat ? rawValues.map((v, i) => [xLabels[i], v]) : rawValues
         })()
 
         // Stack mapping: series item stackId OR options.seriesStackMap[c]
@@ -4110,6 +4116,9 @@ export default function ChartCard({
       const xLabelsFmt = xLabels.map((v:any) => {
         try { return fmtXLabel(v) } catch { return String(v ?? '') }
       })
+      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        try { console.debug('[ChartCard] SeriesList built', { type, seriesCount: seriesList.length, firstSeries: seriesList[0], dataLength: seriesList[0]?.data?.length }) } catch {}
+      }
 
       // Determine if a secondary axis is needed
       const hasSecondaryY = (type !== 'bar') && seriesList.some((s: any) => s.yAxisIndex === 1)

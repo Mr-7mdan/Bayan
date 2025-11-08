@@ -5,11 +5,14 @@ from typing import Optional, Any, Dict, Tuple
 import decimal
 import binascii
 import re
+import logging
 
 import os
 import sys
 import math
 import threading
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -18,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_duckdb_engine, get_engine_from_dsn, open_duck_native
 from ..sqlgen import build_sql, build_distinct_sql
+from ..sqlgen_glot import SQLGlotBuilder, should_use_sqlglot
 import json
 from dateutil import parser as date_parser
 from ..models import SessionLocal, Datasource, User, DatasourceShare, get_share_link_by_public, verify_share_link_token
@@ -44,6 +48,39 @@ try:
     _HEAVY_LIMIT = int(os.environ.get("HEAVY_QUERY_CONCURRENCY", "8") or "8")
 except Exception:
     _HEAVY_LIMIT = 8
+
+
+# SQLGlot helper functions (module-level to be reusable across endpoints)
+def _build_expr_map_helper(ds: Any, source_name: str, ds_type: str, _apply_scope_func) -> dict:
+    """Build mapping of derived column names to SQL expressions"""
+    expr_map = {}
+    
+    if not ds:
+        return expr_map
+    
+    try:
+        raw_json = ds.options_json or "{}"
+        opts = json.loads(raw_json)
+        ds_transforms = opts.get("transforms") or {}
+        ds_transforms = _apply_scope_func(ds_transforms, source_name)
+        
+        # From customColumns
+        custom_cols = ds_transforms.get("customColumns") or []
+        for col in custom_cols:
+            if isinstance(col, dict) and col.get("name") and col.get("expr"):
+                expr_map[col["name"]] = col["expr"]
+        
+        # From computed transforms
+        transforms = ds_transforms.get("transforms") or []
+        for t in transforms:
+            if isinstance(t, dict) and t.get("type") == "computed":
+                if t.get("name") and t.get("expr"):
+                    expr_map[t["name"]] = t["expr"]
+    
+    except Exception as e:
+        logger.error(f"[SQLGlot] Failed to build expr_map: {e}")
+    
+    return expr_map
 if _HEAVY_LIMIT <= 0:
     _HEAVY_LIMIT = 1
 _HEAVY_SEM = threading.BoundedSemaphore(_HEAVY_LIMIT)
@@ -1060,12 +1097,51 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             value_expr = f"{agg.upper()}({_q_ident(val_field)})"
 
     sel_parts = [f"{e} AS {a}" for e, a in (r_exprs + c_exprs)]
-    sel = ", ".join(sel_parts + [f"{value_expr} AS value"]) or f"{value_expr} AS value"
-    # Use expressions in GROUP BY for cross-dialect compatibility (SQL Server disallows aliases here)
-    group_by = ", ".join([e for e, _ in (r_exprs + c_exprs)])
-    gb_sql = f" GROUP BY {group_by}" if group_by else ""
-    order_by = f" ORDER BY {group_by}" if group_by else ""
-    inner = f"SELECT {sel}{base_from_sql}{where_sql}{gb_sql}{order_by}"
+    # Check if SQLGlot should be used
+    use_sqlglot = should_use_sqlglot(actorId)
+    inner = None
+    
+    if use_sqlglot:
+        # NEW PATH: SQLGlot pivot query generation
+        try:
+            print(f"[SQLGlot] Pivot: ENABLED for user={actorId}, dialect={ds_type}")
+            
+            # Build expr_map for custom columns
+            expr_map = _build_expr_map_helper(ds_info, payload.source, ds_type, _apply_scope) if ds_info else {}
+            
+            builder = SQLGlotBuilder(dialect=ds_type)
+            inner = builder.build_pivot_query(
+                source=payload.source,
+                rows=r_dims,
+                cols=c_dims,
+                value_field=val_field if val_field else None,
+                agg=agg,
+                where=payload.where,
+                group_by=payload.groupBy if hasattr(payload, 'groupBy') else None,
+                week_start=payload.weekStart if hasattr(payload, 'weekStart') else 'mon',
+                limit=payload.limit,
+                expr_map=expr_map,
+                ds_type=ds_type,
+            )
+            print(f"[SQLGlot] Pivot: Generated SQL: {inner[:150]}...")
+            
+        except Exception as e:
+            print(f"[SQLGlot] Pivot: Error: {e}")
+            logger.warning(f"[SQLGlot] Pivot query failed: {e}")
+            if not settings.enable_legacy_fallback:
+                logger.error(f"[SQLGlot] Pivot: LEGACY FALLBACK DISABLED - Re-raising error")
+                raise HTTPException(status_code=500, detail=f"SQLGlot query generation failed: {e}")
+            print(f"[SQLGlot] Pivot: Falling back to legacy builder")
+            use_sqlglot = False
+    
+    if not use_sqlglot:
+        # LEGACY PATH: String-based SQL building
+        sel = ", ".join(sel_parts + [f"{value_expr} AS value"]) or f"{value_expr} AS value"
+        # Use expressions in GROUP BY for cross-dialect compatibility (SQL Server disallows aliases here)
+        group_by = ", ".join([e for e, _ in (r_exprs + c_exprs)])
+        gb_sql = f" GROUP BY {group_by}" if group_by else ""
+        order_by = f" ORDER BY {group_by}" if group_by else ""
+        inner = f"SELECT {sel}{base_from_sql}{where_sql}{gb_sql}{order_by}"
 
     # Delegate execution to /query. If no explicit limit is provided, fetch all pages.
     _HEAVY_SEM.acquire()
@@ -2112,6 +2188,200 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             return col
         return col
 
+    # Helper: build expression map from datasource transforms
+    def _build_expr_map(ds: Any, source_name: str, ds_type: str) -> dict:
+        """Build mapping of derived column names to SQL expressions"""
+        expr_map = {}
+        
+        if not ds:
+            return expr_map
+        
+        try:
+            raw_json = ds.options_json or "{}"
+            opts = json.loads(raw_json)
+            ds_transforms = opts.get("transforms") or {}
+            ds_transforms = _apply_scope(ds_transforms, source_name)
+            
+            # From customColumns
+            custom_cols = ds_transforms.get("customColumns") or []
+            for col in custom_cols:
+                if isinstance(col, dict) and col.get("name") and col.get("expr"):
+                    expr_map[col["name"]] = col["expr"]
+            
+            # From computed transforms
+            transforms = ds_transforms.get("transforms") or []
+            for t in transforms:
+                if isinstance(t, dict) and t.get("type") == "computed":
+                    if t.get("name") and t.get("expr"):
+                        expr_map[t["name"]] = t["expr"]
+        
+        except Exception as e:
+            logger.error(f"[SQLGlot] Failed to build expr_map: {e}")
+        
+        return expr_map
+    
+    # Helper: resolve derived columns in WHERE clause
+    def _resolve_derived_columns_in_where(where: dict, ds: Any, source_name: str, ds_type: str) -> dict:
+        """Resolve derived column names to SQL expressions in WHERE clause"""
+        print(f"[SQLGlot] _resolve_derived_columns_in_where CALLED with where keys: {list(where.keys()) if where else 'None'}")
+        
+        if not where:
+            return where
+        
+        if not ds:
+            print("[SQLGlot] No datasource provided for resolution")
+            return where
+        
+        try:
+            # Build expr_map from datasource
+            expr_map = _build_expr_map(ds, source_name, ds_type)
+            
+            # Resolve WHERE clause
+            print(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}")
+            print(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}")
+            
+            resolved = {}
+            resolved_count = 0
+            for key, value in where.items():
+                # First check if it's a custom column
+                if key in expr_map:
+                    expr = expr_map[key]
+                    # Strip table aliases (e.g., s.ClientID → ClientID)
+                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)
+                    print(f"[SQLGlot] ✅ Resolved custom column '{key}' → {expr[:80]}...")
+                    resolved[f"({expr})"] = value
+                    resolved_count += 1
+                # Check if it's a date part pattern like "OrderDate (Year)"
+                elif " (" in key and ")" in key:
+                    match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", key, flags=re.IGNORECASE)
+                    if match:
+                        base_col = match.group(1).strip()
+                        kind = match.group(2).lower()
+                        expr = _build_datepart_expr(base_col, kind, ds_type)
+                        print(f"[SQLGlot] ✅ Resolved date part '{key}' → {expr[:80]}...")
+                        resolved[f"({expr})"] = value
+                        resolved_count += 1
+                    else:
+                        resolved[key] = value
+                else:
+                    resolved[key] = value
+            
+            print(f"[SQLGlot] Resolution complete: {resolved_count}/{len(where)} columns resolved")
+            return resolved
+            
+        except Exception as e:
+            logger.error(f"[SQLGlot] Failed to resolve derived columns: {e}", exc_info=True)
+            print(f"[SQLGlot] Failed to resolve derived columns: {e}")
+            return where
+    
+    def _build_case_expression(case_transform: dict) -> str:
+        """Build SQL CASE expression from transform definition"""
+        try:
+            target = case_transform.get("target", "")
+            cases = case_transform.get("cases", [])
+            else_val = case_transform.get("else")
+            
+            if not target or not cases:
+                return ""
+            
+            sql_parts = ["CASE"]
+            for case in cases:
+                when_cond = case.get("when", {})
+                then_val = case.get("then")
+                
+                # Build condition
+                op = when_cond.get("op", "eq")
+                left = when_cond.get("left", target)
+                right = when_cond.get("right")
+                
+                # Simple operators
+                if op == "eq":
+                    cond = f'"{left}" = \'{right}\''
+                elif op == "ne":
+                    cond = f'"{left}" != \'{right}\''
+                elif op == "gt":
+                    cond = f'"{left}" > {right}'
+                elif op == "gte":
+                    cond = f'"{left}" >= {right}'
+                elif op == "lt":
+                    cond = f'"{left}" < {right}'
+                elif op == "lte":
+                    cond = f'"{left}" <= {right}'
+                elif op == "in":
+                    vals = ", ".join([f"'{v}'" for v in right]) if isinstance(right, list) else f"'{right}'"
+                    cond = f'"{left}" IN ({vals})'
+                elif op == "like":
+                    cond = f'"{left}" LIKE \'{right}\''
+                else:
+                    continue
+                
+                sql_parts.append(f"WHEN {cond} THEN '{then_val}'")
+            
+            if else_val is not None:
+                sql_parts.append(f"ELSE '{else_val}'")
+            
+            sql_parts.append("END")
+            return " ".join(sql_parts)
+            
+        except Exception:
+            return ""
+    
+    def _build_datepart_expr(base_col: str, kind: str, dialect: str) -> str:
+        """Build dialect-specific date part expression (e.g., OrderDate (Year))"""
+        q = f'"{base_col}"'  # Quoted identifier
+        kind_l = kind.lower()
+        
+        # DuckDB
+        if "duckdb" in dialect.lower():
+            if kind_l == 'year': return f"strftime({q}, '%Y')"
+            if kind_l == 'quarter': return f"concat(strftime({q}, '%Y'), '-Q', CAST(EXTRACT(QUARTER FROM {q}) AS INTEGER))"
+            if kind_l == 'month': return f"strftime({q}, '%Y-%m')"
+            if kind_l == 'month name': return f"strftime({q}, '%B')"
+            if kind_l == 'month short': return f"strftime({q}, '%b')"
+            if kind_l == 'week': return f"concat(strftime({q}, '%Y'), '-W', substr('00' || strftime({q}, '%W'), -2))"
+            if kind_l == 'day': return f"strftime({q}, '%Y-%m-%d')"
+            if kind_l == 'day name': return f"strftime({q}, '%A')"
+            if kind_l == 'day short': return f"strftime({q}, '%a')"
+        
+        # PostgreSQL
+        elif "postgres" in dialect.lower() or "postgre" in dialect.lower():
+            if kind_l == 'year': return f"to_char({q}, 'YYYY')"
+            if kind_l == 'quarter': return f"to_char({q}, 'YYYY-\"Q\"Q')"
+            if kind_l == 'month': return f"to_char({q}, 'YYYY-MM')"
+            if kind_l == 'month name': return f"to_char({q}, 'FMMonth')"
+            if kind_l == 'month short': return f"to_char({q}, 'Mon')"
+            if kind_l == 'week': return f"to_char({q}, 'YYYY') || '-W' || lpad(to_char({q}, 'IW'), 2, '0')"
+            if kind_l == 'day': return f"to_char({q}, 'YYYY-MM-DD')"
+            if kind_l == 'day name': return f"to_char({q}, 'FMDay')"
+            if kind_l == 'day short': return f"to_char({q}, 'Dy')"
+        
+        # MSSQL
+        elif "mssql" in dialect.lower() or "sqlserver" in dialect.lower():
+            if kind_l == 'year': return f"CAST(YEAR({q}) AS varchar(10))"
+            if kind_l == 'quarter': return f"CAST(YEAR({q}) AS varchar(4)) + '-Q' + CAST(DATEPART(QUARTER, {q}) AS varchar(1))"
+            if kind_l == 'month': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-', RIGHT('0' + CAST(MONTH({q}) AS varchar(2)), 2))"
+            if kind_l == 'month name': return f"DATENAME(month, {q})"
+            if kind_l == 'month short': return f"LEFT(DATENAME(month, {q}), 3)"
+            if kind_l == 'week': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-W', RIGHT('0' + CAST(DATEPART(ISO_WEEK, {q}) AS varchar(2)), 2))"
+            if kind_l == 'day': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-', RIGHT('0'+CAST(MONTH({q}) AS varchar(2)),2), '-', RIGHT('0'+CAST(DAY({q}) AS varchar(2)),2))"
+            if kind_l == 'day name': return f"DATENAME(weekday, {q})"
+            if kind_l == 'day short': return f"LEFT(DATENAME(weekday, {q}), 3)"
+        
+        # MySQL
+        elif "mysql" in dialect.lower():
+            if kind_l == 'year': return f"DATE_FORMAT({q}, '%Y')"
+            if kind_l == 'quarter': return f"CONCAT(DATE_FORMAT({q}, '%Y'), '-Q', QUARTER({q}))"
+            if kind_l == 'month': return f"DATE_FORMAT({q}, '%Y-%m')"
+            if kind_l == 'month name': return f"DATE_FORMAT({q}, '%M')"
+            if kind_l == 'month short': return f"DATE_FORMAT({q}, '%b')"
+            if kind_l == 'week': return f"CONCAT(DATE_FORMAT({q}, '%Y'), '-W', LPAD(WEEK({q}, 3), 2, '0'))"
+            if kind_l == 'day': return f"DATE_FORMAT({q}, '%Y-%m-%d')"
+            if kind_l == 'day name': return f"DATE_FORMAT({q}, '%W')"
+            if kind_l == 'day short': return f"DATE_FORMAT({q}, '%a')"
+        
+        # Fallback: return quoted identifier
+        return q
+
     # Helper: scope filter for datasource-level transforms
     def _matches_table(scope_table: str, source_name: str) -> bool:
         def norm(s: str) -> str:
@@ -2872,6 +3142,97 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
         # Aggregated query when agg != 'none' (with optional legend)
         if agg and agg != "none":
+            # Check if SQLGlot should be used (feature flag + user whitelist)
+            use_sqlglot = should_use_sqlglot(actorId)
+            sql_inner = None
+            params = None  # Initialize params for both SQLGlot and legacy paths
+            
+            if use_sqlglot:
+                # Build expr_map from datasource transforms
+                expr_map = _build_expr_map(ds, spec.source, ds_type) if ds else {}
+                print(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}")
+                
+                # Resolve WHERE clause
+                where_resolved = None
+                if hasattr(spec, 'where') and spec.where:
+                    where_resolved = _resolve_derived_columns_in_where(
+                        spec.where,
+                        ds,
+                        spec.source,
+                        ds_type
+                    )
+                else:
+                    where_resolved = None
+                
+            if use_sqlglot:
+                # NEW PATH: SQLGlot SQL generation
+                try:
+                    logger.info(f"[SQLGlot] ENABLED for user={actorId}, dialect={ds_type}")
+                    print(f"[SQLGlot] ENABLED for user={actorId}, dialect={ds_type}")
+                    
+                    builder = SQLGlotBuilder(dialect=ds_type)
+                    
+                    # Handle multi-legend (legend could be string or array)
+                    legend_field_val = spec.legend if hasattr(spec, 'legend') else None
+                    legend_fields_val = None
+                    if isinstance(legend_field_val, list):
+                        legend_fields_val = legend_field_val
+                        legend_field_val = None
+                    
+                    # Handle multi-series
+                    series_val = spec.series if hasattr(spec, 'series') and isinstance(spec.series, list) else None
+                    
+                    sql_inner = builder.build_aggregation_query(
+                        source=spec.source,
+                        x_field=x_col,
+                        y_field=spec.y if hasattr(spec, 'y') else None,
+                        legend_field=legend_field_val,
+                        agg=agg,
+                        where=where_resolved,  # Use resolved WHERE with expressions
+                        group_by=spec.groupBy if hasattr(spec, 'groupBy') else None,
+                        order_by=spec.orderBy if hasattr(spec, 'orderBy') else None,
+                        order=spec.order if hasattr(spec, 'order') else 'asc',
+                        limit=lim,
+                        week_start=spec.weekStart if hasattr(spec, 'weekStart') else 'mon',
+                        date_field=x_col,  # For date range filtering
+                        expr_map=expr_map,  # Pass custom column mapping
+                        ds_type=ds_type,  # Pass dialect for date part resolution
+                        series=series_val,  # Multi-series support
+                        legend_fields=legend_fields_val,  # Multi-legend support
+                    )
+                    logger.info(f"[SQLGlot] Generated: {sql_inner[:150]}...")
+                    print(f"[SQLGlot] Generated: {sql_inner[:150]}...")
+                    
+                    # Create query request and execute
+                    eff_limit = lim or 1000
+                    q = QueryRequest(
+                        sql=sql_inner,
+                        datasourceId=(None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId),
+                        limit=eff_limit,
+                        offset=off or 0,
+                        includeTotal=payload.includeTotal,
+                        params=params or None,
+                        preferLocalDuck=prefer_local,
+                        preferLocalTable=spec.source,
+                    )
+                    counter_inc("sqlglot_queries_total", {"dialect": ds_type})
+                    return run_query(q, db)
+                    
+                except Exception as e:
+                    # SQLGlot failed, fall back to legacy
+                    logger.error(f"[SQLGlot] ERROR: {e}")
+                    print(f"[SQLGlot] ERROR: {e}")
+                    counter_inc("sqlglot_errors_total", {"dialect": ds_type, "error": str(type(e).__name__)})
+                    if not settings.enable_legacy_fallback:
+                        logger.error(f"[SQLGlot] /query/spec: LEGACY FALLBACK DISABLED - Re-raising error")
+                        raise HTTPException(status_code=500, detail=f"SQLGlot query generation failed: {e}")
+                    print(f"[SQLGlot] /query/spec: Falling back to legacy SQL builder")
+                    use_sqlglot = False
+            
+            # LEGACY PATH: Continue with existing SQL string building
+            if not use_sqlglot:
+                counter_inc("legacy_queries_total", {"dialect": ds_type})
+            
             if spec.measure:
                 # Sanitize raw measure: trim and strip trailing "AS alias" to avoid invalid wrappers
                 measure_str = str(spec.measure).strip()
@@ -3407,6 +3768,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             if re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", s, flags=re.IGNORECASE):
                 expr = _derived_lhs(s)
                 return f"{expr} AS {_q_ident(s)}"
+            # If base_from_sql exists, columns are already materialized - just quote the name without table prefix
+            if base_from_sql:
+                return _q_ident(s)
             # If unquoted identifier includes spaces or special chars (not an expression), quote it
             try:
                 is_quoted = (s.startswith('[') and s.endswith(']')) or (s.startswith('"') and s.endswith('"')) or (s.startswith('`') and s.endswith('`'))
@@ -3617,7 +3981,9 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                 'joins': filt(model.get('joins')),
                 'defaults': model.get('defaults') or {},
             }
-        ds_transforms = _apply_scope((opts or {}).get("transforms") or {}, str(payload.source))
+        # Keep original transforms for build_sql (before filtering)
+        ds_transforms_original = _apply_scope((opts or {}).get("transforms") or {}, str(payload.source))
+        ds_transforms = ds_transforms_original
         # Probe base columns to filter out transforms/custom columns with missing dependencies
         def _list_cols_for_base() -> set[str]:
             try:
@@ -3649,12 +4015,18 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                     __joins_eff.append(__j)
             except Exception:
                 continue
+        # Build base_select: ALWAYS include the field being queried
+        # The legacy builder will handle it if it's a custom column, date part, or regular column
+        field_name = str(payload.field)
+        base_select_list = ["*", field_name]
+        print(f"[Legacy] /distinct: Adding '{field_name}' to base_select (will be materialized if it's custom/datepart)")
+        
         base_sql, _unused_cols, _warns = build_sql(
             dialect=ds_type or dialect,
             source=str(payload.source),
-            base_select=["*"],
-            custom_columns=ds_transforms.get("customColumns", []),
-            transforms=ds_transforms.get("transforms", []),
+            base_select=base_select_list,
+            custom_columns=ds_transforms_original.get("customColumns", []),
+            transforms=ds_transforms_original.get("transforms", []),
             joins=__joins_eff,
             defaults={},  # do not apply defaults like TopN
             limit=None,
@@ -3662,12 +4034,88 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
         base_from_sql = f"({base_sql}) AS _base"
     # If no datasource or no transforms, select directly from source
     effective_source = base_from_sql or str(payload.source)
-    sql, params = build_distinct_sql(
-        dialect=dialect,
-        source=effective_source,
-        field=str(payload.field),
-        where=dict(payload.where or {}),
-    )
+    
+    # Check if SQLGlot should be used
+    use_sqlglot = should_use_sqlglot(actorId)
+    sql = None
+    params = {}
+    
+    if use_sqlglot:
+        try:
+            print(f"[SQLGlot] ENABLED for /distinct endpoint, dialect={dialect}")
+            
+            # Build expr_map from datasource
+            # Only if there's NO base_from_sql (custom columns already materialized in subquery)
+            print(f"[SQLGlot] /distinct: base_from_sql={'EXISTS' if base_from_sql else 'NONE'}")
+            print(f"[SQLGlot] /distinct: effective_source preview: {effective_source[:200] if effective_source else 'NONE'}...")
+            expr_map = {}
+            if ds_info and not base_from_sql:
+                ds_obj = db.get(Datasource, ds_info.get("id"))
+                if ds_obj:
+                    expr_map = _build_expr_map(ds_obj, payload.source, ds_type)
+            
+            # Resolve WHERE clause (similar to /query/spec)
+            # IMPORTANT: Exclude the field we're querying from WHERE to avoid circular filtering
+            where_resolved = None
+            if payload.where:
+                # Remove the field being queried from WHERE clause
+                field_str = str(payload.field)
+                print(f"[SQLGlot] /distinct: Field='{field_str}', WHERE keys={list(payload.where.keys())}")
+                where_without_field = {k: v for k, v in payload.where.items() if k != field_str}
+                print(f"[SQLGlot] /distinct: Excluded '{field_str}' from WHERE (original had {len(payload.where)} filters, now {len(where_without_field)})")
+                
+                if where_without_field:
+                    if base_from_sql:
+                        # Custom columns already in subquery, use as-is
+                        where_resolved = where_without_field
+                    else:
+                        where_resolved = _resolve_derived_columns_in_where(
+                            where_without_field,
+                            db.get(Datasource, ds_info.get("id")) if ds_info else None,
+                            payload.source,
+                            ds_type
+                        )
+            
+            builder = SQLGlotBuilder(dialect=dialect)
+            sql = builder.build_distinct_query(
+                source=effective_source,
+                field=str(payload.field),
+                where=where_resolved,
+                limit=1000,  # Default limit for distinct values
+                expr_map=expr_map if not base_from_sql else {},  # No resolution needed if subquery
+                ds_type=ds_type,
+            )
+            print(f"[SQLGlot] Generated DISTINCT SQL: {sql[:150]}...")
+            
+        except Exception as e:
+            print(f"[SQLGlot] ERROR in /distinct: {e}")
+            logger.error(f"[SQLGlot] ERROR in /distinct: {e}", exc_info=True)
+            if not settings.enable_legacy_fallback:
+                logger.error(f"[SQLGlot] /distinct: LEGACY FALLBACK DISABLED - Re-raising error")
+                raise HTTPException(status_code=500, detail=f"SQLGlot query generation failed: {e}")
+            print(f"[SQLGlot] /distinct: Falling back to legacy builder")
+            use_sqlglot = False
+    
+    if not use_sqlglot:
+        # IMPORTANT: Exclude the field we're querying from WHERE to avoid circular filtering
+        where_for_legacy = dict(payload.where or {})
+        
+        # Remove the field being queried
+        if str(payload.field) in where_for_legacy:
+            del where_for_legacy[str(payload.field)]
+            print(f"[Legacy] /distinct: Excluded '{payload.field}' from WHERE to get all distinct values")
+        
+        # When base_from_sql exists, also skip other filters to avoid "column not found" errors
+        if base_from_sql:
+            print(f"[Legacy] base_from_sql exists, skipping remaining WHERE filters (custom columns in subquery)")
+            where_for_legacy = {}  # Skip WHERE filtering when using transformed subquery
+        
+        sql, params = build_distinct_sql(
+            dialect=dialect,
+            source=effective_source,
+            field=str(payload.field),
+            where=where_for_legacy,
+        )
     # Cache lookup (short TTL shared with /query)
     try:
         counter_inc("query_requests_total", {"endpoint": "distinct"})
@@ -4500,14 +4948,81 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                     exprs.append(f"COALESCE({e}, '')")
                 legend_expr = " || ".join(exprs)
 
-    if legend_expr:
-        if "mssql" in dialect_name or "sqlserver" in dialect_name:
-            # SQL Server: GROUP BY explicit expression
-            sql_inner = f"SELECT {legend_expr} as k, {value_expr} as v FROM {effective_source}{where_sql} GROUP BY {legend_expr}"
+    # Check if SQLGlot should be used
+    use_sqlglot = should_use_sqlglot(actorId)
+    sql_inner = None
+    
+    if use_sqlglot:
+        # NEW PATH: SQLGlot SQL generation for period totals
+        try:
+            print(f"[SQLGlot] Period-totals: ENABLED for user={actorId}, dialect={dialect_name}")
+            
+            # Build expr_map from ds_transforms
+            expr_map_local = {}
+            if ds_transforms:
+                # From customColumns
+                for col in ds_transforms.get("customColumns", []):
+                    if isinstance(col, dict) and col.get("name") and col.get("expr"):
+                        expr_map_local[col["name"]] = col["expr"]
+                # From computed transforms
+                for t in ds_transforms.get("transforms", []):
+                    if isinstance(t, dict) and t.get("type") == "computed":
+                        if t.get("name") and t.get("expr"):
+                            expr_map_local[t["name"]] = t["expr"]
+            
+            # Build the aggregation query using SQLGlot
+            builder = SQLGlotBuilder(dialect=dialect_name)
+            
+            # Handle legend: can be string, list, or None
+            legend_field_arg = None
+            legend_fields_arg = None
+            if legend:
+                if isinstance(legend, list):
+                    if len(legend) == 1:
+                        legend_field_arg = legend[0]
+                    else:
+                        legend_fields_arg = legend
+                else:
+                    legend_field_arg = legend
+            
+            # Period totals is essentially an aggregation with optional legend
+            sql_inner = builder.build_aggregation_query(
+                source=source,  # Fix: was spec_source, should be source
+                x_field=None,  # No x-axis for period totals
+                y_field=y,
+                legend_field=legend_field_arg,
+                legend_fields=legend_fields_arg,
+                agg=agg,
+                where=base_where,
+                group_by=None,  # No time bucketing (already filtered by date range)
+                order_by=None,
+                order='asc',
+                limit=None,
+                week_start='mon',
+                date_field=None,
+                expr_map=expr_map_local,
+                ds_type=dialect_name,
+            )
+            print(f"[SQLGlot] Period-totals: Generated SQL: {sql_inner[:150]}...")
+            
+        except Exception as e:
+            print(f"[SQLGlot] Period-totals: Error: {e}")
+            logger.warning(f"[SQLGlot] Period-totals query failed: {e}")
+            if not settings.enable_legacy_fallback:
+                logger.error(f"[SQLGlot] Period-totals: LEGACY FALLBACK DISABLED - Re-raising error")
+                raise HTTPException(status_code=500, detail=f"SQLGlot query generation failed: {e}")
+            print(f"[SQLGlot] Period-totals: Falling back to legacy builder")
+            use_sqlglot = False
+    
+    if not use_sqlglot:
+        if legend_expr:
+            if "mssql" in dialect_name or "sqlserver" in dialect_name:
+                # SQL Server: GROUP BY explicit expression
+                sql_inner = f"SELECT {legend_expr} as k, {value_expr} as v FROM {effective_source}{where_sql} GROUP BY {legend_expr}"
+            else:
+                sql_inner = f"SELECT {legend_expr} as k, {value_expr} as v FROM {effective_source}{where_sql} GROUP BY 1"
         else:
-            sql_inner = f"SELECT {legend_expr} as k, {value_expr} as v FROM {effective_source}{where_sql} GROUP BY 1"
-    else:
-        sql_inner = f"SELECT {value_expr} as v FROM {effective_source}{where_sql}"
+            sql_inner = f"SELECT {value_expr} as v FROM {effective_source}{where_sql}"
 
     # Caching key
     try:
@@ -4519,12 +5034,12 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
     
     # Debug: Log request details before cache check
     import sys
-    print(f"[DEBUG period_totals] Request: start={start}, end={end}, y={y}, agg={agg}", file=sys.stderr)
-    print(f"[DEBUG period_totals] Params: {params}", file=sys.stderr)
+    # print(f"[DEBUG period_totals] Request: start={start}, end={end}, y={y}, agg={agg}", file=sys.stderr)
+    # print(f"[DEBUG period_totals] Params: {params}", file=sys.stderr)
     
     cached = _cache_get(cache_key)
     if cached:
-        print(f"[DEBUG period_totals] CACHE HIT - returning cached data: {cached}", file=sys.stderr)
+        # print(f"[DEBUG period_totals] CACHE HIT - returning cached data: {cached}", file=sys.stderr)
         cols, rows = cached
         if legend:
             try:
@@ -4593,11 +5108,11 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             with open_duck_native(db_path) as conn:
                 # Debug: Log SQL and params
                 import sys
-                print(f"[DEBUG period_totals] Params: {vals}", file=sys.stderr)
-                print(f"[DEBUG period_totals] Date range: {start} to {end}", file=sys.stderr)
+                # print(f"[DEBUG period_totals] Params: {vals}", file=sys.stderr)
+                # print(f"[DEBUG period_totals] Date range: {start} to {end}", file=sys.stderr)
                 cur = conn.execute(sql_qm, vals)
                 rows = cur.fetchall()
-                print(f"[DEBUG period_totals] Rows returned: {len(rows)}, First row: {rows[0] if rows else 'None'}", file=sys.stderr)
+                # print(f"[DEBUG period_totals] Rows returned: {len(rows)}, First row: {rows[0] if rows else 'None'}", file=sys.stderr)
             if legend:
                 out = {"totals": {str(r[0]): float(r[1] or 0) for r in rows}}
                 try:

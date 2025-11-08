@@ -346,6 +346,12 @@ def build_sql(
         nm = str(cc.get("name") or "").strip()
         if nm:
             alias_names.append(nm)
+    # Also include computed transforms
+    for tr in (transforms or []):
+        if str(tr.get("type") or "").lower() == "computed":
+            nm = str(tr.get("name") or "").strip()
+            if nm:
+                alias_names.append(nm)
     for tr in (transforms or []):
         t = (tr.get("type") or "").lower()
         if t in {"computed", "case", "replace", "translate", "nullhandling"}:
@@ -353,6 +359,7 @@ def build_sql(
             if tgt:
                 alias_names.append(tgt)
     alias_set = {s.lower() for s in alias_names}
+    print(f"[build_sql] alias_names collected: {alias_names[:10]}")
 
     # Detect unpivot transform (first occurrence only)
     unpivot_tr = None
@@ -386,6 +393,11 @@ def build_sql(
             except Exception:
                 pass
         if token in {"start", "startDate", "end", "endDate"}:
+            continue
+        # Skip tokens that are custom column names - they'll be added by the custom columns loop
+        # Strip table prefix (e.g., "s.ClientType" -> "ClientType") before checking
+        token_base = token.split('.')[-1] if '.' in token else token
+        if token_base in alias_names:
             continue
         # Support derived date parts specified as "BaseField (Part)" in base_select
         # This mirrors build_distinct_sql's mapping but projects as a regular column with an alias

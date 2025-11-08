@@ -59,6 +59,23 @@ class Settings(BaseSettings):
     # Prefer routing queries to local DuckDB when available
     prefer_local_duckdb: bool = Field(default=False, validation_alias=AliasChoices("PREFER_LOCAL_DUCKDB"))
 
+    # SQLGlot feature flag (experimental dual-mode SQL generation)
+    enable_sqlglot: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("ENABLE_SQLGLOT"),
+        description="Enable SQLGlot SQL generation (runs side-by-side with legacy)"
+    )
+    sqlglot_users: str = Field(
+        default="",
+        validation_alias=AliasChoices("SQLGLOT_USERS"),
+        description="Comma-separated user IDs for SQLGlot (empty=none, *=all)"
+    )
+    enable_legacy_fallback: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("ENABLE_LEGACY_FALLBACK"),
+        description="Allow fallback to legacy SQL builder when SQLGlot fails (disable for 100% SQLGlot)"
+    )
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [x.strip() for x in str(self.cors_origins).split(",") if x.strip()]

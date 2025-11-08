@@ -37,11 +37,7 @@ export default function HomePage() {
   const { env } = useEnvironment()
   const searchParams = useSearchParams()
   const idParam = typeof window !== 'undefined' ? (searchParams?.get('id') || null) : null
-  const defaultLayout: RGLLayout[] = [
-    { i: 'kpi1', x: 0, y: 0, w: 3, h: 2 },
-    { i: 'chart1', x: 3, y: 0, w: 6, h: 6 },
-    { i: 'table1', x: 0, y: 2, w: 9, h: 6 },
-  ]
+  const defaultLayout: RGLLayout[] = []
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [dashboardId, setDashboardId] = useState<string | null>(null)
@@ -71,23 +67,7 @@ export default function HomePage() {
   const [embedEt, setEmbedEt] = useState<string>('')
   // Dashboard-level options
   const [dashOptions, setDashOptions] = useState<Record<string, any>>({ publicShowFilters: true, publicLockFilters: false, gridSize: 'lg' })
-  const [configs, setConfigs] = useState<Record<string, WidgetConfig>>({
-    kpi1: { id: 'kpi1', type: 'kpi', title: 'Sample KPI', sql: 'select 123 as value', options: { colorToken: 1 } },
-    chart1: {
-      id: 'chart1',
-      type: 'chart',
-      title: 'Sample Series',
-      sql: 'select range as x, range * 10 as value from range(10)',
-      chartType: 'line',
-      options: { colorToken: 4, showLegend: false, yAxisFormat: 'short' },
-    },
-    table1: {
-      id: 'table1',
-      type: 'table',
-      title: 'Sample Table',
-      sql: "select range as id, range*2 as v, 'row ' || range as label from range(25)",
-    },
-  })
+  const [configs, setConfigs] = useState<Record<string, WidgetConfig>>({})
 
   const selectedConfig = selectedId ? configs[selectedId] : null
   const userEditedRef = useRef<boolean>(false)
@@ -485,10 +465,28 @@ export default function HomePage() {
             setDashboardName(res.name || 'New Dashboard')
             setCreatedAt(res.createdAt || null)
             if (def?.layout && def?.widgets) {
-              setLayoutState(def.layout)
+              // Check for orphaned widgets (exist in widgets but not in layout)
+              const layoutIds = new Set(def.layout.map((ly: RGLLayout) => ly.i))
+              const widgetIds = Object.keys(def.widgets)
+              const orphanedIds = widgetIds.filter(id => !layoutIds.has(id))
+              
+              let finalLayout = def.layout
+              if (orphanedIds.length > 0) {
+                // Auto-add orphaned widgets to layout at the bottom
+                const maxY = def.layout.reduce((acc: number, ly: RGLLayout) => Math.max(acc, ly.y + ly.h), 0)
+                const orphanedLayouts: RGLLayout[] = orphanedIds.map((id, idx) => {
+                  const widget = (def.widgets as any)[id]
+                  const type = widget?.type || 'chart'
+                  const size = (type === 'table' || type === 'composition') ? { w: 9, h: 6 } : type === 'chart' ? { w: 6, h: 6 } : { w: 3, h: 2 }
+                  return { i: id, x: 0, y: maxY + (idx * 7), w: size.w, h: size.h }
+                })
+                finalLayout = [...def.layout, ...orphanedLayouts]
+              }
+              
+              setLayoutState(finalLayout)
               setConfigs(def.widgets as Record<string, WidgetConfig>)
               setDashOptions((def as any).options || { publicShowFilters: true, publicLockFilters: false })
-              try { localStorage.setItem('dashboardDraft', JSON.stringify(def)) } catch {}
+              try { localStorage.setItem('dashboardDraft', JSON.stringify({ ...def, layout: finalLayout })) } catch {}
             }
           } catch { /* ignore */ }
           setHydrated(true)
@@ -1086,7 +1084,45 @@ export default function HomePage() {
     return () => { if (typeof window !== 'undefined') window.removeEventListener('widget-config-patch', handler as EventListener) }
   }, [layoutState])
 
-  
+  // Listen for heatmap month changes
+  useEffect(() => {
+    const handler = (e: Event) => {
+      try {
+        const d = (e as CustomEvent).detail as { widgetId?: string; month?: string }
+        if (!d?.widgetId || !d.month) return
+        setConfigs((prev) => {
+          const cfg = prev[d.widgetId!]
+          if (!cfg) return prev
+          const opts = { ...cfg.options, heatmap: { ...(cfg.options as any)?.heatmap, calendarMonthly: { ...(cfg.options as any)?.heatmap?.calendarMonthly, month: d.month } } }
+          const next = { ...prev, [d.widgetId!]: { ...cfg, options: opts } }
+          scheduleServerSave({ layout: layoutState, widgets: next })
+          return next
+        })
+      } catch {}
+    }
+    if (typeof window !== 'undefined') window.addEventListener('heatmap-month-change', handler as EventListener)
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('heatmap-month-change', handler as EventListener) }
+  }, [layoutState])
+
+  // Listen for heatmap year changes
+  useEffect(() => {
+    const handler = (e: Event) => {
+      try {
+        const d = (e as CustomEvent).detail as { widgetId?: string; year?: string }
+        if (!d?.widgetId || !d.year) return
+        setConfigs((prev) => {
+          const cfg = prev[d.widgetId!]
+          if (!cfg) return prev
+          const opts = { ...cfg.options, heatmap: { ...(cfg.options as any)?.heatmap, calendarAnnual: { ...(cfg.options as any)?.heatmap?.calendarAnnual, year: d.year } } }
+          const next = { ...prev, [d.widgetId!]: { ...cfg, options: opts } }
+          scheduleServerSave({ layout: layoutState, widgets: next })
+          return next
+        })
+      } catch {}
+    }
+    if (typeof window !== 'undefined') window.addEventListener('heatmap-year-change', handler as EventListener)
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('heatmap-year-change', handler as EventListener) }
+  }, [layoutState])
 
   // Listen for load time events from ChartCard
   useEffect(() => {

@@ -1,0 +1,10 @@
+[SQLGlot] ERROR: Binder Error: Referenced column "OrderDate (Year)" not found in FROM clause!
+Candidate bindings: "OrderDate", "OrderID", "OrderUID", "OrderDetailsID", "RecordDateEntry"
+
+LINE 1: ...d_6a35ea5dc886__View_CIT_Invoice_Details_PriceList3" WHERE "OrderDate (Year)" IN ('2023', '2024', '2025') GROUP BY...
+                                                                      ^, falling back to legacy SQL builder
+[SQLGlot] ERROR: Binder Error: Referenced column "OrderDate (Year)" not found in FROM clause!
+Candidate bindings: "OrderDate", "OrderID", "OrderUID", "OrderDetailsID", "RecordDateEntry"
+
+LINE 1: ...d_6a35ea5dc886__View_CIT_Invoice_Details_PriceList3" WHERE "OrderDate (Year)" IN ('2023', '2024', '2025') GROUP BY...
+                                                                      ^, falling back to legacy SQL builder
