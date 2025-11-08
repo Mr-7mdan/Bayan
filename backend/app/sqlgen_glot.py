@@ -2,13 +2,13 @@
 SQLGlot-based SQL generation for multi-dialect support.
 Runs side-by-side with SQLGlot-based SQL builder for multi-dialect query generation.
 """
-print("[SQLGlot] ★★★ sqlgen_glot.py MODULE LOADED ★★★")
+print("[SQLGlot] sqlgen_glot.py MODULE LOADED ")
 from typing import Any, Dict, Optional, List
 import logging
 import re
 import sqlglot
 from sqlglot import exp
-print(f"[SQLGlot] ★★★ sqlglot version {sqlglot.__version__} imported ★★★")
+print(f"[SQLGlot] sqlglot version {sqlglot.__version__} imported ")
 
 logger = logging.getLogger(__name__)
 
