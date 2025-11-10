@@ -94,6 +94,56 @@ if _HEAVY_LIMIT <= 0:
     _HEAVY_LIMIT = 1
 _HEAVY_SEM = threading.BoundedSemaphore(_HEAVY_LIMIT)
 
+# Helper: Resolve table ID to current name
+def _resolve_table_name(ds: Any, source_table_id: str | None, source_name: str | None) -> str | None:
+    """
+    Resolve a table ID to its current name, falling back to source_name if ID not found.
+    
+    Args:
+        ds: Datasource object or dict
+        source_table_id: Stable table ID (format: "{datasourceId}__{originalName}")
+        source_name: Fallback table name (used if ID not found or not provided)
+    
+    Returns:
+        Current table name, or None if neither ID nor name provided
+    """
+    # If no table ID provided, use source name as-is
+    if not source_table_id:
+        return source_name
+    
+    # Try to resolve ID to current name
+    if ds:
+        try:
+            # Handle both dict and object forms
+            if isinstance(ds, dict):
+                raw_json = ds.get("options_json") or "{}"
+            else:
+                raw_json = getattr(ds, "options_json", None) or "{}"
+            
+            opts = json.loads(raw_json)
+            mappings = opts.get("tableIdMappings") or {}
+            
+            # Look up current name by ID
+            if source_table_id in mappings:
+                current_name = mappings[source_table_id]
+                logger.info(f"[TableID] Resolved {source_table_id} -> {current_name}")
+                return current_name
+        except Exception as e:
+            logger.warning(f"[TableID] Failed to resolve table ID: {e}")
+    
+    # Fallback to source name
+    if source_name:
+        logger.info(f"[TableID] No mapping found for {source_table_id}, using source name: {source_name}")
+        return source_name
+    
+    # Last resort: extract original name from ID
+    if source_table_id and "__" in source_table_id:
+        original_name = source_table_id.split("__", 1)[1]
+        logger.warning(f"[TableID] Extracting original name from ID: {original_name}")
+        return original_name
+    
+    return source_name
+
 # Per-actor in-flight limiter (non-reentrant). Default cap via USER_QUERY_CONCURRENCY.
 _ACTOR_CAP = 2
 try:
@@ -2074,6 +2124,18 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
     lim = payload.spec.limit if payload.spec.limit is not None else payload.limit
     off = payload.spec.offset if payload.spec.offset is not None else payload.offset
+    
+    # Resolve table ID to current name (supports table renaming)
+    source_table_id = getattr(payload.spec, 'sourceTableId', None)
+    source_name_original = payload.spec.source
+    resolved_source = _resolve_table_name(ds, source_table_id, source_name_original)
+    
+    # Use resolved source for all subsequent operations
+    if resolved_source and resolved_source != source_name_original:
+        # Override the spec source with resolved name
+        payload.spec.source = resolved_source
+        logger.info(f"[TableID] Using resolved table name: {resolved_source} (was: {source_name_original})")
+    
     # Validate required fields
     if not (payload.spec.source and str(payload.spec.source).strip()):
         raise HTTPException(status_code=400, detail="spec.source is required for /query/spec")

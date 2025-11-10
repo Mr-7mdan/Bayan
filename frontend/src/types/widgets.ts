@@ -149,6 +149,7 @@ export type WidgetConfig = {
   queryMode?: 'sql' | 'spec'
   querySpec?: {
     source: string
+    sourceTableId?: string  // Stable table ID for rename resilience
     select?: string[]
     where?: Record<string, unknown>
     limit?: number

@@ -249,7 +249,7 @@ class SQLGlotBuilder:
             
             # Apply WHERE clauses
             if where:
-                query = self._apply_where(query, where, date_field=date_field or x_field)
+                query = self._apply_where(query, where, date_field=date_field or x_field, expr_map=expr_map)
             
             # Apply GROUP BY (by position)
             if group_positions:
@@ -370,7 +370,7 @@ class SQLGlotBuilder:
             
             # Apply WHERE clauses
             if where:
-                query = self._apply_where(query, where)
+                query = self._apply_where(query, where, expr_map=expr_map)
             
             # Apply ORDER BY
             if order_by:
@@ -506,7 +506,7 @@ class SQLGlotBuilder:
             
             # 2. Additional WHERE conditions
             if where:
-                query = self._apply_where(query, where)
+                query = self._apply_where(query, where, expr_map=expr_map)
             
             # Apply GROUP BY (if legend field exists)
             if legend_field_resolved:
@@ -629,7 +629,8 @@ class SQLGlotBuilder:
         self, 
         query: exp.Select, 
         where: Dict[str, Any],
-        date_field: Optional[str] = None
+        date_field: Optional[str] = None,
+        expr_map: Optional[Dict[str, str]] = None
     ) -> exp.Select:
         """
         Apply WHERE clause filters.
@@ -640,10 +641,32 @@ class SQLGlotBuilder:
         - None: field IS NULL
         - Comparison operators: field__gte, field__gt, field__lte, field__lt
         - Date ranges: start, startDate, end, endDate (requires x_field)
+        - Custom columns: Resolves custom column names to their expressions
         
         Note: Does NOT validate column existence - trusts database to handle it.
         This allows derived columns and transforms to work.
         """
+        def resolve_where_field(field_name: str) -> tuple[Any, bool]:
+            """Resolve a WHERE field to its SQL expression if it's a custom column"""
+            if not field_name:
+                return field_name, False
+            
+            # Check if it's a custom column
+            if expr_map and field_name in expr_map:
+                expr = expr_map[field_name]
+                # Strip table aliases (e.g., s.ClientID -> ClientID)
+                expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
+                expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
+                print(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in WHERE -> {expr[:80]}...")
+                # Parse the expression and return it
+                try:
+                    return sqlglot.parse_one(expr, dialect=self.dialect), True
+                except Exception as e:
+                    logger.warning(f"[SQLGlot] Failed to parse custom column expression '{expr}': {e}")
+                    return field_name, False
+            
+            return field_name, False
+        
         for key, value in where.items():
             # Check if key is an expression (starts with parenthesis)
             # This indicates a resolved derived column like "(strftime('%Y', OrderDate))"
@@ -662,7 +685,12 @@ class SQLGlotBuilder:
                 # Handle comparison operators (field__gte, field__lte, etc.)
                 if "__" in key and key not in ("start", "startDate", "end", "endDate"):
                     field, operator = key.rsplit("__", 1)
-                    col = exp.Column(this=exp.Identifier(this=field, quoted=True))
+                    # Try to resolve as custom column first
+                    resolved, is_custom = resolve_where_field(field)
+                    if is_custom:
+                        col = resolved
+                    else:
+                        col = exp.Column(this=exp.Identifier(this=field, quoted=True))
                     
                     if operator == "gte":
                         query = query.where(col >= self._to_literal(value))
@@ -680,11 +708,21 @@ class SQLGlotBuilder:
                 
                 # Handle date range filters
                 if key in ("start", "startDate") and date_field:
-                    date_col = exp.Column(this=exp.Identifier(this=date_field, quoted=True))
+                    # Resolve date_field if it's a custom column
+                    resolved_date, is_custom_date = resolve_where_field(date_field)
+                    if is_custom_date:
+                        date_col = resolved_date
+                    else:
+                        date_col = exp.Column(this=exp.Identifier(this=date_field, quoted=True))
                     query = query.where(date_col >= self._to_literal(value))
                     continue
                 elif key in ("end", "endDate") and date_field:
-                    date_col = exp.Column(this=exp.Identifier(this=date_field, quoted=True))
+                    # Resolve date_field if it's a custom column
+                    resolved_date, is_custom_date = resolve_where_field(date_field)
+                    if is_custom_date:
+                        date_col = resolved_date
+                    else:
+                        date_col = exp.Column(this=exp.Identifier(this=date_field, quoted=True))
                     query = query.where(date_col <= self._to_literal(value))
                     continue
                 elif key in ("start", "startDate", "end", "endDate"):
@@ -692,8 +730,12 @@ class SQLGlotBuilder:
                     logger.warning(f"[SQLGlot] Date range filter '{key}' ignored: no date_field specified")
                     continue
                 
-                # Regular column name
-                col = exp.Column(this=exp.Identifier(this=key, quoted=True))
+                # Regular column name - try to resolve as custom column first
+                resolved, is_custom = resolve_where_field(key)
+                if is_custom:
+                    col = resolved
+                else:
+                    col = exp.Column(this=exp.Identifier(this=key, quoted=True))
             
             if value is None:
                 # NULL check

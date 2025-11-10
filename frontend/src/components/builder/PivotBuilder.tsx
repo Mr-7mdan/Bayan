@@ -81,10 +81,26 @@ export function PivotBuilder({
         const cfg = await Api.getDatasourceTransforms(String(datasourceId))
         const cols = Array.isArray((cfg as any)?.customColumns) ? (cfg as any).customColumns : []
         const map: Record<string,string> = {}
+        
+        // Helper to normalize table names for comparison
+        const norm = (s: string) => String(s || '').trim().replace(/^\[|\]|^"|"$/g, '')
+        const tblEq = (a: string, b: string) => {
+          const na = norm(a).split('.').pop() || ''
+          const nb = norm(b).split('.').pop() || ''
+          return na.toLowerCase() === nb.toLowerCase()
+        }
+        
         for (const cc of cols) {
           const name = String(cc?.name || '').trim()
           const expr = String(cc?.expr || '').trim()
           if (!name || !expr) continue
+          
+          // Check scope: only include if datasource-level OR matches current table
+          const sc = cc?.scope || {}
+          const lvl = String(sc?.level || 'datasource').toLowerCase()
+          const scopeMatch = (lvl === 'datasource' || (lvl === 'table' && sc?.table && source && tblEq(String(sc.table), source)))
+          if (!scopeMatch) continue
+          
           // Accept simple proxy expressions like [Base], "Base", s.Base, s."Base"
           const m = expr.match(/^\s*(?:\[s\]\.\[([^\]]+)\]|\[([^\]]+)\]|s\.\"?([A-Za-z0-9_]+)\"?|\"([^\"]+)\")\s*$/)
           const base = (m?.[1] || m?.[2] || m?.[3] || m?.[4] || '').trim()

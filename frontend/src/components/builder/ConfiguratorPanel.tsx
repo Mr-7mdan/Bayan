@@ -380,11 +380,30 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
   // Merge base column names with custom columns for builders, and Unpivot outputs
   const allFieldNames: string[] = useMemo(() => {
     const customs = (local?.customColumns || []).map((c) => c.name).filter(Boolean)
-    // Include ALL datasource-level custom columns unconditionally so users can select them
+    // Include custom columns matching the current table or datasource scope
     const dsCustoms: string[] = (() => {
       try {
-        const items = ((dsTransformsQ.data as any)?.customColumns || []) as Array<{ name?: string }>
-        return items.map((c) => String(c?.name || '')).filter(Boolean)
+        const items = ((dsTransformsQ.data as any)?.customColumns || []) as Array<{ name?: string; scope?: any }>
+        const srcNow = String(local?.querySpec?.source || '')
+        const widNow = String((local as any)?.id || '')
+        const norm = (s: string) => String(s || '').trim().replace(/^\[|\]|^"|"$/g, '')
+        const tblEq = (a: string, b: string) => {
+          const na = norm(a).split('.').pop() || ''
+          const nb = norm(b).split('.').pop() || ''
+          return na.toLowerCase() === nb.toLowerCase()
+        }
+        return items
+          .filter((c) => {
+            const sc = (c?.scope || {}) as any
+            const lvl = String(sc?.level || 'datasource').toLowerCase()
+            const match = (
+              lvl === 'datasource' ||
+              (lvl === 'table' && sc?.table && srcNow && tblEq(String(sc.table), srcNow)) ||
+              (lvl === 'widget' && sc?.widgetId && widNow && String(sc.widgetId) === widNow)
+            )
+            return match
+          })
+          .map((c) => String(c?.name || '')).filter(Boolean)
       } catch { return [] }
     })()
     // Unpivot: add key/value columns for matching-scope transforms and hide the sourceColumns they replace
@@ -5048,7 +5067,9 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                   <Select
                     value={local.querySpec?.source || ''}
                     onValueChangeAction={(src: string) => {
-                      const next = { ...local, querySpec: { source: src, select: [], where: undefined, x: undefined as any, y: undefined as any, legend: undefined as any, measure: undefined as any, agg: undefined as any, groupBy: undefined as any } }
+                      // Generate stable table ID for rename resilience
+                      const tableId = dsId ? `${dsId}__${src}` : undefined
+                      const next = { ...local, querySpec: { source: src, sourceTableId: tableId, select: [], where: undefined, x: undefined as any, y: undefined as any, legend: undefined as any, measure: undefined as any, agg: undefined as any, groupBy: undefined as any } }
                       next.options = { ...(local.options || {}), deltaDateField: undefined } as any
                       setLocal(next)
                       updateConfig(next)

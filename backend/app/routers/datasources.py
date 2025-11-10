@@ -1297,8 +1297,42 @@ def rename_local_table(ds_id: str, payload: _RenameLocalTableRequest, actorId: s
     try:
         with open_duck_native(settings.duckdb_path) as conn:
             conn.execute(f"ALTER TABLE {q_old} RENAME TO {q_new}")
+        
+        # Update table ID mapping to track renames
+        try:
+            opts = json.loads(ds.options_json or "{}")
+        except Exception:
+            opts = {}
+        
+        # Initialize table mappings if not present
+        if "tableIdMappings" not in opts:
+            opts["tableIdMappings"] = {}
+        
+        # Create stable table ID from datasource + original name
+        table_id = f"{ds_id}__{old_name}"
+        
+        # Check if this table already has a mapping (was renamed before)
+        # If so, keep the original ID, just update the current name
+        found_id = None
+        for tid, current_name in opts["tableIdMappings"].items():
+            if current_name == old_name:
+                found_id = tid
+                break
+        
+        if found_id:
+            # Update existing mapping
+            opts["tableIdMappings"][found_id] = new_name
+        else:
+            # Create new mapping (first rename)
+            opts["tableIdMappings"][table_id] = new_name
+        
+        # Save updated options
+        ds.options_json = json.dumps(opts)
+        db.commit()
+        
         return {"ok": True}
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to rename table: {str(e)}")
 
 

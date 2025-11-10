@@ -77,6 +77,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
   const [limitN, setLimitN] = useState<string>('')
   // Examples panel (right-side) visibility; default collapsed
   const [examplesOpen, setExamplesOpen] = useState<boolean>(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const mainColsClass = examplesOpen ? 'lg:grid-cols-[1fr,320px]' : 'lg:grid-cols-[1fr,auto]'
 
   const colsAvailable = useMemo(() => {
@@ -475,7 +476,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
   // After hooks: guard render when closed or no window
   if (!open || typeof window === 'undefined') return null
 
-  return createPortal(
+  const mainPortal = createPortal(
     <div className="fixed inset-0 z-[1000]">
       <div className="absolute inset-0 bg-black/40" onClick={onCloseAction} />
       {/* External JSON panel positioned to the left of the dialog */}
@@ -1132,9 +1133,23 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                   input.onchange = async (e: any) => {
                     try {
                       const file = e.target?.files?.[0]
-                      if (!file) return
+                      if (!file) {
+                        console.log('[Import] No file selected')
+                        return
+                      }
+                      console.log('[Import] File selected:', file.name, 'size:', file.size)
                       const text = await file.text()
+                      console.log('[Import] File text length:', text.length)
+                      console.log('[Import] First 200 chars:', text.substring(0, 200))
                       const imported = JSON.parse(text) as any
+                      
+                      // Debug: Log what we're importing
+                      console.log('[Import] Parsed imported data:', imported)
+                      console.log('[Import] Type of imported:', typeof imported)
+                      console.log('[Import] Is object?', imported && typeof imported === 'object')
+                      console.log('[Import] Custom columns:', imported?.customColumns, 'isArray:', Array.isArray(imported?.customColumns))
+                      console.log('[Import] Transforms:', imported?.transforms, 'isArray:', Array.isArray(imported?.transforms))
+                      console.log('[Import] Joins:', imported?.joins, 'isArray:', Array.isArray(imported?.joins))
                       
                       // Merge logic: update existing by name, add new ones
                       const current = JSON.parse(editJson || '{}') as any
@@ -1145,39 +1160,54 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                         defaults: current?.defaults || undefined,
                       }
                       
-                      // Merge custom columns by name
+                      // Merge custom columns by name (if name exists, otherwise just add)
                       if (Array.isArray(imported?.customColumns)) {
                         imported.customColumns.forEach((ic: any) => {
+                          if (!ic || typeof ic !== 'object') return
                           const name = String(ic?.name || '').trim()
-                          if (!name) return
-                          const idx = merged.customColumns.findIndex((c: any) => String(c?.name || '').trim().toLowerCase() === name.toLowerCase())
-                          if (idx >= 0) merged.customColumns[idx] = ic
-                          else merged.customColumns.push(ic)
+                          if (name) {
+                            const idx = merged.customColumns.findIndex((c: any) => String(c?.name || '').trim().toLowerCase() === name.toLowerCase())
+                            if (idx >= 0) merged.customColumns[idx] = ic
+                            else merged.customColumns.push(ic)
+                          } else {
+                            // No name, just append
+                            merged.customColumns.push(ic)
+                          }
                         })
                       }
                       
-                      // Merge transforms by target/name
+                      // Merge transforms by target/name (if exists, otherwise just add)
                       if (Array.isArray(imported?.transforms)) {
                         imported.transforms.forEach((it: any) => {
+                          if (!it || typeof it !== 'object') return
                           const key = String(it?.target || it?.name || '').trim()
-                          if (!key) return
-                          const idx = merged.transforms.findIndex((t: any) => {
-                            const tk = String(t?.target || t?.name || '').trim()
-                            return tk.toLowerCase() === key.toLowerCase()
-                          })
-                          if (idx >= 0) merged.transforms[idx] = it
-                          else merged.transforms.push(it)
+                          if (key) {
+                            const idx = merged.transforms.findIndex((t: any) => {
+                              const tk = String(t?.target || t?.name || '').trim()
+                              return tk.toLowerCase() === key.toLowerCase()
+                            })
+                            if (idx >= 0) merged.transforms[idx] = it
+                            else merged.transforms.push(it)
+                          } else {
+                            // No key, just append
+                            merged.transforms.push(it)
+                          }
                         })
                       }
                       
-                      // Merge joins by targetTable
+                      // Merge joins by targetTable (if exists, otherwise just add)
                       if (Array.isArray(imported?.joins)) {
                         imported.joins.forEach((ij: any) => {
+                          if (!ij || typeof ij !== 'object') return
                           const table = String(ij?.targetTable || '').trim()
-                          if (!table) return
-                          const idx = merged.joins.findIndex((j: any) => String(j?.targetTable || '').trim().toLowerCase() === table.toLowerCase())
-                          if (idx >= 0) merged.joins[idx] = ij
-                          else merged.joins.push(ij)
+                          if (table) {
+                            const idx = merged.joins.findIndex((j: any) => String(j?.targetTable || '').trim().toLowerCase() === table.toLowerCase())
+                            if (idx >= 0) merged.joins[idx] = ij
+                            else merged.joins.push(ij)
+                          } else {
+                            // No targetTable, just append
+                            merged.joins.push(ij)
+                          }
                         })
                       }
                       
@@ -1186,11 +1216,15 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                         merged.defaults = { ...merged.defaults, ...imported.defaults }
                       }
                       
-                      // Count what was imported
-                      const importedCCCount = Array.isArray(imported?.customColumns) ? imported.customColumns.filter((ic: any) => String(ic?.name || '').trim()).length : 0
-                      const importedTRCount = Array.isArray(imported?.transforms) ? imported.transforms.filter((it: any) => String(it?.target || it?.name || '').trim()).length : 0
-                      const importedJNCount = Array.isArray(imported?.joins) ? imported.joins.filter((ij: any) => String(ij?.targetTable || '').trim()).length : 0
+                      // Count what was imported (validate with actual object presence, not just name)
+                      const importedCCCount = Array.isArray(imported?.customColumns) ? imported.customColumns.length : 0
+                      const importedTRCount = Array.isArray(imported?.transforms) ? imported.transforms.length : 0
+                      const importedJNCount = Array.isArray(imported?.joins) ? imported.joins.length : 0
                       const totalImported = importedCCCount + importedTRCount + importedJNCount
+                      
+                      // Debug counts
+                      console.log('[Import] Counts:', { importedCCCount, importedTRCount, importedJNCount, totalImported })
+                      console.log('[Import] Merged result:', merged)
                       
                       setEditJson(JSON.stringify(merged, null, 2))
                       setError(undefined)
@@ -1212,21 +1246,31 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                           } catch {}
                         }, 100)
                         
-                        alert(`✓ Successfully imported:\n${parts.join('\n')}\n\nCheck the "All Statements" panel below to see the imported items.\nRemember to click "Save" to persist the changes.`)
+                        setToast({ message: `Import successful: ${parts.join(', ')}`, type: 'success' })
+                        setTimeout(() => setToast(null), 5000)
                       } else {
-                        alert('⚠ No valid items found in the import file')
+                        // Provide diagnostic info in the error message
+                        const ccLen = imported?.customColumns?.length || 0
+                        const trLen = imported?.transforms?.length || 0
+                        const jnLen = imported?.joins?.length || 0
+                        const diagnostic = `Detected: ${ccLen} columns, ${trLen} transforms, ${jnLen} joins`
+                        console.error('[Import] No items found.', diagnostic, 'Raw:', { cc: imported?.customColumns, tr: imported?.transforms, jn: imported?.joins })
+                        setToast({ message: `No valid items in file. ${diagnostic}. Check console for details.`, type: 'error' })
+                        setTimeout(() => setToast(null), 8000)
                       }
                     } catch (e: any) {
                       const errMsg = String(e?.message || 'Import failed - invalid JSON')
                       setError(errMsg)
-                      alert(`✗ Import failed:\n${errMsg}`)
+                      setToast({ message: `Import failed: ${errMsg}`, type: 'error' })
+                      setTimeout(() => setToast(null), 5000)
                     }
                   }
                   input.click()
                 } catch (e: any) {
                   const errMsg = String(e?.message || 'Import failed')
                   setError(errMsg)
-                  alert(`✗ Import failed:\n${errMsg}`)
+                  setToast({ message: `Import failed: ${errMsg}`, type: 'error' })
+                  setTimeout(() => setToast(null), 5000)
                 }
               }}
               title="Import and merge transforms from JSON file"
@@ -1380,4 +1424,27 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
     document.body
   )
 
+  // Toast notification (outside portal)
+  const toastPortal = toast && typeof window !== 'undefined' ? createPortal(
+    <div className="fixed bottom-4 right-4 z-[9999] animate-in slide-in-from-bottom-2">
+      <div 
+        className={`px-4 py-3 rounded-lg shadow-lg border ${
+          toast.type === 'success' 
+            ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100' 
+            : 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-900 dark:text-red-100'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{toast.message}</span>
+          <button 
+            onClick={() => setToast(null)} 
+            className="text-xs opacity-60 hover:opacity-100"
+          >✕</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null
+
+  return <>{mainPortal}{toastPortal}</>
 }

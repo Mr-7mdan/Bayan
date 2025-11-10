@@ -1,0 +1,53 @@
+{
+  "customColumns": [
+    {
+      "name": "ClientCode",
+      "expr": "CASE  WHEN s.ClientID = '2' THEN 'BOP'  WHEN s.ClientID = '4' THEN 'BOJ'  WHEN s.ClientID = '11' THEN 'JAB'  WHEN s.ClientID = '5' THEN 'CAB'  WHEN s.ClientID = '9' THEN 'AIB'  WHEN s.ClientID = '10' THEN 'PIB'  WHEN s.ClientID = '31' THEN 'Anabtawi'  WHEN s.ClientID = '21' THEN 'Jebrini'  WHEN s.ClientID = '18' THEN 'UniPal'  WHEN s.ClientID = '30' THEN 'Jawwal'  WHEN s.ClientID = '29' THEN 'Paltel'  WHEN s.ClientID = '15' THEN 'Jawwal'  WHEN s.ClientID = '17' THEN 'Bravo'  WHEN s.ClientID = '13' THEN 'Paltel'  WHEN s.ClientID = '12' THEN 'HBTF'  WHEN s.ClientID = '6' THEN 'QB'  WHEN s.ClientID = '16' THEN 'UNRWRA'  WHEN s.ClientID = '14' THEN 'Safa'  WHEN s.ClientID = '19' THEN 'EALB'  WHEN s.ClientID = '20' THEN 'PIBBank'  WHEN s.ClientID = '34' THEN 'PIB'  WHEN s.ClientID = '3' THEN 'TNB'  WHEN s.ClientID = '28' THEN 'UniPal'  WHEN s.ClientID = '33' THEN 'AIB'  WHEN s.ClientID = '35' THEN 'AMAN'  WHEN s.ClientID = '32' THEN 'QB'  WHEN s.ClientID = '36' THEN 'JCC'  WHEN s.ClientID = '37' THEN 'PIBBank'  WHEN s.ClientID = '24' THEN 'AB'  WHEN s.ClientID = '1' THEN 'AMAN'  WHEN s.ClientID = '38' THEN 'BOJ'  WHEN s.ClientID = '22' THEN 'BRINKS IL'  WHEN s.ClientID = '25' THEN 'IDB'  WHEN s.ClientID = '26' THEN 'BRINKS JO'  WHEN s.ClientID = '8' THEN 'JCB'  WHEN s.ClientID = '41' THEN 'JDECO'  WHEN s.ClientID = '46' THEN 'Juneidi'  WHEN s.ClientID = '47' THEN 'BPC'  WHEN s.ClientID = '52' THEN 'GrandPharm'  WHEN s.ClientID = '48' THEN 'Izhiman'  WHEN s.ClientID = '51' THEN 'GrandHealth'  WHEN s.ClientID = '49' THEN 'NEDCO'  WHEN s.ClientID = '50' THEN 'JEPharm'  WHEN s.ClientID = '43' THEN 'Aziza'  WHEN s.ClientID = '53' THEN 'PalLease'  WHEN s.ClientID = '54' THEN 'PalGaz'  WHEN s.ClientID = '42' THEN 'BeSAFE' END",
+      "type": "string",
+      "scope": {
+        "level": "datasource",
+        "widgetId": null,
+        "table": null
+      }
+    },
+    {
+      "name": "ClientType",
+      "expr": "CASE  WHEN s.ClientID = '2' THEN 'Bank'  WHEN s.ClientID = '4' THEN 'Bank'  WHEN s.ClientID = '11' THEN 'Bank'  WHEN s.ClientID = '5' THEN 'Bank'  WHEN s.ClientID = '9' THEN 'Bank'  WHEN s.ClientID = '10' THEN 'Bank'  WHEN s.ClientID = '31' THEN 'Retail'  WHEN s.ClientID = '21' THEN 'Retail'  WHEN s.ClientID = '18' THEN 'Retail'  WHEN s.ClientID = '30' THEN 'Retail'  WHEN s.ClientID = '29' THEN 'Retail'  WHEN s.ClientID = '15' THEN 'Retail'  WHEN s.ClientID = '17' THEN 'Retail'  WHEN s.ClientID = '13' THEN 'Retail'  WHEN s.ClientID = '12' THEN 'Bank'  WHEN s.ClientID = '6' THEN 'Bank'  WHEN s.ClientID = '16' THEN 'Retail'  WHEN s.ClientID = '14' THEN 'Bank'  WHEN s.ClientID = '19' THEN 'Bank'  WHEN s.ClientID = '20' THEN 'Bank'  WHEN s.ClientID = '34' THEN 'Bank'  WHEN s.ClientID = '3' THEN 'Bank'  WHEN s.ClientID = '28' THEN 'Retail'  WHEN s.ClientID = '33' THEN 'Bank'  WHEN s.ClientID = '35' THEN 'Bank'  WHEN s.ClientID = '32' THEN 'Bank'  WHEN s.ClientID = '36' THEN 'Retail'  WHEN s.ClientID = '37' THEN 'Bank'  WHEN s.ClientID = '24' THEN 'Bank'  WHEN s.ClientID = '1' THEN 'CIT Company'  WHEN s.ClientID = '38' THEN 'Bank'  WHEN s.ClientID = '22' THEN 'CIT Company'  WHEN s.ClientID = '25' THEN 'Bank'  WHEN s.ClientID = '26' THEN 'CIT Company'  WHEN s.ClientID = '8' THEN 'Bank'  WHEN s.ClientID = '41' THEN 'Retail'  WHEN s.ClientID = '46' THEN 'Retail'  WHEN s.ClientID = '47' THEN 'Retail'  WHEN s.ClientID = '52' THEN 'Retail'  WHEN s.ClientID = '48' THEN 'Retail'  WHEN s.ClientID = '51' THEN 'Retail'  WHEN s.ClientID = '49' THEN 'Retail'  WHEN s.ClientID = '50' THEN 'Retail'  WHEN s.ClientID = '43' THEN 'Retail'  WHEN s.ClientID = '53' THEN 'Retail'  WHEN s.ClientID = '54' THEN 'Retail'  WHEN s.ClientID = '42' THEN 'CIT Company' END",
+      "type": null,
+      "scope": {
+        "level": "datasource",
+        "widgetId": null,
+        "table": null
+      }
+    }
+  ],
+  "transforms": [
+    {
+      "type": "computed",
+      "name": "VisitType",
+      "expr": "CASE WHEN ([ToBranchID] IN (508, 600, 305, 306, 307, 308, 309, 618, 617, 593, 594, 595, 596, 597, 598, 599) AND [ToGovernorateID] IN (9, 18)) THEN 'To IL' WHEN ([FromBranchID] IN (508, 600, 305, 306, 307, 308, 309, 618, 617, 593, 594, 595, 596, 597, 598, 599)) THEN 'From IL' WHEN ([FromBranchID] IN (315, 385, 384)) THEN 'From Allenby' WHEN ([ToBranchID] IN (315, 385, 384)) THEN 'To Allenby' WHEN ([FromGovernorateID] = [ToGovernorateID]) THEN 'In-City' ELSE 'Between Cities' END",
+      "valueType": null,
+      "scope": {
+        "level": "datasource",
+        "widgetId": null,
+        "table": null
+      }
+    },
+    {
+      "type": "computed",
+      "name": "SourceRegion",
+      "expr": "CASE WHEN ([FromGovernorateID] = 9) THEN 'IL' WHEN ([FromGovernorateID] IN (22)) THEN 'JO' WHEN ([FromGovernorateID] IN (20, 13, 15, 16, 12, 11, 10)) THEN 'GZ' WHEN ([FromGovernorateID] = 18) THEN 'JR' ELSE 'WB' END",
+      "valueType": null,
+      "scope": null
+    },
+    {
+      "type": "computed",
+      "name": "DestRegion",
+      "expr": "CASE WHEN ([ToGovernorateID] = 9) THEN 'IL' WHEN ([ToGovernorateID] = 22) THEN 'JO' WHEN ([ToGovernorateID] IN (20, 16, 15, 13, 12, 11, 10)) THEN 'GZ' WHEN ([ToGovernorateID] = 18) THEN 'JR' ELSE 'WB' END",
+      "valueType": null,
+      "scope": null
+    }
+  ],
+  "joins": [],
+  "defaults": null
+}
