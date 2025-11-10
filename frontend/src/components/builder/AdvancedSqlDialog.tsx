@@ -1186,14 +1186,47 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                         merged.defaults = { ...merged.defaults, ...imported.defaults }
                       }
                       
+                      // Count what was imported
+                      const importedCCCount = Array.isArray(imported?.customColumns) ? imported.customColumns.filter((ic: any) => String(ic?.name || '').trim()).length : 0
+                      const importedTRCount = Array.isArray(imported?.transforms) ? imported.transforms.filter((it: any) => String(it?.target || it?.name || '').trim()).length : 0
+                      const importedJNCount = Array.isArray(imported?.joins) ? imported.joins.filter((ij: any) => String(ij?.targetTable || '').trim()).length : 0
+                      const totalImported = importedCCCount + importedTRCount + importedJNCount
+                      
                       setEditJson(JSON.stringify(merged, null, 2))
+                      setError(undefined)
+                      
+                      // Show success feedback and scroll to statements panel
+                      if (totalImported > 0) {
+                        const parts: string[] = []
+                        if (importedCCCount > 0) parts.push(`${importedCCCount} custom column${importedCCCount > 1 ? 's' : ''}`)
+                        if (importedTRCount > 0) parts.push(`${importedTRCount} transform${importedTRCount > 1 ? 's' : ''}`)
+                        if (importedJNCount > 0) parts.push(`${importedJNCount} join${importedJNCount > 1 ? 's' : ''}`)
+                        
+                        // Scroll to All Statements panel after a brief delay to let React render
+                        setTimeout(() => {
+                          try {
+                            const statementsPanel = document.querySelector('[class*="All Statements"]')?.parentElement
+                            if (statementsPanel) {
+                              statementsPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                            }
+                          } catch {}
+                        }, 100)
+                        
+                        alert(`✓ Successfully imported:\n${parts.join('\n')}\n\nCheck the "All Statements" panel below to see the imported items.\nRemember to click "Save" to persist the changes.`)
+                      } else {
+                        alert('⚠ No valid items found in the import file')
+                      }
                     } catch (e: any) {
-                      setError(String(e?.message || 'Import failed - invalid JSON'))
+                      const errMsg = String(e?.message || 'Import failed - invalid JSON')
+                      setError(errMsg)
+                      alert(`✗ Import failed:\n${errMsg}`)
                     }
                   }
                   input.click()
                 } catch (e: any) {
-                  setError(String(e?.message || 'Import failed'))
+                  const errMsg = String(e?.message || 'Import failed')
+                  setError(errMsg)
+                  alert(`✗ Import failed:\n${errMsg}`)
                 }
               }}
               title="Import and merge transforms from JSON file"
