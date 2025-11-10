@@ -81,6 +81,22 @@ function toProperCase(s: string): string {
     .join(' ')
 }
 
+// Helper: split legend label into base and category parts
+// Format: "SeriesName (Category)" => { base: "SeriesName", cat: "Category" }
+function splitLegend(label: string): { base: string; cat: string } {
+  const str = String(label || '').trim()
+  const match = str.match(/^(.+?)\s*\(([^)]+)\)\s*$/)
+  if (match) {
+    return { base: match[1].trim(), cat: match[2].trim() }
+  }
+  return { base: str, cat: '' }
+}
+
+// Helper: extract base label without category suffix
+function extractBaseLabel(label: string): string {
+  return splitLegend(label).base
+}
+
 // Fallback string values from current query result rows
 function fallbackStringsFor(field: string, qdata?: any): string[] {
   try {

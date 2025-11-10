@@ -138,7 +138,7 @@ export type CompositionComponent =
   | { id?: string; kind: 'title'; text?: string; align?: 'left'|'center'|'right'; span?: number }
   | { id?: string; kind: 'subtitle'; text?: string; align?: 'left'|'center'|'right'; span?: number }
   | { id?: string; kind: 'kpi'; span?: number; refId?: string; label?: string; props?: { preset?: 'basic'|'badge'|'withPrevious'|'donut'|'spark'|'progress'|'categoryBar'|'multiProgress' } }
-  | { id?: string; kind: 'chart'; span?: number; refId?: string; label?: string; props?: { type?: 'line'|'bar'|'area'|'column'|'donut'|'categoryBar'|'spark'|'combo'|'badges'|'progress'|'tracker'|'scatter'|'tremorTable'|'heatmap'|'barList'|'gantt' } }
+  | { id?: string; kind: 'chart'; span?: number; refId?: string; label?: string; props?: { type?: 'line'|'bar'|'area'|'column'|'donut'|'categoryBar'|'spark'|'combo'|'badges'|'progress'|'tracker'|'scatter'|'tremorTable'|'heatmap'|'barList'|'gantt'|'sankey' } }
   | { id?: string; kind: 'table'; span?: number; refId?: string; label?: string; props?: { tableType?: 'data'|'pivot' } }
 
 export type WidgetConfig = {
@@ -176,7 +176,7 @@ export type WidgetConfig = {
       }>
     }>
   }
-  chartType?: 'line' | 'bar' | 'area' | 'column' | 'donut' | 'categoryBar' | 'spark' | 'combo' | 'badges' | 'progress' | 'tracker' | 'scatter' | 'tremorTable' | 'heatmap' | 'barList' | 'gantt'
+  chartType?: 'line' | 'bar' | 'area' | 'column' | 'donut' | 'categoryBar' | 'spark' | 'combo' | 'badges' | 'progress' | 'tracker' | 'scatter' | 'tremorTable' | 'heatmap' | 'barList' | 'gantt' | 'sankey'
   datasourceId?: string
   options?: {
     // Card-level options
