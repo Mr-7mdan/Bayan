@@ -7,11 +7,23 @@ export type WidgetKebabMenuProps = {
   open: boolean
   anchorEl: HTMLElement | null
   onCloseAction: () => void
-  onAction: (action: 'duplicate' | 'delete' | 'viewSpec' | 'viewSql' | 'viewJson' | 'aiAssist' | 'embed') => void
+  onAction: (action: 'duplicate' | 'delete' | 'viewSpec' | 'viewSql' | 'viewJson' | 'aiAssist' | 'embed' | 'downloadPNG' | 'downloadSVG') => void
+  widgetType?: string
+  chartType?: string
 }
 
-export default function WidgetKebabMenu({ open, anchorEl, onCloseAction, onAction }: WidgetKebabMenuProps) {
+export default function WidgetKebabMenu({ open, anchorEl, onCloseAction, onAction, widgetType, chartType }: WidgetKebabMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null)
+  
+  // Determine if this widget supports chart downloads
+  // Supported: chart type widgets (except non-ECharts types like badges, progress, tracker, categoryBar, barList, tremorTable)
+  const supportsDownload = useMemo(() => {
+    if (widgetType !== 'chart') return false
+    // Non-ECharts chart types that don't support download
+    const nonEChartsTypes = ['badges', 'progress', 'tracker', 'categoryBar', 'barList', 'tremorTable', 'spark']
+    if (chartType && nonEChartsTypes.includes(chartType)) return false
+    return true
+  }, [widgetType, chartType])
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
@@ -62,6 +74,13 @@ export default function WidgetKebabMenu({ open, anchorEl, onCloseAction, onActio
         <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)]" onClick={() => { onAction('viewSql'); onCloseAction() }}>View SQL Statement</button>
         <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)]" onClick={() => { onAction('viewJson'); onCloseAction() }}>View JSON Config</button>
         <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)]" onClick={() => { onAction('embed'); onCloseAction() }}>Embed</button>
+        {supportsDownload && (
+          <>
+            <div className="my-1 h-px bg-[hsl(var(--border))]" />
+            <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)]" onClick={() => { onAction('downloadPNG'); onCloseAction() }}>Download PNG</button>
+            <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)]" onClick={() => { onAction('downloadSVG'); onCloseAction() }}>Download SVG</button>
+          </>
+        )}
         <div className="my-1 h-px bg-[hsl(var(--border))]" />
         <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)]" onClick={() => { onAction('duplicate'); onCloseAction() }}>Duplicate</button>
         <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)] text-red-600" onClick={() => { onAction('delete'); onCloseAction() }}>Delete</button>

@@ -62,11 +62,18 @@ function Item({ it, active, nested, badge }: { it: SidebarItem; active: boolean;
   const base = resolved === 'dark' ? 'sidebar-item-dark' : 'sidebar-item-light'
   const activeCls = resolved === 'dark' ? 'sidebar-item-active-dark' : 'sidebar-item-active-light'
   const cls = `${base} ${active ? activeCls : ''} ${nested ? 'pl-6 pr-3' : ''}`
+  
+  // Debug logging for badge
+  const shouldShowBadge = typeof badge === 'number' && badge > 0
+  if (badge !== undefined) {
+    console.log(`[Item] ${it.label}: badge=${badge}, type=${typeof badge}, shouldShow=${shouldShowBadge}`)
+  }
+  
   const content = (
     <div className="flex items-center gap-3 w-full">
       <span className={`shrink-0 ${active ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'}`}>{iconFor(it.label)}</span>
       <span className={`truncate ${active ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'}`}>{it.label}</span>
-      {typeof badge === 'number' && badge > 0 && (
+      {shouldShowBadge && (
         <span className="ml-auto px-1.5 py-0.5 text-[11px] rounded-md bg-[hsl(var(--secondary)/0.6)] text-[hsl(var(--muted-foreground))] ring-1 ring-[hsl(var(--border))]">
           {badge}
         </span>
@@ -129,13 +136,16 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
       Api.getSidebarCounts(userId).catch(() => null),
       Api.listAlerts().catch(() => null),
     ]).then(([res, alerts]) => {
-      setCounts({
+      const newCounts = {
         dashboards: (res as SidebarCountsResponse | null)?.dashboardCount || 0,
         datasources: (res as SidebarCountsResponse | null)?.datasourceCount || 0,
         shared: (res as SidebarCountsResponse | null)?.sharedCount || 0,
         collections: (res as SidebarCountsResponse | null)?.collectionCount || 0,
         alerts: Array.isArray(alerts) ? alerts.length : 0,
-      })
+      }
+      console.log('[Sidebar] API response:', res)
+      console.log('[Sidebar] Setting counts:', newCounts)
+      setCounts(newCounts)
     }).catch(() => {})
     .finally(() => { busyRef.current = false; lastRunRef.current = Date.now(); try { if (typeof window !== 'undefined') { (window as any).__sidebarCountsLastRunMs = Date.now(); (window as any).__sidebarCountsBusy = false } } catch {} })
   }, [user?.id])
@@ -152,18 +162,27 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
   }, [loadCounts])
 
   const badgeFor = (label: string): number | undefined => {
+    let badge: number | undefined
     switch (label) {
       case 'My Dashboards':
-        return counts.dashboards
+        badge = counts.dashboards
+        break
       case 'My Datasources':
-        return counts.datasources
+        badge = counts.datasources
+        break
       case 'Shared With Me':
-        return counts.shared
+        badge = counts.shared
+        break
       case 'Alerts & Notifications':
-        return counts.alerts
+        badge = counts.alerts
+        break
       default:
-        return undefined
+        badge = undefined
     }
+    if (badge !== undefined) {
+      console.log(`[Sidebar] Badge for "${label}":`, badge, 'counts:', counts)
+    }
+    return badge
   }
 
   return (

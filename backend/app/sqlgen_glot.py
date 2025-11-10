@@ -135,8 +135,9 @@ class SQLGlotBuilder:
                     expr = expr_map[field]
                     # Strip table aliases (e.g., s.ClientID -> ClientID, src.OrderDate -> OrderDate)
                     # Only strip short lowercase identifiers (typical aliases), not schema names
-                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)
-                    print(f"[SQLGlot] ✅ Resolving custom column '{field}' in SELECT → {expr[:80]}...")
+                    expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
+                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
+                    print(f"[SQLGlot] [OK] Resolving custom column '{field}' in SELECT -> {expr[:80]}...")
                     return expr, True
                 
                 # Check if it's a date part pattern
@@ -145,7 +146,7 @@ class SQLGlotBuilder:
                     base_col = match.group(1).strip()
                     kind = match.group(2).lower()
                     expr = self._build_datepart_expr(base_col, kind, ds_type or self.dialect)
-                    print(f"[SQLGlot] ✅ Resolving date part '{field}' in SELECT → {expr[:80]}")
+                    print(f"[SQLGlot] [OK] Resolving date part '{field}' in SELECT -> {expr[:80]}")
                     return expr, True
                 
                 return field, False
@@ -320,8 +321,9 @@ class SQLGlotBuilder:
                 if expr_map and field_name in expr_map:
                     expr = expr_map[field_name]
                     # Strip table aliases
-                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)
-                    print(f"[SQLGlot] ✅ Resolving custom column '{field_name}' in DISTINCT")
+                    expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
+                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
+                    print(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in DISTINCT")
                     return expr, True
                 
                 # Check if it's a date part pattern
@@ -330,7 +332,7 @@ class SQLGlotBuilder:
                     base_col = match.group(1).strip()
                     kind = match.group(2).lower()
                     expr = self._build_datepart_expr(base_col, kind, ds_type or self.dialect)
-                    print(f"[SQLGlot] ✅ Resolving date part '{field_name}' in DISTINCT")
+                    print(f"[SQLGlot] [OK] Resolving date part '{field_name}' in DISTINCT")
                     return expr, True
                 
                 return field_name, False
@@ -436,8 +438,9 @@ class SQLGlotBuilder:
                 if expr_map and field_name in expr_map:
                     expr = expr_map[field_name]
                     # Strip table aliases
-                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)
-                    print(f"[SQLGlot] ✅ Resolving custom column '{field_name}' in period-totals")
+                    expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
+                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
+                    print(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in period-totals")
                     return expr, True
                 
                 # Check if it's a date part pattern
@@ -446,7 +449,7 @@ class SQLGlotBuilder:
                     base_col = match.group(1).strip()
                     kind = match.group(2).lower()
                     expr = self._build_datepart_expr(base_col, kind, ds_type or self.dialect)
-                    print(f"[SQLGlot] ✅ Resolving date part '{field_name}' in period-totals")
+                    print(f"[SQLGlot] [OK] Resolving date part '{field_name}' in period-totals")
                     return expr, True
                 
                 return field_name, False
@@ -826,8 +829,12 @@ class SQLGlotBuilder:
                 # Check custom columns
                 if expr_map and field in expr_map:
                     expr = expr_map[field]
-                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)
+                    print(f"[SQLGlot] Pivot: Resolved '{field}' -> {expr[:100]}...")
+                    expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
+                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
                     return expr, True
+                else:
+                    print(f"[SQLGlot] Pivot: '{field}' not in expr_map (has {len(expr_map) if expr_map else 0} entries)")
                 
                 # Check date parts
                 match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", field, flags=re.IGNORECASE)
@@ -846,19 +853,19 @@ class SQLGlotBuilder:
             # Resolve all dimension fields
             all_dims = rows + cols
             select_exprs = []
-            group_exprs = []
+            group_positions = []  # Use positions instead of expressions
             
-            for dim in all_dims:
+            for idx, dim in enumerate(all_dims, 1):  # 1-indexed for SQL
                 dim_resolved, is_expr = resolve_field(dim)
                 if is_expr:
                     # Parse as raw SQL expression
                     dim_expr = sqlglot.parse_one(dim_resolved, dialect=ds_type or self.dialect)
                     select_exprs.append(dim_expr.as_(dim))
-                    group_exprs.append(dim_expr)
+                    group_positions.append(idx)
                 else:
                     # Simple column reference
                     select_exprs.append(exp.column(dim_resolved or dim).as_(dim))
-                    group_exprs.append(exp.column(dim_resolved or dim))
+                    group_positions.append(idx)
             
             # Build aggregation expression
             agg_lower = agg.lower()
@@ -902,13 +909,14 @@ class SQLGlotBuilder:
                 if where_conditions:
                     final_query = final_query.where(*where_conditions)
             
-            # Add GROUP BY
-            if group_exprs:
-                final_query = final_query.group_by(*group_exprs)
+            # Add GROUP BY (by position to avoid alias issues)
+            if group_positions:
+                print(f"[SQLGlot] Pivot: GROUP BY positions: {group_positions}")
+                final_query = final_query.group_by(*[exp.Literal.number(i) for i in group_positions])
             
-            # Add ORDER BY (same as GROUP BY for pivot)
-            if group_exprs:
-                final_query = final_query.order_by(*group_exprs)
+            # Add ORDER BY (by position, same as GROUP BY for pivot)
+            if group_positions:
+                final_query = final_query.order_by(*[exp.Literal.number(i) for i in group_positions])
             
             # Add LIMIT
             if limit:
@@ -916,7 +924,7 @@ class SQLGlotBuilder:
             
             # Generate SQL
             sql = final_query.sql(dialect=ds_type or self.dialect)
-            print(f"[SQLGlot] Generated PIVOT SQL ({ds_type or self.dialect}): {sql[:200]}...")
+            print(f"[SQLGlot] Generated PIVOT SQL ({ds_type or self.dialect}): {sql}")
             return sql
             
         except Exception as e:
@@ -1056,7 +1064,7 @@ def should_use_sqlglot(user_id: Optional[str] = None) -> bool:
         >>> should_use_sqlglot("user1")  # True
         >>> should_use_sqlglot("user3")  # False
     """
-    print(f"[SQLGlot] ★ should_use_sqlglot() CALLED with user_id={user_id}")
+    print(f"[SQLGlot] * should_use_sqlglot() CALLED with user_id={user_id}")
     from .config import settings
     
     # DEBUG: Always log what we see

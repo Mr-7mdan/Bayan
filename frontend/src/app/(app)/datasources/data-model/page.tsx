@@ -8,6 +8,7 @@ import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
 import type { IntrospectResponse as IR } from '@/lib/api'
 import { Select, SelectItem, Card, TextInput } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
+import { RiEditBoxLine } from '@remixicon/react'
 
 type Row = {
   table: string
@@ -46,6 +47,11 @@ export default function DataModelPage() {
   const [activeDuckId, setActiveDuckId] = useState<string | null>(null)
   // User-selected DuckDB for viewing tables (separate from default)
   const [viewingDuckId, setViewingDuckId] = useState<string | null>(null)
+  // Table rename state
+  const [renamingTable, setRenamingTable] = useState<{ dsId: string; oldName: string; newName: string } | null>(null)
+  const [users, setUsers] = useState<Array<{ id: string; username?: string; email?: string }>>([])
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [customColumnsByDs, setCustomColumnsByDs] = useState<Record<string, Array<{ name: string; type: string; scope?: string | { level: string; table?: string | null; widgetId?: string | null }; formula?: string }>>>({})
 
   // Keep defaultDsId in sync with localStorage and custom events
   useEffect(() => {
@@ -123,6 +129,11 @@ export default function DataModelPage() {
             setActiveDuckId(null)
           }
         } catch {}
+        // Load users for owner display
+        try {
+          const usersList = await Api.listUsers(user?.id)
+          if (!stop) setUsers(usersList || [])
+        } catch {}
       } catch (e: any) {
         if (!stop) setError(String(e?.message || 'Failed to load Data Model'))
       } finally {
@@ -146,7 +157,9 @@ export default function DataModelPage() {
     ;(async () => {
       try {
         setColumnsByTable({})
+        // Don't clear customColumnsByDs - just update the specific datasource
         if (!selectedDuckId) return
+        if (datasources.length === 0) return
         const schemaSel = await Api.introspect(selectedDuckId)
         if (stop) return
         const map: Record<string, Array<{ name: string; type?: string | null }>> = {}
@@ -154,12 +167,60 @@ export default function DataModelPage() {
           ;(s.tables || []).forEach((t) => { map[t.name] = t.columns || [] })
         })
         setColumnsByTable(map)
+        // Fetch custom columns (transforms) for all datasources
+        try {
+          const allDucks = datasources.filter((d) => String(d.type||'').toLowerCase().includes('duckdb'))
+          if (allDucks.length === 0) return  // No DuckDB datasources
+          
+          // Fetch for all DuckDB datasources (will update state even if already loaded)
+          const ducksToFetch = allDucks
+          if (ducksToFetch.length === 0) return
+          
+          const allTransforms = await Promise.all(
+            ducksToFetch.map(async (d) => {
+              const t = await Api.getDatasourceTransforms(d.id)
+              return { dsId: d.id, transforms: t }
+            })
+          )
+          
+          if (!stop) {
+            // Store transforms for all datasources
+            const transformsMap: Record<string, any[]> = {}
+            allTransforms.forEach(({ dsId, transforms }) => {
+              const allCustomCols = [
+                ...(transforms?.customColumns || []).map((c: any) => ({ 
+                  name: c.name, 
+                  type: 'custom',
+                  scope: c.scope || 'datasource',
+                  formula: c.formula || c.expression || c.expr || ''
+                })),
+                ...(transforms?.transforms || []).map((t: any) => ({ 
+                  name: t.name, 
+                  type: t.type || 'case',
+                  scope: t.scope || 'datasource',
+                  formula: t.formula || t.expr || t.expression || ''
+                })),
+                ...(transforms?.joins || []).map((j: any) => ({ 
+                  name: `Join: ${j.rightTable || 'unknown'}`,
+                  type: 'join',
+                  scope: j.scope || 'datasource',
+                  formula: `${j.leftKey} = ${j.rightKey}`
+                }))
+              ]
+              transformsMap[dsId] = allCustomCols
+            })
+            
+            setCustomColumnsByDs((prev) => ({ ...prev, ...transformsMap }))
+          }
+        } catch (err) {
+          console.error('[DataModel] Failed to load custom columns:', err)
+        }
       } catch (err) {
         console.error('[DataModel] Failed to load columns:', err)
       }
     })()
     return () => { stop = true }
-  }, [selectedDuckId])
+  }, [selectedDuckId, datasources.length, datasources])
 
   // Base rows filtered by selected DuckDB
   const baseRows = useMemo(() => {
@@ -212,6 +273,7 @@ export default function DataModelPage() {
                 <th className="px-2 py-1">Name</th>
                 <th className="px-2 py-1">Type</th>
                 <th className="px-2 py-1">Default (UI)</th>
+                <th className="px-2 py-1">Owner</th>
                 <th className="px-2 py-1">Actions</th>
               </tr>
             </thead>
@@ -245,6 +307,12 @@ export default function DataModelPage() {
                     </td>
                     <td className="px-2 py-1">{d.type}</td>
                     <td className="px-2 py-1">{isDefault ? 'Yes' : 'No'}</td>
+                    <td className="px-2 py-1">
+                      {(() => {
+                        const owner = users.find(u => u.id === (d as any).userId)
+                        return owner ? (owner.username || owner.email || 'Unknown') : '—'
+                      })()}
+                    </td>
                     <td className="px-2 py-1">
                       <div className="flex items-center gap-2">
                         {!isDefault && (
@@ -321,10 +389,10 @@ export default function DataModelPage() {
       </div>
 
       <div className="overflow-auto rounded-xl border-2 border-[hsl(var(--border))]">
-        <table className="min-w-full text-sm">
+        <table className="min-w-full text-sm table-fixed">
           <thead className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
             <tr>
-              <th className="text-left px-3 py-2 font-medium">Table</th>
+              <th className="text-left px-3 py-2 font-medium w-[35%]">Table</th>
               <th className="text-left px-3 py-2 font-medium">Records</th>
               <th className="text-left px-3 py-2 font-medium">Last Synced</th>
               <th className="text-left px-3 py-2 font-medium">Source Datasource</th>
@@ -350,9 +418,79 @@ export default function DataModelPage() {
               const isExp = !!expanded[r.table]
               return (
                 <Fragment key={`${r.datasourceId}:${r.table}`}>
-                  <tr key={`${r.datasourceId}:${r.table}`} className="border-t border-[hsl(var(--border))]">
+                  <tr key={`${r.datasourceId}:${r.table}`} className="group border-t border-[hsl(var(--border))]">
                     <td className="px-3 py-2">
-                      <button className="font-mono hover:underline" onClick={() => setExpanded((m) => ({ ...m, [r.table]: !m[r.table] }))}>{r.table}</button>
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        {renamingTable?.oldName === r.table && renamingTable?.dsId === r.datasourceId ? (
+                          <input
+                            autoFocus
+                            className="font-mono px-1 py-0.5 text-sm border rounded bg-[hsl(var(--card))] w-full min-w-0 flex-1"
+                            value={renamingTable.newName}
+                            onChange={(e) => setRenamingTable({ ...renamingTable, newName: e.target.value })}
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter') {
+                                const oldName = r.table
+                                const newName = renamingTable.newName
+                                try {
+                                  await Api.renameLocalTable(r.datasourceId, oldName, newName, user?.id)
+                                  // Update rows state
+                                  setRows((arr) => arr.map((x) => 
+                                    (x.datasourceId === r.datasourceId && x.table === oldName) 
+                                      ? { ...x, table: newName } 
+                                      : x
+                                  ))
+                                  // Update columnsByTable state
+                                  setColumnsByTable((prev) => {
+                                    const cols = prev[oldName]
+                                    if (!cols) return prev
+                                    const next = { ...prev }
+                                    delete next[oldName]
+                                    next[newName] = cols
+                                    return next
+                                  })
+                                  // Update expanded state
+                                  setExpanded((prev) => {
+                                    if (!prev[oldName]) return prev
+                                    const next = { ...prev }
+                                    delete next[oldName]
+                                    next[newName] = true
+                                    return next
+                                  })
+                                  setRenamingTable(null)
+                                  setToast({ message: `Table renamed to "${newName}"`, type: 'success' })
+                                  setTimeout(() => setToast(null), 3000)
+                                } catch (err) {
+                                  console.error('Failed to rename table:', err)
+                                  setToast({ message: `Failed to rename table: ${(err as any)?.message || 'Unknown error'}`, type: 'error' })
+                                  setTimeout(() => setToast(null), 4000)
+                                }
+                              } else if (e.key === 'Escape') {
+                                setRenamingTable(null)
+                              }
+                            }}
+                            onBlur={() => setRenamingTable(null)}
+                          />
+                        ) : (
+                          <>
+                            <button 
+                              className="font-mono hover:underline" 
+                              onClick={() => setExpanded((m) => ({ ...m, [r.table]: !m[r.table] }))}
+                            >
+                              {r.table}
+                            </button>
+                            <button
+                              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity p-0.5 hover:bg-[hsl(var(--muted))] rounded"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setRenamingTable({ dsId: r.datasourceId, oldName: r.table, newName: r.table })
+                              }}
+                              title="Rename table"
+                            >
+                              <RiEditBoxLine className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2">{typeof r.rowCount === 'number' ? r.rowCount.toLocaleString() : '—'}</td>
                     <td className="px-3 py-2">{r.lastSyncAt ? new Date(r.lastSyncAt).toLocaleString() : '—'}</td>
@@ -378,20 +516,235 @@ export default function DataModelPage() {
                   {isExp && (
                     <tr key={`${r.datasourceId}:${r.table}#exp`} className="border-t border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40">
                       <td className="px-3 py-2" colSpan={6}>
-                        <div className="text-[11px]">Columns</div>
-                        <div className="mt-1 overflow-x-auto">
-                          <table className="w-full table-fixed text-[11px]">
-                            <tbody>
-                              {cols.length === 0 ? (
-                                <tr><td className="px-2 py-1 text-muted-foreground">No columns</td></tr>
-                              ) : cols.map((c) => (
-                                <tr key={c.name} className="align-top">
-                                  <td className="w-[220px] px-2 py-0.5"><span className="inline-flex px-1.5 py-0.5 rounded bg-card font-mono">{c.name}</span></td>
-                                  <td className="px-2 py-0.5 text-muted-foreground">{c.type || ''}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* Regular Columns */}
+                          <div>
+                            <div className="text-[11px] font-medium mb-1">Columns</div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full table-fixed text-[11px]">
+                                <tbody>
+                                  {cols.length === 0 ? (
+                                    <tr><td className="px-2 py-1 text-muted-foreground">No columns</td></tr>
+                                  ) : cols.map((c) => (
+                                    <tr key={c.name} className="align-top">
+                                      <td className="w-[180px] px-2 py-0.5"><span className="inline-flex px-1.5 py-0.5 rounded bg-card font-mono">{c.name}</span></td>
+                                      <td className="px-2 py-0.5 text-muted-foreground">{c.type || ''}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                          
+                          {/* Custom Columns */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="text-[11px] font-medium">Custom Columns & Transforms</div>
+                              <button 
+                                className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
+                                onClick={() => {
+                                  const schemaOne: IR = { schemas: [{ name: 'main', tables: [{ name: r.table, columns: cols }] }] }
+                                  setAdv({ open: true, dsId: r.datasourceId, dsType: r.datasourceType, source: r.table, schema: schemaOne })
+                                }}
+                              >
+                                Edit
+                              </button>
+                            </div>
+                            <div className="overflow-x-auto">
+                              {(() => {
+                                const allCustomCols = customColumnsByDs[r.datasourceId] || []
+                                // Filter to show: datasource-scoped OR scoped to this specific table
+                                const customCols = allCustomCols.filter((cc) => {
+                                  if (!cc.scope || cc.scope === 'datasource') return true
+                                  // If scope is an object with level field
+                                  if (typeof cc.scope === 'object') {
+                                    if (cc.scope.level === 'datasource') return true
+                                    if (cc.scope.level === 'table' && cc.scope.table === r.table) return true
+                                  }
+                                  return false
+                                })
+                                
+                                if (customCols.length === 0) {
+                                  return <div className="px-2 py-1 text-[11px] text-muted-foreground">No custom columns or transforms</div>
+                                }
+                                
+                                // Check which custom columns are active (have all dependencies in this table)
+                                const colNames = new Set(cols.map(c => c.name.toLowerCase()))
+                                const colNamesOriginal = new Map(cols.map(c => [c.name.toLowerCase(), c.name]))
+                                
+                                // Comprehensive SQL keywords and functions to exclude
+                                const sqlKeywords = new Set([
+                                  'case', 'when', 'then', 'else', 'end', 'and', 'or', 'not', 'in', 'null', 'true', 'false',
+                                  'select', 'from', 'where', 'as', 'on', 'join', 'left', 'right', 'inner', 'outer', 'full',
+                                  'group', 'by', 'order', 'having', 'limit', 'offset', 'distinct', 'count', 'sum', 'avg',
+                                  'min', 'max', 'between', 'like', 'is', 'exists', 'all', 'any', 'some', 'union', 'intersect',
+                                  'except', 'date', 'time', 'timestamp', 'interval', 'cast', 'extract', 'substring', 'trim',
+                                  'upper', 'lower', 'coalesce', 'nullif', 'length', 'concat', 'replace', 'position',
+                                  'year', 'month', 'day', 'hour', 'minute', 'second', 'now', 'current', 'values', 'row'
+                                ])
+                                
+                                const customColsWithDeps = customCols.map(cc => {
+                                  const formula = cc.formula || ''
+                                  
+                                  // Remove string literals first to avoid false positives
+                                  // Remove single-quoted strings: 'text'
+                                  let cleanFormula = formula.replace(/'[^']*'/g, ' ')
+                                  
+                                  const refs = new Set<string>()
+                                  
+                                  // Extract double-quoted identifiers (column names in DuckDB: "ColumnName")
+                                  const quotedRegex = /"([^"]+)"/g
+                                  let match
+                                  while ((match = quotedRegex.exec(cleanFormula)) !== null) {
+                                    refs.add(match[1].toLowerCase())
+                                  }
+                                  
+                                  // Extract dotted identifiers (s.ColumnName, table.Column)
+                                  const dottedRegex = /(\w+)\.([a-zA-Z_][a-zA-Z0-9_]*)/g
+                                  while ((match = dottedRegex.exec(cleanFormula)) !== null) {
+                                    // match[2] is the column name after the dot
+                                    refs.add(match[2].toLowerCase())
+                                  }
+                                  
+                                  // Extract unquoted identifiers (but not if they were part of dotted notation)
+                                  // First, remove dotted patterns from cleanFormula to avoid double-counting
+                                  let noDottedFormula = cleanFormula.replace(/\b\w+\.([a-zA-Z_][a-zA-Z0-9_]*)\b/g, ' ')
+                                  const unquotedRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g
+                                  while ((match = unquotedRegex.exec(noDottedFormula)) !== null) {
+                                    const ref = match[1].toLowerCase()
+                                    // Filter out SQL keywords and single-letter aliases (like s, t, etc.)
+                                    if (!sqlKeywords.has(ref) && ref.length > 1) {
+                                      refs.add(ref)
+                                    }
+                                  }
+                                  
+                                  // Filter to only actual table columns
+                                  const deps = Array.from(refs).filter(ref => colNames.has(ref))
+                                  const missingDeps = Array.from(refs).filter(ref => !colNames.has(ref) && !sqlKeywords.has(ref))
+                                  
+                                  // A custom column is active if:
+                                  // 1. We found at least one column reference AND all of them exist in the table
+                                  // 2. OR it's a join (no column dependencies, just table joins)
+                                  const isJoin = cc.type === 'join'
+                                  const hasColumnRefs = refs.size > 0
+                                  const allDepsExist = hasColumnRefs && missingDeps.length === 0 && deps.length > 0
+                                  const isActive = isJoin || allDepsExist
+                                  
+                                  return {
+                                    ...cc,
+                                    deps: deps.map(d => colNamesOriginal.get(d) || d),
+                                    missingDeps: missingDeps,
+                                    isActive
+                                  }
+                                })
+                                
+                                const active = customColsWithDeps.filter(cc => cc.isActive)
+                                const inactive = customColsWithDeps.filter(cc => !cc.isActive)
+                                
+                                return (
+                                  <div className="space-y-2">
+                                    {active.length > 0 && (
+                                      <div>
+                                        <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mb-1">Active</div>
+                                        <table className="w-full table-fixed text-[11px]">
+                                          <tbody>
+                                            {active.map((cc, idx) => (
+                                              <tr key={idx} className="align-top">
+                                                <td className="w-[180px] px-2 py-0.5">
+                                                  <div className="flex flex-col gap-0.5">
+                                                    <span className="inline-flex px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-800 font-mono text-emerald-700 dark:text-emerald-300">
+                                                      {cc.name}
+                                                    </span>
+                                                    {cc.deps && cc.deps.length > 0 && (
+                                                      <div className="text-[9px] text-gray-500 dark:text-gray-400 pl-1">
+                                                        {cc.deps.map((dep: string, i: number) => (
+                                                          <span key={i} className="inline-flex items-center gap-0.5 mr-1">
+                                                            <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+                                                            <span className="font-mono">{dep}</span>
+                                                          </span>
+                                                        ))}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                </td>
+                                                <td className="px-2 py-0.5 text-muted-foreground">
+                                                  {cc.type.toUpperCase()} {(() => {
+                                                    if (!cc.scope) return ''
+                                                    if (typeof cc.scope === 'string') return `(${cc.scope})`
+                                                    if (typeof cc.scope === 'object') {
+                                                      if (cc.scope.level === 'table') {
+                                                        return `(table: ${cc.scope.table || 'unknown'})`
+                                                      }
+                                                      return `(${cc.scope.level || 'datasource'})`
+                                                    }
+                                                    return ''
+                                                  })()}
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
+                                    
+                                    {inactive.length > 0 && (
+                                      <div>
+                                        <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-600 mb-1">Inactive (missing dependencies)</div>
+                                        <table className="w-full table-fixed text-[11px]">
+                                          <tbody>
+                                            {inactive.map((cc, idx) => (
+                                              <tr key={idx} className="align-top opacity-50">
+                                                <td className="w-[180px] px-2 py-0.5">
+                                                  <div className="flex flex-col gap-0.5">
+                                                    <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 font-mono text-gray-500 dark:text-gray-500">
+                                                      {cc.name}
+                                                    </span>
+                                                    {cc.deps && cc.deps.length > 0 && (
+                                                      <div className="text-[9px] text-gray-500 dark:text-gray-400 pl-1">
+                                                        {cc.deps.map((dep: string, i: number) => (
+                                                          <span key={i} className="inline-flex items-center gap-0.5 mr-1">
+                                                            <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+                                                            <span className="font-mono">{dep}</span>
+                                                          </span>
+                                                        ))}
+                                                      </div>
+                                                    )}
+                                                    {cc.missingDeps && cc.missingDeps.length > 0 && (
+                                                      <div className="text-[9px] text-red-500 dark:text-red-400 pl-1">
+                                                        {cc.missingDeps.map((dep: string, i: number) => (
+                                                          <span key={i} className="inline-flex items-center gap-0.5 mr-1">
+                                                            <span>✗</span>
+                                                            <span className="font-mono">{dep}</span>
+                                                          </span>
+                                                        ))}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                </td>
+                                                <td className="px-2 py-0.5 text-muted-foreground">
+                                                  {cc.type.toUpperCase()} {(() => {
+                                                    if (!cc.scope) return ''
+                                                    if (typeof cc.scope === 'string') return `(${cc.scope})`
+                                                    if (typeof cc.scope === 'object') {
+                                                      if (cc.scope.level === 'table') {
+                                                        return `(table: ${cc.scope.table || 'unknown'})`
+                                                      }
+                                                      return `(${cc.scope.level || 'datasource'})`
+                                                    }
+                                                    return ''
+                                                  })()}
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
+                            </div>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -418,7 +771,45 @@ export default function DataModelPage() {
       )}
 
       {adv.open && adv.dsId && (
-        <AdvancedSqlDialog open={adv.open} onCloseAction={() => setAdv({ open: false })} datasourceId={adv.dsId} dsType={adv.dsType} source={adv.source} schema={adv.schema}
+        <AdvancedSqlDialog 
+          open={adv.open} 
+          onCloseAction={async () => {
+            setAdv({ open: false })
+            // Refresh custom columns after closing Advanced SQL dialog
+            if (selectedDuckId) {
+              try {
+                const transforms = await Api.getDatasourceTransforms(selectedDuckId)
+                // Combine customColumns, transforms, and joins into a single list
+                const allCustomCols = [
+                  ...(transforms?.customColumns || []).map((c: any) => ({ 
+                    name: c.name, 
+                    type: 'custom',
+                    scope: c.scope || 'datasource',
+                    formula: c.formula || c.expression || c.expr || ''
+                  })),
+                  ...(transforms?.transforms || []).map((t: any) => ({ 
+                    name: t.name, 
+                    type: t.type || 'case',
+                    scope: t.scope || 'datasource',
+                    formula: t.formula || t.expr || t.expression || ''
+                  })),
+                  ...(transforms?.joins || []).map((j: any) => ({ 
+                    name: `Join: ${j.rightTable || 'unknown'}`,
+                    type: 'join',
+                    scope: j.scope || 'datasource',
+                    formula: `${j.leftKey} = ${j.rightKey}`
+                  }))
+                ]
+                setCustomColumnsByDs((prev) => ({ ...prev, [selectedDuckId]: allCustomCols }))
+              } catch (err) {
+                console.error('[DataModel] Failed to refresh custom columns:', err)
+              }
+            }
+          }} 
+          datasourceId={adv.dsId} 
+          dsType={adv.dsType} 
+          source={adv.source} 
+          schema={adv.schema}
         />
       )}
 
@@ -539,6 +930,29 @@ export default function DataModelPage() {
               >{creating ? 'Creating…' : 'Create'}</button>
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-2">
+          <div 
+            className={`px-4 py-3 rounded-lg shadow-lg border ${
+              toast.type === 'success' 
+                ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100' 
+                : 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-900 dark:text-red-100'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">{toast.message}</span>
+              <button 
+                onClick={() => setToast(null)} 
+                className="ml-2 opacity-70 hover:opacity-100"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

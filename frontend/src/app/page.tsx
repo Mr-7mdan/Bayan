@@ -1724,6 +1724,8 @@ export default function HomePage() {
         open={!!kebabMenuId}
         anchorEl={kebabMenuId ? kebabAnchorEl : null}
         onCloseAction={() => { setKebabMenuId(null); setKebabAnchorEl(null) }}
+        widgetType={kebabMenuId ? configs[kebabMenuId]?.type : undefined}
+        chartType={kebabMenuId ? (configs[kebabMenuId] as any)?.chartType : undefined}
         onAction={(action) => {
           const id = kebabMenuId as string | null
           if (!id) return
@@ -1734,6 +1736,12 @@ export default function HomePage() {
           else if (action === 'viewJson') setViewJsonId(id)
           else if (action === 'aiAssist') { setAiWidgetId(id); setAiOpen(true) }
           else if (action === 'embed') { setEmbedWidgetId(id); setEmbedOpen(true) }
+          else if (action === 'downloadPNG') {
+            window.dispatchEvent(new CustomEvent('widget-download-chart', { detail: { widgetId: id, format: 'png' } }))
+          }
+          else if (action === 'downloadSVG') {
+            window.dispatchEvent(new CustomEvent('widget-download-chart', { detail: { widgetId: id, format: 'svg' } }))
+          }
         }}
       />
       {/* Viewers */}

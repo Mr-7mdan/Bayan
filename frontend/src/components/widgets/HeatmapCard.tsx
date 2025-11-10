@@ -242,6 +242,53 @@ export default function HeatmapCard({
   const { filters } = useFilters()
   const { user } = useAuth()
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const echartsRef = useRef<any>(null)
+  
+  // Handle download actions from kebab menu
+  useEffect(() => {
+    const handleDownload = (e: CustomEvent) => {
+      const { widgetId: targetId, format } = e.detail || {}
+      if (targetId !== widgetId) return
+      
+      const instance = echartsRef.current?.getEchartsInstance?.()
+      if (!instance) {
+        console.warn('[HeatmapCard] No ECharts instance available for download')
+        return
+      }
+      
+      try {
+        const fileName = `${title || 'heatmap'}_${new Date().toISOString().split('T')[0]}`
+        
+        if (format === 'png') {
+          const url = instance.getDataURL({
+            type: 'png',
+            pixelRatio: 2,
+            backgroundColor: '#fff'
+          })
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `${fileName}.png`
+          link.click()
+        } else if (format === 'svg') {
+          const url = instance.getDataURL({
+            type: 'svg',
+            backgroundColor: '#fff'
+          })
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `${fileName}.svg`
+          link.click()
+        }
+      } catch (err) {
+        console.error('[HeatmapCard] Download failed:', err)
+      }
+    }
+    
+    window.addEventListener('widget-download-chart' as any, handleDownload as any)
+    return () => {
+      window.removeEventListener('widget-download-chart' as any, handleDownload as any)
+    }
+  }, [widgetId, title])
   
   // Local UI-driven filters (Filterbars) merged into where
   const [uiWhere, setUiWhere] = useState<Record<string, any>>({})
@@ -1161,7 +1208,7 @@ export default function HeatmapCard({
           </div>
           <div key={keyBase} className="relative flex-1 min-h-0 w-full">
             {pairs.length > 0 ? (
-              <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+              <ReactECharts ref={echartsRef} key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
             )}
@@ -1250,7 +1297,7 @@ export default function HeatmapCard({
           </div>
           <div key={keyBase} className="relative flex-1 min-h-0 w-full">
             {pairs.length > 0 ? (
-              <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+              <ReactECharts ref={echartsRef} key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
             )}
@@ -1325,7 +1372,7 @@ export default function HeatmapCard({
           {filterbarsUI}
           <div key={keyBase} className="relative flex-1 min-h-0 w-full">
             {dataForSeries.length > 0 ? (
-              <ReactECharts key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
+              <ReactECharts ref={echartsRef} key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
             )}

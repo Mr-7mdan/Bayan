@@ -126,6 +126,19 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
     staleTime: 60 * 1000,
   })
 
+  // Listen for transform saves to refresh field list immediately
+  useEffect(() => {
+    function onSaved(e: Event) {
+      try {
+        const d = (e as CustomEvent).detail as { datasourceId?: string }
+        if (!dsId || !d?.datasourceId || String(d.datasourceId) !== String(dsId)) return
+        try { dsTransformsQ.refetch() } catch {}
+      } catch {}
+    }
+    if (typeof window !== 'undefined') window.addEventListener('datasource-transforms-saved', onSaved as EventListener)
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('datasource-transforms-saved', onSaved as EventListener) }
+  }, [dsId, dsTransformsQ.refetch])
+
   // (moved below fallbackQ)
 
   // (relocated below fallbackQ to avoid TDZ)
@@ -436,10 +449,42 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
         if (aggAlias) joinAdds.push(aggAlias)
       }
     } catch {}
+    // Transforms (computed/case/replace/translate/nullHandling): include produced aliases for matching scope
+    const transformAdds: string[] = []
+    try {
+      const list = Array.isArray((dsTransformsQ.data as any)?.transforms) ? ((dsTransformsQ.data as any).transforms as any[]) : []
+      const srcNow = String(local?.querySpec?.source || '')
+      const widNow = String((local as any)?.id || '')
+      const norm = (s: string) => String(s || '').trim().replace(/^\[|\]|^"|"$/g, '')
+      const tblEq = (a: string, b: string) => {
+        const na = norm(a).split('.').pop() || ''
+        const nb = norm(b).split('.').pop() || ''
+        return na.toLowerCase() === nb.toLowerCase()
+      }
+      for (const t of list) {
+        const sc = (t?.scope || {}) as any
+        const lvl = String(sc?.level || 'datasource').toLowerCase()
+        const match = (
+          lvl === 'datasource' ||
+          (lvl === 'table' && sc?.table && srcNow && tblEq(String(sc.table), srcNow)) ||
+          (lvl === 'widget' && sc?.widgetId && widNow && String(sc.widgetId) === widNow)
+        )
+        if (!match) continue
+        const ty = String(t?.type || '').toLowerCase()
+        if (ty === 'computed') {
+          const nm = String(t?.name || '').trim()
+          if (nm) transformAdds.push(nm)
+        } else if (ty === 'case' || ty === 'replace' || ty === 'translate' || ty === 'nullhandling') {
+          const tgt = String(t?.target || '').trim()
+          if (tgt) transformAdds.push(tgt)
+        }
+      }
+    } catch {}
     const set = new Set<string>([...columnNames, ...dsCustoms, ...customs, ...unpivotAdds])
     // Hide the pivoted columns if present
     unpivotHide.forEach((n) => { if (set.has(n)) set.delete(n) })
     joinAdds.forEach((n) => { if (n) set.add(n) })
+    transformAdds.forEach((n) => { if (n) set.add(n) })
     return Array.from(set.values())
   }, [columnNames, local?.customColumns, dsTransformsQ.data, local?.querySpec?.source, (local as any)?.id])
 
@@ -2334,7 +2379,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
             <div>
               <label className="block text-xs text-muted-foreground mb-1">Chart Type</label>
               <div className="grid grid-cols-3 gap-2 h-[240px] overflow-y-scroll overflow-x-hidden p-1" style={{ scrollbarGutter: 'stable' }}>
-                {(['column', 'bar', 'area', 'line', 'donut', 'categoryBar', 'spark', 'combo', 'progress', 'tracker', 'badges', 'scatter', 'gantt', 'tremorTable', 'heatmap', 'barList'] as const).map((t) => (
+                {(['column', 'bar', 'area', 'line', 'donut', 'categoryBar', 'spark', 'combo', 'progress', 'tracker', 'badges', 'scatter', 'gantt', 'sankey', 'tremorTable', 'heatmap', 'barList'] as const).map((t) => (
                   <label key={t} className={`w-full flex flex-col items-center gap-1 p-2 rounded-md border cursor-pointer text-xs ${((local.chartType || 'line') === t) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))] ring-offset-2 ring-offset-[hsl(var(--card))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary)/0.6)]'}`}>
                     <input
                       type="radio"
@@ -2431,6 +2476,21 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                           <rect x="10" y="24" width="8" height="4" rx="2" fill="#a78bfa" />
                           <line x1="4" y1="4" x2="36" y2="4" stroke="hsl(var(--border))" />
                           <line x1="4" y1="30" x2="36" y2="30" stroke="hsl(var(--border))" />
+                        </svg>
+                      )}
+                      {t === 'sankey' && (
+                        <svg className="w-full h-full" viewBox="0 0 40 32" aria-hidden="true">
+                          {/* Left nodes */}
+                          <rect x="2" y="8" width="3" height="6" rx="1" fill="#60a5fa" />
+                          <rect x="2" y="18" width="3" height="6" rx="1" fill="#34d399" />
+                          {/* Right nodes */}
+                          <rect x="35" y="6" width="3" height="8" rx="1" fill="#f59e0b" />
+                          <rect x="35" y="18" width="3" height="8" rx="1" fill="#a78bfa" />
+                          {/* Flow paths with gradient effect */}
+                          <path d="M5 11 Q20 11 35 9" fill="none" stroke="#60a5fa" strokeWidth="2.5" opacity="0.4" />
+                          <path d="M5 13 Q20 15 35 21" fill="none" stroke="#60a5fa" strokeWidth="1.5" opacity="0.3" />
+                          <path d="M5 21 Q20 19 35 13" fill="none" stroke="#34d399" strokeWidth="2" opacity="0.4" />
+                          <path d="M5 23 Q20 23 35 23" fill="none" stroke="#34d399" strokeWidth="2" opacity="0.3" />
                         </svg>
                       )}
                       {t === 'tremorTable' && (
@@ -3252,7 +3312,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     <div className="border rounded-md p-2 space-y-2">
                       <div className="text-[11px] font-medium text-muted-foreground">Legend</div>
                       <label className="flex items-center gap-2 text-xs">
-                        <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={!!local.options?.showLegend}
+                        <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={(local.options?.showLegend ?? true)}
                           onChange={(e) => { const opts = { ...(local.options || {}), showLegend: e.target.checked }; const next = { ...local, options: opts }; setLocal(next); updateConfig(next) }} />
                         Show legend
                       </label>

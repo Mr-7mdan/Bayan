@@ -31,8 +31,15 @@ function stripSeriesPrefix(name: string): string {
   try {
     const s = String(name || '')
     if (!s) return s
-    const seps = [' • ', ' - ', ' — ']
-    for (const sep of seps) {
+    // New format: "Category - Series" -> return "Category"
+    // If " - " separator exists, return the first part (category)
+    if (s.includes(' - ')) {
+      const parts = s.split(' - ')
+      return parts[0]
+    }
+    // Legacy format: "Series • Category" -> return "Category" (last part)
+    const legacySeps = [' • ', ' — ']
+    for (const sep of legacySeps) {
       if (s.includes(sep)) {
         const parts = s.split(sep)
         return parts[parts.length - 1]
@@ -71,7 +78,7 @@ function pieLabelConfigs(show: boolean, position: LabelPosition | undefined) {
   return { label, labelLine }
 }
 
-export function renderDonut({ chartInstanceKey, data, colors, valueFormatterAction, showLabels, labelPosition }: { chartInstanceKey: string; data: PieDatum[]; colors?: string[]; valueFormatterAction: (n:number)=>string; showLabels?: boolean; labelPosition?: LabelPosition }) {
+export function renderDonut({ chartInstanceKey, data, colors, valueFormatterAction, showLabels, labelPosition, echartsRef }: { chartInstanceKey: string; data: PieDatum[]; colors?: string[]; valueFormatterAction: (n:number)=>string; showLabels?: boolean; labelPosition?: LabelPosition; echartsRef?: React.RefObject<any> }) {
   const option = {
     color: Array.isArray(colors) && colors.length ? colors : undefined,
     legend: { show: false },
@@ -97,12 +104,12 @@ export function renderDonut({ chartInstanceKey, data, colors, valueFormatterActi
   }
   return (
     <div className="absolute inset-0">
-      <ReactECharts key={chartInstanceKey} option={option} style={{ height: '100%', width: '100%' }} notMerge={true} lazyUpdate={true} opts={{ renderer: 'svg' }} />
+      <ReactECharts ref={echartsRef} key={chartInstanceKey} option={option} style={{ height: '100%', width: '100%' }} notMerge={true} lazyUpdate={true} opts={{ renderer: 'svg' }} />
     </div>
   )
 }
 
-export function renderPie({ chartInstanceKey, data, colors, valueFormatterAction, showLabels, labelPosition }: { chartInstanceKey: string; data: PieDatum[]; colors?: string[]; valueFormatterAction: (n:number)=>string; showLabels?: boolean; labelPosition?: LabelPosition }) {
+export function renderPie({ chartInstanceKey, data, colors, valueFormatterAction, showLabels, labelPosition, echartsRef }: { chartInstanceKey: string; data: PieDatum[]; colors?: string[]; valueFormatterAction: (n:number)=>string; showLabels?: boolean; labelPosition?: LabelPosition; echartsRef?: React.RefObject<any> }) {
   const option = {
     color: Array.isArray(colors) && colors.length ? colors : undefined,
     legend: { show: false },
@@ -128,12 +135,12 @@ export function renderPie({ chartInstanceKey, data, colors, valueFormatterAction
   }
   return (
     <div className="absolute inset-0">
-      <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge={false} lazyUpdate={true} opts={{ renderer: 'svg' }} />
+      <ReactECharts ref={echartsRef} option={option} style={{ height: '100%', width: '100%' }} notMerge={false} lazyUpdate={true} opts={{ renderer: 'svg' }} />
     </div>
   )
 }
 
-export function renderNightingale({ chartInstanceKey, data, colors, valueFormatterAction, showLabels, labelPosition }: { chartInstanceKey: string; data: PieDatum[]; colors?: string[]; valueFormatterAction: (n:number)=>string; showLabels?: boolean; labelPosition?: LabelPosition }) {
+export function renderNightingale({ chartInstanceKey, data, colors, valueFormatterAction, showLabels, labelPosition, echartsRef }: { chartInstanceKey: string; data: PieDatum[]; colors?: string[]; valueFormatterAction: (n:number)=>string; showLabels?: boolean; labelPosition?: LabelPosition; echartsRef?: React.RefObject<any> }) {
   const option = {
     color: Array.isArray(colors) && colors.length ? colors : undefined,
     legend: { show: false },
@@ -160,12 +167,12 @@ export function renderNightingale({ chartInstanceKey, data, colors, valueFormatt
   }
   return (
     <div className="absolute inset-0">
-      <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge={false} lazyUpdate={true} opts={{ renderer: 'svg' }} />
+      <ReactECharts ref={echartsRef} option={option} style={{ height: '100%', width: '100%' }} notMerge={false} lazyUpdate={true} opts={{ renderer: 'svg' }} />
     </div>
   )
 }
 
-export function renderSunburst({ chartInstanceKey, data, colors, valueFormatterAction, showLabels }: { chartInstanceKey: string; data: PieDatum[]; colors?: string[]; valueFormatterAction: (n:number)=>string; showLabels?: boolean }) {
+export function renderSunburst({ chartInstanceKey, data, colors, valueFormatterAction, showLabels, echartsRef }: { chartInstanceKey: string; data: PieDatum[]; colors?: string[]; valueFormatterAction: (n:number)=>string; showLabels?: boolean; echartsRef?: React.RefObject<any> }) {
   const total = data.reduce((a, b) => a + Number(b.value || 0), 0)
   const sbData = data.map(d => ({ name: d.name, value: d.value }))
   const option = {
@@ -193,7 +200,7 @@ export function renderSunburst({ chartInstanceKey, data, colors, valueFormatterA
   }
   return (
     <div className="absolute inset-0">
-      <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge={false} lazyUpdate={true} opts={{ renderer: 'svg' }} />
+      <ReactECharts ref={echartsRef} option={option} style={{ height: '100%', width: '100%' }} notMerge={false} lazyUpdate={true} opts={{ renderer: 'svg' }} />
     </div>
   )
 }

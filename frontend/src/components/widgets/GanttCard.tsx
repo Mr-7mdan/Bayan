@@ -54,6 +54,53 @@ export default function GanttCard({
   }
 }) {
   const { filters } = useFilters()
+  const echartsRef = React.useRef<any>(null)
+  
+  // Handle download actions from kebab menu
+  React.useEffect(() => {
+    const handleDownload = (e: CustomEvent) => {
+      const { widgetId: targetId, format } = e.detail || {}
+      if (targetId !== widgetId) return
+      
+      const instance = echartsRef.current?.getEchartsInstance?.()
+      if (!instance) {
+        console.warn('[GanttCard] No ECharts instance available for download')
+        return
+      }
+      
+      try {
+        const fileName = `${title || 'gantt'}_${new Date().toISOString().split('T')[0]}`
+        
+        if (format === 'png') {
+          const url = instance.getDataURL({
+            type: 'png',
+            pixelRatio: 2,
+            backgroundColor: '#fff'
+          })
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `${fileName}.png`
+          link.click()
+        } else if (format === 'svg') {
+          const url = instance.getDataURL({
+            type: 'svg',
+            backgroundColor: '#fff'
+          })
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `${fileName}.svg`
+          link.click()
+        }
+      } catch (err) {
+        console.error('[GanttCard] Download failed:', err)
+      }
+    }
+    
+    window.addEventListener('widget-download-chart' as any, handleDownload as any)
+    return () => {
+      window.removeEventListener('widget-download-chart' as any, handleDownload as any)
+    }
+  }, [widgetId, title])
   const gantt = (options?.gantt || {}) as NonNullable<WidgetConfig['options']>['gantt']
   const mode = gantt?.mode || 'startEnd'
   const durationUnit = gantt?.durationUnit || 'hours'
@@ -236,7 +283,7 @@ export default function GanttCard({
   return (
     <ErrorBoundary name="GanttCard">
       <div className="absolute inset-0">
-        <ReactECharts key={`${widgetId || title}-gantt`} option={option} style={{ height: '100%', width: '100%' }} notMerge={true} lazyUpdate={true} opts={{ renderer: 'svg' }} />
+        <ReactECharts ref={echartsRef} key={`${widgetId || title}-gantt`} option={option} style={{ height: '100%', width: '100%' }} notMerge={true} lazyUpdate={true} opts={{ renderer: 'svg' }} />
       </div>
     </ErrorBoundary>
   )

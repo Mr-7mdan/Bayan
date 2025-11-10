@@ -24,6 +24,7 @@ import ReactDOMServer from 'react-dom/server'
 import GanttCard from '@/components/widgets/GanttCard'
 import { renderAdvancedAreaChart } from './echarts/AreaAdvanced'
 import { renderDonut as renderEchartsDonut, renderPie as renderEchartsPie, renderSunburst as renderEchartsSunburst, renderNightingale as renderEchartsNightingale } from './echarts/PiePresets'
+import { renderSankey } from './echarts/SankeyChart'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
 import { RiArrowUpSFill, RiArrowDownSFill, RiArrowRightSFill, RiArrowUpLine, RiArrowDownLine, RiArrowRightLine, RiCalendar2Line, RiArrowDownSLine } from '@remixicon/react'
 import {
@@ -362,7 +363,7 @@ export default function ChartCard({
   sql: string
   datasourceId?: string
   type?: 'line' | 'bar' | 'area' | 'column' | 'donut' | 'categoryBar' | 'spark' | 'combo' | 'badges' | 'progress' | 'tracker' | 'scatter' | 'tremorTable' | 'barList'
-  | 'gantt'
+  | 'gantt' | 'sankey'
   options?: WidgetConfig['options']
   queryMode?: 'sql' | 'spec'
   querySpec?: QuerySpec
@@ -397,6 +398,55 @@ export default function ChartCard({
   const isPreview = useMemo(() => {
     try { return String(widgetId || '').startsWith('ai_prev_') || ((options as any)?.__preview === true) } catch { return false }
   }, [widgetId, options])
+  
+  // Store ECharts instance for export
+  const echartsRef = useRef<any>(null)
+  
+  // Handle download actions from kebab menu
+  useEffect(() => {
+    const handleDownload = (e: CustomEvent) => {
+      const { widgetId: targetId, format } = e.detail || {}
+      if (targetId !== widgetId) return
+      
+      const instance = echartsRef.current?.getEchartsInstance?.()
+      if (!instance) {
+        console.warn('[ChartCard] No ECharts instance available for download')
+        return
+      }
+      
+      try {
+        const fileName = `${title || 'chart'}_${new Date().toISOString().split('T')[0]}`
+        
+        if (format === 'png') {
+          const url = instance.getDataURL({
+            type: 'png',
+            pixelRatio: 2,
+            backgroundColor: '#fff'
+          })
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `${fileName}.png`
+          link.click()
+        } else if (format === 'svg') {
+          const url = instance.getDataURL({
+            type: 'svg',
+            backgroundColor: '#fff'
+          })
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `${fileName}.svg`
+          link.click()
+        }
+      } catch (err) {
+        console.error('[ChartCard] Download failed:', err)
+      }
+    }
+    
+    window.addEventListener('widget-download-chart' as any, handleDownload as any)
+    return () => {
+      window.removeEventListener('widget-download-chart' as any, handleDownload as any)
+    }
+  }, [widgetId, title])
   const isSnap = useMemo(() => {
     try {
       if (typeof document === 'undefined') return false
@@ -1318,12 +1368,13 @@ export default function ChartCard({
               case 'count': default: return vals.filter((v) => v !== null && v !== undefined).length
             }
           }
-          // Multi-series WITH legend (client path): virtualize categories per series -> "Series • Category"
+          // Multi-series WITH legend (client path): virtualize categories per series -> "Category - Series"
           if (legendField && seriesArr.length > 0) {
             const labelFor = (s: any, idx: number) => s.label || s.y || s.measure || `series_${idx + 1}`
             const outMap = new Map<any, any>()
             const catsSet = new Set<string>()
             const virtualMeta: Record<string, { baseSeriesIndex: number; baseSeriesLabel: string; categoryLabel: string; agg?: string }> = {}
+            const hasMultipleSeries = seriesArr.length > 1
             keysSorted.forEach((k) => {
               const arr = partitions.get(k) || []
               const obj: any = { x: k }
@@ -1342,7 +1393,8 @@ export default function ChartCard({
                 byLegend.forEach((subset, lk) => {
                   const cat = String(lk)
                   const v = aggregate(subset, String(s.y), aggEff)
-                  const virtualKey = `${baseLabel} • ${cat}`
+                  // Format: "LegendKey - DataSeriesName" if multiple series, else just "LegendKey"
+                  const virtualKey = hasMultipleSeries ? `${cat} - ${baseLabel}` : cat
                   catsSet.add(virtualKey)
                   obj[virtualKey] = v
                   virtualMeta[virtualKey] = { baseSeriesIndex: i, baseSeriesLabel: baseLabel, categoryLabel: cat, agg: aggLabel }
@@ -1533,6 +1585,7 @@ export default function ChartCard({
           // If no X column OR all X values are the same (backend default), but has legend, create single x-category with multiple series
           if (((!hasXColumn || allXValuesSame) && legendPresent)) {
             const obj: any = { x: (querySpec as any)?.y || (querySpec as any)?.measure || 'Total' }
+            const hasMultipleSeries = (series || []).length > 1
             results.forEach((res, idx) => {
               const baseLabel = labelFor((series || [])[idx], idx)
               const cols: string[] = ((res?.columns || []) as string[])
@@ -1542,7 +1595,8 @@ export default function ChartCard({
               res.rows.forEach((row: any[]) => {
                 const v = Number(row[iv] ?? 0)
                 const cat = String(row[il])
-                const key = `${baseLabel} • ${cat}`
+                // Format: "LegendKey - DataSeriesName" if multiple series, else just "LegendKey"
+                const key = hasMultipleSeries ? `${cat} - ${baseLabel}` : cat
                 catsSet.add(key)
                 obj[key] = v
                 virtualMeta[key] = { baseSeriesIndex: idx, baseSeriesLabel: baseLabel, categoryLabel: cat, agg: String(((series || [])[idx] as any)?.agg ?? ((querySpec as any)?.agg ?? 'count')) }
@@ -1558,6 +1612,7 @@ export default function ChartCard({
           }
           
           // Normal path with X column
+          const hasMultipleSeries = (series || []).length > 1
           results.forEach((res, idx) => {
             const baseLabel = labelFor((series || [])[idx], idx)
             const cols: string[] = ((res?.columns || []) as string[])
@@ -1568,7 +1623,8 @@ export default function ChartCard({
               const x = row[ix] as any
               const v = Number(row[iv] ?? 0)
               const cat = il >= 0 ? String(row[il]) : baseLabel
-              const key = il >= 0 ? `${baseLabel} • ${cat}` : baseLabel
+              // Format: "LegendKey - DataSeriesName" if multiple series, else just "LegendKey" or baseLabel
+              const key = il >= 0 ? (hasMultipleSeries ? `${cat} - ${baseLabel}` : cat) : baseLabel
               catsSet.add(key)
               if (!map.has(x)) map.set(x, { x })
               if (map.get(x)![key] === undefined) map.get(x)![key] = v
@@ -2707,6 +2763,8 @@ export default function ChartCard({
 
   // Custom tooltip (smaller font, themed background; no glow)
   const renderTooltip = ({ active, payload, label }: any) => {
+    // Honor global showTooltip toggle for Tremor/Recharts path
+    if ((options as any)?.showTooltip === false) return null
     if (typeof window !== 'undefined') {
       try { console.log('[ChartCard] [Tooltip] RECHARTS renderTooltip called', { active, payloadLength: payload?.length, label }) } catch {}
     }
@@ -2793,7 +2851,7 @@ export default function ChartCard({
           }
         } else {
           // Multiple series - match by label
-          const base = String(rawName).split(' • ')[0].trim()
+          const base = extractBaseLabel(String(rawName)).trim()
           for (let i = 0; i < seriesDefs.length; i++) {
             const s = seriesDefs[i]
             const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
@@ -2809,11 +2867,10 @@ export default function ChartCard({
       // Compute legend/server keys to resolve prev total
       const baseCandidates = (() => {
         try {
-          const rn = String(rawName)
-          const partsSplit = rn.includes(' • ') ? rn.split(' • ') : (rn.includes(' · ') ? rn.split(' · ') : rn.split(' • '))
-          const a = (partsSplit[0] || '').trim()
+          const parts = splitLegend(String(rawName))
+          const a = extractBaseLabel(String(rawName)).trim()
           const b = String((vmeta as any)?.[rawName]?.baseSeriesLabel || a)
-          const legendPart = partsSplit.slice(1).join(' • ').trim()
+          const legendPart = parts.cat || ''
           const list: string[] = []
           if (legendPart) list.push(a)
           if (!list.includes(b)) list.push(b)
@@ -2908,7 +2965,7 @@ export default function ChartCard({
               return toProperCase(String(ag))
             }
             // Multiple series - match by label
-            const base = String(rawName).split(' • ')[0].trim()
+            const base = extractBaseLabel(String(rawName)).trim()
             for (let i = 0; i < seriesDefs.length; i++) {
               const s = seriesDefs[i]
               const lab = (s?.label || s?.y || s?.measure || `series_${i+1}`)
@@ -2999,6 +3056,12 @@ export default function ChartCard({
         return h >>> 0
       }
       if (cats.length > 0) {
+        // Use sequential assignment when we have fewer categories than colors for guaranteed distinction
+        // Use hash-based assignment for many categories to maintain consistency across charts
+        if (cats.length <= N) {
+          return cats.map((label, i) => base[i % N] as any)
+        }
+        // For many categories, use hash-based assignment
         return cats.map((label, i) => {
           const idx = ((hash(String(label)) * step) % N)
           return base[idx] as any
@@ -3029,8 +3092,10 @@ export default function ChartCard({
     const hasRotate = Math.max(-90, Math.min(90, Number((options as any)?.xTickAngle ?? 0))) !== 0
     const wantSecondaryAxis = Array.isArray(series) && series.some((s: any) => !!(s as any)?.secondaryAxis)
     const typeIsAdvanced = (type === 'bar' || type === 'column' || type === 'line' || type === 'area')
-    const forceAdvanced = ((((options as any)?.colorMode === 'valueGradient') || denseX || hasRotate || ((type === 'column') && !!(options as any)?.dataLabelsShow) || wantSecondaryAxis) && typeIsAdvanced)
-    const advanced = (((options as any)?.advancedMode) || forceAdvanced) && typeIsAdvanced
+    // If Rich Tooltip is explicitly off, don't force advanced just for dense/rotate; allow simple Tremor tooltip
+    const ignoreDenseRotate = ((options as any)?.richTooltip === false)
+    const forceAdvanced = ((((options as any)?.colorMode === 'valueGradient') || (ignoreDenseRotate ? false : (denseX || hasRotate)) || ((type === 'column') && !!(options as any)?.dataLabelsShow) || wantSecondaryAxis) && typeIsAdvanced)
+    const advanced = ((((options as any)?.advancedMode) || forceAdvanced) && typeIsAdvanced)
     if (!advanced) {
       return chartColorsTokens.map((t: any) => tremorNameToHex(t as any))
     }
@@ -3103,13 +3168,26 @@ export default function ChartCard({
     const isSingleSeries = Array.isArray(series) ? (series.length <= 1) : true
     function splitLegend(raw: string): { base: string; cat?: string } {
       const s = String(raw || '')
-      const parts = s.includes(' • ')
-        ? s.split(' • ')
-        : (s.includes(' · ')
-          ? s.split(' · ')
-          : s.split(' • '))
-      if (parts.length >= 2) return { base: parts[0], cat: parts.slice(1).join(' • ') }
+      // New format: "Category - Series" (was "Series • Category")
+      const parts = s.includes(' - ')
+        ? s.split(' - ')
+        : (s.includes(' • ') // Support legacy format
+          ? s.split(' • ')
+          : (s.includes(' · ')
+            ? s.split(' · ')
+            : [s]))
+      if (parts.length >= 2) {
+        // New format has category first, base second
+        if (s.includes(' - ')) return { cat: parts[0], base: parts.slice(1).join(' - ') }
+        // Legacy format has base first, cat second
+        return { base: parts[0], cat: parts.slice(1).join(' • ') }
+      }
       return { base: s }
+    }
+    // Helper to extract base series label from category name (supports both new and legacy formats)
+    function extractBaseLabel(categoryName: string): string {
+      const parts = splitLegend(categoryName)
+      return parts.base || categoryName
     }
     function formatCategoryCase(name: string): string {
       const str = String(name ?? '')
@@ -3132,7 +3210,8 @@ export default function ChartCard({
         const parts = splitLegend(s)
         if (isSingleSeries && parts.cat) return formatCategoryCase(parts.cat)
         if (!parts.cat) return formatHeader(s)
-        return `${formatHeader(parts.base)} • ${formatCategoryCase(parts.cat)}`
+        // New format: "Category - Series"
+        return `${formatCategoryCase(parts.cat)} - ${formatHeader(parts.base)}`
       } catch { return String(rawName ?? '') }
     }
 
@@ -3142,8 +3221,9 @@ export default function ChartCard({
     // Detect if any series opts into the secondary axis (per-chip toggle)
     const wantSecondaryAxis = Array.isArray(series) && series.some((s: any) => !!(s as any)?.secondaryAxis)
     // Also force advanced when column charts show data labels so we can rotate labels vertically via labelLayout
+    const ignoreDenseRotate2 = ((options as any)?.richTooltip === false)
     const forceAdvanced = (
-      (((options as any)?.colorMode === 'valueGradient') || denseX || hasRotate || ((type === 'column') && !!(options as any)?.dataLabelsShow) || wantSecondaryAxis)
+      (((options as any)?.colorMode === 'valueGradient') || (ignoreDenseRotate2 ? false : (denseX || hasRotate)) || ((type === 'column') && !!(options as any)?.dataLabelsShow) || wantSecondaryAxis)
     ) && (type === 'bar' || type === 'column' || type === 'line' || type === 'area')
     if ((((options as any)?.advancedMode) || forceAdvanced) && (type === 'bar' || type === 'column' || type === 'line' || type === 'area')) {
       const xLabels = (displayData as any[]).map((d) => d.x)
@@ -3171,7 +3251,7 @@ export default function ChartCard({
           const tmp = new Map<string, string[]>()
           ;(categories || []).forEach((cc: any) => {
             const name = String(cc)
-            const base = vmetaColor[name]?.baseSeriesLabel || name.split(' • ')[0]
+            const base = vmetaColor[name]?.baseSeriesLabel || extractBaseLabel(name)
             const arr = tmp.get(base) || []
             arr.push(name)
             tmp.set(base, arr)
@@ -3189,8 +3269,8 @@ export default function ChartCard({
         const nameC = String(c)
         const baseHex = wantValueGrad ? baseHexVG : tremorNameToHex(chartColorsTokens[idx % chartColorsTokens.length])
         const rounded = options?.barRounded ? (type === 'bar' ? [0, 6, 6, 0] : [6, 6, 0, 0]) : 0
-        // Per-series overrides: resolve by base series label when categories are virtualized ("Series • Cat")
-        const baseLabelForMeta = (vmetaColor[nameC]?.baseSeriesLabel || String(nameC).split(' • ')[0])
+        // Per-series overrides: resolve by base series label when categories are virtualized
+        const baseLabelForMeta = (vmetaColor[nameC]?.baseSeriesLabel || extractBaseLabel(String(nameC)))
         const sMeta: any = Array.isArray(series) ? (metaByName.get(String(baseLabelForMeta)) || series?.[idx]) : undefined
         const gradientWanted = ((type === 'bar' || type === 'column') ? !!options?.barGradient : false)
         const style = (sMeta?.style as any) || (gradientWanted ? 'gradient' : 'solid')
@@ -3355,7 +3435,7 @@ export default function ChartCard({
       const axisPtr = (!useItemTrigger && hasSeriesData) ? { type: axisPointerType } : undefined
       const advTooltip = (options?.richTooltip)
         ? {
-            show: hasSeriesData && xLabels.length > 0,
+            show: (((options as any)?.showTooltip ?? true) && hasSeriesData && xLabels.length > 0),
             trigger: useItemTrigger ? 'item' : 'axis',
             axisPointer: axisPtr,
             backgroundColor: 'transparent',
@@ -3468,7 +3548,7 @@ export default function ChartCard({
                     if (!rk) return 0
                     // Determine per-series agg/y/measure based on the series label prefix
                     const seriesDefs: any[] = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
-                    const sLabelBase = String(rawName).split(' • ')[0].trim()
+                    const sLabelBase = extractBaseLabel(String(rawName)).trim()
                     let sAgg: any = ((vmeta[rawName]?.agg as any) || ((querySpec as any)?.agg || (((querySpec as any)?.y || (querySpec as any)?.measure) ? 'sum' : 'count')) as any)
                     let sY: any = (querySpec as any)?.y as any
                     let sMeasure: any = (querySpec as any)?.measure as any
@@ -3568,10 +3648,9 @@ export default function ChartCard({
                     }
                     const baseCandidates = (() => {
                       try {
-                        const rn = String(rawName)
-                        const partsSplit = rn.includes(' • ') ? rn.split(' • ') : (rn.includes(' · ') ? rn.split(' · ') : rn.split(' • '))
-                        const a = partsSplit[0] || ''
-                        const legendPart = partsSplit.slice(1).join(' • ').trim()
+                        const parts = splitLegend(String(rawName))
+                        const a = extractBaseLabel(String(rawName)).trim()
+                        const legendPart = parts.cat || ''
                         const b = String(vmeta[rawName]?.baseSeriesLabel || '')
                         // Try to infer legend from the current row by matching the current value v
                         const legendFromRow = (() => {
@@ -3753,7 +3832,7 @@ export default function ChartCard({
               } catch { return '' }
             },
           }
-        : { show: hasSeriesData && xLabels.length > 0, trigger: useItemTrigger ? 'item' : 'axis', axisPointer: axisPtr, backgroundColor: 'transparent', borderColor: 'transparent', textStyle: { color: undefined as any }, renderMode: 'html', confine: true, extraCssText: 'padding:0;border:none;background:transparent;box-shadow:none;z-index:99999;', position: (pos: [number, number], _params: any, dom: HTMLElement, _rect: any, size: any) => {
+        : { show: (((options as any)?.showTooltip ?? true) && hasSeriesData && xLabels.length > 0), trigger: useItemTrigger ? 'item' : 'axis', axisPointer: axisPtr, backgroundColor: 'transparent', borderColor: 'transparent', textStyle: { color: undefined as any }, renderMode: 'html', confine: true, extraCssText: 'padding:0;border:none;background:transparent;box-shadow:none;z-index:99999;', position: (pos: [number, number], _params: any, dom: HTMLElement, _rect: any, size: any) => {
               const x = Number(pos?.[0] || 0)
               const y = Number(pos?.[1] || 0)
               const viewW = Number((size?.viewSize?.[0]) || 0)
@@ -4147,6 +4226,7 @@ export default function ChartCard({
           },
           onReadyAction: () => { try { markChartReady() } catch {} },
           noAnim: isSnap,
+          echartsRef,
         })
       }
 
@@ -4205,6 +4285,7 @@ export default function ChartCard({
       return (
         <div className="absolute inset-0">
           <ReactECharts
+            ref={echartsRef}
             key={chartInstanceKey}
             option={option}
             notMerge={true}
@@ -4799,6 +4880,7 @@ export default function ChartCard({
       return (
         <div className="absolute inset-0" style={{ paddingBottom: dataZoom ? 48 : 0 }}>
           <ReactECharts
+            ref={echartsRef}
             key={chartInstanceKey}
             option={option}
             notMerge={true}
@@ -5543,6 +5625,7 @@ export default function ChartCard({
       return (
         <div className="absolute inset-0" style={{ paddingBottom: dataZoomCombo ? 48 : 0 }}>
           <ReactECharts
+            ref={echartsRef}
             key={chartInstanceKey}
             option={option}
             notMerge={true}
@@ -6154,7 +6237,7 @@ export default function ChartCard({
           maxValue={options?.yMax}
           className="h-full text-[11px]"
           {...(type === 'bar' ? ({ layout: 'vertical' } as any) : {})}
-          customTooltip={renderTooltip}
+          customTooltip={options?.richTooltip ? renderTooltip : undefined}
           startEndOnly={denseX}
           />
         </div>
@@ -6219,11 +6302,132 @@ export default function ChartCard({
           minValue={options?.yMin}
           maxValue={options?.yMax}
           className="h-full text-[11px]"
-          customTooltip={renderTooltip}
+          customTooltip={options?.richTooltip ? renderTooltip : undefined}
           startEndOnly={denseX}
           />
         </div>
       )
+    }
+    if (type === 'sankey') {
+      // Transform data for Sankey diagram: expects { nodes: [], links: [] }
+      // Data comes with standardized column names: 'x' (source), 'legend' (target), 'value'
+      const rowsArr: any[] = Array.isArray(displayData)
+        ? (displayData as any[])
+        : (Array.isArray((q.data as any)?.rows) ? ((q.data as any).rows as any[]) : [])
+      const cols: string[] = ((q.data as any)?.columns as string[]) || []
+      
+      // Look for standardized column names
+      const sourceIdx = cols.indexOf('x')
+      const targetIdx = cols.indexOf('legend')
+      const valueIdx = cols.indexOf('value')
+      
+      if (sourceIdx === -1 || targetIdx === -1 || valueIdx === -1) {
+        return <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+          Sankey requires X-axis (source) and Legend (target) to be configured in the pivot builder
+        </div>
+      }
+      
+      console.log('[Sankey] Data structure:', { cols, rowCount: rowsArr.length, sourceIdx, targetIdx, valueIdx })
+      console.log('[Sankey] First 3 rows:', rowsArr.slice(0, 3))
+      if (rowsArr.length > 0 && rowsArr[0] && typeof rowsArr[0] === 'object') {
+        console.log('[Sankey] Column keys in first row:', Object.keys(rowsArr[0]))
+        console.log('[Sankey] First row values:', rowsArr[0])
+        console.log('[Sankey] Sample values:', {
+          x: rowsArr[0].x,
+          firstKey: Object.keys(rowsArr[0])[1],
+          firstValue: rowsArr[0][Object.keys(rowsArr[0])[1]],
+          firstValueType: typeof rowsArr[0][Object.keys(rowsArr[0])[1]]
+        })
+      }
+      
+      // Collect all flows (including bidirectional)
+      const allFlows: Array<{ source: string; target: string; value: number }> = []
+      
+      // Handle pivoted data format where each row has x and multiple category columns
+      rowsArr.forEach((row: any) => {
+        if (Array.isArray(row)) {
+          // Array format: [source, target, value]
+          const source = String(row[sourceIdx] || '')
+          const target = String(row[targetIdx] || '')
+          const value = Number(row[valueIdx] || 0)
+          
+          if (source && target && value > 0 && source !== target) {
+            allFlows.push({ source, target, value })
+          }
+        } else if (row && typeof row === 'object') {
+          // Object format: {x: 'source', 'target1 - measure': value1, 'target2 - measure': value2, ...}
+          const source = String(row.x || '')
+          if (!source) return
+          
+          // Iterate through all keys except 'x' to find target-value pairs
+          Object.keys(row).forEach(key => {
+            if (key === 'x') return
+            
+            const value = Number(row[key])
+            if (!value || value <= 0 || !Number.isFinite(value)) return
+            
+            // Extract target name - handle various formats:
+            // 'WB - OrderUID' -> 'WB'
+            // 'WB - sum(amount)' -> 'WB'
+            // 'WB' -> 'WB'
+            let target = key
+            if (key.includes(' - ')) {
+              target = key.split(' - ')[0]
+            } else if (key.includes('-')) {
+              target = key.split('-')[0].trim()
+            }
+            
+            // Skip self-loops but allow bidirectional flows
+            if (source !== target) {
+              allFlows.push({ source, target, value })
+            }
+          })
+        }
+      })
+      
+      // For bidirectional flows, split nodes into "From" and "To" groups
+      // This allows showing both A→B and B→A without creating cycles
+      const sourceNodes = new Set<string>()
+      const targetNodes = new Set<string>()
+      
+      allFlows.forEach(flow => {
+        sourceNodes.add(flow.source)
+        targetNodes.add(flow.target)
+      })
+      
+      // Create node list with suffixes to distinguish source/target sides
+      const nodes: Array<{ name: string }> = []
+      sourceNodes.forEach(name => nodes.push({ name: `${name} (From)` }))
+      targetNodes.forEach(name => nodes.push({ name: `${name} (To)` }))
+      
+      // Transform links to use the suffixed node names
+      const finalLinks = allFlows.map(flow => ({
+        source: `${flow.source} (From)`,
+        target: `${flow.target} (To)`,
+        value: flow.value
+      }))
+      
+      console.log('[Sankey] Built data:', { nodeCount: nodes.length, linkCount: finalLinks.length, nodes: nodes.slice(0, 10), links: finalLinks.slice(0, 5) })
+      const hexColors = legendHexColors || (chartColorsTokens || [])
+      const vf = (n: number) => valueFormatter(n)
+      const showLabels = (options?.dataLabelsShow ?? true)
+      const labelPosition = ((options?.dataLabelPosition as any) || 'right') as 'left' | 'right' | 'top' | 'bottom'
+      const orient = ((options as any)?.sankeyOrient || 'horizontal') as 'horizontal' | 'vertical'
+      const nodeWidth = Number((options as any)?.sankeyNodeWidth ?? 20)
+      const nodeGap = Number((options as any)?.sankeyNodeGap ?? 8)
+      
+      return renderSankey({
+        chartInstanceKey,
+        data: { nodes, links: finalLinks },
+        colors: hexColors as any,
+        valueFormatterAction: vf,
+        orient,
+        nodeWidth,
+        nodeGap,
+        showLabels,
+        labelPosition,
+        echartsRef
+      })
     }
     if (type === 'donut') {
       // Unified sums via calcEngine (reuse existing shaping)
@@ -6244,10 +6448,10 @@ export default function ChartCard({
       const vf = (n: number) => valueFormatter(n)
       const showLabels = !!options?.dataLabelsShow
       const labelPosition = (options?.dataLabelPosition as any) || 'outsideEnd'
-      if (variant === 'pie') return renderEchartsPie({ chartInstanceKey, data: dataForChart, colors: hexColors as any, valueFormatterAction: vf, showLabels, labelPosition })
-      if (variant === 'sunburst') return renderEchartsSunburst({ chartInstanceKey, data: dataForChart, colors: hexColors as any, valueFormatterAction: vf, showLabels })
-      if (variant === 'nightingale') return renderEchartsNightingale({ chartInstanceKey, data: dataForChart, colors: hexColors as any, valueFormatterAction: vf, showLabels, labelPosition })
-      return renderEchartsDonut({ chartInstanceKey, data: dataForChart, colors: hexColors as any, valueFormatterAction: vf, showLabels, labelPosition })
+      if (variant === 'pie') return renderEchartsPie({ chartInstanceKey, data: dataForChart, colors: hexColors as any, valueFormatterAction: vf, showLabels, labelPosition, echartsRef })
+      if (variant === 'sunburst') return renderEchartsSunburst({ chartInstanceKey, data: dataForChart, colors: hexColors as any, valueFormatterAction: vf, showLabels, echartsRef })
+      if (variant === 'nightingale') return renderEchartsNightingale({ chartInstanceKey, data: dataForChart, colors: hexColors as any, valueFormatterAction: vf, showLabels, labelPosition, echartsRef })
+      return renderEchartsDonut({ chartInstanceKey, data: dataForChart, colors: hexColors as any, valueFormatterAction: vf, showLabels, labelPosition, echartsRef })
     }
 
     // Default: line chart
@@ -6302,17 +6506,24 @@ export default function ChartCard({
         minValue={options?.yMin}
         maxValue={options?.yMax}
         className="h-full text-[11px]"
-        customTooltip={renderTooltip}
+        customTooltip={options?.richTooltip ? renderTooltip : undefined}
         startEndOnly={denseX}
         />
       </div>
     )
   })()
 
-  if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  if (typeof window !== 'undefined') {
     try {
       // eslint-disable-next-line no-console
-      console.debug('[ChartCard] colors', { categories, chartColorsTokens, legendHexColors })
+      console.log('[ChartCard] COLOR ASSIGNMENT:', {
+        categories,
+        isMulti,
+        chartColorsTokens,
+        legendHexColors,
+        paletteSize: getPresetPalette(options?.colorPreset as any).length,
+        mapping: categories?.map((cat, i) => ({ category: cat, token: chartColorsTokens[i], hex: legendHexColors[i] }))
+      })
     } catch {}
   }
 

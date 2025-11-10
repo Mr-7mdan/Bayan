@@ -1269,6 +1269,39 @@ def drop_local_table(ds_id: str, payload: _DropLocalTableRequest, actorId: str |
     return {"ok": True, "dropped": dropped}
 
 
+class _RenameLocalTableRequest(BaseModel):
+    oldName: str
+    newName: str
+
+
+@router.post("/{ds_id}/local/rename-table")
+def rename_local_table(ds_id: str, payload: _RenameLocalTableRequest, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    # owner or admin
+    if not _is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if ds.user_id and ds.user_id != actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    old_name = (payload.oldName or "").strip()
+    new_name = (payload.newName or "").strip()
+    if not old_name or not new_name:
+        raise HTTPException(status_code=400, detail="oldName and newName are required")
+    if old_name == new_name:
+        return {"ok": True}
+    from ..db import open_duck_native
+    # Quote for DuckDB to handle spaces/reserved words
+    q_old = '"' + old_name.replace('"', '""') + '"'
+    q_new = '"' + new_name.replace('"', '""') + '"'
+    try:
+        with open_duck_native(settings.duckdb_path) as conn:
+            conn.execute(f"ALTER TABLE {q_old} RENAME TO {q_new}")
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to rename table: {str(e)}")
+
+
 # --- Datasource-level transforms (Advanced SQL Mode) ---
 
 @router.get("/{ds_id}/transforms", response_model=DatasourceTransforms)

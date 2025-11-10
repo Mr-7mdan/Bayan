@@ -6,6 +6,7 @@ export type DatasourceOut = {
   active?: boolean
   connectionUri?: string
   options?: Record<string, unknown>
+  userId?: string
 }
 
 export type DatasourceDetailOut = {
@@ -600,6 +601,8 @@ export const Api = {
       { method: 'DELETE' }
     ),
   dropLocalTable: (id: string, table: string, actorId?: string) => http<{ ok: boolean; dropped: number }>(`/datasources/${id}/local/drop-table${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST', body: JSON.stringify({ table }) }),
+  renameLocalTable: (id: string, oldName: string, newName: string, actorId?: string) => http<{ ok: boolean }>(`/datasources/${id}/local/rename-table${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST', body: JSON.stringify({ oldName, newName }) }),
+  listUsers: (actorId?: string) => http<Array<{ id: string; username?: string; email?: string }>>(`/users${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`),
   // Export / Import: Datasources
   exportDatasources: (opts?: { ids?: string[]; includeSyncTasks?: boolean; actorId?: string }) => {
     const params: string[] = []

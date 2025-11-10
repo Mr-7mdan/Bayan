@@ -844,14 +844,22 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
     if (rowDims.length === 0) return visRowLeaves
     const out: string[] = []
     const arr = sortedVisRowLeaves
+    // Track which collapsed prefix we've already added a representative for
+    const seenCollapsedPrefix = new Set<string>()
+    
     for (const rk of arr) {
       const pref = nearestCollapsedPrefixFor(rk)
-      if (!pref) { out.push(rk); continue }
-      const rep = repByPrefix.get(pref) || firstLeafForPrefix.get(pref)
-      if (rep === rk) out.push(rk)
+      if (!pref) { 
+        out.push(rk)
+        continue 
+      }
+      // For collapsed prefix, only show the first row in the current sorted order
+      if (seenCollapsedPrefix.has(pref)) continue
+      seenCollapsedPrefix.add(pref)
+      out.push(rk)
     }
     return out
-  }, [sortedVisRowLeaves, firstLeafForPrefix, repByPrefix, collapsed, rowDims.length])
+  }, [sortedVisRowLeaves, repByPrefix, collapsed, rowDims.length, nearestCollapsedPrefixFor])
 
   const rowHeaderSpans = useMemo<number[][]>(() => {
     const levelRuns: Array<number[]> = rowDims.map(() => [])
@@ -862,7 +870,19 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
       while (i < parts.length) {
         const val = parts[i]?.[level] ?? ''
         let j = i + 1
-        while (j < parts.length && parts[j]?.[level] === val) j++
+        // Check that current level matches AND all parent levels match
+        while (j < parts.length && parts[j]?.[level] === val) {
+          // Verify all parent levels are also equal
+          let parentsMatch = true
+          for (let p = 0; p < level; p++) {
+            if ((parts[i]?.[p] ?? '') !== (parts[j]?.[p] ?? '')) {
+              parentsMatch = false
+              break
+            }
+          }
+          if (!parentsMatch) break
+          j++
+        }
         levelRuns[level][i] = j - i
         for (let k = i + 1; k < j; k++) levelRuns[level][k] = 0
         i = j
@@ -1286,15 +1306,28 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
                 <th colSpan={rowDims.length} className="text-left border px-2 font-semibold">Total</th>
               ) : null}
               {colDims.length === 0 ? (
-                <td className={`${cellTextAlignClass} ${cellValignClass} font-semibold border px-2 bg-gradient-to-b from-[hsl(var(--muted)/0.9)] to-[hsl(var(--muted)/0.6)]`} style={{ fontSize: headerFontSize, fontStyle: headerFontStyle as any, fontWeight: headerFontWeight as any }}>
-                  {(() => {
-                    // Grand total when no columns
-                    let s = 0
-                    const rks = visibleRowKeys
-                    for (const rk of rks) s += valueAt(rk, '__no_key__')
-                    return formatNumber(s)
-                  })()}
-                </td>
+                <>
+                  <td className={`${cellTextAlignClass} ${cellValignClass} font-semibold border px-2 bg-gradient-to-b from-[hsl(var(--muted)/0.9)] to-[hsl(var(--muted)/0.6)]`} style={{ fontSize: headerFontSize, fontStyle: headerFontStyle as any, fontWeight: headerFontWeight as any }}>
+                    {(() => {
+                      // Grand total when no columns
+                      let s = 0
+                      const rks = visibleRowKeys
+                      for (const rk of rks) s += valueAt(rk, '__no_key__')
+                      return formatNumber(s)
+                    })()}
+                  </td>
+                  {showRowTotals && (
+                    <td className={`${cellTextAlignClass} ${cellValignClass} font-bold border px-2 bg-gradient-to-b from-[hsl(var(--muted)/0.9)] to-[hsl(var(--muted)/0.6)]`} style={{ fontSize: headerFontSize, fontStyle: headerFontStyle as any, fontWeight: headerFontWeight as any }}>
+                      {(() => {
+                        // Grand total for row totals column (same as the value column when no col dims)
+                        let s = 0
+                        const rks = visibleRowKeys
+                        for (const rk of rks) s += valueAt(rk, '__no_key__')
+                        return formatNumber(s)
+                      })()}
+                    </td>
+                  )}
+                </>
               ) : (
                 <>
                   {(() => {
@@ -1336,33 +1369,14 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
                   {showRowTotals && (
                     <td className={`${cellTextAlignClass} ${cellValignClass} font-bold border px-2 bg-gradient-to-b from-[hsl(var(--muted)/0.9)] to-[hsl(var(--muted)/0.6)]`} style={{ fontSize: headerFontSize, fontStyle: headerFontStyle as any, fontWeight: headerFontWeight as any }}>
                       {(() => {
+                        // Grand total: sum all values across all visible rows and columns
                         let s = 0
-                        // sum across currently visible columns only
-                        const parts = colLeaves.map(splitKey)
-                        const visible: string[] = []
-                        for (let idx = 0; idx < parts.length; idx++) {
-                          const ck = colLeaves[idx]
-                          const bits = parts[idx]
-                          let collapsedUnder: string | null = null
-                          for (let i = bits.length - 1; i >= 1; i--) {
-                            const pref = bits.slice(0, i).join('|')
-                            if (colCollapsed.has(pref)) { collapsedUnder = pref; break }
-                          }
-                          if (!collapsedUnder) { visible.push(ck); continue }
-                          const first = colLeaves.find(c => splitKey(c).slice(0, splitKey(collapsedUnder!).length).join('|') === collapsedUnder)
-                          const rep = colRepByPrefix.get(collapsedUnder!) || first
-                          if (rep === ck) visible.push(ck)
+                        for (const rk of visibleRowKeys) {
+                          const val = valueAt(rk, '__TOTAL__')
+                          console.log(`[Pivot] Total row grand total: rk=${rk}, val=${val}`)
+                          s += val
                         }
-                        for (const rk of visibleRowKeys) for (const ck of visible) {
-                          const partsC = splitKey(ck)
-                          let collapsedUnder: string | null = null
-                          for (let k = partsC.length - 1; k >= 1; k--) {
-                            const pref = partsC.slice(0, k).join('|')
-                            if (colCollapsed.has(pref)) { collapsedUnder = pref; break }
-                          }
-                          const ckAgg = collapsedUnder || ck
-                          s += valueAt(rk, ckAgg)
-                        }
+                        console.log(`[Pivot] Total row grand total final: ${s}`)
                         return formatNumber(s)
                       })()}
                     </td>

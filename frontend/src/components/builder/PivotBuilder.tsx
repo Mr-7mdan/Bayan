@@ -454,8 +454,7 @@ export function PivotBuilder({
                     type="button"
                     className="text-[10px] opacity-70 hover:opacity-100"
                     title="Remove alias"
-                    onMouseDown={(e)=>e.preventDefault()}
-                    onClick={(e) => { e.stopPropagation(); removeAlias(display) }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeAlias(display) }}
                   >✕</button>
                 </span>
               ) : (
@@ -521,7 +520,7 @@ export function PivotBuilder({
                     onBlur={() => commitRename(baseForDisplay(f))}
                     onKeyDown={(e) => { if (e.key === 'Enter') commitRename(baseForDisplay(f)); if (e.key === 'Escape') setRenaming(null) }}
                   />
-                  <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e)=>e.preventDefault()} onClick={(e)=>{ e.stopPropagation(); removeAlias(f) }}>✕</button>
+                  <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeAlias(f) }}>✕</button>
                 </span>
               ) : (
                 f
@@ -560,7 +559,7 @@ export function PivotBuilder({
                         onBlur={() => commitRename(baseForDisplay(f))}
                         onKeyDown={(e) => { if (e.key === 'Enter') commitRename(baseForDisplay(f)); if (e.key === 'Escape') setRenaming(null) }}
                       />
-                      <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e)=>e.preventDefault()} onClick={(e)=>{ e.stopPropagation(); removeAlias(f) }}>✕</button>
+                      <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeAlias(f) }}>✕</button>
                     </span>
                   ) : f}
                 </span>
@@ -584,7 +583,7 @@ export function PivotBuilder({
                         onBlur={() => commitRename(baseForDisplay(String(assignments.legend)))}
                         onKeyDown={(e) => { if (e.key === 'Enter') commitRename(baseForDisplay(String(assignments.legend))); if (e.key === 'Escape') setRenaming(null) }}
                       />
-                      <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e)=>e.preventDefault()} onClick={(e)=>{ e.stopPropagation(); removeAlias(String(assignments.legend)) }}>✕</button>
+                      <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeAlias(String(assignments.legend)) }}>✕</button>
                     </span>
                   ) : String(assignments.legend)}
                 </span>
@@ -647,7 +646,7 @@ export function PivotBuilder({
                       onBlur={() => commitRename(baseForDisplay(String(assignments.x)))}
                       onKeyDown={(e) => { if (e.key === 'Enter') commitRename(baseForDisplay(String(assignments.x))); if (e.key === 'Escape') setRenaming(null) }}
                     />
-                    <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e)=>e.preventDefault()} onClick={(e)=>{ e.stopPropagation(); removeAlias(String(assignments.x)) }}>✕</button>
+                    <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeAlias(String(assignments.x)) }}>✕</button>
                   </span>
                 ) : (
                   <span onDoubleClick={() => startRename(String(assignments.x))}>{String(assignments.x)}</span>
@@ -703,7 +702,7 @@ export function PivotBuilder({
                             onBlur={() => commitRename(baseForDisplay(String(v.field)))}
                             onKeyDown={(e) => { if (e.key === 'Enter') commitRename(baseForDisplay(String(v.field))); if (e.key === 'Escape') setRenaming(null) }}
                           />
-                          <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e)=>e.preventDefault()} onClick={(e)=>{ e.stopPropagation(); removeAlias(String(v.field || '')) }}>✕</button>
+                          <button type="button" className="text-[10px] opacity-70 hover:opacity-100" title="Remove alias" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeAlias(String(v.field || '')) }}>✕</button>
                         </span>
                       ) : (
                         label

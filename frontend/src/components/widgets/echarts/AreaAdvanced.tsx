@@ -28,6 +28,7 @@ export type AreaAdvancedArgs = {
   onZoomAction?: (args: { startIndex: number; endIndex: number; startVal: any; endVal: any }) => void
   noAnim?: boolean
   onReadyAction?: () => void
+  echartsRef?: React.RefObject<any>
 }
 
 // Helper to possibly augment series for area-specific options
@@ -73,6 +74,7 @@ export function renderAdvancedAreaChart(args: AreaAdvancedArgs) {
     onZoomAction,
     noAnim,
     onReadyAction,
+    echartsRef,
   } = args
 
   const xAxis: any = {
@@ -181,6 +183,7 @@ export function renderAdvancedAreaChart(args: AreaAdvancedArgs) {
   return (
     <div className="absolute inset-0">
       <ReactECharts
+        ref={echartsRef}
         key={chartInstanceKey}
         option={option}
         notMerge={true}

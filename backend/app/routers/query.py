@@ -53,13 +53,18 @@ except Exception:
 # SQLGlot helper functions (module-level to be reusable across endpoints)
 def _build_expr_map_helper(ds: Any, source_name: str, ds_type: str, _apply_scope_func) -> dict:
     """Build mapping of derived column names to SQL expressions"""
+    from ..sqlgen import _normalize_expr_idents
     expr_map = {}
     
     if not ds:
         return expr_map
     
     try:
-        raw_json = ds.options_json or "{}"
+        # Handle both dict and object forms
+        if isinstance(ds, dict):
+            raw_json = ds.get("options_json") or "{}"
+        else:
+            raw_json = ds.options_json or "{}"
         opts = json.loads(raw_json)
         ds_transforms = opts.get("transforms") or {}
         ds_transforms = _apply_scope_func(ds_transforms, source_name)
@@ -68,14 +73,18 @@ def _build_expr_map_helper(ds: Any, source_name: str, ds_type: str, _apply_scope
         custom_cols = ds_transforms.get("customColumns") or []
         for col in custom_cols:
             if isinstance(col, dict) and col.get("name") and col.get("expr"):
-                expr_map[col["name"]] = col["expr"]
+                # Normalize bracket identifiers for target dialect
+                expr = _normalize_expr_idents(ds_type, col["expr"])
+                expr_map[col["name"]] = expr
         
         # From computed transforms
         transforms = ds_transforms.get("transforms") or []
         for t in transforms:
             if isinstance(t, dict) and t.get("type") == "computed":
                 if t.get("name") and t.get("expr"):
-                    expr_map[t["name"]] = t["expr"]
+                    # Normalize bracket identifiers for target dialect
+                    expr = _normalize_expr_idents(ds_type, t["expr"])
+                    expr_map[t["name"]] = expr
     
     except Exception as e:
         logger.error(f"[SQLGlot] Failed to build expr_map: {e}")
@@ -2206,14 +2215,20 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             custom_cols = ds_transforms.get("customColumns") or []
             for col in custom_cols:
                 if isinstance(col, dict) and col.get("name") and col.get("expr"):
-                    expr_map[col["name"]] = col["expr"]
+                    # Normalize bracket identifiers for target dialect
+                    from ..sqlgen import _normalize_expr_idents
+                    expr = _normalize_expr_idents(ds_type, col["expr"])
+                    expr_map[col["name"]] = expr
             
             # From computed transforms
             transforms = ds_transforms.get("transforms") or []
             for t in transforms:
                 if isinstance(t, dict) and t.get("type") == "computed":
                     if t.get("name") and t.get("expr"):
-                        expr_map[t["name"]] = t["expr"]
+                        # Normalize bracket identifiers for target dialect
+                        from ..sqlgen import _normalize_expr_idents
+                        expr = _normalize_expr_idents(ds_type, t["expr"])
+                        expr_map[t["name"]] = expr
         
         except Exception as e:
             logger.error(f"[SQLGlot] Failed to build expr_map: {e}")
@@ -2246,9 +2261,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 # First check if it's a custom column
                 if key in expr_map:
                     expr = expr_map[key]
-                    # Strip table aliases (e.g., s.ClientID → ClientID)
-                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)
-                    print(f"[SQLGlot] ✅ Resolved custom column '{key}' → {expr[:80]}...")
+                    # Strip table aliases - handle both quoted and unquoted (e.g., s.ClientID or "s"."ClientID" -> ClientID)
+                    expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases like "s".
+                    expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases like s.
+                    print(f"[SQLGlot] [OK] Resolved custom column '{key}' -> {expr[:80]}...")
                     resolved[f"({expr})"] = value
                     resolved_count += 1
                 # Check if it's a date part pattern like "OrderDate (Year)"
@@ -2258,7 +2274,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         base_col = match.group(1).strip()
                         kind = match.group(2).lower()
                         expr = _build_datepart_expr(base_col, kind, ds_type)
-                        print(f"[SQLGlot] ✅ Resolved date part '{key}' → {expr[:80]}...")
+                        print(f"[SQLGlot] [OK] Resolved date part '{key}' -> {expr[:80]}...")
                         resolved[f"({expr})"] = value
                         resolved_count += 1
                     else:

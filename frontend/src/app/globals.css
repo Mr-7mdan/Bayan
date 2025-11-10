@@ -101,7 +101,7 @@
   --chart-4: 262 55% 60%;
   --chart-5: 152 48% 52%;
   /* Prefer neutral header accents (avoid heavy color strips) */
-  --header-accent: var(--border);
+  --header-accent: 0 70% 40%;
   /* Button accents (dark mode exact colors) */
   --btn1: 13 100% 68%;   /* #FF7F5C */
   --btn2: 45 100% 68%;   /* #FFD65C */
@@ -140,7 +140,7 @@
   --chart-3: 40 80% 58%;
   --chart-4: 262 55% 60%;
   --chart-5: 152 48% 52%;
-  --header-accent: 220 8% 20%;
+  --header-accent: 0 70% 40%;
   --btn1: 13 100% 68%;
   --btn2: 45 100% 68%;
   --btn3: 129 72% 46%;
@@ -323,6 +323,11 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .dark[data-variant="blackish"] .builder-root .border-r {
   border-color: hsl(var(--border)) !important;
 }
+
+/* Ensure widget title accent stays distinct in dark mode */
+.dark .widget-title { border-left-color: hsl(var(--header-accent)) !important; }
+.dark[data-variant="bluish"] .builder-root .widget-title { border-left-color: hsl(var(--header-accent)) !important; }
+.dark[data-variant="blackish"] .builder-root .widget-title { border-left-color: hsl(var(--header-accent)) !important; }
 
 /* Shared With Me dark-mode surface match */
 .dark .shared-root {
@@ -639,3 +644,15 @@ button.border:not([class*="rounded-"]),
 /* Editor text + placeholder in both modes */
 .ql-editor { color: hsl(var(--foreground)) !important; }
 .ql-editor.ql-blank::before { color: hsl(var(--muted-foreground)) !important; }
+
+/* ---------- json-edit-react: ensure input text is visible in dark mode ---------- */
+.dark .jer-editor-container input,
+.dark .jer-editor-container textarea {
+  color: hsl(var(--foreground)) !important;
+  background-color: hsl(var(--card)) !important;
+}
+.dark .jer-editor-container input::placeholder,
+.dark .jer-editor-container textarea::placeholder {
+  color: hsl(var(--muted-foreground)) !important;
+  opacity: 0.6;
+}

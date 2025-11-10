@@ -75,22 +75,63 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
   const [sortBy, setSortBy] = useState<string>('')
   const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc')
   const [limitN, setLimitN] = useState<string>('')
+  // Examples panel (right-side) visibility; default collapsed
+  const [examplesOpen, setExamplesOpen] = useState<boolean>(false)
+  const mainColsClass = examplesOpen ? 'lg:grid-cols-[1fr,320px]' : 'lg:grid-cols-[1fr,auto]'
 
   const colsAvailable = useMemo(() => {
     // Prefer select provided by caller
     if (Array.isArray(select) && select.length) return select
+    const baseCols: string[] = []
     try {
       const src = String(source || '')
       const sc = (schemaLocal || schema)
-      if (!src || !sc) return [] as string[]
-      const parts = src.split('.')
-      const tbl = parts.pop() as string
-      const sch = parts.join('.') || 'main'  // Default to 'main' schema if no schema prefix
-      const schNode = (sc.schemas || []).find(s => s.name === sch)
-      const tblNode = schNode?.tables.find(t => t.name === tbl)
-      return (tblNode?.columns || []).map(c => c.name)
-    } catch { return [] }
-  }, [schema, schemaLocal, source, JSON.stringify(select || [])])
+      if (src && sc) {
+        const parts = src.split('.')
+        const tbl = parts.pop() as string
+        const sch = parts.join('.') || 'main'  // Default to 'main' schema if no schema prefix
+        const schNode = (sc.schemas || []).find(s => s.name === sch)
+        const tblNode = schNode?.tables.find(t => t.name === tbl)
+        baseCols.push(...(tblNode?.columns || []).map(c => c.name))
+      }
+    } catch {}
+    
+    // Add custom columns and transforms from datasource/table scope
+    const customAliases: string[] = []
+    try {
+      const parsed = JSON.parse(editJson || '{}') as any
+      const src = String(source || '')
+      const norm = (s: string) => String(s || '').trim().replace(/^\[|\]|^"|"$/g, '')
+      const tblEq = (a: string, b: string) => {
+        const na = norm(a).split('.').pop() || ''
+        const nb = norm(b).split('.').pop() || ''
+        return na.toLowerCase() === nb.toLowerCase()
+      }
+      
+      // From customColumns
+      const ccList = Array.isArray(parsed?.customColumns) ? parsed.customColumns : []
+      for (const cc of ccList) {
+        const sc = cc?.scope || {}
+        const lvl = String(sc?.level || 'datasource').toLowerCase()
+        const match = (lvl === 'datasource' || (lvl === 'table' && sc?.table && src && tblEq(String(sc.table), src)))
+        if (match && cc?.name) customAliases.push(String(cc.name))
+      }
+      
+      // From transforms
+      const trList = Array.isArray(parsed?.transforms) ? parsed.transforms : []
+      for (const tr of trList) {
+        const sc = tr?.scope || {}
+        const lvl = String(sc?.level || 'datasource').toLowerCase()
+        const match = (lvl === 'datasource' || (lvl === 'table' && sc?.table && src && tblEq(String(sc.table), src)))
+        if (!match) continue
+        const ty = String(tr?.type || '').toLowerCase()
+        if (ty === 'computed' && tr?.name) customAliases.push(String(tr.name))
+        else if ((ty === 'case' || ty === 'replace' || ty === 'translate' || ty === 'nullhandling') && tr?.target) customAliases.push(String(tr.target))
+      }
+    } catch {}
+    
+    return [...baseCols, ...customAliases]
+  }, [schema, schemaLocal, source, JSON.stringify(select || []), editJson])
 
   const colsFiltered = useMemo(() => {
     const f = String(colFilter || '').toLowerCase()
@@ -262,11 +303,13 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
     setTab('transform')
     setEditingTransformIndex(i)
     setInitialTransform(t)
-    const typ = String(t?.type || '')
-    setShowCaseBuilder(typ==='case')
+    const typ = String(t?.type || '').toLowerCase()
+    const expr = String((t as any)?.expr || '')
+    const looksLikeCase = (typ === 'computed') && /^\s*case\b/i.test(expr)
+    setShowCaseBuilder(typ==='case' || looksLikeCase)
     setShowReplaceBuilder(typ==='replace' || typ==='translate')
-    setShowComputedBuilder(typ==='computed')
-    setShowNullBuilder(typ==='nullHandling')
+    setShowComputedBuilder(typ==='computed' && !looksLikeCase)
+    setShowNullBuilder(typ==='nullhandling' || typ==='nullHandling')
     setShowUnpivotBuilder(typ==='unpivot')
   }
   function openEditJoin(i: number, j: any) {
@@ -480,6 +523,17 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                 await Api.saveDatasourceTransforms(effectiveDsId, payload)
                 setModel(payload)
                 setBaselineJson(JSON.stringify(payload, null, 2))
+                try {
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('datasource-transforms-saved', { detail: { datasourceId: effectiveDsId } }))
+                    // Request other widgets/panels to refresh columns/rows/samples
+                    if (widgetId) {
+                      window.dispatchEvent(new CustomEvent('request-table-columns', { detail: { widgetId } }))
+                      window.dispatchEvent(new CustomEvent('request-table-rows', { detail: { widgetId } }))
+                      window.dispatchEvent(new CustomEvent('request-table-samples', { detail: { widgetId } }))
+                    }
+                  }
+                } catch {}
               } catch (e:any) {
                 setJsonPanelError(String(e?.message || 'Invalid JSON'))
               } finally {
@@ -489,7 +543,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
           </div>
         </div>
       )}
-      <div ref={dialogRef} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[880px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-card p-4 shadow-none">
+      <div ref={dialogRef} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[880px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
             <div className="text-sm font-medium">SQL Advanced Mode</div>
@@ -556,11 +610,11 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
         </div>
 
         {/* Main content grid (JSON panel is now external) */}
-        <div className={`min-h-[360px] grid grid-cols-1 lg:grid-cols-[1fr,320px] gap-3`}>
+        <div className={`min-h-[360px] grid grid-cols-1 ${mainColsClass} gap-3`}>
           <div className="min-w-0">
           {tab === 'custom' && (
             <div className="space-y-2 text-[12px]">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 rounded-md border bg-[hsl(var(--secondary)/0.4)] p-2">
                 <div className="text-muted-foreground">Add custom columns using the builder. Use the left JSON panel to inspect config.</div>
                 <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=> setShowCustomBuilder(v=>!v)}>{showCustomBuilder ? 'Hide Custom Column' : 'Add Custom Column'}</button>
               </div>
@@ -608,7 +662,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
           {/* Insert tab removed; Mapping moved into Custom column builder */}
           {tab === 'joins' && (
             <div className="space-y-2 text-[12px]">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 rounded-md border bg-[hsl(var(--secondary)/0.4)] p-2">
                 <div className="text-muted-foreground">Define joins from the base source to other tables.</div>
                 <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=> setShowJoinBuilder(v=>!v)}>{showJoinBuilder ? 'Hide Join Builder' : 'Add Join'}</button>
               </div>
@@ -649,7 +703,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
           )}
           {tab === 'transform' && (
             <div className="space-y-2 text-[12px]">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2 rounded-md border bg-[hsl(var(--secondary)/0.4)] p-2">
                 <div className="text-muted-foreground">Add transformations using the builders. Use the left JSON panel to inspect config.</div>
                 <div className="flex flex-wrap items-center gap-2 justify-end">
                   <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=> setShowCaseBuilder(v=>!v)}>{showCaseBuilder ? 'Hide CASE' : 'Add CASE'}</button>
@@ -699,7 +753,14 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
               {showCaseBuilder && (
                 <AdvancedSqlCaseBuilder
                   columns={colsAvailable}
-                  initial={editingTransformIndex !== null && (initialTransform?.type === 'case') ? (initialTransform as any) : undefined}
+                  initial={(() => {
+                    if (editingTransformIndex === null) return undefined
+                    if (initialTransform?.type === 'case') return (initialTransform as any)
+                    const expr = String((initialTransform as any)?.expr || '')
+                    const isComputedCase = String(initialTransform?.type||'').toLowerCase()==='computed' && /^\s*case\b/i.test(expr)
+                    if (isComputedCase) return (initialTransform as any)
+                    return undefined
+                  })()}
                   submitLabel={editingTransformIndex !== null ? 'Update CASE transform' : 'Add CASE transform'}
                   onAddAction={(tr: any) => {
                     try {
@@ -962,7 +1023,29 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
           )}
           </div>
           {/* Right-side examples panel */}
+          {/* Collapsed stub: show a small button to open the panel when hidden (lg and up) */}
+          {!examplesOpen && (
+            <div className="hidden lg:block text-[11px]">
+              <div className="sticky top-2">
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+                  onClick={() => setExamplesOpen(true)}
+                  title="Show Examples"
+                >Show Examples</button>
+              </div>
+            </div>
+          )}
+          {examplesOpen && (
           <aside className="hidden lg:block text-[11px]">
+            <div className="sticky top-2 mb-2 flex items-center justify-end">
+              <button
+                type="button"
+                className="px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+                onClick={() => setExamplesOpen(false)}
+                title="Hide Examples"
+              >Hide Examples</button>
+            </div>
             {tab === 'custom' && (
               <div className="sticky top-2 space-y-2">
                 <div className="font-medium">Examples: Custom Columns</div>
@@ -1016,13 +1099,112 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
               </div>
             )}
           </aside>
+          )}
         </div>
-        <div className="mt-4 flex items-center justify-end gap-2">
-          <button className="text-xs px-3 py-1.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>Close</button>
-          <button
-            className={`text-xs px-3 py-1.5 rounded-md border ${canSave ? 'bg-[hsl(var(--btn3))] text-black' : 'opacity-60 cursor-not-allowed'}`}
-            disabled={!canSave || saving}
-            onClick={async () => {
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              className="text-xs px-3 py-1.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+              onClick={() => {
+                try {
+                  const blob = new Blob([editJson || '{}'], { type: 'application/json' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `transforms-${effectiveDsId || 'export'}-${Date.now()}.json`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  URL.revokeObjectURL(url)
+                } catch (e: any) {
+                  setError(String(e?.message || 'Export failed'))
+                }
+              }}
+              title="Export all transforms to JSON file"
+            >Export</button>
+            <button
+              className="text-xs px-3 py-1.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+              onClick={() => {
+                try {
+                  const input = document.createElement('input')
+                  input.type = 'file'
+                  input.accept = 'application/json,.json'
+                  input.onchange = async (e: any) => {
+                    try {
+                      const file = e.target?.files?.[0]
+                      if (!file) return
+                      const text = await file.text()
+                      const imported = JSON.parse(text) as any
+                      
+                      // Merge logic: update existing by name, add new ones
+                      const current = JSON.parse(editJson || '{}') as any
+                      const merged = {
+                        customColumns: Array.isArray(current?.customColumns) ? [...current.customColumns] : [],
+                        transforms: Array.isArray(current?.transforms) ? [...current.transforms] : [],
+                        joins: Array.isArray(current?.joins) ? [...current.joins] : [],
+                        defaults: current?.defaults || undefined,
+                      }
+                      
+                      // Merge custom columns by name
+                      if (Array.isArray(imported?.customColumns)) {
+                        imported.customColumns.forEach((ic: any) => {
+                          const name = String(ic?.name || '').trim()
+                          if (!name) return
+                          const idx = merged.customColumns.findIndex((c: any) => String(c?.name || '').trim().toLowerCase() === name.toLowerCase())
+                          if (idx >= 0) merged.customColumns[idx] = ic
+                          else merged.customColumns.push(ic)
+                        })
+                      }
+                      
+                      // Merge transforms by target/name
+                      if (Array.isArray(imported?.transforms)) {
+                        imported.transforms.forEach((it: any) => {
+                          const key = String(it?.target || it?.name || '').trim()
+                          if (!key) return
+                          const idx = merged.transforms.findIndex((t: any) => {
+                            const tk = String(t?.target || t?.name || '').trim()
+                            return tk.toLowerCase() === key.toLowerCase()
+                          })
+                          if (idx >= 0) merged.transforms[idx] = it
+                          else merged.transforms.push(it)
+                        })
+                      }
+                      
+                      // Merge joins by targetTable
+                      if (Array.isArray(imported?.joins)) {
+                        imported.joins.forEach((ij: any) => {
+                          const table = String(ij?.targetTable || '').trim()
+                          if (!table) return
+                          const idx = merged.joins.findIndex((j: any) => String(j?.targetTable || '').trim().toLowerCase() === table.toLowerCase())
+                          if (idx >= 0) merged.joins[idx] = ij
+                          else merged.joins.push(ij)
+                        })
+                      }
+                      
+                      // Merge defaults
+                      if (imported?.defaults) {
+                        merged.defaults = { ...merged.defaults, ...imported.defaults }
+                      }
+                      
+                      setEditJson(JSON.stringify(merged, null, 2))
+                    } catch (e: any) {
+                      setError(String(e?.message || 'Import failed - invalid JSON'))
+                    }
+                  }
+                  input.click()
+                } catch (e: any) {
+                  setError(String(e?.message || 'Import failed'))
+                }
+              }}
+              title="Import and merge transforms from JSON file"
+            >Import</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="text-xs px-3 py-1.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>Close</button>
+            <button
+              className={`text-xs px-3 py-1.5 rounded-md border ${canSave ? 'bg-[hsl(var(--btn3))] text-black' : 'opacity-60 cursor-not-allowed'}`}
+              disabled={!canSave || saving}
+              onClick={async () => {
               if (!effectiveDsId) return
               setSaving(true); setError(undefined)
               try {
@@ -1052,6 +1234,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
+          </div>
         </div>
         {/* Unified bottom grid for all statements */}
         <div className="mt-4">
@@ -1099,14 +1282,16 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                   {/* Transforms */}
                   {listTR.map((t: any, i: number) => (
                     <tr key={`tr-${i}`}>
-                      <td className="px-2 py-1 border-b whitespace-pre">{String(t?.type || '')}</td>
+                      <td className="px-2 py-1 border-b whitespace-pre">{(() => { const typ=String(t?.type||''); const expr=String((t as any)?.expr||''); const looks=/^\s*case\b/i.test(expr) && typ.toLowerCase()==='computed'; return looks ? 'case' : typ })()}</td>
                       <td className="px-2 py-1 border-b whitespace-pre">
-                        {t?.type === 'case' && (<span>{String(t?.target || '')} — {Array.isArray(t?.cases) ? `${t.cases.length} cases` : '0 cases'}</span>)}
-                        {t?.type === 'replace' && (<span>{String(t?.target || '')} — replace</span>)}
-                        {t?.type === 'translate' && (<span>{String(t?.target || '')} — translate</span>)}
-                        {t?.type === 'computed' && (<span>{String(t?.name || '')} — {shorten(t?.expr || '', 80)}</span>)}
-                        {t?.type === 'nullHandling' && (<span>{String(t?.target || '')} — {String(t?.mode || '')}</span>)}
-                        {t?.type === 'unpivot' && (<span>{String(t?.keyColumn || '')}/{String(t?.valueColumn || '')} — {Array.isArray(t?.sourceColumns)? `${t.sourceColumns.length} cols` : ''}, {String(t?.mode || 'auto')}</span>)}
+                        {(() => { const typ=String(t?.type||''); const expr=String((t as any)?.expr||''); const looks=/^\s*case\b/i.test(expr) && typ.toLowerCase()==='computed';
+                          if (t?.type === 'case' || looks) return (<span>{String((t as any)?.target || (t as any)?.name || '')} — {Array.isArray((t as any)?.cases) ? `${(t as any).cases.length} cases` : (looks ? 'CASE expr' : '0 cases')}</span>)
+                          if (t?.type === 'replace') return (<span>{String(t?.target || '')} — replace</span>)
+                          if (t?.type === 'translate') return (<span>{String(t?.target || '')} — translate</span>)
+                          if (t?.type === 'computed') return (<span>{String(t?.name || '')} — {shorten(t?.expr || '', 80)}</span>)
+                          if (t?.type === 'nullHandling') return (<span>{String(t?.target || '')} — {String(t?.mode || '')}</span>)
+                          if (t?.type === 'unpivot') return (<span>{String(t?.keyColumn || '')}/{String(t?.valueColumn || '')} — {Array.isArray(t?.sourceColumns)? `${t.sourceColumns.length} cols` : ''}, {String(t?.mode || 'auto')}</span>)
+                          return null })()}
                       </td>
                       <td className="px-2 py-1 border-b whitespace-pre">
                         <div className="flex items-center gap-1">
