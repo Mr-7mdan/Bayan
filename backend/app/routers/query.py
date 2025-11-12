@@ -1196,10 +1196,20 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
     if not use_sqlglot:
         # LEGACY PATH: String-based SQL building
         sel = ", ".join(sel_parts + [f"{value_expr} AS value"]) or f"{value_expr} AS value"
-        # Use expressions in GROUP BY for cross-dialect compatibility (SQL Server disallows aliases here)
-        group_by = ", ".join([e for e, _ in (r_exprs + c_exprs)])
-        gb_sql = f" GROUP BY {group_by}" if group_by else ""
-        order_by = f" ORDER BY {group_by}" if group_by else ""
+        # Use ordinals for DuckDB/Postgres/MySQL/SQLite; use expressions only for SQL Server
+        dim_count = len(r_exprs) + len(c_exprs)
+        if dim_count > 0:
+            if 'mssql' in (ds_type or '') or 'sqlserver' in (ds_type or ''):
+                group_by = ", ".join([e for e, _ in (r_exprs + c_exprs)])
+                gb_sql = f" GROUP BY {group_by}"
+                order_by = f" ORDER BY {group_by}"
+            else:
+                ordinals = ", ".join(str(i) for i in range(1, dim_count + 1))
+                gb_sql = f" GROUP BY {ordinals}"
+                order_by = f" ORDER BY {ordinals}"
+        else:
+            gb_sql = ""
+            order_by = ""
         inner = f"SELECT {sel}{base_from_sql}{where_sql}{gb_sql}{order_by}"
 
     # Delegate execution to /query. If no explicit limit is provided, fetch all pages.
