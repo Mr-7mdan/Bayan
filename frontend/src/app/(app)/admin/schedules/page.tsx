@@ -304,6 +304,19 @@ function AdminSchedulesInner() {
     return map
   }, [logsData])
 
+  // Map task details by taskId for logs display
+  const taskDetailsById = useMemo(() => {
+    const map: Record<string, { sourceTable: string; sourceSchema?: string; destTableName: string }> = {}
+    for (const t of tasksData) {
+      map[t.id] = {
+        sourceTable: t.sourceTable,
+        sourceSchema: t.sourceSchema || undefined,
+        destTableName: t.destTableName,
+      }
+    }
+    return map
+  }, [tasksData])
+
   return (
     <div className="space-y-3">
       <Card className="p-0 bg-[hsl(var(--background))]">
@@ -739,24 +752,33 @@ function AdminSchedulesInner() {
                           <th className="text-left font-medium px-2 py-1">Started</th>
                           <th className="text-left font-medium px-2 py-1">Mode</th>
                           <th className="text-left font-medium px-2 py-1">Task</th>
+                          <th className="text-left font-medium px-2 py-1">Source Table</th>
+                          <th className="text-left font-medium px-2 py-1">Dest Table</th>
                           <th className="text-left font-medium px-2 py-1">Rows</th>
                           <th className="text-left font-medium px-2 py-1">Finished</th>
                           <th className="text-left font-medium px-2 py-1">Error</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {pagedLogs.map((r, idx) => (
-                          <tr key={r.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
-                            <td className="px-2 py-1">{new Date(r.startedAt).toLocaleString()}</td>
-                            <td className="px-2 py-1">{r.mode}</td>
-                            <td className="px-2 py-1 font-mono">{r.taskId}</td>
-                            <td className="px-2 py-1">{typeof r.rowCount === 'number' ? r.rowCount.toLocaleString() : '—'}</td>
-                            <td className="px-2 py-1">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '—'}</td>
-                            <td className="px-2 py-1">{r.error ? <span className="text-red-600">{r.error}</span> : '—'}</td>
-                          </tr>
-                        ))}
+                        {pagedLogs.map((r, idx) => {
+                          const task = taskDetailsById[r.taskId]
+                          const sourceTableDisplay = task ? (task.sourceSchema ? `${task.sourceSchema}.${task.sourceTable}` : task.sourceTable) : '—'
+                          const destTableDisplay = task?.destTableName || '—'
+                          return (
+                            <tr key={r.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
+                              <td className="px-2 py-1">{new Date(r.startedAt).toLocaleString()}</td>
+                              <td className="px-2 py-1">{r.mode}</td>
+                              <td className="px-2 py-1 font-mono">{r.taskId}</td>
+                              <td className="px-2 py-1 font-mono">{sourceTableDisplay}</td>
+                              <td className="px-2 py-1 font-mono">{destTableDisplay}</td>
+                              <td className="px-2 py-1">{typeof r.rowCount === 'number' ? r.rowCount.toLocaleString() : '—'}</td>
+                              <td className="px-2 py-1">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '—'}</td>
+                              <td className="px-2 py-1">{r.error ? <span className="text-red-600">{r.error}</span> : '—'}</td>
+                            </tr>
+                          )
+                        })}
                         {logsData.length === 0 && (
-                          <tr><td colSpan={6} className="px-2 py-2 text-muted-foreground">No logs.</td></tr>
+                          <tr><td colSpan={8} className="px-2 py-2 text-muted-foreground">No logs.</td></tr>
                         )}
                       </tbody>
                     </table>
