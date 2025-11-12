@@ -1007,7 +1007,6 @@ export default function ChartCard({
         const DERIVED_RE = /^(.*) \((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/
         const hasDerivedWhere = whereKeys.some((k) => DERIVED_RE.test(k))
         const hasCustomWhere = whereKeys.some((k) => customNames.has(k))
-        // Build a server-safe subset of mergedWhere (exclude only custom columns; derived filters are now supported server-side)
         const serverWhere: Record<string, any> = {}
         whereKeys.forEach((k) => { if (!customNames.has(k)) (serverWhere as any)[k] = (mergedWhere as any)[k] })
         // Only custom column filters require client-side fallback now
@@ -1704,23 +1703,19 @@ export default function ChartCard({
         // (or legend) but no agg, default to count so the server performs aggregation instead of returning raw rows.
         const effectiveLegendAny = (((querySpec as any)?.legend) ?? (pivot as any)?.legend) as any
         const effectiveLegend = Array.isArray(effectiveLegendAny) ? ((effectiveLegendAny as any[]).length > 0 ? effectiveLegendAny : undefined) : effectiveLegendAny
+        // Check if X field is a derived date part BEFORE inferring agg
+        const xFieldStr = String(xField || '')
+        const isDerivedDatePart = /\s\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/.test(xFieldStr)
+        
         const inferredAgg = (() => {
           // Check series[0].agg first (for single-series with legend)
-          const seriesAgg = (Array.isArray((querySpec as any)?.series) && (querySpec as any).series.length > 0) ? (querySpec as any).series[0]?.agg : undefined
-          if (typeof window !== 'undefined') {
-            try { console.log('[ChartCard] inferredAgg resolution', { 
-              hasSeries: Array.isArray((querySpec as any)?.series), 
-              seriesLength: Array.isArray((querySpec as any)?.series) ? (querySpec as any).series.length : 0,
-              series0: (querySpec as any)?.series?.[0],
-              seriesAgg, 
-              rootAgg: (querySpec as any)?.agg,
-              hasLegend: !!effectiveLegend
-            }) } catch {}
+          const seriesAgg = (Array.isArray((querySpec as any)?.series) && (querySpec as any).series.length > 0) ? (querySpec as any)?.series[0]?.agg : undefined
+          
+          // IMPORTANT: If X is a derived date part and series has agg='none', override to 'count'
+          if (seriesAgg && String(seriesAgg).toLowerCase() === 'none' && isDerivedDatePart) {
+            return 'count' as any
           }
           if (seriesAgg) {
-            if (typeof window !== 'undefined') {
-              try { console.log('[ChartCard] inferredAgg using series[0].agg:', seriesAgg) } catch {}
-            }
             return String(seriesAgg).toLowerCase() as any
           }
           
@@ -1728,10 +1723,8 @@ export default function ChartCard({
           if (cur && cur !== 'none') return cur as any
           const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
           const legendBool = Array.isArray(effectiveLegend) ? (effectiveLegend.length > 0) : !!effectiveLegend
-          if ((gb && gb !== 'none') || legendBool) {
-            if (typeof window !== 'undefined') {
-              try { console.log('[ChartCard] inferredAgg defaulting to count (legend/groupBy present)') } catch {}
-            }
+          
+          if ((gb && gb !== 'none') || legendBool || isDerivedDatePart) {
             return 'count' as any
           }
           return 'none' as any
@@ -1742,11 +1735,13 @@ export default function ChartCard({
           weekStart: ((options as any)?.xWeekStart || (querySpec as any)?.weekStart || env.weekStart) as any,
           legend: effectiveLegend,
           agg: (inferredAgg as any),
+          // CRITICAL FIX: Ensure groupBy is set for derived date parts so backend knows to GROUP BY
+          groupBy: isDerivedDatePart && !((querySpec as any)?.groupBy) ? 'none' : ((querySpec as any)?.groupBy as any),
           // Respect Top-N ranking on the server when present
           orderBy: ((querySpec as any)?.orderBy as any),
           order: ((querySpec as any)?.order as any),
         }
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
           try { console.log('[ChartCard] merged query spec', { inferredAgg, mergedAgg: (merged as any).agg, merged, hasLegend }) } catch {}
         }
         // If agg === 'none' (and no series, no legend), fetch raw select [x,y]
@@ -3279,7 +3274,7 @@ export default function ChartCard({
         } catch {}
       })()
       if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-        try { console.debug('[ChartCard] Building seriesList', { type, categories, displayDataLen: (displayData as any[]).length, xLabelsLen: xLabels.length }) } catch {}
+        try { console.log('[ChartCard] ===  CHART RENDER START ===', { type, categories, displayDataLen: (displayData as any[]).length, xLabelsLen: xLabels.length }) } catch {}
       }
       const seriesList = (categories || []).map((c, idx) => {
         const nameC = String(c)
@@ -4162,6 +4157,7 @@ export default function ChartCard({
         const lineIdxs = Array.from({ length: (categories || []).length }, (_, i) => i)
         return [{ show: false, type: 'continuous', min: 0, max: gmax, dimension: 0, seriesIndex: lineIdxs, inRange: { color: [c1, c2] } }] as any
       })()
+      
       // X label formatter (dates) — declared as a function to avoid TDZ issues when used inside tooltip/axis formatters
       function fmtXLabel(raw: any): string {
         const s = String(raw ?? '')
@@ -4218,6 +4214,53 @@ export default function ChartCard({
       // Determine if a secondary axis is needed
       const hasSecondaryY = (type !== 'bar') && seriesList.some((s: any) => s.yAxisIndex === 1)
       const hasSecondaryXBar = (type === 'bar') && seriesList.some((s: any) => s.xAxisIndex === 1)
+      
+      // Calculate margins based on maximum Y values to prevent label cutoff
+      // Using larger estimates and no upper limit to ensure labels fit
+      const calculateMargins = (data: any[], categories?: string[], hasSecondary?: boolean): { left: number; right: number } => {
+        try {
+          const allValues: number[] = []
+          if (categories && categories.length > 0) {
+            // Multi-series: check all category values
+            data.forEach((row: any) => {
+              categories.forEach((cat) => {
+                const val = Number(row?.[cat] ?? 0)
+                if (!isNaN(val)) allValues.push(Math.abs(val))
+              })
+            })
+          } else {
+            // Single series: check value column
+            data.forEach((row: any) => {
+              const val = Number(row?.value ?? row?.[1] ?? 0)
+              if (!isNaN(val)) allValues.push(Math.abs(val))
+            })
+          }
+          if (allValues.length === 0) return { left: 60, right: hasSecondary ? 60 : 30 }
+          
+          const maxVal = Math.max(...allValues)
+          const formatted = valueFormatter(maxVal)
+          // More aggressive estimation: ~10px per character + 30px padding
+          const estimatedWidth = Math.ceil((formatted.length * 10) + 30)
+          // Higher minimum (60px)
+          const margin = Math.max(estimatedWidth, 60)
+          if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+            console.log('[ChartCard] Margin calculation:', { maxVal, formatted, charCount: formatted.length, estimatedWidth, finalMargin: margin })
+          }
+          return { 
+            left: margin,
+            right: hasSecondary ? margin : 30
+          }
+        } catch {
+          return { left: 60, right: hasSecondary ? 60 : 30 }
+        }
+      }
+      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        console.log('[ChartCard] About to calculate margins', { type, isMulti: (categories && categories.length > 0), categoriesCount: categories?.length, dataLength: data?.length, hasSecondaryY })
+      }
+      const margins = calculateMargins(data, categories, hasSecondaryY)
+      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        console.log('[ChartCard] Margins calculated:', margins)
+      }
 
       // Delegate advanced Area to specialized renderer (refactor step)
       if (type === 'area') {
@@ -4267,7 +4310,7 @@ export default function ChartCard({
         animationDurationUpdate: isSnap ? 0 : 300,
         tooltip: advTooltip,
         legend: { show: false },
-        grid: { left: 40, right: 16, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (dataZoom && type !== 'bar' ? 48 : 0), containLabel: true },
+        grid: { left: margins.left, right: margins.right, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (dataZoom && type !== 'bar' ? 48 : 0), containLabel: false },
         xAxis: (type === 'bar')
           ? (hasSecondaryXBar
               ? [
@@ -4275,7 +4318,14 @@ export default function ChartCard({
                   { type: 'value', axisLabel: { fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor) }, position: 'top', ...(buildAxisGrid('x') as any) },
                 ]
               : { type: 'value', axisLabel: { fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) })
-          : ((() => { const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase(); const isTimeSeries = gb && gb !== 'none'; return isTimeSeries ? { type: 'time', axisLabel: { rotate: xRotate, fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => { try { return fmtXLabel(val) } catch { return String(val ?? '') } } }, ...(buildAxisGrid('x') as any) } : { type: 'category', data: xLabelsFmt, axisLabel: { rotate: xRotate, interval: (xInterval as any), fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) } })()),
+          : ((() => { 
+              const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
+              const xFieldStr = String(((querySpec as any)?.x || '') as any)
+              const isDerivedDatePart = /\s+\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/.test(xFieldStr)
+              // Use time-series axis only if groupBy is set AND x-field is not a derived date part
+              // Derived date parts should use category axis to show discrete values (e.g., "2015", "2016")
+              const isTimeSeries = (gb && gb !== 'none') && !isDerivedDatePart
+              return isTimeSeries ? { type: 'time', axisLabel: { rotate: xRotate, fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => { try { return fmtXLabel(val) } catch { return String(val ?? '') } } }, ...(buildAxisGrid('x') as any) } : { type: 'category', data: xLabelsFmt, axisLabel: { rotate: xRotate, interval: (xInterval as any), fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) } })()),
         yAxis: (type === 'bar')
           ? { type: 'category', data: xLabelsFmt, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGrid('y') as any) }
           : (hasSecondaryY
@@ -4565,6 +4615,23 @@ export default function ChartCard({
         { type: 'inside', xAxisIndex: 0, filterMode: 'filter', zoomOnMouseWheel: true, moveOnMouseWheel: true, moveOnMouseMove: true, throttle: 50 },
         { type: 'slider', xAxisIndex: 0, bottom: 10, height: 26, handleSize: 12, showDetail: false, filterMode: 'filter' },
       ] : undefined
+      // Calculate margins for Y-axis labels (single series)
+      const marginsSingle = (() => {
+        try {
+          const allValues = (data as any[]).map((row: any) => Math.abs(Number(row?.value ?? row?.[1] ?? 0))).filter((v: number) => !isNaN(v))
+          if (allValues.length === 0) return { left: 60, right: hasSecondaryY ? 60 : 30 }
+          const maxVal = Math.max(...allValues)
+          const formatted = valueFormatter(maxVal)
+          const estimatedWidth = Math.ceil((formatted.length * 10) + 30)
+          const margin = Math.max(estimatedWidth, 60)
+          if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+            console.log('[ChartCard] [Single] Margin calculation:', { maxVal, formatted, charCount: formatted.length, estimatedWidth, finalMargin: margin })
+          }
+          return { left: margin, right: hasSecondaryY ? margin : 30 }
+        } catch {
+          return { left: 60, right: hasSecondaryY ? 60 : 30 }
+        }
+      })()
       const option = {
         tooltip: { show: (Array.isArray(data) && data.length > 0), trigger: 'item', backgroundColor: 'transparent', borderColor: 'transparent', textStyle: { color: undefined as any }, extraCssText: 'border:1px solid hsl(var(--border));background:hsl(var(--card));color:hsl(var(--foreground));padding:4px 8px;border-radius:6px;box-shadow:none;',
           formatter: (p: any) => {
@@ -4804,7 +4871,7 @@ export default function ChartCard({
           }
         },
         legend: { show: false },
-        grid: { left: 40, right: 16, top: 10, bottom: 24 + (dataZoom ? 48 : 0), containLabel: true },
+        grid: { left: marginsSingle.left, right: marginsSingle.right, top: 10, bottom: 24 + (dataZoom ? 48 : 0), containLabel: false },
         xAxis: isTime
           ? { type: 'time', axisLabel: { fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => {
                 const s = String(val ?? '')
@@ -5493,6 +5560,33 @@ export default function ChartCard({
       const baseSeriesAug = (((options as any)?.largeScale) && Array.isArray(baseSeries))
         ? baseSeries.map((s:any) => (s?.type === 'line' ? { ...s, sampling: 'lttb', progressive: 20000, progressiveThreshold: 3000 } : s))
         : baseSeries
+      // Calculate margins for Y-axis labels (combo chart)
+      const marginsCombo = (() => {
+        try {
+          const allValues: number[] = []
+          if (Array.isArray(baseSeries)) {
+            baseSeries.forEach((s: any) => {
+              if (Array.isArray(s?.data)) {
+                s.data.forEach((point: any) => {
+                  const val = Array.isArray(point) ? Number(point[1] ?? 0) : Number(point ?? 0)
+                  if (!isNaN(val)) allValues.push(Math.abs(val))
+                })
+              }
+            })
+          }
+          if (allValues.length === 0) return { left: 60, right: hasSecondary ? 60 : 30 }
+          const maxVal = Math.max(...allValues)
+          const formatted = valueFormatter(maxVal)
+          const estimatedWidth = Math.ceil((formatted.length * 10) + 30)
+          const margin = Math.max(estimatedWidth, 60)
+          if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+            console.log('[ChartCard] [Combo] Margin calculation:', { maxVal, formatted, charCount: formatted.length, estimatedWidth, finalMargin: margin })
+          }
+          return { left: margin, right: hasSecondary ? margin : 30 }
+        } catch {
+          return { left: 60, right: hasSecondary ? 60 : 30 }
+        }
+      })()
       const option = {
         tooltip: {
           show: (Array.isArray(baseSeries) && baseSeries.length > 0 && baseSeries.some((s:any)=>Array.isArray(s?.data) && s.data.length>0) && Array.isArray(data) && data.length>0),
@@ -5599,7 +5693,7 @@ export default function ChartCard({
           }
         },
         legend: { show: false },
-        grid: { left: 40, right: 16, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (dataZoomCombo ? 48 : 0), containLabel: true },
+        grid: { left: marginsCombo.left, right: marginsCombo.right, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (dataZoomCombo ? 48 : 0), containLabel: false },
         xAxis: { type: 'category', data: (() => { const fmt = (val:any)=>{ const s = String(val ?? ''); const d = parseDateLoose(s); const f = (options as any)?.xDateFormat
               || (((querySpec as any)?.groupBy === 'year') ? 'YYYY'
                 : ((querySpec as any)?.groupBy === 'quarter') ? 'YYYY-[Q]q'
@@ -6303,6 +6397,27 @@ export default function ChartCard({
         }
       }
       const displayData2 = Array.isArray(displayData) ? (displayData as any[]).map((r) => ({ ...r, x: formatX(r?.x) })) : displayData
+      // Calculate Y-axis width based on maximum Y value to prevent label cutoff
+      const yAxisWidthArea = (() => {
+        try {
+          const allYValues: number[] = []
+          if (Array.isArray(displayData2) && Array.isArray(categories)) {
+            displayData2.forEach((row: any) => {
+              categories.forEach((cat: string) => {
+                const val = Number(row?.[cat] ?? 0)
+                if (!isNaN(val)) allYValues.push(Math.abs(val))
+              })
+            })
+          }
+          if (allYValues.length === 0) return 60
+          const maxVal = Math.max(...allYValues)
+          const formatted = valueFormatter(maxVal)
+          const estimatedWidth = Math.ceil((formatted.length * 8) + 20)
+          return Math.max(estimatedWidth, 60)
+        } catch {
+          return 60
+        }
+      })()
       return (
         <div className="absolute inset-0 chart-axis-scope chart-grid-scope" style={{ ['--x-axis-color' as any]: ((options as any)?.xAxisFontColor || axisTextColor), ['--y-axis-color' as any]: ((options as any)?.yAxisFontColor || axisTextColor), ['--x-axis-weight' as any]: ((options as any)?.xAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--y-axis-weight' as any]: ((options as any)?.yAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--x-axis-size' as any]: `${(options as any)?.xAxisFontSize ?? 11}px`, ['--y-axis-size' as any]: `${(options as any)?.yAxisFontSize ?? 11}px`, ...(buildTremorGridStyle() as any) } as any}>
           <AreaChart
@@ -6312,7 +6427,7 @@ export default function ChartCard({
           categories={categories}
           colors={chartColorsTokens}
           showLegend={chartLegend}
-          yAxisWidth={40}
+          yAxisWidth={yAxisWidthArea}
           curveType="monotone"
           valueFormatter={(v: number) => valueFormatter(v)}
           minValue={options?.yMin}
@@ -6507,6 +6622,34 @@ export default function ChartCard({
       }
     }
     const displayData2 = Array.isArray(displayData) ? (displayData as any[]).map((r) => ({ ...r, x: formatX(r?.x) })) : displayData
+    // Calculate Y-axis width based on maximum Y value to prevent label cutoff
+    const yAxisWidthLine = (() => {
+      try {
+        const allYValues: number[] = []
+        if (Array.isArray(displayData2) && Array.isArray(categories)) {
+          displayData2.forEach((row: any) => {
+            categories.forEach((cat: string) => {
+              const val = Number(row?.[cat] ?? 0)
+              if (!isNaN(val)) allYValues.push(Math.abs(val))
+            })
+          })
+        }
+        if (allYValues.length === 0) return 60
+        const maxVal = Math.max(...allYValues)
+        const formatted = valueFormatter(maxVal)
+        const estimatedWidth = Math.ceil((formatted.length * 8) + 20)
+        const calculatedWidth = Math.max(estimatedWidth, 60)
+        if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+          console.log('[ChartCard] [Tremor LineChart] Y-axis width calculation:', { maxVal, formatted, charCount: formatted.length, estimatedWidth, calculatedWidth })
+        }
+        return calculatedWidth
+      } catch (e) {
+        if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+          console.error('[ChartCard] [Tremor LineChart] Y-axis width calculation error:', e)
+        }
+        return 60
+      }
+    })()
     return (
       <div className="absolute inset-0 chart-axis-scope chart-grid-scope" style={{ ['--x-axis-color' as any]: ((options as any)?.xAxisFontColor || axisTextColor), ['--y-axis-color' as any]: ((options as any)?.yAxisFontColor || axisTextColor), ['--x-axis-weight' as any]: ((options as any)?.xAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--y-axis-weight' as any]: ((options as any)?.yAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--x-axis-size' as any]: `${(options as any)?.xAxisFontSize ?? 11}px`, ['--y-axis-size' as any]: `${(options as any)?.yAxisFontSize ?? 11}px`, ...(buildTremorGridStyle() as any) } as any}>
       <LineChart
@@ -6516,7 +6659,7 @@ export default function ChartCard({
         categories={categories}
         colors={chartColorsTokens}
         showLegend={chartLegend}
-        yAxisWidth={40}
+        yAxisWidth={yAxisWidthLine}
         curveType="monotone"
         valueFormatter={(v: number) => valueFormatter(v)}
         minValue={options?.yMin}

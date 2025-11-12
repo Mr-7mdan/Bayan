@@ -154,6 +154,8 @@ class SQLGlotBuilder:
             # Resolve fields before building query
             x_field_resolved, x_is_expr = resolve_field(x_field)
             y_field_resolved, y_is_expr = resolve_field(y_field)
+            print(f"[SQLGlot] X field resolution: '{x_field}' -> '{x_field_resolved}', is_expr={x_is_expr}")
+            print(f"[SQLGlot] Y field resolution: '{y_field}' -> '{y_field_resolved}', is_expr={y_is_expr}")
             
             # MULTI-LEGEND: Handle legend_fields array (single or multiple)
             legend_field_resolved = legend_field
@@ -249,11 +251,15 @@ class SQLGlotBuilder:
             
             # Apply WHERE clauses
             if where:
+                print(f"[SQLGlot] WHERE clause before _apply_where: {where}")
                 query = self._apply_where(query, where, date_field=date_field or x_field, expr_map=expr_map)
+                print(f"[SQLGlot] WHERE clause applied")
             
             # Apply GROUP BY (by position)
+            print(f"[SQLGlot] Group positions before GROUP BY: {group_positions}")
             if group_positions:
                 query = query.group_by(*[exp.Literal.number(i) for i in group_positions])
+                print(f"[SQLGlot] Applied GROUP BY with positions: {group_positions}")
             
             # Apply ORDER BY
             if order_by:
@@ -274,8 +280,10 @@ class SQLGlotBuilder:
             # Generate SQL for target dialect
             sql = query.sql(dialect=self.dialect, pretty=False)
             
-            logger.info(f"[SQLGlot] Generated SQL ({self.dialect}): {sql[:150]}...")
-            print(f"[SQLGlot] Generated SQL ({self.dialect}): {sql[:150]}...")
+            # Print full SQL for debugging
+            logger.info(f"[SQLGlot] Generated SQL ({self.dialect}): {sql[:500]}...")
+            print(f"[SQLGlot] Generated FULL SQL ({self.dialect}):")
+            print(sql)
             return sql
             
         except Exception as e:
@@ -667,6 +675,9 @@ class SQLGlotBuilder:
             
             return field_name, False
         
+        # Collect all WHERE conditions to combine with AND at the end
+        conditions = []
+        
         for key, value in where.items():
             # Check if key is an expression (starts with parenthesis)
             # This indicates a resolved derived column like "(strftime('%Y', OrderDate))"
@@ -685,25 +696,39 @@ class SQLGlotBuilder:
                 # Handle comparison operators (field__gte, field__lte, etc.)
                 if "__" in key and key not in ("start", "startDate", "end", "endDate"):
                     field, operator = key.rsplit("__", 1)
+                    print(f"[SQLGlot] _apply_where: Processing comparison {field}__{operator} = {value}")
                     # Try to resolve as custom column first
                     resolved, is_custom = resolve_where_field(field)
                     if is_custom:
                         col = resolved
+                        print(f"[SQLGlot] _apply_where: Resolved {field} to custom column expression")
                     else:
                         col = exp.Column(this=exp.Identifier(this=field, quoted=True))
+                        print(f"[SQLGlot] _apply_where: Using column {field}")
                     
+                    # Build condition expression
+                    condition = None
                     if operator == "gte":
-                        query = query.where(col >= self._to_literal(value))
+                        condition = col >= self._to_literal(value)
+                        print(f"[SQLGlot] _apply_where: Applied {field} >= {value}")
                     elif operator == "gt":
-                        query = query.where(col > self._to_literal(value))
+                        condition = col > self._to_literal(value)
+                        print(f"[SQLGlot] _apply_where: Applied {field} > {value}")
                     elif operator == "lte":
-                        query = query.where(col <= self._to_literal(value))
+                        condition = col <= self._to_literal(value)
+                        print(f"[SQLGlot] _apply_where: Applied {field} <= {value}")
                     elif operator == "lt":
-                        query = query.where(col < self._to_literal(value))
+                        condition = col < self._to_literal(value)
+                        print(f"[SQLGlot] _apply_where: Applied {field} < {value}")
                     else:
                         # Unknown operator, treat as regular field name
                         col = exp.Column(this=exp.Identifier(this=key, quoted=True))
-                        query = query.where(col == self._to_literal(value))
+                        condition = col == self._to_literal(value)
+                        print(f"[SQLGlot] _apply_where: Unknown operator {operator}, treating as equality")
+                    
+                    # Collect conditions instead of applying immediately
+                    if condition is not None:
+                        conditions.append(condition)
                     continue
                 
                 # Handle date range filters
@@ -714,7 +739,7 @@ class SQLGlotBuilder:
                         date_col = resolved_date
                     else:
                         date_col = exp.Column(this=exp.Identifier(this=date_field, quoted=True))
-                    query = query.where(date_col >= self._to_literal(value))
+                    conditions.append(date_col >= self._to_literal(value))
                     continue
                 elif key in ("end", "endDate") and date_field:
                     # Resolve date_field if it's a custom column
@@ -723,7 +748,7 @@ class SQLGlotBuilder:
                         date_col = resolved_date
                     else:
                         date_col = exp.Column(this=exp.Identifier(this=date_field, quoted=True))
-                    query = query.where(date_col <= self._to_literal(value))
+                    conditions.append(date_col <= self._to_literal(value))
                     continue
                 elif key in ("start", "startDate", "end", "endDate"):
                     # Date range key but no date_field specified, skip
@@ -737,17 +762,26 @@ class SQLGlotBuilder:
                 else:
                     col = exp.Column(this=exp.Identifier(this=key, quoted=True))
             
+            # Build condition based on value type
             if value is None:
                 # NULL check
-                query = query.where(col.is_(exp.null()))
+                conditions.append(col.is_(exp.null()))
             elif isinstance(value, list):
                 # IN clause
                 if len(value) > 0:
                     literals = [self._to_literal(v) for v in value]
-                    query = query.where(col.isin(*literals))
+                    conditions.append(col.isin(*literals))
             else:
                 # Equality
-                query = query.where(col.eq(self._to_literal(value)))
+                conditions.append(col.eq(self._to_literal(value)))
+        
+        # Combine all conditions with AND
+        if conditions:
+            combined_condition = conditions[0]
+            for condition in conditions[1:]:
+                combined_condition = combined_condition & condition
+            query = query.where(combined_condition)
+            print(f"[SQLGlot] _apply_where: Applied {len(conditions)} conditions combined with AND")
         
         return query
     

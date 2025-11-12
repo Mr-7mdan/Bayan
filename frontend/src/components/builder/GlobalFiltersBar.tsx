@@ -12,6 +12,7 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
   const { filters, setFilters, reset } = useFilters()
   const [showMapping, setShowMapping] = useState(false)
   const [showBreakPanel, setShowBreakPanel] = useState(false)
+  const [selectedPreset, setSelectedPreset] = useState<string>('all')
 
   const presetLabels: Record<string, string> = {
     all: 'All time',
@@ -38,6 +39,7 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
   ] as const
 
   function applyPreset(v: string) {
+    setSelectedPreset(v) // Track which preset was selected
     const now = new Date()
     const fmt = (d: Date) => {
       const y = d.getFullYear()
@@ -152,7 +154,7 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
   return (
     <div className="flex items-center gap-3">
       <FilterbarControl
-        active={undefined}
+        active={selectedPreset}
         options={presetOptions}
         labels={presetLabels}
         onChange={applyPreset}
@@ -162,21 +164,30 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
         <label className="text-[11px] text-[hsl(var(--muted-foreground))]">Start</label>
         <DatePickerField
           value={filters.startDate}
-          onChangeAction={(v) => setFilters({ ...filters, startDate: v })}
+          onChangeAction={(v) => {
+            setSelectedPreset('all') // Clear preset when manually changing dates
+            setFilters({ ...filters, startDate: v })
+          }}
           disabled={!!disabled}
           ariaLabel="Start date"
         />
         <label className="text-[11px] text-[hsl(var(--muted-foreground))]">End</label>
         <DatePickerField
           value={filters.endDate}
-          onChangeAction={(v) => setFilters({ ...filters, endDate: v })}
+          onChangeAction={(v) => {
+            setSelectedPreset('all') // Clear preset when manually changing dates
+            setFilters({ ...filters, endDate: v })
+          }}
           disabled={!!disabled}
           ariaLabel="End date"
         />
         <button
           type="button"
           className={`text-[12px] h-8 px-2 rounded-md border ${disabled?'opacity-60 cursor-not-allowed':'hover:bg-[hsl(var(--muted))]'} bg-[hsl(var(--card))] text-[hsl(var(--foreground))] border-[hsl(var(--border))]`}
-          onClick={disabled ? undefined : reset}
+          onClick={disabled ? undefined : () => {
+            setSelectedPreset('all') // Reset preset to "All time"
+            reset()
+          }}
           disabled={!!disabled}
           title="Clear filters"
         >

@@ -861,7 +861,8 @@ export default function HomePage() {
     const el = canvasRef.current
     const ro = new ResizeObserver(() => {
       const rect = el.getBoundingClientRect()
-      setCanvasW(Math.max(480, Math.floor(rect.width)))
+      // Subtract canvas padding (p-3 = 12px * 2 = 24px total horizontal padding)
+      setCanvasW(Math.max(480, Math.floor(rect.width - 24)))
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -879,9 +880,27 @@ export default function HomePage() {
         const cfg = configs[it.i]
         const autoFit = cfg?.options?.autoFitCardContent !== false
         if (!autoFit) return it
+        
+        // Measure actual content height (includes p-3 padding on content div)
         const contentH = el.scrollHeight
-        const desired = Math.max(2, Math.ceil(contentH / rowH))
-        return desired !== it.h ? { ...it, h: desired } : it
+        
+        // The content div has p-3 (12px top + 12px bottom = 24px vertical padding)
+        // We need to ensure after grid snapping, there's enough space for this padding
+        // to be symmetric. Calculate rows needed, then ensure remainder >= 24px
+        const minPaddingPx = 24 // p-3 top + bottom
+        
+        // Try initial row count
+        let desiredRows = Math.max(2, Math.ceil(contentH / rowH))
+        let actualGridHeight = desiredRows * rowH
+        let remainder = actualGridHeight - contentH
+        
+        // If remainder is less than minimum padding needed, add another row
+        // This ensures we have at least 12px top + 12px bottom symmetric padding
+        if (remainder < minPaddingPx) {
+          desiredRows += 1
+        }
+        
+        return desiredRows !== it.h ? { ...it, h: desiredRows } : it
       })
       const changed = next.some((n, i) => n.h !== prev[i]?.h)
       return changed ? next : prev

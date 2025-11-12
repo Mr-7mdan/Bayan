@@ -696,11 +696,22 @@ export default function KpiCard({
     const good = downIsGood ? !pos : pos
     return good ? 'text-emerald-600' : 'text-rose-600'
   }
-  // Spark-only: unconditional sign-based color (ignore downIsGood)
+  // Spark-only: unconditional rule matching product spec
+  // red for < 0%, gray for 0%–1%, green for > 1%
   const deltaColorSpark = (pct: number) => {
     const n = Number(pct)
-    if (!isFinite(n) || Math.abs(n) < 1e-9) return 'text-gray-500'
-    return n > 0 ? 'text-emerald-600' : 'text-rose-600'
+    if (!isFinite(n)) return 'text-muted-foreground'
+    if (n < 0) return 'text-rose-600'
+    if (n <= 1) return 'text-muted-foreground'
+    return 'text-emerald-600'
+  }
+  // Spark stroke color names (tremor palette keywords) using same thresholds
+  const sparkColorName = (pct: number): 'emerald'|'rose'|'slate' => {
+    const n = Number(pct)
+    if (!isFinite(n)) return 'slate'
+    if (n < 0) return 'rose'
+    if (n <= 1) return 'slate'
+    return 'emerald'
   }
   const deltaBadge = (pct: number) => {
     const n = Number(pct)
@@ -1194,8 +1205,6 @@ export default function KpiCard({
                 const picked = sorted.slice(0, topN)
                 const wrapEvery = (typeof (options as any)?.kpi?.wrapEveryN === 'number' && (options as any).kpi.wrapEveryN > 0) ? (options as any).kpi.wrapEveryN : 3
                 const cols = Math.max(1, Math.min(wrapEvery, picked.length || 1))
-                const palette = getPresetPalette((options?.colorPreset || 'default') as any)
-                const lineColors = getDefaultSeriesColors(picked.length, palette) as any
                 return (
                   <div className="grid gap-[clamp(8px,1.4vw,12px)]" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
                     {picked.map(([lg, v], i) => {
@@ -1214,9 +1223,9 @@ export default function KpiCard({
                           { x: 2, value: currLocal * 1.00 },
                         ])
                       const data: SparkPoint[] = base.map((d: any) => ({ x: d.x, xLabel: (d.xLabel ?? formatXLabel(d.x)), value: d.value }))
-                      const lineColor = deltaEnabled ? lineColors[i % lineColors.length] : getColorFromTrend(data)
-                      const colorHex = tremorNameToHex(lineColor as any)
-                      const gradientId = `kpi-spark-${sizeKey}-${i}-${lineColor}`
+                      const colorName = deltaEnabled ? sparkColorName(pctLocal) : getColorFromTrend(data)
+                      const colorHex = tremorNameToHex(colorName as any)
+                      const gradientId = `kpi-spark-${sizeKey}-${i}-${colorName}`
                       return (
                         <div key={lg} className="rounded-lg border bg-card p-[clamp(10px,1.3vw,14px)]">
                           <div className={`${labelClass} truncate mb-1`} title={String(lg)}>{displayKpiLabel(String(lg))}</div>
@@ -1272,9 +1281,9 @@ export default function KpiCard({
                         return [ { x: 0, xLabel: '0', value: v * 0.96 }, { x: 1, xLabel: '1', value: v * 1.02 }, { x: 2, xLabel: '2', value: v * 1.00 } ]
                       })()
                       const data: SparkPoint[] = base.map((d: any) => ({ x: d.x, xLabel: (d.xLabel ?? formatXLabel(d.x)), value: d.value }))
-                      const lineColor = deltaEnabled ? color : getColorFromTrend(data)
-                      const colorHex = tremorNameToHex(lineColor as any)
-                      const gradientId = `kpi-spark-single-${sizeKey}-${lineColor}`
+                      const colorName = deltaEnabled ? sparkColorName(p) : getColorFromTrend(data)
+                      const colorHex = tremorNameToHex(colorName as any)
+                      const gradientId = `kpi-spark-single-${sizeKey}-${colorName}`
                       return (
                         <ResponsiveContainer key={`spark-${sizeKey}`} width="100%" height="100%">
                           <ReAreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>

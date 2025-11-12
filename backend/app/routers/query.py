@@ -2526,7 +2526,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         })
     
     agg = (spec.agg or "none").lower()
-    print(f"[BACKEND] /query/spec agg extraction: spec.agg={spec.agg}, agg={agg}, spec.y={spec.y}, spec.series={getattr(spec, 'series', None)}")
     has_chart_semantics = bool(spec.x or spec.y or spec.measure or spec.legend or (spec.groupBy and spec.groupBy != "none") or (agg and agg != "none"))
     # If there are no chart semantics at all, treat it as a plain SELECT
     if not has_chart_semantics:
@@ -2771,11 +2770,17 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             _validated_legend = spec.legend
             
             if _validated_x:
-                x_norm = _norm_name(_validated_x)
-                if x_norm and x_norm not in available_cols:
-                    _validated_x = None
+                # Allow derived date parts like "OrderDate (Year)" even if base column not in available_cols
+                is_derived_x = bool(re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(_validated_x), flags=re.IGNORECASE))
+                if is_derived_x:
+                    # Keep the derived field as-is
+                    pass
                 else:
-                    _validated_x = canonical_map.get(x_norm, _validated_x)
+                    x_norm = _norm_name(_validated_x)
+                    if x_norm and x_norm not in available_cols:
+                        _validated_x = None
+                    else:
+                        _validated_x = canonical_map.get(x_norm, _validated_x)
             if _validated_y:
                 y_norm = _norm_name(_validated_y)
                 if y_norm and y_norm not in available_cols:
@@ -2866,11 +2871,17 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             _validated_legend = spec.legend
             
             if _validated_x:
-                _xn = _norm_name(_validated_x)
-                if _xn not in available_cols_direct_norm:
-                    _validated_x = None
+                # Allow derived date parts like "OrderDate (Year)" even if base column not in available_cols
+                is_derived_x2 = bool(re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(_validated_x), flags=re.IGNORECASE))
+                if is_derived_x2:
+                    # Keep the derived field as-is
+                    pass
                 else:
-                    _validated_x = canonical_direct.get(_xn, _validated_x)
+                    _xn = _norm_name(_validated_x)
+                    if _xn not in available_cols_direct_norm:
+                        _validated_x = None
+                    else:
+                        _validated_x = canonical_direct.get(_xn, _validated_x)
             if _validated_y:
                 _yn = _norm_name(_validated_y)
                 if _yn not in available_cols_direct_norm:
@@ -4411,6 +4422,9 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
     end = payload.get("end")
     legend = payload.get("legend")
     base_where = payload.get("where") or {}
+    
+    print(f"[DEBUG period_totals] dateField={date_field}, start={start}, end={end}")
+    print(f"[DEBUG period_totals] base_where keys: {list(base_where.keys())}")
 
     if not date_field or not start or not end:
         raise HTTPException(status_code=400, detail="dateField, start, end are required")
@@ -5063,6 +5077,15 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                 else:
                     legend_field_arg = legend
             
+            # Add date range filters to where clause for SQLGlot
+            where_with_dates = {**base_where}
+            if date_field and start and end:
+                # Use comparison operators for date range
+                where_with_dates[f"{date_field}__gte"] = start
+                where_with_dates[f"{date_field}__lt"] = end
+                print(f"[SQLGlot] Period-totals: Added date filters: {date_field}__gte={start}, {date_field}__lt={end}")
+                print(f"[SQLGlot] Period-totals: where_with_dates keys: {list(where_with_dates.keys())}")
+            
             # Period totals is essentially an aggregation with optional legend
             sql_inner = builder.build_aggregation_query(
                 source=source,  # Fix: was spec_source, should be source
@@ -5071,7 +5094,7 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                 legend_field=legend_field_arg,
                 legend_fields=legend_fields_arg,
                 agg=agg,
-                where=base_where,
+                where=where_with_dates,  # Now includes date range filters
                 group_by=None,  # No time bucketing (already filtered by date range)
                 order_by=None,
                 order='asc',
