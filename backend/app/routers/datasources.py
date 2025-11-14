@@ -1546,10 +1546,29 @@ def list_local_tables_only():
 
 @router.get("/{ds_id}/schema", response_model=IntrospectResponse)
 def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
-    ds: Datasource | None = db.get(Datasource, ds_id)
-    if not ds:
-        raise HTTPException(status_code=404, detail="Datasource not found")
+    print(f"[/schema] Called for datasource {ds_id}")
+    try:
+        ds: Datasource | None = db.get(Datasource, ds_id)
+        if not ds:
+            print(f"[/schema] ERROR: Datasource {ds_id} not found")
+            raise HTTPException(status_code=404, detail="Datasource not found")
+        print(f"[/schema] Found datasource: type={ds.type}, has_connection={bool(ds.connection_encrypted)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[/schema] ERROR: Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Schema introspection failed: {e}")
+    
+    # Check if this is actually a remote datasource based on type
+    ds_type_lower = str(ds.type or '').lower()
+    is_remote = any(x in ds_type_lower for x in ['mssql', 'sqlserver', 'postgres', 'mysql', 'mariadb', 'oracle'])
+    
     if not ds.connection_encrypted:
+        if is_remote:
+            print(f"[/schema] ERROR: Remote datasource ({ds.type}) has no connection string!")
+            raise HTTPException(status_code=400, detail=f"Datasource is configured as {ds.type} but has no connection string. Please update the datasource configuration.")
         # Special-case: DuckDB datasource without a connection URI should introspect the local store
         try:
             if str(ds.type or '').lower().find('duckdb') != -1:
@@ -1718,64 +1737,74 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
         insp = inspect(engine)
         schema_names = insp.get_schema_names()
         schemas: list[SchemaInfo] = []
+        dialect_name = (engine.dialect.name or '').lower()
+        is_mssql = 'mssql' in dialect_name or 'sqlserver' in dialect_name
+        
         with engine.connect() as conn:
             for sch in schema_names:
+                print(f"[/schema] Processing schema: {sch}")
                 try:
                     tbls = insp.get_table_names(schema=sch)
+                    print(f"[/schema]   Found {len(tbls)} tables")
                 except Exception:
                     tbls = []
                 # Try inspector first for views, then fall back to information_schema
                 vws: list[str] = []
                 try:
                     vws = [str(v) for v in insp.get_view_names(schema=sch)]
+                    print(f"[/schema]   Found {len(vws)} views")
                 except Exception:
                     vws = []
                 if not vws:
                     try:
                         res = conn.execute(text("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = :s AND TABLE_TYPE = 'VIEW'"), {"s": sch})
                         vws = [str(r[0]) for r in res.fetchall()]
+                        print(f"[/schema]   Found {len(vws)} views via INFORMATION_SCHEMA")
                     except Exception:
                         vws = []
-                if not vws:
+                if not vws and is_mssql:
                     # SQL Server final fallback
                     try:
                         res = conn.execute(text("SELECT v.name FROM sys.views v JOIN sys.schemas s ON s.schema_id = v.schema_id WHERE s.name = :s"), {"s": sch})
                         vws = [str(r[0]) for r in res.fetchall()]
+                        print(f"[/schema]   Found {len(vws)} views via sys.views")
                     except Exception:
                         vws = []
                 names = list({*tbls, *vws})
                 names.sort()
+                
+                # OPTIMIZATION: Batch-fetch ALL columns for this schema in one query
+                print(f"[/schema]   Batch-fetching columns for {len(names)} tables...")
+                columns_by_table: dict[str, list[ColumnInfo]] = {}
+                try:
+                    # Use INFORMATION_SCHEMA to get all columns for all tables in this schema at once
+                    col_res = conn.execute(
+                        text("SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, ORDINAL_POSITION FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = :s ORDER BY TABLE_NAME, ORDINAL_POSITION"),
+                        {"s": sch}
+                    )
+                    for tbl_name, col_name, col_type, _ in col_res.fetchall():
+                        tbl_name = str(tbl_name)
+                        if tbl_name not in columns_by_table:
+                            columns_by_table[tbl_name] = []
+                        columns_by_table[tbl_name].append(ColumnInfo(name=str(col_name), type=str(col_type)))
+                    print(f"[/schema]   Batch-fetched columns for {len(columns_by_table)} tables")
+                except Exception as e:
+                    print(f"[/schema]   WARNING: Batch column fetch failed: {e}, falling back to per-table queries")
+                
                 tables: list[TableInfo] = []
                 for name in names:
-                    try:
-                        cols = [ColumnInfo(name=str(c['name']), type=str(c.get('type'))) for c in insp.get_columns(name, schema=sch)]
-                        # Fallback for views or drivers that don't report columns via inspector
-                        if not cols:
-                            try:
-                                dialect = (engine.dialect.name or '').lower()
-                                def _q_ident(s: str) -> str:
-                                    s2 = str(s or '')
-                                    if dialect.startswith('mssql'):
-                                        return s2 if (s2.startswith('[') and s2.endswith(']')) else f"[{s2}]"
-                                    if dialect.startswith('mysql'):
-                                        return s2 if (s2.startswith('`') and s2.endswith('`')) else f"`{s2}`"
-                                    if dialect.startswith('postgres') or dialect.startswith('oracle'):
-                                        return s2 if (s2.startswith('"') and s2.endswith('"')) else f'"{s2}"'
-                                    return s2
-                                full = f"{_q_ident(sch)}.{_q_ident(name)}" if sch else _q_ident(name)
-                                sql = (f"SELECT TOP 0 * FROM {full} AS s" if dialect.startswith('mssql') else f"SELECT * FROM {full} WHERE 1=0")
-                                try:
-                                    res = conn.execute(text(sql))
-                                    keys = [str(c) for c in res.keys()]
-                                    if keys:
-                                        cols = [ColumnInfo(name=k, type=None) for k in keys]
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                    except Exception:
-                        cols = []
+                    # First, try to get from batch-fetched columns
+                    cols = columns_by_table.get(name, [])
+                    
+                    # If not in batch (or batch failed), fall back to inspector
+                    if not cols:
+                        try:
+                            cols = [ColumnInfo(name=str(c['name']), type=str(c.get('type'))) for c in insp.get_columns(name, schema=sch)]
+                        except Exception:
+                            cols = []
+                    
                     tables.append(TableInfo(name=name, columns=cols))
+                print(f"[/schema]   Created {len(tables)} table info objects")
                 schemas.append(SchemaInfo(name=sch, tables=tables))
         return IntrospectResponse(schemas=schemas)
     except Exception as e:
@@ -1784,10 +1813,29 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
 
 @router.get("/{ds_id}/tables", response_model=TablesOnlyResponse)
 def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
-    ds: Datasource | None = db.get(Datasource, ds_id)
-    if not ds:
-        raise HTTPException(status_code=404, detail="Datasource not found")
+    print(f"[/tables] Called for datasource {ds_id}")
+    try:
+        ds: Datasource | None = db.get(Datasource, ds_id)
+        if not ds:
+            print(f"[/tables] ERROR: Datasource {ds_id} not found")
+            raise HTTPException(status_code=404, detail="Datasource not found")
+        print(f"[/tables] Found datasource: type={ds.type}, has_connection={bool(ds.connection_encrypted)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[/tables] ERROR: Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"List tables failed: {e}")
+    
+    # Check if this is actually a remote datasource based on type
+    ds_type_lower = str(ds.type or '').lower()
+    is_remote = any(x in ds_type_lower for x in ['mssql', 'sqlserver', 'postgres', 'mysql', 'mariadb', 'oracle'])
+    
     if not ds.connection_encrypted:
+        if is_remote:
+            print(f"[/tables] ERROR: Remote datasource ({ds.type}) has no connection string!")
+            raise HTTPException(status_code=400, detail=f"Datasource is configured as {ds.type} but has no connection string. Please update the datasource configuration.")
         # Treat as DuckDB local
         if _duckdb is None:
             raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
@@ -1818,52 +1866,144 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
                 return TablesOnlyResponse(schemas=out)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"List tables failed: {e}")
-    # External: SQLAlchemy inspector
+    # External datasource with connection string
+    print(f"[/tables] Decrypting connection string...")
     try:
         dsn = decrypt_text(ds.connection_encrypted)
-    except Exception:
+        print(f"[/tables] Decrypted successfully")
+    except Exception as e:
+        print(f"[/tables] ERROR: Decryption failed: {e}")
         dsn = None
     if not dsn:
         raise HTTPException(status_code=400, detail="Invalid connection secret")
+    
+    # Special handling for DuckDB - use native driver to avoid connection conflicts
+    if (dsn or '').lower().startswith('duckdb:'):
+        print(f"[/tables] Using native DuckDB driver...")
+        if _duckdb is None:
+            raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
+        # Extract path from DSN
+        raw = dsn
+        if raw.startswith('duckdb:////'):
+            path = '/' + raw[len('duckdb:////'):]
+        elif raw.startswith('duckdb:///'):
+            path = raw[len('duckdb:///'):]
+        elif raw.startswith('duckdb://'):
+            path = raw[len('duckdb://'):]
+        else:
+            path = raw[len('duckdb:'):]
+        if '?' in path:
+            path = path.split('?', 1)[0]
+        from urllib.parse import unquote
+        path = unquote(path)
+        if path in (':memory:', '/:memory:'):
+            path = ':memory:'
+        while path.startswith('//') and path != '://':
+            path = path[1:]
+        if not path:
+            path = settings.duckdb_path
+        if path != ':memory:':
+            import os
+            path = os.path.abspath(os.path.expanduser(path))
+        try:
+            with open_duck_native(path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT table_schema, table_name FROM information_schema.tables
+                    WHERE table_schema <> 'information_schema'
+                      AND lower(table_name) NOT LIKE 'duckdb_%'
+                      AND lower(table_name) NOT LIKE 'sqlite_%'
+                      AND lower(table_name) NOT LIKE 'pragma_%'
+                      AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
+                    UNION
+                    SELECT table_schema, table_name FROM information_schema.views
+                    WHERE table_schema <> 'information_schema'
+                      AND lower(table_name) NOT LIKE 'duckdb_%'
+                      AND lower(table_name) NOT LIKE 'sqlite_%'
+                      AND lower(table_name) NOT LIKE 'pragma_%'
+                      AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
+                    ORDER BY table_schema, table_name
+                    """
+                ).fetchall()
+                by_schema: dict[str, set[str]] = {}
+                for sch, tbl in rows:
+                    by_schema.setdefault(str(sch), set()).add(str(tbl))
+                out = [ _TablesSchema(name=sch, tables=sorted(list(tbls))) for sch, tbls in by_schema.items() ]
+                print(f"[/tables] Found {len(out)} DuckDB schemas")
+                return TablesOnlyResponse(schemas=out)
+        except Exception as e:
+            print(f"[/tables] ERROR: DuckDB native query failed: {e}")
+            raise HTTPException(status_code=500, detail=f"DuckDB tables query failed: {e}")
+    
+    # Non-DuckDB: use SQLAlchemy inspector
     try:
+        print(f"[/tables] Creating engine...")
         engine = get_engine_from_dsn(dsn)
+        print(f"[/tables] Getting inspector...")
         insp = inspect(engine)
+        print(f"[/tables] Getting schema names...")
         schema_names = insp.get_schema_names()
+        print(f"[/tables] Found {len(schema_names)} schemas")
+        
+        # Filter out SQL Server system schemas to speed up
+        dialect_name = (engine.dialect.name or '').lower()
+        if 'mssql' in dialect_name or 'sqlserver' in dialect_name:
+            system_schemas = {'sys', 'INFORMATION_SCHEMA', 'guest', 'db_owner', 'db_accessadmin', 'db_securityadmin', 
+                            'db_ddladmin', 'db_backupoperator', 'db_datareader', 'db_datawriter', 'db_denydatareader', 
+                            'db_denydatawriter'}
+            schema_names = [s for s in schema_names if s not in system_schemas]
+            print(f"[/tables] Filtered to {len(schema_names)} user schemas")
+        
         out: list[_TablesSchema] = []
+        print(f"[/tables] Connecting to database...")
         with engine.connect() as conn:
+            print(f"[/tables] Connected successfully")
             for sch in schema_names:
+                print(f"[/tables] Processing schema: {sch}")
                 try:
+                    print(f"[/tables]   Getting tables...")
                     tbls = insp.get_table_names(schema=sch)
-                except Exception:
+                    print(f"[/tables]   Found {len(tbls)} tables")
+                except Exception as e:
+                    print(f"[/tables]   Error getting tables: {e}")
                     tbls = []
+                
+                print(f"[/tables]   Getting views...")
                 vws: list[str] = []
                 try:
                     vws = [str(v) for v in insp.get_view_names(schema=sch)]
-                except Exception:
-                    vws = []
-                if not vws:
-                    try:
-                        res = conn.execute(text("SELECT table_name FROM information_schema.views WHERE table_schema = :s"), {"s": sch})
-                        vws = [str(r[0]) for r in res.fetchall()]
-                    except Exception:
-                        vws = []
-                if not vws:
-                    try:
-                        res = conn.execute(text("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = :s AND TABLE_TYPE = 'VIEW'"), {"s": sch})
-                        vws = [str(r[0]) for r in res.fetchall()]
-                    except Exception:
-                        vws = []
-                if not vws:
+                    print(f"[/tables]   Found {len(vws)} views via inspector")
+                except Exception as e:
+                    print(f"[/tables]   Inspector failed, trying INFORMATION_SCHEMA: {e}")
+                    # Only try SQL Server sys.views as fallback
                     try:
                         res = conn.execute(text("SELECT v.name FROM sys.views v JOIN sys.schemas s ON s.schema_id = v.schema_id WHERE s.name = :s"), {"s": sch})
                         vws = [str(r[0]) for r in res.fetchall()]
-                    except Exception:
+                        print(f"[/tables]   Found {len(vws)} views via sys.views")
+                    except Exception as e2:
+                        print(f"[/tables]   sys.views also failed: {e2}")
                         vws = []
+                
                 # Union tables and views; keep unique, sorted for stability
                 combined = sorted(list({*(str(t) for t in tbls), *vws}))
+                print(f"[/tables]   Total: {len(combined)} objects in schema {sch}")
                 out.append(_TablesSchema(name=sch, tables=combined))
-        return TablesOnlyResponse(schemas=out)
+        
+        print(f"[/tables] Finished processing {len(out)} schemas, returning response...")
+        try:
+            response = TablesOnlyResponse(schemas=out)
+            print(f"[/tables] Response object created successfully")
+            print(f"[/tables] Response has {sum(len(s.tables) for s in response.schemas)} total tables")
+            return response
+        except Exception as resp_err:
+            print(f"[/tables] ERROR creating response: {resp_err}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Failed to create response: {resp_err}")
     except Exception as e:
+        print(f"[/tables] ERROR in main block: {e}")
+        import traceback
+        traceback.print_exc()
         mapped = _http_for_db_error(e)
         if mapped:
             raise mapped

@@ -808,12 +808,13 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
 
   useEffect(() => {
     if (!advOpen || !advDatasourceId) { setTableList([]); setTablesMeta(null); setAdvTablesLoading(false); return }
-    const ac = new AbortController()
+    let cancelled = false
     setAdvTablesLoading(true)
     ;(async () => {
       try {
-        // Fast tables-only endpoint
-        const tbls = await Api.tablesOnly(advDatasourceId, ac.signal)
+        // Fast tables-only endpoint - don't pass abort signal
+        const tbls = await Api.tablesOnly(advDatasourceId)
+        if (cancelled) return
         const arr: string[] = []
         const schemas = (tbls as any)?.schemas || []
         for (const s of schemas) {
@@ -827,9 +828,11 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         // Defer full introspect until a table is selected
         setTablesMeta(null)
       } catch {
+        if (cancelled) return
         try {
           // Fallback to full introspect if tablesOnly fails
-          const meta = await Api.introspect(advDatasourceId, ac.signal)
+          const meta = await Api.introspect(advDatasourceId)
+          if (cancelled) return
           const arr: string[] = []
           const schemas = (meta as any)?.schemas || []
           for (const s of schemas) {
@@ -841,20 +844,22 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           }
           setTableList(arr)
           setTablesMeta(meta)
-        } catch { setTableList([]) }
-      } finally { setAdvTablesLoading(false) }
+        } catch { if (!cancelled) setTableList([]) }
+      } finally { if (!cancelled) setAdvTablesLoading(false) }
     })()
-    return () => { ac.abort() }
+    return () => { cancelled = true }
   }, [advOpen, advDatasourceId])
 
   useEffect(() => {
-    const ac = new AbortController()
+    let cancelled = false
     ;(async () => {
       try {
         if (!advOpen || !advSource) { setColumns([]); return }
         // If we don't yet have schema meta, fetch it lazily now
         if (!tablesMeta && advDatasourceId) {
-          const meta = await Api.introspect(advDatasourceId, ac.signal)
+          // Don't pass signal - let schema requests complete
+          const meta = await Api.introspect(advDatasourceId)
+          if (cancelled) return
           setTablesMeta(meta)
           // will recompute columns on next pass
           return
@@ -866,10 +871,10 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           for (const t of (s?.tables || [])) tables.push({ schema: sch, table: String(t?.name || ''), columns: t?.columns || [] })
         }
         const match = tables.find((t) => (maybeSchema ? (t.schema === maybeSchema && t.table === maybeTable) : (t.table === maybeTable)))
-        setColumns(Array.isArray(match?.columns) ? match.columns : [])
-      } catch { setColumns([]) }
+        if (!cancelled) setColumns(Array.isArray(match?.columns) ? match.columns : [])
+      } catch { if (!cancelled) setColumns([]) }
     })()
-    return () => { ac.abort() }
+    return () => { cancelled = true }
   }, [advOpen, advSource, tablesMeta, advDatasourceId])
 
   // When using carried widget, load its dashboard to read layout for aspect ratio

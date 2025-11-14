@@ -65,7 +65,7 @@ export default function AiAssistDialog({
 
   useEffect(() => {
     if (!open || !datasourceId) return
-    const ac = new AbortController()
+    let cancelled = false
     ;(async () => {
       try {
         setLoadingSchema(true)
@@ -76,8 +76,9 @@ export default function AiAssistDialog({
         } catch {}
         // 2) Always fetch lightweight tables-only list (includes views) so list is fresh even if schema is cached
         try {
-          const fast = await Api.tablesOnly(datasourceId, ac.signal)
-          if (!ac.signal.aborted) {
+          // Don't pass abort signal - let the request complete
+          const fast = await Api.tablesOnly(datasourceId)
+          if (!cancelled) {
             const pairs: Array<{ key: string; label: string }> = []
             ;(fast?.schemas || []).forEach((sch) => {
               ;(sch?.tables || []).forEach((t) => {
@@ -94,17 +95,17 @@ export default function AiAssistDialog({
         try {
           const tr = await Api.getDatasourceTransforms(String(datasourceId))
           const names = ((tr?.customColumns || []) as any[]).map((c: any) => String(c?.name || '')).filter(Boolean)
-          if (!ac.signal.aborted) setCustomColNames(names)
+          if (!cancelled) setCustomColNames(names)
         } catch {
-          if (!ac.signal.aborted) setCustomColNames([])
+          if (!cancelled) setCustomColNames([])
         }
       } catch {
-        if (!ac.signal.aborted) { setSchema((prev)=>prev); setTablesFast([]) }
+        if (!cancelled) { setSchema((prev)=>prev); setTablesFast([]) }
       } finally {
-        if (!ac.signal.aborted) setLoadingSchema(false)
+        if (!cancelled) setLoadingSchema(false)
       }
     })()
-    return () => { try { ac.abort() } catch {} }
+    return () => { cancelled = true }
   }, [open, datasourceId])
 
   const tables: Array<{ key: string; label: string; cols: Array<{ name: string; type?: string | null }> }> = useMemo(() => {

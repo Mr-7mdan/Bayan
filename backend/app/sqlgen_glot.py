@@ -897,6 +897,9 @@ class SQLGlotBuilder:
             ... )
         """
         try:
+            # Normalize dialect name for SQLGlot
+            normalized_dialect = self._normalize_dialect(ds_type or self.dialect)
+            
             # Helper to resolve fields (reuse from build_aggregation_query)
             def resolve_field(field: Optional[str]) -> tuple[Optional[str], bool]:
                 if not field:
@@ -910,37 +913,59 @@ class SQLGlotBuilder:
                     expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
                     return expr, True
                 else:
-                    print(f"[SQLGlot] Pivot: '{field}' not in expr_map (has {len(expr_map) if expr_map else 0} entries)")
+                    print(f"[SQLGlot] Pivot: '{field}' not in expr_map (has {len(expr_map) if expr_map else 0} entries, keys={list(expr_map.keys()) if expr_map else []})")
                 
                 # Check date parts
                 match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", field, flags=re.IGNORECASE)
                 if match:
                     base_col = match.group(1).strip()
                     kind = match.group(2).lower()
-                    expr = self._build_datepart_expr(base_col, kind, ds_type or self.dialect)
+                    expr = self._build_datepart_expr(base_col, kind, normalized_dialect)
+                    print(f"[SQLGlot] Pivot: Resolved date part '{field}' -> {expr[:100]}...")
                     return expr, True
                 
+                print(f"[SQLGlot] Pivot: '{field}' is a plain column (no custom expr, no date part)")
                 return field, False
             
-            # Build base query
-            table_expr = exp.to_table(source)
+            # Build base query (support subqueries or aliased sources)
+            s_source = str(source).strip()
+            try:
+                # If the source looks like a subquery or raw SELECT, parse it as an expression
+                if s_source.startswith("(") or s_source.lower().startswith("select"):
+                    table_expr = sqlglot.parse_one(s_source, dialect=normalized_dialect)
+                else:
+                    table_expr = exp.to_table(s_source, dialect=normalized_dialect)
+            except Exception:
+                # Fallback to table conversion
+                table_expr = exp.to_table(s_source, dialect=normalized_dialect)
             query = exp.select("*").from_(table_expr)
             
             # Resolve all dimension fields
             all_dims = rows + cols
             select_exprs = []
-            group_positions = []  # Use positions instead of expressions
+            group_positions = []  # Positions for GROUP BY (DuckDB, Postgres)
+            group_columns = []    # Column names for GROUP BY (SQL Server)
             
             for idx, dim in enumerate(all_dims, 1):  # 1-indexed for SQL
                 dim_resolved, is_expr = resolve_field(dim)
                 if is_expr:
                     # Parse as raw SQL expression
-                    dim_expr = sqlglot.parse_one(dim_resolved, dialect=ds_type or self.dialect)
+                    dim_expr = sqlglot.parse_one(dim_resolved, dialect=normalized_dialect)
                     select_exprs.append(dim_expr.as_(dim))
                     group_positions.append(idx)
+                    group_columns.append(exp.column(dim))  # Use the alias for GROUP BY
                 else:
-                    # Simple column reference
-                    select_exprs.append(exp.column(dim_resolved or dim).as_(dim))
+                    # Simple column reference - avoid self-aliasing (e.g., VaultName AS VaultName)
+                    # which causes DuckDB to reject GROUP BY references to that column
+                    col_name = dim_resolved or dim
+                    if col_name.lower() == dim.lower():
+                        # No alias needed - just select the column
+                        select_exprs.append(exp.column(col_name))
+                        group_columns.append(exp.column(col_name))
+                    else:
+                        # Alias needed (e.g., different source column)
+                        select_exprs.append(exp.column(col_name).as_(dim))
+                        group_columns.append(exp.column(dim))  # Use the alias for GROUP BY
                     group_positions.append(idx)
             
             # Build aggregation expression
@@ -955,15 +980,65 @@ class SQLGlotBuilder:
                     value_expr = exp.Count(this=exp.Star())
             elif agg_lower in ("sum", "avg", "min", "max"):
                 if value_field:
-                    val_resolved, _ = resolve_field(value_field)
+                    val_resolved, is_val_expr = resolve_field(value_field)
+                    
+                    # If val_resolved contains references to custom column aliases (e.g., "20", "50"),
+                    # we need to recursively expand them to their base expressions
+                    if is_val_expr and expr_map:
+                        # Recursively expand alias references in the expression
+                        def expand_aliases(expr_str: str, depth: int = 0) -> str:
+                            if depth > 10:  # Prevent infinite recursion
+                                return expr_str
+                            
+                            # Find all quoted identifiers that might be aliases
+                            pattern = r'"([^"]+)"'
+                            matches = re.findall(pattern, expr_str)
+                            
+                            expanded = expr_str
+                            for match in matches:
+                                # Check if this is a custom column alias
+                                if match in expr_map:
+                                    # Get the base expression for this alias
+                                    alias_expr = expr_map[match]
+                                    # Remove AS alias part if present
+                                    alias_expr = re.sub(r'\s+AS\s+"[^"]+"', '', alias_expr, flags=re.IGNORECASE)
+                                    # Strip parentheses around simple column references
+                                    alias_expr = re.sub(r'^\(("[^"]+"|[a-zA-Z0-9_]+)\)$', r'\1', alias_expr.strip())
+                                    # Replace the alias reference with its base expression
+                                    expanded = expanded.replace(f'"{match}"', f'({alias_expr})')
+                            
+                            # Recursively expand if we made changes
+                            if expanded != expr_str:
+                                return expand_aliases(expanded, depth + 1)
+                            return expanded
+                        
+                        val_resolved = expand_aliases(val_resolved)
+                        print(f"[SQLGlot] Pivot: Expanded aliases in value expression: {val_resolved[:200]}...")
+                        
+                        # For DuckDB, wrap each base column reference with numeric cleaning
+                        # to handle VARCHAR columns that need to be cast to numbers before addition
+                        if "duckdb" in (ds_type or self.dialect).lower():
+                            # Find all quoted column references (e.g., "Category1", "Category2")
+                            col_pattern = r'\("([^"]+)"\)'
+                            def wrap_column(match):
+                                col_name = match.group(1)
+                                # Wrap each column with numeric cleaning
+                                return f'(COALESCE(TRY_CAST(REGEXP_REPLACE(CAST("{col_name}" AS TEXT), \'[^0-9\\\\.-]\', \'\') AS DOUBLE), TRY_CAST("{col_name}" AS DOUBLE), 0.0))'
+                            val_resolved = re.sub(col_pattern, wrap_column, val_resolved)
+                            print(f"[SQLGlot] Pivot: Wrapped columns with numeric cleaning: {val_resolved[:200]}...")
                     
                     # DuckDB numeric cleaning
-                    if "duckdb" in (ds_type or self.dialect).lower():
-                        # COALESCE(try_cast(regexp_replace(...), ...), 0.0)
-                        clean_expr = sqlglot.parse_one(
-                            f"COALESCE(try_cast(regexp_replace(CAST({val_resolved or value_field} AS VARCHAR), '[^0-9\\\\.-]', '') AS DOUBLE), try_cast({val_resolved or value_field} AS DOUBLE), 0.0)",
-                            dialect="duckdb"
-                        )
+                    if "duckdb" in normalized_dialect.lower():
+                        # For expressions, use the cleaned val_resolved directly
+                        if is_val_expr and expr_map:
+                            # Parse the entire cleaned expression
+                            clean_expr = sqlglot.parse_one(val_resolved, dialect=normalized_dialect)
+                        else:
+                            # For simple columns, apply numeric cleaning
+                            clean_expr = sqlglot.parse_one(
+                                f"COALESCE(try_cast(regexp_replace(CAST({val_resolved or value_field} AS VARCHAR), '[^0-9\\\\.-]', '') AS DOUBLE), try_cast({val_resolved or value_field} AS DOUBLE), 0.0)",
+                                dialect=normalized_dialect
+                            )
                         value_expr = getattr(exp, agg_lower.capitalize())(this=clean_expr)
                     else:
                         value_expr = getattr(exp, agg_lower.capitalize())(this=exp.column(val_resolved or value_field))
@@ -981,16 +1056,26 @@ class SQLGlotBuilder:
             
             # Add WHERE clause
             if where:
-                where_conditions = self._build_where_conditions(where, expr_map, ds_type)
-                if where_conditions:
-                    final_query = final_query.where(*where_conditions)
+                # For pivot, custom columns are already materialized in the FROM subquery
+                # So we should NOT expand them in WHERE - just reference the alias names
+                # Pass empty expr_map to prevent expansion
+                final_query = self._apply_where(final_query, where, expr_map={})
             
-            # Add GROUP BY (by position to avoid alias issues)
+            # Add GROUP BY (use columns for SQL Server, positions for others)
             if group_positions:
-                print(f"[SQLGlot] Pivot: GROUP BY positions: {group_positions}")
-                final_query = final_query.group_by(*[exp.Literal.number(i) for i in group_positions])
+                if normalized_dialect == 'tsql':
+                    # SQL Server requires actual column references, not positions
+                    # Use string-based GROUP BY to force column names instead of positions
+                    print(f"[SQLGlot] Pivot: GROUP BY columns for SQL Server: {[str(c) for c in group_columns]}")
+                    # Don't use .group_by() as it may simplify to positions - manually add to SQL
+                    # We'll handle this after generating the base query
+                    final_query = final_query.group_by(*group_columns)
+                else:
+                    # Other dialects support positions
+                    print(f"[SQLGlot] Pivot: GROUP BY positions: {group_positions}")
+                    final_query = final_query.group_by(*[exp.Literal.number(i) for i in group_positions])
             
-            # Add ORDER BY (by position, same as GROUP BY for pivot)
+            # Add ORDER BY (by position for all dialects - ORDER BY supports positions everywhere)
             if group_positions:
                 final_query = final_query.order_by(*[exp.Literal.number(i) for i in group_positions])
             
@@ -999,8 +1084,17 @@ class SQLGlotBuilder:
                 final_query = final_query.limit(limit)
             
             # Generate SQL
-            sql = final_query.sql(dialect=ds_type or self.dialect)
-            print(f"[SQLGlot] Generated PIVOT SQL ({ds_type or self.dialect}): {sql}")
+            sql = final_query.sql(dialect=normalized_dialect)
+            
+            # Fix GROUP BY for SQL Server - SQLGlot may convert column names to positions
+            if normalized_dialect == 'tsql' and group_columns:
+                # Replace "GROUP BY 1, 2" with "GROUP BY VaultName, CurrencyName"
+                group_by_cols = ", ".join([c.sql(dialect=normalized_dialect) for c in group_columns])
+                # Find and replace the GROUP BY clause (re is imported at module level)
+                sql = re.sub(r'GROUP BY (\d+(?:, \d+)*)', f'GROUP BY {group_by_cols}', sql, flags=re.IGNORECASE)
+                print(f"[SQLGlot] Fixed GROUP BY for SQL Server: GROUP BY {group_by_cols}")
+            
+            print(f"[SQLGlot] Generated PIVOT SQL ({normalized_dialect}): {sql}")
             return sql
             
         except Exception as e:

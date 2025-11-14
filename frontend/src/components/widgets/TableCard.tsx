@@ -519,7 +519,25 @@ export default function TableCard({
         // Build call descriptors but DO NOT start requests yet (avoid self-abort)
         const calls = fieldsToFetch.map((f, idx) => {
           const chip = (pvList[idx] as any) || pvList.find((v) => (v.field === f || v.measureId === f))
-          const agg = mapFor(chip?.agg)
+          // FALLBACK: If chip.agg is missing, default to 'sum' for numeric-looking fields, else 'count'
+          // This handles legacy widgets where pivot.values[*].agg was never persisted
+          let aggRaw = chip?.agg
+          if (!aggRaw) {
+            // Check if field looks numeric (not a pure number like '2', but could be 'Total' or 'Amount')
+            const fieldName = String(chip?.field || f || '').trim()
+            const isNumericField = !(/^\d+$/.test(fieldName)) && (
+              fieldName.toLowerCase().includes('total') ||
+              fieldName.toLowerCase().includes('amount') ||
+              fieldName.toLowerCase().includes('value') ||
+              fieldName.toLowerCase().includes('sum') ||
+              fieldName.toLowerCase().includes('count') ||
+              fieldName.toLowerCase().includes('qty') ||
+              fieldName.toLowerCase().includes('quantity')
+            )
+            aggRaw = isNumericField ? 'sum' : 'count'
+            console.log(`[TableCard] Pivot value chip missing agg for field "${fieldName}", defaulting to "${aggRaw}"`)
+          }
+          const agg = mapFor(aggRaw)
           const label = String(chip?.label || f)
           const chosen = String(chip?.field || chip?.measureId || f || '')
           const valueFieldName = aliasToBase[chosen] ? String(aliasToBase[chosen]) : chosen

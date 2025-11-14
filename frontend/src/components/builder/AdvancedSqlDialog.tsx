@@ -190,17 +190,18 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
 
   // Fallback: fetch schema if not provided
   useEffect(() => {
-    const ac = new AbortController()
+    let cancelled = false
     async function run() {
       try {
         if (!open) return
         if (schemaLocal) return
-        const sc = await (effectiveDsId ? Api.introspect(effectiveDsId, ac.signal) : Api.introspectLocal(ac.signal))
-        if (!ac.signal.aborted) setSchemaLocal(sc as any)
+        // Don't pass signal - let schema requests complete
+        const sc = await (effectiveDsId ? Api.introspect(effectiveDsId) : Api.introspectLocal())
+        if (!cancelled) setSchemaLocal(sc as any)
       } catch {}
     }
     run()
-    return () => { try { ac.abort() } catch {} }
+    return () => { cancelled = true }
   }, [open, effectiveDsId, schemaLocal])
 
   // Load datasources list when needed for fallback selection

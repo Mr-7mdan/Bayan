@@ -106,9 +106,25 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
 
   const dsId = (local?.datasourceId as string | undefined) ?? (defaultDsId || undefined)
   const initialSchema = dsId ? (SchemaCache.get(dsId) || undefined) : undefined
+  
+  // Fetch datasource metadata to determine if it's a remote datasource
+  const dsMetaQ = useQuery({
+    queryKey: ['ds-metadata', dsId],
+    queryFn: () => Api.getDatasource(String(dsId)),
+    enabled: !!dsId,
+    staleTime: 5 * 60 * 1000,
+  })
+  const isRemoteDatasource = useMemo(() => {
+    const dsType = (dsMetaQ.data as any)?.type?.toLowerCase() || ''
+    // Query routing only applies to remote datasources (mssql, postgres, etc.)
+    // Not applicable for local DuckDB datasources
+    return dsType && dsType !== 'duckdb' && dsType !== 'api'
+  }, [dsMetaQ.data])
+  
   const schemaQ = useQuery({
     queryKey: ['ds-schema', dsId ?? '_local'],
-    queryFn: ({ signal }) => (dsId ? Api.introspect(dsId as string, signal) : Api.introspectLocal(signal)),
+    // Don't pass signal - let schema requests complete (they're cached anyway)
+    queryFn: () => (dsId ? Api.introspect(dsId as string) : Api.introspectLocal()),
     retry: 0,
     refetchOnWindowFocus: false,
     staleTime: 5 * 60 * 1000,
@@ -151,11 +167,13 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
   const [tablesFast, setTablesFast] = useState<Array<{ value: string; label: string }>>([])
   useEffect(() => {
     if (!dsId) { setTablesFast([]); return }
-    const ac = new AbortController()
+    let cancelled = false
     ;(async () => {
       try {
-        const fast = await Api.tablesOnly(String(dsId), ac.signal)
-        if (ac.signal.aborted) return
+        // Don't pass abort signal - let the request complete
+        // Table lists are relatively static and can be cached
+        const fast = await Api.tablesOnly(String(dsId))
+        if (cancelled) return
         const items: Array<{ value: string; label: string }> = []
         ;(fast?.schemas || []).forEach((sch: any) => {
           ;(sch?.tables || []).forEach((t: string) => {
@@ -165,10 +183,10 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
         })
         setTablesFast(items)
       } catch {
-        if (!ac.signal.aborted) setTablesFast([])
+        if (!cancelled) setTablesFast([])
       }
     })()
-    return () => { try { ac.abort() } catch {} }
+    return () => { cancelled = true }
   }, [dsId])
 
   // Determine datasource type for the selected widget
@@ -376,6 +394,56 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
     return Array.from(new Set<string>([...base, ...res]).values())
   }, [JSON.stringify(schemaColumnNames), JSON.stringify(resultColumns)])
 
+
+  // Merge widget and datasource custom columns (full objects) for FilterEditor
+  const allCustomColumns: Array<{ name: string; formula: string; type?: string }> = useMemo(() => {
+    const widgetCols = (local?.customColumns || []).map(c => ({ name: c.name, formula: c.formula, type: c.type }))
+    const dsCols = (() => {
+      try {
+        const items = ((dsTransformsQ.data as any)?.customColumns || []) as Array<{ name?: string; expr?: string; formula?: string; expression?: string; type?: string; scope?: any }>
+        console.log('[allCustomColumns] Raw datasource custom columns:', items?.length || 0, items)
+        const srcNow = String(local?.querySpec?.source || '')
+        const widNow = String((local as any)?.id || '')
+        console.log('[allCustomColumns] Current source:', srcNow, 'widgetId:', widNow)
+        const norm = (s: string) => String(s || '').trim().replace(/^\[|\]|^"|"$/g, '')
+        const tblEq = (a: string, b: string) => {
+          const na = norm(a).split('.').pop() || ''
+          const nb = norm(b).split('.').pop() || ''
+          return na.toLowerCase() === nb.toLowerCase()
+        }
+        const filtered = items
+          .filter((c) => {
+            const sc = (c?.scope || {}) as any
+            const lvl = String(sc?.level || 'datasource').toLowerCase()
+            const match = (
+              lvl === 'datasource' ||
+              (lvl === 'table' && sc?.table && srcNow && tblEq(String(sc.table), srcNow)) ||
+              (lvl === 'widget' && sc?.widgetId && widNow && String(sc.widgetId) === widNow)
+            )
+            console.log('[allCustomColumns] Column:', c?.name, 'scope:', sc, 'match:', match, 'full object:', c)
+            return match
+          })
+          .map((c) => {
+            const mapped = { name: String(c?.name || ''), formula: String(c?.expr || c?.formula || c?.expression || ''), type: c?.type }
+            console.log('[allCustomColumns] Mapped:', mapped.name, 'formula:', mapped.formula?.substring(0, 50))
+            return mapped
+          })
+          .filter(c => {
+            const keep = c.name && c.formula
+            if (!keep) console.log('[allCustomColumns] Filtering out:', c.name, 'name:', !!c.name, 'formula:', !!c.formula)
+            return keep
+          })
+        console.log('[allCustomColumns] Filtered datasource columns:', filtered.length, filtered.map(c => c.name))
+        return filtered
+      } catch (err) { 
+        console.error('[allCustomColumns] Error processing datasource columns:', err)
+        return [] 
+      }
+    })()
+    const result = [...widgetCols, ...dsCols]
+    console.log('[allCustomColumns] Final merged columns:', result.length, result.map(c => c.name))
+    return result
+  }, [local?.customColumns, dsTransformsQ.data, local?.querySpec?.source, (local as any)?.id])
 
   // Merge base column names with custom columns for builders, and Unpivot outputs
   const allFieldNames: string[] = useMemo(() => {
@@ -711,6 +779,10 @@ function FilterDetailsTabs({ kind, selField, local, setLocal, updateConfig }: { 
           datasourceId={dsId}
           values={(local.querySpec?.where as any)?.[selField] as any[]}
           where={(local.querySpec?.where as any)}
+          widgetId={local.id}
+          samplesByField={samplesByField}
+          sampleRows={sampleRows}
+          customColumns={allCustomColumns}
           onChange={(vals) => {
             const where = { ...(local.querySpec?.where || {}) as any }
             const hasVals = Array.isArray(vals) && vals.length > 0
@@ -1350,9 +1422,21 @@ function NewCustomColumnButton({
 }
 
 // Field filter editor for chart-level filters (multi-select values)
-function FilterEditor({ field, source, datasourceId, values, where, onChange }: { field: string; source: string; datasourceId?: string; values?: any[]; where?: Record<string, any>; onChange: (vals: any[]) => void }) {
+function FilterEditor({ field, source, datasourceId, values, where, onChange, widgetId, samplesByField, sampleRows, customColumns }: { 
+  field: string; 
+  source: string; 
+  datasourceId?: string; 
+  values?: any[]; 
+  where?: Record<string, any>; 
+  onChange: (vals: any[]) => void;
+  widgetId?: string;
+  samplesByField?: Record<string, string[]>;
+  sampleRows?: Array<Record<string, any>>;
+  customColumns?: Array<{ name: string; formula: string; type?: string }>;
+}) {
   const [selected, setSelected] = useState<any[]>(values || [])
   const [filterQuery, setFilterQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   useEffect(() => {
     const next = Array.isArray(values) ? values : []
     setSelected((prev) => {
@@ -1362,35 +1446,50 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
   }, [JSON.stringify(values || [])])
   // Request fresh samples from TableCard whenever field or widget changes
   useEffect(() => {
-    if (!local?.id) return
-    try { window.dispatchEvent(new CustomEvent('request-table-samples', { detail: { widgetId: local.id } })) } catch {}
-  }, [field, local?.id])
+    if (!widgetId) return
+    try { window.dispatchEvent(new CustomEvent('request-table-samples', { detail: { widgetId } })) } catch {}
+  }, [field, widgetId])
   // Fallback: fetch distinct values ignoring self constraint (server path for base fields)
   const [extraSamples, setExtraSamples] = useState<string[]>([])
+  const [loadingSamples, setLoadingSamples] = useState(false)
   useEffect(() => {
     let abort = false
     async function run() {
+      console.log('[FilterEditor] Starting sample fetch for field:', field, 'source:', source, 'datasourceId:', datasourceId)
+      setLoadingSamples(true)
       try {
-        if (!source) return
-        const omitWhere: Record<string, any> = { ...((where || {}) as any) }
-        // Remove self constraints for the same field, including range ops
-        Object.keys(omitWhere).forEach((k) => { if (k === field || k.startsWith(`${field}__`)) delete (omitWhere as any)[k] })
+        if (!source) {
+          console.log('[FilterEditor] No source, skipping sample fetch')
+          setLoadingSamples(false)
+          return
+        }
+        // IMPORTANT: Fetch ALL distinct values regardless of filters
+        // This gives users a complete view of available options
+        // Selection state is managed separately via the values prop
+        console.log('[FilterEditor] Fetching ALL samples (no filters applied)')
+        
         // Try server-side DISTINCT endpoint first (fast, authoritative) if available
         if (typeof (Api as any).distinct === 'function') {
           try {
-            const res = await (Api as any).distinct({ source: String(source), field: String(field), where: Object.keys(omitWhere).length ? omitWhere : undefined, datasourceId })
+            const res = await (Api as any).distinct({ source: String(source), field: String(field), where: undefined, datasourceId })
             const values = ((res?.values || []) as any[]).map((v) => (v != null ? String(v) : null)).filter((v) => v != null) as string[]
             const dedup = Array.from(new Set(values).values()).sort()
-            if (!abort) setExtraSamples(dedup)
+            console.log('[FilterEditor] Fetched', dedup.length, 'distinct values via DISTINCT endpoint')
+            if (!abort) {
+              setExtraSamples(dedup)
+              setLoadingSamples(false)
+            }
             return
-          } catch {}
+          } catch (err) {
+            console.warn('[FilterEditor] DISTINCT endpoint failed:', err)
+          }
         }
-        // Fallback: page through all rows to compute full distinct values
+        // Fallback: page through all rows to compute full distinct values (no filters)
         const pageSize = 5000
         let offset = 0
         const set = new Set<string>()
         for (let i = 0; i < 50; i++) {
-          const spec: any = { source, select: [field], where: Object.keys(omitWhere).length ? omitWhere : undefined, limit: pageSize, offset }
+          const spec: any = { source, select: [field], where: undefined, limit: pageSize, offset }
           const res = await QueryApi.querySpec({ spec, datasourceId, limit: pageSize, offset, includeTotal: true })
           const cols = (res.columns || []) as string[]
           const idx = Math.max(0, cols.indexOf(field))
@@ -1403,17 +1502,35 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
           offset += got
           if (got < pageSize || (total > 0 && offset >= total) || abort) break
         }
-        if (!abort) setExtraSamples(Array.from(set.values()).sort())
-      } catch {
-        if (!abort) setExtraSamples([])
+        const finalSamples = Array.from(set.values()).sort()
+        console.log('[FilterEditor] Fetched', finalSamples.length, 'distinct values via querySpec fallback')
+        if (!abort) {
+          setExtraSamples(finalSamples)
+          setLoadingSamples(false)
+        }
+      } catch (err) {
+        console.error('[FilterEditor] Error fetching base field samples:', err)
+        if (!abort) {
+          setExtraSamples([])
+          setLoadingSamples(false)
+        }
       }
     }
-    // Only run this base-field loader when the field is not a custom column; custom path added below
-    const isCustomName = (local?.customColumns || []).some((c) => c.name === field)
-    if (!isCustomName) run()
-    else setExtraSamples([])
+    // Only run this base-field loader when the field is not a custom column or derived field; custom path added below
+    const DERIVED_RE = /^(.*) \((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/
+    const isDerivedField = DERIVED_RE.test(field)
+    const isCustomName = (customColumns || []).some((c) => c.name === field)
+    console.log('[FilterEditor] Field type check:', { field, isCustomName, isDerivedField, customColumnsCount: customColumns?.length || 0 })
+    if (!isCustomName && !isDerivedField) {
+      console.log('[FilterEditor] Fetching as base field')
+      run()
+    } else {
+      console.log('[FilterEditor] Skipping base field fetch - will use', isDerivedField ? 'derived' : 'custom', 'column logic')
+      setExtraSamples([])
+      setLoadingSamples(false)
+    }
     return () => { abort = true }
-  }, [field, source, datasourceId, JSON.stringify(where), local?.customColumns])
+  }, [field, source, datasourceId, customColumns])
   // Helpers to detect derived date part fields
   const DERIVED_RE = /^(.*) \((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/
   const isDerived = DERIVED_RE.test(field)
@@ -1452,7 +1569,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
       default: return null
     }
   }
-  const custom = (local?.customColumns || []).find(c => c.name === field)
+  const custom = (customColumns || []).find(c => c.name === field)
   let computedSamples: string[] = []
   if (isDerived) {
     // Prefer sampleRows for accuracy; fallback to mapping samples of the base field
@@ -1466,13 +1583,34 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
       computedSamples = Array.from(set.values()).sort()
     }
   } else if (custom) {
-    if (Array.isArray(sampleRows) && sampleRows.length > 0) {
+    // Check if this is a SQL formula (from datasource transforms) vs JS formula (widget-level)
+    // SQL formulas contain keywords like CASE, WHEN, table aliases like [s]., etc.
+    const isSqlFormula = /\b(CASE|WHEN|THEN|END|SELECT)\b/i.test(custom.formula) || /\[[a-z_]+\]\.\[/i.test(custom.formula)
+    
+    if (isSqlFormula) {
+      // For SQL formulas, we cannot compile them as JS - skip this path
+      // The useEffect below will fetch values from backend instead
+      console.log('[FilterEditor] Detected SQL formula, skipping JS compilation:', custom.formula?.substring(0, 50))
+    } else if (Array.isArray(sampleRows) && sampleRows.length > 0) {
+      // For JS formulas, compile and execute on sampleRows
+      console.log('[FilterEditor] Computing from sampleRows:', sampleRows?.length, 'rows, formula:', custom.formula?.substring(0, 50))
       try {
         const cf = compileFormula(custom.formula)
+        console.log('[FilterEditor] Formula compiled successfully')
         const set = new Set<string>()
-        sampleRows.forEach((r) => { const v = cf.exec({ row: r }); if (v !== null && v !== undefined) set.add(String(v)) })
+        sampleRows.forEach((r) => { 
+          try {
+            const v = cf.exec({ row: r })
+            if (v !== null && v !== undefined) set.add(String(v))
+          } catch (err) {
+            console.warn('[FilterEditor] Error executing formula on row:', err)
+          }
+        })
         computedSamples = Array.from(set.values()).sort()
-      } catch {}
+        console.log('[FilterEditor] Computed', computedSamples.length, 'samples from sampleRows:', computedSamples.slice(0, 10))
+      } catch (err) {
+        console.error('[FilterEditor] Error compiling formula:', err)
+      }
     }
   }
   // Client-side fallback to compute distinct values for custom columns when no sampleRows
@@ -1480,37 +1618,51 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
   useEffect(() => {
     let abort = false
     async function runCustom() {
+      console.log('[FilterEditor] runCustom called for field:', field, 'custom found:', !!custom, 'formula:', custom?.formula)
+      setLoadingSamples(true)
       try {
-        if (!custom || !source || !datasourceId) return
+        if (!custom || !source || !datasourceId) {
+          console.log('[FilterEditor] Skipping custom column fetch - missing:', { custom: !custom, source: !source, datasourceId: !datasourceId })
+          if (!abort) setLoadingSamples(false)
+          return
+        }
         // If we already have sampleRows-derived values, skip
-        if (Array.isArray(sampleRows) && sampleRows.length > 0) return
-        const refs = Array.from(new Set((parseReferences(custom.formula).row || []) as string[]))
-        if (refs.length === 0) { if (!abort) setExtraSamples([]); return }
-        const DERIVED_RE = /^(.*) \((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/
-        const customNames = new Set<string>((local?.customColumns || []).map((c) => c.name))
-        const serverWhere: Record<string, any> = {}
-        Object.entries((where || {}) as Record<string, any>).forEach(([k, v]) => { if (!DERIVED_RE.test(k) && !customNames.has(k)) (serverWhere as any)[k] = v })
-        const spec: any = { source, select: refs, where: Object.keys(serverWhere).length ? serverWhere : undefined, limit: 500, offset: 0 }
-        const res = await QueryApi.querySpec({ spec, datasourceId, limit: 500, offset: 0, includeTotal: false })
-        const cols = (res.columns || []) as string[]
-        const cf = compileFormula(custom.formula)
+        if (Array.isArray(sampleRows) && sampleRows.length > 0) {
+          if (!abort) setLoadingSamples(false)
+          return
+        }
+        // For datasource custom columns, just SELECT the custom column directly and let backend compute it
+        console.log('[FilterEditor] Fetching custom column', field, 'directly from backend')
+        const spec: any = { source, select: [field], where: undefined, limit: 5000, offset: 0 }
+        console.log('[FilterEditor] Calling querySpec with:', { source, select: [field], datasourceId })
+        const res = await QueryApi.querySpec({ spec, datasourceId, limit: 5000, offset: 0, includeTotal: false })
+        console.log('[FilterEditor] Got response:', { columns: res.columns, rowCount: res.rows?.length })
         const set = new Set<string>()
         ;(res.rows || []).forEach((arr: any[]) => {
-          const row: Record<string, any> = {}
-          cols.forEach((c, i) => { row[c] = arr[i] })
-          try { const v = cf.exec({ row }); if (v !== null && v !== undefined) set.add(String(v)) } catch {}
+          const v = Array.isArray(arr) ? arr[0] : arr
+          if (v !== null && v !== undefined) set.add(String(v))
         })
-        if (!abort) setExtraSamples(Array.from(set.values()).sort())
-      } catch {
-        if (!abort) setExtraSamples([])
+        const finalSamples = Array.from(set.values()).sort()
+        console.log('[FilterEditor] Fetched', finalSamples.length, 'distinct values for custom column:', finalSamples.slice(0, 10))
+        if (!abort) {
+          setExtraSamples(finalSamples)
+          setLoadingSamples(false)
+        }
+      } catch (err) {
+        console.error('[FilterEditor] Error fetching custom column samples:', err)
+        if (!abort) {
+          setExtraSamples([])
+          setLoadingSamples(false)
+        }
       }
     }
     runCustom()
     return () => { abort = true }
-  }, [custom?.formula, source, datasourceId, JSON.stringify(where), Array.isArray(sampleRows) ? sampleRows.length : 0, local?.customColumns])
+  }, [custom?.formula, source, datasourceId, Array.isArray(sampleRows) ? sampleRows.length : 0, customColumns])
   const baseSamples = (samplesByField?.[field] || []) as string[]
   // Merge fallback distinct values with existing samples/computed
   const mergedPool = Array.from(new Set<string>([...computedSamples, ...baseSamples, ...extraSamples]))
+  console.log('[FilterEditor] Sample counts for field', field, '- computed:', computedSamples.length, 'base:', baseSamples.length, 'extra:', extraSamples.length, 'merged:', mergedPool.length)
   
   // Smart sort: detect if values are numeric or dates for natural ordering
   const sortedPool = (() => {
@@ -1546,26 +1698,27 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
     return pool.sort((a, b) => String(a).localeCompare(String(b)))
   })()
   
-  // Initialize with all values selected when first loading
+  // Initialize selection from existing filter values (if any)
+  // Don't auto-select all values - let users explicitly choose what to filter
   useEffect(() => {
-    if (sortedPool.length > 0 && selected.length === 0 && !values?.length) {
-      const allValues = [...sortedPool]
-      setSelected(allValues)
-      onChange(allValues)
+    if (sortedPool.length > 0 && values && values.length > 0) {
+      // Restore previously applied filter
+      const existing = values.filter(v => sortedPool.includes(String(v)))
+      if (existing.length > 0 && selected.length === 0) {
+        setSelected(existing)
+      }
     }
-  }, [sortedPool.length])
+  }, [sortedPool.length, values?.length])
   
-  const samples = sortedPool.filter((v) => String(v).toLowerCase().includes(filterQuery.toLowerCase()))
-  
-  // Auto-select search results when typing
+  // Debounce filter query to reduce re-renders
   useEffect(() => {
-    if (!filterQuery) return
-    const set = new Set<string>(selected)
-    samples.forEach((v) => set.add(v))
-    const next = Array.from(set.values())
-    setSelected(next)
-    onChange(next)
+    const timer = setTimeout(() => {
+      setDebouncedQuery(filterQuery)
+    }, 300)
+    return () => clearTimeout(timer)
   }, [filterQuery])
+  
+  const samples = sortedPool.filter((v) => String(v).toLowerCase().includes(debouncedQuery.toLowerCase()))
   
   const toggle = (v: any) => {
     const exists = selected.some((x) => x === v)
@@ -1590,12 +1743,22 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
         </div>
       </div>
       <div className="mt-2 space-y-2">
-        <input className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" placeholder="Search values" value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} />
+        <input 
+          className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" 
+          placeholder="Search values" 
+          value={filterQuery} 
+          onChange={(e) => setFilterQuery(e.target.value)}
+          autoComplete="off"
+        />
         <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-          <span>{selected.length} of {mergedPool.length} selected</span>
+          <span>
+            {selected.length} of {mergedPool.length} selected
+            {loadingSamples && <span className="ml-1 opacity-60">(loading more...)</span>}
+            {filterQuery && <span className="ml-1 text-blue-400">({samples.length} filtered)</span>}
+          </span>
           <div className="flex gap-2">
-            <button className="hover:text-foreground" onClick={() => { const next = [...samples]; setSelected(next); onChange(next) }}>Select All</button>
-            <button className="hover:text-foreground" onClick={() => { setSelected([]); onChange([]) }}>Deselect All</button>
+            <button className="hover:text-foreground" onClick={() => { const next = [...samples]; setSelected(next) }}>Select All</button>
+            <button className="hover:text-foreground" onClick={() => { setSelected([]) }}>Deselect All</button>
           </div>
         </div>
       </div>
@@ -1610,8 +1773,21 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange }: 
               <span className="truncate max-w-[240px]" title={String(v)}>{String(v)}</span>
             </li>
           ))}
-          {samples.length === 0 && (
+          {/* Also show currently selected values that aren't in samples yet */}
+          {selected.filter(v => !samples.includes(v)).map((v: any, i: number) => (
+            <li key={`selected-${i}`} className="flex items-center gap-2 text-xs opacity-60">
+              <Switch
+                checked={true}
+                onChangeAction={() => toggle(v)}
+              />
+              <span className="truncate max-w-[240px]" title={String(v)}>{String(v)} (selected)</span>
+            </li>
+          ))}
+          {samples.length === 0 && selected.length === 0 && !loadingSamples && (
             <li className="text-xs text-muted-foreground">No samples available</li>
+          )}
+          {loadingSamples && samples.length === 0 && selected.length === 0 && (
+            <li className="text-xs text-muted-foreground">Loading available values...</li>
           )}
         </ul>
     </div>
@@ -4866,27 +5042,29 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               </Select>
             </div>
           </div>
-          {/* Query routing preference (tri-state) */}
-          <div>
-            <label className="block text-xs text-muted-foreground mb-1">Query routing</label>
-            <select
-              className="h-8 px-2 rounded-md bg-card text-xs"
-              value={(local.options?.preferLocalDuck === true) ? 'local' : (local.options?.preferLocalDuck === false) ? 'remote' : ''}
-              onChange={(e) => {
-                const v = e.target.value
-                const opts: any = { ...(local.options || {}) }
-                if (!v) delete opts.preferLocalDuck
-                else if (v === 'local') opts.preferLocalDuck = true
-                else if (v === 'remote') opts.preferLocalDuck = false
-                const next = { ...local, options: opts } as WidgetConfig
-                setLocal(next); updateConfig(next)
-              }}
-            >
-              <option value="">Server default</option>
-              <option value="local">Prefer local DuckDB</option>
-              <option value="remote">Force remote datasource</option>
-            </select>
-          </div>
+          {/* Query routing preference (tri-state) - only show for remote datasources */}
+          {isRemoteDatasource && (
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">Query routing</label>
+              <select
+                className="h-8 px-2 rounded-md bg-card text-xs"
+                value={(local.options?.preferLocalDuck === true) ? 'local' : (local.options?.preferLocalDuck === false) ? 'remote' : ''}
+                onChange={(e) => {
+                  const v = e.target.value
+                  const opts: any = { ...(local.options || {}) }
+                  if (!v) delete opts.preferLocalDuck
+                  else if (v === 'local') opts.preferLocalDuck = true
+                  else if (v === 'remote') opts.preferLocalDuck = false
+                  const next = { ...local, options: opts } as WidgetConfig
+                  setLocal(next); updateConfig(next)
+                }}
+              >
+                <option value="">Server default</option>
+                <option value="local">Prefer local DuckDB</option>
+                <option value="remote">Force remote datasource</option>
+              </select>
+            </div>
+          )}
           {(!local.queryMode || local.queryMode === 'sql') && (
             <div>
               <label className="block text-xs text-muted-foreground mb-1">SQL</label>

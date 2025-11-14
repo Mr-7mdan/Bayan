@@ -50,7 +50,8 @@ export default function DataNavigator() {
   const initialSchema = selectedId ? (SchemaCache.get(selectedId) || undefined) : undefined
   const schemaQ = useQuery<IntrospectResponse, Error>({
     queryKey: ['ds-schema', selectedId],
-    queryFn: ({ signal }) => Api.introspect(selectedId as string, signal),
+    // Don't pass signal - let schema requests complete (they're cached anyway)
+    queryFn: () => Api.introspect(selectedId as string),
     enabled: !!selectedId,
     retry: 0,
     refetchOnWindowFocus: false,

@@ -1,0 +1,345 @@
+[preflight] Terminating existing process(es) on 8000: 6404
+6415
+[SQLGlot] sqlgen_glot.py MODULE LOADED 
+[SQLGlot] sqlglot version 27.28.1 imported 
+[Pivot] Loading datasource: 9eb8f9f7-7286-466a-aa81-6f885fbc8311
+[Pivot] Datasource type: duckdb
+[Pivot] Loaded 11 custom columns from datasource transforms
+[Pivot] DuckDB detected: keeping all 1 joins (will probe with joins applied)
+[Pivot] Probing columns from main.View_Client_Vault_Report_By_Category1...
+[Pivot] Number of joins to apply: 1
+[Pivot] First join: targetTable=main.SYS_Lookups, sourceKey=VaultID, targetKey=LKP_ID
+[build_sql] alias_names collected: []
+[build_sql] base_select=['*'], has_star=True, custom_columns_count=0
+[build_sql] Final SELECT columns: ['s.*', 'VaultName']
+[build_sql] Generated SQL (first 500 chars): SELECT s.*, "j1"."EnName" AS "VaultName" FROM "main"."View_Client_Vault_Report_By_Category1" AS s LEFT JOIN "main"."SYS_Lookups" AS j1 ON "s"."VaultID" = "j1"."LKP_ID"  AND ("j1"."LKP_Type" = 'Vault')
+[Pivot] Probe SQL preview: SELECT s.*, "j1"."EnName" AS "VaultName" FROM "main"."View_Client_Vault_Report_By_Category1" AS s LEFT JOIN "main"."SYS_Lookups" AS j1 ON "s"."VaultID" = "j1"."LKP_ID"  AND ("j1"."LKP_Type" = 'Vault')...
+[Pivot] Probed 24 columns (including joins): ['atmid', 'atmname', 'balance', 'branchid', 'category1', 'category3', 'category4', 'category5', 'category6', 'category7', 'clientid', 'companyname', 'currencyid', 'currencyname', 'orderid', 'orderuid', 'reptype', 'subbalance', 'vaultid', 'vaultname']
+[Pivot] Filtering 11 custom columns...
+[Pivot] ✗ Skipping custom column 'ClientCode': expr='CASE
+  WHEN [s].[ClientID] = '2' THEN 'BOP'
+  WHEN', refs={'clientid', 's'}, missing={'s'}
+[Pivot] ✗ Skipping custom column 'ClientType': expr='CASE  WHEN [s].[ClientID] = '2' THEN 'Bank'  WHEN ', refs={'clientid', 's'}, missing={'s'}
+[Pivot] ✓ Including custom column '20' (leaf)
+[Pivot] ✓ Including custom column '50' (leaf)
+[Pivot] ✓ Including custom column '100' (leaf)
+[Pivot] ✓ Including custom column '200' (leaf)
+[Pivot] ✓ Including custom column '5' (leaf)
+[Pivot] ✓ Including custom column '10' (leaf)
+[Pivot] ✓ Including custom column '1' (leaf)
+[Pivot] ✓ Including custom column '2' (leaf)
+[Pivot] ✓ Including custom column 'Total' (derived, will be computed in outer query)
+[Pivot] Filtering 3 transforms...
+[Pivot] ✗ Skipping computed transform 'VisitType': references missing columns {'frombranchid', 'tobranchid', 'togovernorateid', 'fromgovernorateid'}
+[Pivot] ✗ Skipping computed transform 'SourceRegion': references missing columns {'fromgovernorateid'}
+[Pivot] ✗ Skipping computed transform 'DestRegion': references missing columns {'togovernorateid'}
+[Pivot] Final: 8 custom columns, 0 transforms
+[build_sql] alias_names collected: ['20', '50', '100', '200', '5', '10', '1', '2']
+[build_sql] base_select=['*'], has_star=True, custom_columns_count=8
+[build_sql] Including custom column '20'
+[build_sql] Including custom column '50'
+[build_sql] Including custom column '100'
+[build_sql] Including custom column '200'
+[build_sql] Including custom column '5'
+[build_sql] Including custom column '10'
+[build_sql] Including custom column '1'
+[build_sql] Including custom column '2'
+[build_sql] Final SELECT columns: ['s.*', '20', '50', '100', '200', '5', '10', '1', '2', 'VaultName']
+[build_sql] Generated SQL (first 500 chars): SELECT s.*, ("Category1") AS "20", ("Category2") AS "50", ("Category3") AS "100", ("Category4") AS "200", ("Category5") AS "5", ("Category6") AS "10", ("Category7") AS "1", ("Category8") AS "2", "j1"."EnName" AS "VaultName" FROM "main"."View_Client_Vault_Report_By_Category1" AS s LEFT JOIN "main"."SYS_Lookups" AS j1 ON "s"."VaultID" = "j1"."LKP_ID"  AND ("j1"."LKP_Type" = 'Vault')
+[SQLGlot] * should_use_sqlglot() CALLED with user_id=None
+[SQLGlot] Config check: enable_sqlglot=True, sqlglot_users='*', user_id=None
+[SQLGlot] ENABLED for all users (wildcard or empty)
+[SQLGlot] Pivot: Forcing legacy path for DuckDB (ds_type=duckdb)
+[DEBUG] base_from_sql =  FROM (SELECT s.*, ("Category1") AS "20", ("Category2") AS "50", ("Category3") AS "100", ("Category4") AS "200", ("Category5") AS "5", ("Category6") AS "10", ("Category7") AS "1", ("Category8") AS "2"
+[DEBUG] ds_transforms exists = True, custom_cols = 11
+[build_sql] alias_names collected: ['ClientCode', 'ClientType', '20', '50', '100', '200', '5', '10', '1', '2']
+[build_sql] base_select=['*'], has_star=True, custom_columns_count=11
+[build_sql] Including custom column 'ClientCode'
+[build_sql] Including custom column 'ClientType'
+[build_sql] Including custom column '20'
+[build_sql] Including custom column '50'
+[build_sql] Including custom column '100'
+[build_sql] Including custom column '200'
+[build_sql] Including custom column '5'
+[build_sql] Including custom column '10'
+[build_sql] Including custom column '1'
+[build_sql] Including custom column '2'
+[build_sql] Including custom column 'Total'
+[build_sql] Substituting [200] -> "Category4"...
+[build_sql] Substituting [100] -> "Category3"...
+[build_sql] Substituting [50] -> "Category2"...
+[build_sql] Substituting [20] -> "Category1"...
+[build_sql] Substituting [10] -> "Category6"...
+[build_sql] Substituting [5] -> "Category5"...
+[build_sql] Substituting [2] -> "Category8"...
+[build_sql] Substituting [1] -> "Category7"...
+[build_sql] Made 8 substitutions in 'Total'
+[build_sql] Original: "200" + "100" + "50" + "20" + "10" + "5" + "2" + "1"...
+[build_sql] Expanded: ("Category4") + ("Category3") + ("Category2") + ("Category1") + ("Category6") + ("Category5") + ("Ca...
+[build_sql] Final SELECT columns: ['s.*', 'ClientCode', 'ClientType', '20', '50', '100', '200', '5', '10', '1', '2', 'Total', 'VisitType', 'SourceRegion', 'DestRegion']
+[build_sql] Generated SQL (first 500 chars): SELECT s.*, (CASE
+  WHEN "s"."ClientID" = '2' THEN 'BOP'
+  WHEN "s"."ClientID" = '4' THEN 'BOJ'
+  WHEN "s"."ClientID" = '11' THEN 'JAB'
+  WHEN "s"."ClientID" = '5' THEN 'CAB'
+  WHEN "s"."ClientID" = '9' THEN 'AIB'
+  WHEN "s"."ClientID" = '10' THEN 'PIB'
+  WHEN "s"."ClientID" = '31' THEN 'Anabtawi'
+  WHEN "s"."ClientID" = '21' THEN 'Jebrini'
+  WHEN "s"."ClientID" = '18' THEN 'UniPal'
+  WHEN "s"."ClientID" = '30' THEN 'Jawwal'
+  WHEN "s"."ClientID" = '29' THEN 'Paltel'
+  WHEN "s"."ClientID" = '15'
+[2025-11-14 18:48:34 +0200] [7050] [ERROR] Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_utils.py", line 79, in collapse_excgroups
+  |     yield
+  |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 183, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |                ~~~~~~~~~~~~~~~~~~~~~~~^^
+  |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 781, in __aexit__
+  |     raise BaseExceptionGroup(
+  |         "unhandled errors in a TaskGroup", self._exceptions
+  |     ) from None
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/uvicorn/protocols/http/httptools_impl.py", line 409, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |         self.scope, self.receive, self.send
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/applications.py", line 1134, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/applications.py", line 113, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    |     raise exc
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 182, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |                                    ~~~~~~~~~~~~~~~~~~^^
+    |   File "/opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions/3.13/lib/python3.13/contextlib.py", line 162, in __exit__
+    |     self.gen.throw(value)
+    |     ~~~~~~~~~~~~~~^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_utils.py", line 85, in collapse_excgroups
+    |     raise exc
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 184, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/app/main.py", line 80, in _issues_mw
+    |     return await call_next(request)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 159, in call_next
+    |     raise app_exc
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 182, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |                                    ~~~~~~~~~~~~~~~~~~^^
+    |   File "/opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions/3.13/lib/python3.13/contextlib.py", line 162, in __exit__
+    |     self.gen.throw(value)
+    |     ~~~~~~~~~~~~~~^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_utils.py", line 85, in collapse_excgroups
+    |     raise exc
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 184, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/app/main.py", line 69, in _metrics_mw
+    |     resp: Response = await call_next(request)
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 159, in call_next
+    |     raise app_exc
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/cors.py", line 93, in __call__
+    |     await self.simple_response(scope, receive, send, request_headers=headers)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/cors.py", line 144, in simple_response
+    |     await self.app(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    |     await route.handle(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/routing.py", line 290, in handle
+    |     await self.app(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/routing.py", line 124, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/routing.py", line 110, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/routing.py", line 390, in app
+    |     raw_response = await run_endpoint_function(
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     ...<3 lines>...
+    |     )
+    |     ^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/routing.py", line 291, in run_endpoint_function
+    |     return await run_in_threadpool(dependant.call, **values)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    |     return await anyio.to_thread.run_sync(func)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/anyio/to_thread.py", line 56, in run_sync
+    |     return await get_async_backend().run_sync_in_worker_thread(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |         func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 2485, in run_sync_in_worker_thread
+    |     return await future
+    |            ^^^^^^^^^^^^
+    |   File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 976, in run
+    |     result = context.run(func, *args)
+    |   File "/Users/mohammed/Documents/Bayan/backend/app/routers/query.py", line 1672, in run_pivot
+    |     res = run_query(q, db, actorId=actorId, publicId=publicId, token=token)
+    |   File "/Users/mohammed/Documents/Bayan/backend/app/routers/query.py", line 2243, in run_query
+    |     cur = conn.execute(sql_native, values)
+    | _duckdb.BinderException: Binder Error: Referenced column "ClientCode" not found in FROM clause!
+    | Candidate bindings: "ClientID", "CurrencyName", "OrderDate", "VaultName", "SubBalance"
+    | 
+    | LINE 1: SELECT * FROM (SELECT "ClientCode", "VaultName", "CurrencyName", SUM(COALESCE...
+    |                               ^
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/uvicorn/protocols/http/httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/applications.py", line 1134, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 182, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+                                   ~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions/3.13/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_utils.py", line 85, in collapse_excgroups
+    raise exc
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 184, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/app/main.py", line 80, in _issues_mw
+    return await call_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 159, in call_next
+    raise app_exc
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 182, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+                                   ~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions/3.13/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_utils.py", line 85, in collapse_excgroups
+    raise exc
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 184, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/app/main.py", line 69, in _metrics_mw
+    resp: Response = await call_next(request)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 159, in call_next
+    raise app_exc
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/routing.py", line 124, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/routing.py", line 110, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/routing.py", line 390, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/fastapi/routing.py", line 291, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/anyio/to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 2485, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/Users/mohammed/Documents/Bayan/backend/venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 976, in run
+    result = context.run(func, *args)
+  File "/Users/mohammed/Documents/Bayan/backend/app/routers/query.py", line 1672, in run_pivot
+    res = run_query(q, db, actorId=actorId, publicId=publicId, token=token)
+  File "/Users/mohammed/Documents/Bayan/backend/app/routers/query.py", line 2243, in run_query
+    cur = conn.execute(sql_native, values)
+_duckdb.BinderException: Binder Error: Referenced column "ClientCode" not found in FROM clause!
+Candidate bindings: "ClientID", "CurrencyName", "OrderDate", "VaultName", "SubBalance"
+
+LINE 1: SELECT * FROM (SELECT "ClientCode", "VaultName", "CurrencyName", SUM(COALESCE...
+                              ^

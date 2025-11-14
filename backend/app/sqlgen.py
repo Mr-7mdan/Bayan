@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 import re
+from .sql_dialect_normalizer import normalize_sql_expression
 
 SUPPORTED_TRANSLATE = {"postgres", "postgresql", "mssql"}
 
@@ -522,27 +523,125 @@ def build_sql(
         select_cols.append(qtok)
 
     # Apply computed/custom columns as projections
+    # Only include custom columns if:
+    # 1. base_select contains "*" (select all), OR
+    # 2. The custom column name is explicitly in base_select
+    requested_cols_lower = {str(c).strip().split('.')[-1].lower() for c in (base_select or [])} if not has_star else set()
+    import sys
+    import re as _re_cc
+    print(f"[build_sql] base_select={base_select}, has_star={has_star}, custom_columns_count={len(custom_columns or [])}", flush=True)
+    
+    # Build a map of custom column names to their normalized expressions
+    # This allows us to substitute references to other custom columns
+    cc_expr_map: Dict[str, str] = {}
     for cc in (custom_columns or []):
         name = str(cc.get("name") or "")
         expr = str(cc.get("expr") or "")
         ctype = str(cc.get("type") or "").lower()
+        
+        # If has_star, include ALL custom columns; otherwise check if explicitly requested
+        if has_star:
+            should_include = True
+        else:
+            should_include = name.lower() in requested_cols_lower
+        
+        if not should_include:
+            continue
+        
         if name and expr:
-            expr = _normalize_expr_idents(d, expr, numericify=(ctype == 'number'))
-            select_cols.append(f"({expr}) AS {_qal(d, name)}")
+            # Detect pure arithmetic: only identifiers, numbers, and arithmetic operators (+, -, *, /)
+            _num_hint = (ctype == 'number')
+            if not _num_hint:
+                try:
+                    e_check = str(expr or '').strip()
+                    # Remove all quoted identifiers, numbers, whitespace, and arithmetic operators
+                    e_clean = _re_cc.sub(r'"[^"]+"|\'[^\']+\'|\d+|\s+', '', e_check)
+                    e_clean = e_clean.replace('+', '').replace('-', '').replace('*', '').replace('/', '').replace('(', '').replace(')', '')
+                    # If nothing left, it's pure arithmetic
+                    if not e_clean and ('+' in e_check or '-' in e_check or '*' in e_check or '/' in e_check):
+                        _num_hint = True
+                except Exception:
+                    pass
+            normalized_expr = _normalize_expr_idents(d, expr, numericify=_num_hint)
+            # Normalize SQL dialect (convert MSSQL syntax to target dialect)
+            normalized_expr = normalize_sql_expression(normalized_expr, d)
+            cc_expr_map[name] = normalized_expr
+    
+    # Second pass: substitute references to other custom columns and add to select
+    for cc in (custom_columns or []):
+        name = str(cc.get("name") or "")
+        if name not in cc_expr_map:
+            continue
+        
+        print(f"[build_sql] Including custom column '{name}'", flush=True)
+        expr = cc_expr_map[name]
+        original_expr = expr
+        
+        # Check if this is an arithmetic expression that needs NULL handling
+        is_arithmetic = any(op in original_expr for op in ['+', '-', '*', '/'])
+        
+        # Substitute any references to other custom columns with their expressions
+        # Match patterns like [CustomColName] or "CustomColName"
+        substitution_count = 0
+        def replace_custom_ref(match):
+            nonlocal substitution_count
+            ref_name = match.group(1) or match.group(2)
+            if ref_name in cc_expr_map:
+                substitution_count += 1
+                substituted = cc_expr_map[ref_name]
+                # Wrap substituted expression in parentheses to preserve order of operations
+                # Add COALESCE for NULL handling in arithmetic expressions
+                if is_arithmetic and d == "mssql":
+                    substituted = f"COALESCE({substituted}, 0)"
+                print(f"[build_sql] Substituting [{ref_name}] -> {substituted[:50]}...", flush=True)
+                return f"({substituted})"
+            return match.group(0)  # No substitution needed
+        
+        # Replace [Name] and "Name" with their expressions
+        expr = _re_cc.sub(r'\[([^\]]+)\]|"([^"]+)"', replace_custom_ref, expr)
+        
+        if substitution_count > 0:
+            print(f"[build_sql] Made {substitution_count} substitutions in '{name}'", flush=True)
+            print(f"[build_sql] Original: {original_expr[:100]}...", flush=True)
+            print(f"[build_sql] Expanded: {expr[:100]}...", flush=True)
+
+        # For DuckDB, arithmetic custom columns may reference VARCHAR sources (e.g. numeric strings).
+        # Wrap each double-quoted identifier in a robust numeric cast to DOUBLE so arithmetic works.
+        if is_arithmetic and d == "duckdb":
+            def _wrap_duckdb_numeric(m):
+                ident = m.group(0)
+                return (
+                    "COALESCE("
+                    f"try_cast(regexp_replace(CAST({ident} AS VARCHAR), '[^0-9\\.-]', '') AS DOUBLE), "
+                    f"try_cast({ident} AS DOUBLE), 0.0)"
+                )
+            expr = _re_cc.sub(r'"[^"]+"', _wrap_duckdb_numeric, expr)
+        
+        select_cols.append(f"({expr}) AS {_qal(d, name)}")
 
     for tr in (transforms or []):
         t = (tr.get("type") or "").lower()
         if t == "computed":
             name = str(tr.get("name") or "")
             expr = str(tr.get("expr") or "")
+            # Skip if not explicitly requested and no "*" in base_select
+            if not has_star and name.lower() not in requested_cols_lower:
+                print(f"[build_sql] Skipping computed transform '{name}' (not requested)")
+                continue
             if name and expr:
                 # computed transforms have no explicit type; keep ident normalization only
                 expr = _normalize_expr_idents(d, expr, numericify=False)
+                # Normalize SQL dialect (convert MSSQL syntax to target dialect)
+                expr = normalize_sql_expression(expr, d)
                 select_cols.append(f"({expr}) AS {_qal(d, name)}")
         elif t == "case":
             target = str(tr.get("target") or "")
             cases = tr.get("cases") or []
             else_val = tr.get("else") or tr.get("else_")
+            # Skip if not explicitly requested and no "*" in base_select
+            if not has_star and target.lower() not in requested_cols_lower:
+                print(f"[build_sql] Skipping case transform '{target}' (not requested)")
+                continue
             if target and cases:
                 # Remap WHEN.left alias 's.' to current base_alias when unpivot is applied
                 try:
@@ -570,6 +669,10 @@ def build_sql(
             target = str(tr.get("target") or "")
             search = tr.get("search")
             repl = tr.get("replace")
+            # Skip if not explicitly requested and no "*" in base_select
+            if not has_star and target.lower() not in requested_cols_lower:
+                print(f"[build_sql] Skipping replace transform '{target}' (not requested)")
+                continue
             if target is not None and search is not None and repl is not None:
                 src = target
                 if src and ("(" not in src and ")" not in src and " " not in src) and "." not in src:
@@ -583,6 +686,10 @@ def build_sql(
             target = str(tr.get("target") or "")
             s = str(tr.get("search") or "")
             r = str(tr.get("replace") or "")
+            # Skip if not explicitly requested and no "*" in base_select
+            if not has_star and target.lower() not in requested_cols_lower:
+                print(f"[build_sql] Skipping translate transform '{target}' (not requested)")
+                continue
             if target and s:
                 src = target
                 if src and ("(" not in src and ")" not in src and " " not in src) and "." not in src:
@@ -596,6 +703,10 @@ def build_sql(
             target = str(tr.get("target") or "")
             mode = str(tr.get("mode") or "coalesce")
             val = tr.get("value")
+            # Skip if not explicitly requested and no "*" in base_select
+            if not has_star and target.lower() not in requested_cols_lower:
+                print(f"[build_sql] Skipping nullhandling transform '{target}' (not requested)")
+                continue
             if target:
                 src = target
                 if src and ("(" not in src and ")" not in src and " " not in src) and "." not in src:
@@ -869,6 +980,8 @@ def build_sql(
         else:
             # bare column or *
             colnames.append(_unquote_ident(c.strip()))
+    print(f"[build_sql] Final SELECT columns: {colnames}", flush=True)
+    print(f"[build_sql] Generated SQL (first 500 chars): {sql[:500]}", flush=True)
     return sql, colnames, warnings
 
 
