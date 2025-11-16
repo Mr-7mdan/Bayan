@@ -1248,18 +1248,19 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                     sys.stderr.flush()
                 missing = refs - available_with_aliases
                 if missing:
-                    print(f"[Pivot] ✗ Skipping custom column '{name}': expr='{expr_str[:50]}', refs={refs}, missing={missing}")
+                    # Use ASCII-only markers for Windows console compatibility
+                    print(f"[Pivot] SKIP custom column '{name}': expr='{expr_str[:50]}', refs={refs}, missing={missing}")
                     continue
                 
                 # Check if this column references any custom column aliases (not just base columns)
                 refs_custom_aliases = refs - available_cols_lower
                 if refs_custom_aliases:
                     # This column references other custom columns - exclude from _base subquery
-                    print(f"[Pivot] ✓ Including custom column '{name}' (derived, will be computed in outer query)")
+                    print(f"[Pivot] OK including custom column '{name}' (derived, will be computed in outer query)")
                     custom_cols_derived.append(cc)
                 else:
                     # This column only references base columns - include in _base subquery
-                    print(f"[Pivot] ✓ Including custom column '{name}' (leaf)")
+                    print(f"[Pivot] OK including custom column '{name}' (leaf)")
                     custom_cols_leaf.append(cc)
                 
                 # Add this custom column's alias to available columns for subsequent checks
@@ -1286,9 +1287,9 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                         refs = extract_refs(expr_normalized)
                         missing = refs - available_cols_lower
                         if missing:
-                            print(f"[Pivot] ✗ Skipping computed transform '{name}': references missing columns {missing}")
+                            print(f"[Pivot] SKIP computed transform '{name}': references missing columns {missing}")
                             continue
-                        print(f"[Pivot] ✓ Including computed transform '{name}'")
+                        print(f"[Pivot] OK including computed transform '{name}'")
                 __transforms_eff_filtered.append(t)
             __transforms_eff = __transforms_eff_filtered
             print(f"[Pivot] Final: {len(__custom_cols_eff)} custom columns, {len(__transforms_eff)} transforms")
@@ -1332,6 +1333,52 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 continue
             if v is None:
                 where_clauses.append(f"{_q_ident(k)} IS NULL")
+            elif isinstance(k, str) and "__" in k:
+                # Check for operators FIRST before checking if value is array
+                base, op = k.split("__", 1)
+                opname = None
+                if op == "gte": opname = ">="
+                elif op == "gt": opname = ">"
+                elif op == "lte": opname = "<="
+                elif op == "lt": opname = "<"
+                if opname:
+                    pname = _pname(base, f"_{op}")
+                    # Extract first element if value is an array (operators expect scalar values)
+                    param_val = v[0] if isinstance(v, (list, tuple)) and len(v) > 0 else v
+                    params[pname] = param_val
+                    where_clauses.append(f"{_derived_lhs(base)} {opname} :{pname}")
+                elif op == "ne":
+                    # NOT EQUALS: use NOT IN to support multiple exclusions
+                    if isinstance(v, (list, tuple)) and len(v) > 0:
+                        pnames = []
+                        for i, item in enumerate(v):
+                            pname = _pname(base, f"_ne_{i}")
+                            params[pname] = item
+                            pnames.append(f":{pname}")
+                        where_clauses.append(f"{_derived_lhs(base)} NOT IN ({', '.join(pnames)})")
+                    else:
+                        pname = _pname(base, "_ne")
+                        params[pname] = v
+                        where_clauses.append(f"{_derived_lhs(base)} != :{pname}")
+                elif op == "notcontains":
+                    # DOESN'T CONTAIN: use NOT LIKE
+                    pname = _pname(base, "_notcontains")
+                    params[pname] = f"%{v}%"
+                    where_clauses.append(f"{_derived_lhs(base)} NOT LIKE :{pname}")
+                elif op in {"contains", "startswith", "endswith"}:
+                    # String matching operators
+                    pname = _pname(base, f"_{op}")
+                    if op == "contains":
+                        params[pname] = f"%{v}%"
+                    elif op == "startswith":
+                        params[pname] = f"{v}%"
+                    else:  # endswith
+                        params[pname] = f"%{v}"
+                    where_clauses.append(f"{_derived_lhs(base)} LIKE :{pname}")
+                else:
+                    pname = _pname(k)
+                    where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
+                    params[pname] = v
             elif isinstance(v, (list, tuple)):
                 if len(v) == 0:
                     continue
@@ -1341,26 +1388,20 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                     params[pname] = item
                     pnames.append(f":{pname}")
                 where_clauses.append(f"{_derived_lhs(k)} IN ({', '.join(pnames)})")
-            elif isinstance(k, str) and "__" in k:
-                base, op = k.split("__", 1)
-                opname = None
-                if op == "gte": opname = ">="
-                elif op == "gt": opname = ">"
-                elif op == "lte": opname = "<="
-                elif op == "lt": opname = "<"
-                if opname:
-                    pname = _pname(base, f"_{op}")
-                    params[pname] = v
-                    where_clauses.append(f"{_derived_lhs(base)} {opname} :{pname}")
-                else:
-                    pname = _pname(k)
-                    where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
-                    params[pname] = v
             else:
                 pname = _pname(k)
                 where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
                 params[pname] = v
-    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    # Store WHERE clauses and filter keys before building where_sql
+    # We'll split them later based on dimensions
+    where_filter_map: Dict[str, str] = {}  # key -> SQL clause
+    for clause in where_clauses:
+        # Extract the column name from the clause (before operator/IN/etc)
+        # This is a simple heuristic - we stored them in order they were added
+        pass
+    
+    # Build preliminary where_sql (will be split later based on dimensions)
+    all_where_clauses = list(where_clauses)  # Keep a copy
 
     # Dimensions (filter out reserved synthetic fields if they slipped into config)
     _reserved = {"__metric__", "value"}
@@ -1376,6 +1417,51 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
         return out
     r_dims = _clean_dims(payload.rows)
     c_dims = _clean_dims(payload.cols)
+    
+    # Split WHERE clauses based on dimensions vs non-dimensions
+    # When using FROM (...) AS _base, non-dimension filters must go inside _base
+    dimension_names = set()
+    for d in (r_dims + c_dims):
+        # Handle derived columns like "OrderDate (Year)" -> extract "OrderDate"
+        base_name = re.sub(r'\s*\(.*\)$', '', str(d)).strip()
+        dimension_names.add(base_name.lower())
+        dimension_names.add(d.lower())  # Also add the full name
+    
+    # Rebuild WHERE clauses: separate dimension vs non-dimension filters
+    dim_where_clauses = []
+    non_dim_where_clauses = []
+    
+    if payload.where:
+        for k, v in payload.where.items():
+            if k in ("start", "startDate", "end", "endDate"):
+                continue
+            # Extract base column name (remove operators like __ne, __gte)
+            base_col = k.split("__")[0] if "__" in k else k
+            is_dimension = base_col.lower() in dimension_names
+            
+            # Find the corresponding WHERE clause we built earlier
+            # Match by looking for the column name in the clause
+            matching_clause = None
+            for clause in all_where_clauses:
+                if _q_ident(base_col) in clause or _derived_lhs(base_col) in clause:
+                    matching_clause = clause
+                    all_where_clauses.remove(clause)  # Remove so we don't match it again
+                    break
+            
+            if matching_clause:
+                if is_dimension:
+                    dim_where_clauses.append(matching_clause)
+                else:
+                    non_dim_where_clauses.append(matching_clause)
+    
+    # Build final where_sql for outer query (dimension filters only)
+    where_sql = f" WHERE {' AND '.join(dim_where_clauses)}" if dim_where_clauses else ""
+    
+    # If we have non-dimension filters and using _base subquery, inject them
+    if non_dim_where_clauses and "_base" in base_from_sql:
+        non_dim_where_sql = f" WHERE {' AND '.join(non_dim_where_clauses)}"
+        # Inject before ) AS _base
+        base_from_sql = base_from_sql.replace(") AS _base", f"{non_dim_where_sql}) AS _base")
     
     # Apply groupBy time bucketing to first row dimension if specified
     gb = (getattr(payload, 'groupBy', None) or 'none').lower()
@@ -2018,16 +2104,8 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
                 continue
             if v is None:
                 where_clauses.append(f"{_q_ident(k)} IS NULL")
-            elif isinstance(v, (list, tuple)):
-                if len(v) == 0:
-                    continue
-                pnames = []
-                for i, item in enumerate(v):
-                    pname = _pname(k, f"_{i}")
-                    params[pname] = item
-                    pnames.append(f":{pname}")
-                where_clauses.append(f"{_derived_lhs(k)} IN ({', '.join(pnames)})")
             elif isinstance(k, str) and "__" in k:
+                # Check for operators FIRST before checking if value is array
                 base, op = k.split("__", 1)
                 opname = None
                 if op == "gte": opname = ">="
@@ -2036,17 +2114,56 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
                 elif op == "lt": opname = "<"
                 if opname:
                     pname = _pname(base, f"_{op}")
-                    params[pname] = v
+                    # Extract first element if value is an array (operators expect scalar values)
+                    param_val = v[0] if isinstance(v, (list, tuple)) and len(v) > 0 else v
+                    params[pname] = param_val
                     where_clauses.append(f"{_derived_lhs(base)} {opname} :{pname}")
+                elif op == "ne":
+                    # NOT EQUALS: use NOT IN to support multiple exclusions
+                    if isinstance(v, (list, tuple)) and len(v) > 0:
+                        pnames = []
+                        for i, item in enumerate(v):
+                            pname = _pname(base, f"_ne_{i}")
+                            params[pname] = item
+                            pnames.append(f":{pname}")
+                        where_clauses.append(f"{_derived_lhs(base)} NOT IN ({', '.join(pnames)})")
+                    else:
+                        pname = _pname(base, "_ne")
+                        params[pname] = v
+                        where_clauses.append(f"{_derived_lhs(base)} != :{pname}")
+                elif op == "notcontains":
+                    # DOESN'T CONTAIN: use NOT LIKE
+                    pname = _pname(base, "_notcontains")
+                    params[pname] = f"%{v}%"
+                    where_clauses.append(f"{_derived_lhs(base)} NOT LIKE :{pname}")
+                elif op in {"contains", "startswith", "endswith"}:
+                    # String matching operators
+                    pname = _pname(base, f"_{op}")
+                    if op == "contains":
+                        params[pname] = f"%{v}%"
+                    elif op == "startswith":
+                        params[pname] = f"{v}%"
+                    else:  # endswith
+                        params[pname] = f"%{v}"
+                    where_clauses.append(f"{_derived_lhs(base)} LIKE :{pname}")
                 else:
                     pname = _pname(k)
                     where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
                     params[pname] = v
+            elif isinstance(v, (list, tuple)):
+                pnames = []
+                for i, item in enumerate(v):
+                    pname = _pname(k, f"_{i}")
+                    params[pname] = item
+                    pnames.append(f":{pname}")
+                where_clauses.append(f"{_derived_lhs(k)} IN ({', '.join(pnames)})")
             else:
                 pname = _pname(k)
                 where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
                 params[pname] = v
-    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    
+    # Build preliminary where_sql (will be split later based on dimensions)
+    all_where_clauses = list(where_clauses)  # Keep a copy
 
     # Dimensions
     _reserved = {"__metric__", "value"}
@@ -2062,6 +2179,44 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
         return out
     r_dims = _clean_dims(payload.rows)
     c_dims = _clean_dims(payload.cols)
+    
+    # Split WHERE clauses based on dimensions vs non-dimensions (same as run_pivot)
+    dimension_names = set()
+    for d in (r_dims + c_dims):
+        base_name = re.sub(r'\s*\(.*\)$', '', str(d)).strip()
+        dimension_names.add(base_name.lower())
+        dimension_names.add(d.lower())
+    
+    dim_where_clauses = []
+    non_dim_where_clauses = []
+    
+    if payload.where:
+        for k, v in payload.where.items():
+            if k in ("start", "startDate", "end", "endDate"):
+                continue
+            base_col = k.split("__")[0] if "__" in k else k
+            is_dimension = base_col.lower() in dimension_names
+            
+            matching_clause = None
+            for clause in all_where_clauses:
+                if _q_ident(base_col) in clause or _derived_lhs(base_col) in clause:
+                    matching_clause = clause
+                    all_where_clauses.remove(clause)
+                    break
+            
+            if matching_clause:
+                if is_dimension:
+                    dim_where_clauses.append(matching_clause)
+                else:
+                    non_dim_where_clauses.append(matching_clause)
+    
+    # Build final where_sql for outer query (dimension filters only)
+    where_sql = f" WHERE {' AND '.join(dim_where_clauses)}" if dim_where_clauses else ""
+    
+    # If we have non-dimension filters and using _base subquery, inject them
+    if non_dim_where_clauses and "_base" in base_from_sql:
+        non_dim_where_sql = f" WHERE {' AND '.join(non_dim_where_clauses)}"
+        base_from_sql = base_from_sql.replace(") AS _base", f"{non_dim_where_sql}) AS _base")
     
     # Apply groupBy time bucketing to first row dimension if specified
     gb = (getattr(payload, 'groupBy', None) or 'none').lower()
@@ -3204,6 +3359,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     elif op == "gt": opname = ">"
                     elif op == "lte": opname = "<="
                     elif op == "lt": opname = "<"
+                    elif op == "ne": opname = "!="
                     if opname:
                         pname = _pname(base, f"_{op}")
                         params[pname] = _coerce_filter_value(base, v)
@@ -3587,14 +3743,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         elif op == "gt": opname = ">"
                         elif op == "lte": opname = "<="
                         elif op == "lt": opname = "<"
+                        elif op == "ne": opname = "!="
                         if opname:
                             pname = _pname(base, f"_{op}")
                             params[pname] = _coerce_filter_value(base, v)
                             where_clauses.append(f"{_where_lhs(base)} {opname} :{pname}")
-                        elif op == "ne":
-                            pname = _pname(base, "_ne")
-                            params[pname] = _coerce_filter_value(base, v)
-                            where_clauses.append(f"{_where_lhs(base)} <> :{pname}")
                         elif op in {"contains", "notcontains", "startswith", "endswith"}:
                             if op == "notcontains":
                                 cmp = "NOT LIKE"; patt = f"%{v}%"
@@ -3737,6 +3890,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         elif op == "gt": opname = ">"
                         elif op == "lte": opname = "<="
                         elif op == "lt": opname = "<"
+                        elif op == "ne": opname = "!="
                         if opname:
                             pname = _pname(base, f"_{op}")
                             params[pname] = _coerce_filter_value(base, v)
@@ -5256,6 +5410,7 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             elif op == "gt": opname = ">"
             elif op == "lte": opname = "<="
             elif op == "lt": opname = "<"
+            elif op == "ne": opname = "!="
             if opname:
                 pname = _pname2(base, f"_{op}")
                 params[pname] = _coerce_date_like(v)

@@ -1158,6 +1158,54 @@ export default function HomePage() {
     return () => { if (typeof window !== 'undefined') window.removeEventListener('chart-load-time', handler as EventListener) }
   }, [])
 
+  // Global popover detector: watch for Radix/Tremor popovers and gate configurator hover while they're active
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
+    const body = document.body as any
+    const w = window as any
+    const st = (w.__actionsMenuState ||= { count: 0, timeoutId: null as any })
+    const popoverSelectors = [
+      '[data-radix-popper-content-wrapper]',
+      '[data-radix-portal]',
+      '[role="listbox"]',
+      '[role="menu"]',
+      '[role="dialog"]',
+      '.tremor-Select-popover',
+      '.filterbar-popover',
+    ].join(',')
+    let activePopovers = new Set<Element>()
+    const updateGate = () => {
+      const currentPopovers = new Set(Array.from(document.querySelectorAll(popoverSelectors)))
+      const added = Array.from(currentPopovers).filter(el => !activePopovers.has(el))
+      const removed = Array.from(activePopovers).filter(el => !currentPopovers.has(el))
+      added.forEach(() => {
+        if (st.timeoutId) { window.clearTimeout(st.timeoutId); st.timeoutId = null }
+        st.count = Math.max(0, Number(st.count || 0)) + 1
+        body.dataset.actionsMenuOpen = '1'
+        console.debug('[PopoverDetector] Gate ON (popover added), count:', st.count)
+      })
+      removed.forEach(() => {
+        const prev = Math.max(0, Number(st.count || 0))
+        if (prev <= 0) return
+        st.count = prev - 1
+        console.debug('[PopoverDetector] Gate dec (popover removed), count:', st.count)
+        if (st.count === 0) {
+          if (st.timeoutId) window.clearTimeout(st.timeoutId)
+          st.timeoutId = window.setTimeout(() => {
+            try { delete body.dataset.actionsMenuOpen } catch {}
+            console.debug('[PopoverDetector] Gate OFF (cooldown)')
+            st.timeoutId = null
+          }, 300)
+        }
+      })
+      activePopovers = currentPopovers
+    }
+    const observer = new MutationObserver(updateGate)
+    observer.observe(document.body, { childList: true, subtree: true })
+    updateGate() // Initial check
+    return () => { observer.disconnect() }
+  }, [])
+
   return (
     <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
     <div className="builder-root min-h-screen">
@@ -1490,6 +1538,7 @@ export default function HomePage() {
               onMouseEnter={() => {
                 if (typeof document !== 'undefined' && document.body?.dataset?.actionsMenuOpen === '1') return
                 if (dragging) return
+                if (gridInteracting) return
                 if (rightTimerRef.current) { try { clearTimeout(rightTimerRef.current) } catch {} }
                 // If tucked, expand while preserving the snapped edge
                 setRightCollapsed((prev) => {
@@ -1509,6 +1558,7 @@ export default function HomePage() {
               onMouseLeave={() => {
                 if (typeof document !== 'undefined' && document.body?.dataset?.actionsMenuOpen === '1') return
                 if (dragging) return
+                if (gridInteracting) return
                 if (rightTimerRef.current) { try { clearTimeout(rightTimerRef.current) } catch {} }
                 if (!configPinned) rightTimerRef.current = setTimeout(() => {
                   if (typeof window === 'undefined') { setRightCollapsed(true); return }

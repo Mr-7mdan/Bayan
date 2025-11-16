@@ -686,6 +686,32 @@ export function FilterbarShell(props: { label: string; icon?: ReactNode; classNa
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [menuWidth, setMenuWidth] = useState<number | undefined>(undefined)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  // Gate configurator hover expansion while this filterbar popover is open.
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
+    const body = document.body as any
+    const w = window as any
+    const st = (w.__actionsMenuState ||= { count: 0, timeoutId: null as any })
+    if (open) {
+      if (st.timeoutId) { window.clearTimeout(st.timeoutId); st.timeoutId = null }
+      st.count = Math.max(0, Number(st.count || 0)) + 1
+      body.dataset.actionsMenuOpen = '1'
+      console.debug('[FilterbarShell] Gate ON, count:', st.count, 'flag:', body.dataset.actionsMenuOpen)
+    } else {
+      const prev = Math.max(0, Number(st.count || 0))
+      if (prev <= 0) return
+      st.count = prev - 1
+      console.debug('[FilterbarShell] Gate dec, count:', st.count)
+      if (st.count === 0) {
+        if (st.timeoutId) window.clearTimeout(st.timeoutId)
+        st.timeoutId = window.setTimeout(() => {
+          try { delete body.dataset.actionsMenuOpen } catch {}
+          console.debug('[FilterbarShell] Gate OFF (cooldown)')
+          st.timeoutId = null
+        }, 300)
+      }
+    }
+  }, [open])
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       if (!open) return
@@ -741,6 +767,33 @@ export default function FilterbarControl(props: any) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [menuWidth, setMenuWidth] = useState<number | undefined>(undefined)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  // Gate configurator hover expansion while the global filterbar popover is open.
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
+    const body = document.body as any
+    const w = window as any
+    const st = (w.__actionsMenuState ||= { count: 0, timeoutId: null as any })
+    const gate = open && !disabled
+    if (gate) {
+      if (st.timeoutId) { window.clearTimeout(st.timeoutId); st.timeoutId = null }
+      st.count = Math.max(0, Number(st.count || 0)) + 1
+      body.dataset.actionsMenuOpen = '1'
+      console.debug('[FilterbarControl] Gate ON, count:', st.count, 'flag:', body.dataset.actionsMenuOpen)
+    } else {
+      const prev = Math.max(0, Number(st.count || 0))
+      if (prev <= 0) return
+      st.count = prev - 1
+      console.debug('[FilterbarControl] Gate dec, count:', st.count)
+      if (st.count === 0) {
+        if (st.timeoutId) window.clearTimeout(st.timeoutId)
+        st.timeoutId = window.setTimeout(() => {
+          try { delete body.dataset.actionsMenuOpen } catch {}
+          console.debug('[FilterbarControl] Gate OFF (cooldown)')
+          st.timeoutId = null
+        }, 300)
+      }
+    }
+  }, [open, disabled])
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       if (!open) return

@@ -606,15 +606,13 @@ def build_sql(
             print(f"[build_sql] Expanded: {expr[:100]}...", flush=True)
 
         # For DuckDB, arithmetic custom columns may reference VARCHAR sources (e.g. numeric strings).
-        # Wrap each double-quoted identifier in a robust numeric cast to DOUBLE so arithmetic works.
+        # To ensure the arithmetic operates on numeric types, cast double-quoted identifiers to DOUBLE
+        # with a simple COALESCE(try_cast(...), 0.0). Avoid embedding regexp patterns here to keep
+        # the generated SQL simpler and prevent parser issues.
         if is_arithmetic and d == "duckdb":
             def _wrap_duckdb_numeric(m):
-                ident = m.group(0)
-                return (
-                    "COALESCE("
-                    f"try_cast(regexp_replace(CAST({ident} AS VARCHAR), '[^0-9\\.-]', '') AS DOUBLE), "
-                    f"try_cast({ident} AS DOUBLE), 0.0)"
-                )
+                ident = m.group(0)  # e.g. "Category4"
+                return f"COALESCE(try_cast({ident} AS DOUBLE), 0.0)"
             expr = _re_cc.sub(r'"[^"]+"', _wrap_duckdb_numeric, expr)
         
         select_cols.append(f"({expr}) AS {_qal(d, name)}")
@@ -1103,6 +1101,7 @@ def build_distinct_sql(
                 elif op == "gt": opname = ">"
                 elif op == "lte": opname = "<="
                 elif op == "lt": opname = "<"
+                elif op == "ne": opname = "!="
                 if opname:
                     pname = f"w_{_unquote_ident(base)}_{op}"
                     params[pname] = v

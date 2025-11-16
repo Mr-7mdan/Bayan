@@ -720,6 +720,33 @@ class SQLGlotBuilder:
                     elif operator == "lt":
                         condition = col < self._to_literal(value)
                         print(f"[SQLGlot] _apply_where: Applied {field} < {value}")
+                    elif operator == "ne":
+                        # NOT EQUALS: use NOT IN for arrays, != for scalars
+                        if isinstance(value, (list, tuple)) and len(value) > 0:
+                            literals = [self._to_literal(v) for v in value]
+                            condition = ~col.isin(*literals)
+                            print(f"[SQLGlot] _apply_where: Applied {field} NOT IN {value}")
+                        else:
+                            condition = col != self._to_literal(value)
+                            print(f"[SQLGlot] _apply_where: Applied {field} != {value}")
+                    elif operator in {"contains", "notcontains", "startswith", "endswith"}:
+                        # String matching operators
+                        if operator == "contains":
+                            pattern = f"%{value}%"
+                            condition = col.like(self._to_literal(pattern))
+                            print(f"[SQLGlot] _apply_where: Applied {field} LIKE '%{value}%'")
+                        elif operator == "notcontains":
+                            pattern = f"%{value}%"
+                            condition = ~col.like(self._to_literal(pattern))
+                            print(f"[SQLGlot] _apply_where: Applied {field} NOT LIKE '%{value}%'")
+                        elif operator == "startswith":
+                            pattern = f"{value}%"
+                            condition = col.like(self._to_literal(pattern))
+                            print(f"[SQLGlot] _apply_where: Applied {field} LIKE '{value}%'")
+                        elif operator == "endswith":
+                            pattern = f"%{value}"
+                            condition = col.like(self._to_literal(pattern))
+                            print(f"[SQLGlot] _apply_where: Applied {field} LIKE '%{value}'")
                     else:
                         # Unknown operator, treat as regular field name
                         col = exp.Column(this=exp.Identifier(this=key, quoted=True))

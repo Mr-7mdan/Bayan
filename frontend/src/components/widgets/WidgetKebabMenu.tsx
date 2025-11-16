@@ -44,11 +44,31 @@ export default function WidgetKebabMenu({ open, anchorEl, onCloseAction, onActio
     }
   }, [open, onCloseAction])
 
-  // Signal "actionsMenuOpen" while the kebab menu is open to prevent hover-based panels from closing
+  // Signal "actionsMenuOpen" while the kebab menu is open to gate configurator hover expansion.
   useEffect(() => {
-    if (typeof document === 'undefined') return
-    if (open) document.body.dataset.actionsMenuOpen = '1'
-    return () => { try { delete (document.body as any).dataset.actionsMenuOpen } catch {} }
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
+    const body = document.body as any
+    const w = window as any
+    const st = (w.__actionsMenuState ||= { count: 0, timeoutId: null as any })
+    if (open) {
+      if (st.timeoutId) { window.clearTimeout(st.timeoutId); st.timeoutId = null }
+      st.count = Math.max(0, Number(st.count || 0)) + 1
+      body.dataset.actionsMenuOpen = '1'
+      console.debug('[WidgetKebabMenu] Gate ON, count:', st.count, 'flag:', body.dataset.actionsMenuOpen)
+    } else {
+      const prev = Math.max(0, Number(st.count || 0))
+      if (prev <= 0) return
+      st.count = prev - 1
+      console.debug('[WidgetKebabMenu] Gate dec, count:', st.count)
+      if (st.count === 0) {
+        if (st.timeoutId) window.clearTimeout(st.timeoutId)
+        st.timeoutId = window.setTimeout(() => {
+          try { delete body.dataset.actionsMenuOpen } catch {}
+          console.debug('[WidgetKebabMenu] Gate OFF (cooldown)')
+          st.timeoutId = null
+        }, 300)
+      }
+    }
   }, [open])
 
   const pos = useMemo(() => {
