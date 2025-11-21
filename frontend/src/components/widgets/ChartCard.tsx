@@ -1342,7 +1342,31 @@ export default function ChartCard({
           const keysSorted = (() => {
             try {
               const keys = Array.from(partitions.keys()) as any[]
+              console.log('[ChartCard] Partition keys (insertion order):', keys)
               if (gbEffective === 'none') return keys
+              // Check for 12-month seasonality (x=date, groupBy=month, legend=Year)
+              const checkSeasonality = (() => {
+                try {
+                  const gb = String(gbEffective || 'none').toLowerCase()
+                  const xF = String(xField || '')
+                  const lgRaw = (() => {
+                    const lg: any = legendField
+                    if (Array.isArray(lg) && lg.length > 0) return String(lg[0] ?? '')
+                    return typeof lg === 'string' ? lg : ''
+                  })()
+                  const m = lgRaw.match(/^(.*)\s*\(Year\)$/i)
+                  if (m && gb === 'month' && m[1].trim() === xF) {
+                    console.log('[ChartCard] ✅ 12-MONTH SEASONALITY ENABLED (client-custom keysSorted)', { gb, xF, lgRaw })
+                    return true
+                  }
+                  return false
+                } catch { return false }
+              })()
+              // In seasonality mode, preserve backend month order (assume keys are already ordered)
+              if (checkSeasonality && gbEffective === 'month') {
+                console.log('[ChartCard] ✅ Skipping client-side key sorting (seasonality mode - preserving order)')
+                return keys
+              }
               const asDates = keys.map((k) => parseDateLoose(String(k))).filter(Boolean) as Date[]
               if (asDates.length === keys.length) return keys.sort((a, b) => (parseDateLoose(String(a))!.getTime() - parseDateLoose(String(b))!.getTime()))
               const nums = keys.filter((k) => !isNaN(Number(k)))
@@ -1764,10 +1788,10 @@ export default function ChartCard({
         }
         if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
           try {
-            console.debug('[ChartCard] branch=single/agg', { where: mergedWhere, hasLegend })
+            console.log('[ChartCard] ⚠️ BRANCH: single/agg', { where: mergedWhere, hasLegend })
             const specView = { x: (merged as any).x, y: (merged as any).y, agg: (merged as any).agg, legend: (merged as any).legend, measure: (merged as any).measure, groupBy: (merged as any).groupBy }
             // eslint-disable-next-line no-console
-            console.debug('[ChartCard] [FiltersDebug] request.single-agg', { where: mergedWhere, spec: specView })
+            console.log('[ChartCard] [FiltersDebug] request.single-agg', { where: mergedWhere, spec: specView })
           } catch {}
         }
         const mergedSafe = { ...merged, x: (Array.isArray((merged as any).x) ? (merged as any).x[0] : (merged as any).x) } as any
@@ -1775,11 +1799,20 @@ export default function ChartCard({
         if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
           try {
             // eslint-disable-next-line no-console
-            console.debug('[ChartCard] [FiltersDebug] response.single-agg', { columns: res?.columns, rows: Array.isArray(res?.rows) ? res.rows.length : 0, sample: Array.isArray(res?.rows) ? res.rows[0] : undefined })
+            console.log('[ChartCard] 📥 RESPONSE: single/agg', { columns: res?.columns, rows: Array.isArray(res?.rows) ? res.rows.length : 0, sample: Array.isArray(res?.rows) ? res.rows[0] : undefined })
           } catch {}
         }
-        // Server single-agg path with legend (only when NO series array is configured)
-        if (hasLegend && (!Array.isArray(series) || (series || []).length === 0) && res?.rows?.length) {
+        // Server single-agg path with legend - pivot when response has legend column
+        const hasLegendCol = res?.columns?.includes('legend')
+        console.log('[ChartCard] 🔍 Checking pivot condition:', { 
+          hasLegend, 
+          hasLegendCol,
+          seriesIsArray: Array.isArray(series), 
+          seriesLength: Array.isArray(series) ? series.length : 'N/A',
+          hasRows: !!res?.rows?.length,
+          willPivot: hasLegend && hasLegendCol && res?.rows?.length
+        })
+        if (hasLegend && hasLegendCol && res?.rows?.length) {
           // Robustly map by column names; when x is absent, backend returns [legend, value]
           const cols: string[] = ((res?.columns || []) as string[])
           const ix = cols.indexOf('x')
@@ -1805,6 +1838,8 @@ export default function ChartCard({
           // Otherwise, pivot into categories per legend for each X bucket
           const map = new Map<string | number, any>()
           const catsSet = new Set<string>()
+          // DEBUG: Log first 20 rows to see backend order
+          console.log('[ChartCard] Backend response row order (first 20):', res.rows.slice(0, 20).map((r: any[]) => ({ x: r[ix], legend: r[il], value: r[iv] })))
           res.rows.forEach((r: any[]) => {
             const x = r[ix] as any
             const legendVal = String(r[il] as any)
@@ -1814,6 +1849,8 @@ export default function ChartCard({
             // If 'none' agg is used with legend, take the first value per (x,legend)
             if (map.get(x)![legendVal] === undefined) map.get(x)![legendVal] = v
           })
+          // DEBUG: Log map key order
+          console.log('[ChartCard] Map keys after insertion:', Array.from(map.keys()))
           let categories = Array.from(catsSet)
           // Safety net: enforce legend filter client-side if present
           const legendFieldRaw = ((querySpec as any)?.legend || (pivot as any)?.legend)
@@ -1834,10 +1871,10 @@ export default function ChartCard({
           }
           if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
             try {
-              console.debug('[ChartCard] branch=single/agg+legend->pivot', { categories })
+              console.log('[ChartCard] 🔄 PIVOT: single/agg+legend', { categories })
               const sample = Array.from(map.values())[0]
               // eslint-disable-next-line no-console
-              console.debug('[ChartCard] [FiltersDebug] pivot.single-agg', { categories, sample })
+              console.log('[ChartCard] [FiltersDebug] pivot.single-agg', { categories, sample })
             } catch {}
           }
           return { columns: ['x', ...categories], rows: Array.from(map.values()), categories } as any
@@ -2089,9 +2126,38 @@ export default function ChartCard({
       const cats = (categories || []) as string[]
       const rowVal = (r: any) => (isMulti ? cats.reduce((s, c) => s + (Number(r?.[c]) || 0), 0) : Number(r?.value || 0))
       const cmpAsc = (a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0)
+
+      // Detect 12-month seasonality pattern (x=date, legend=Year(x), groupBy=month)
+      const gbDisp = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
+      const xFieldDisp = String(((querySpec as any)?.x || '') as any)
+      const legendDispRaw = (() => {
+        const lg: any = (querySpec as any)?.legend
+        if (Array.isArray(lg) && lg.length > 0) return String(lg[0] ?? '')
+        return typeof lg === 'string' ? lg : ''
+      })()
+      let seasonalityModeDisp = false
+      try {
+        const m = legendDispRaw.match(/^(.*)\s*\(Year\)$/i)
+        if (m) {
+          const base = m[1].trim()
+          if (gbDisp === 'month' && base === xFieldDisp) {
+            seasonalityModeDisp = true
+            console.log('[ChartCard] ✅ 12-MONTH SEASONALITY ENABLED (displayData)', { gbDisp, xFieldDisp, legendDispRaw, base })
+          }
+        }
+        if (!seasonalityModeDisp) {
+          console.log('[ChartCard] ❌ Seasonality NOT detected (displayData)', { gbDisp, xFieldDisp, legendDispRaw, legendMatch: !!m })
+        }
+      } catch {}
+
       const doSort = (by?: 'x'|'value', dir?: 'asc'|'desc') => {
         const asc = (dir || 'desc') === 'asc'
         if (by === 'x') {
+          // In 12-month seasonality mode, preserve backend month order (Jan..Dec)
+          if (seasonalityModeDisp) {
+            console.log('[ChartCard] ✅ Skipping client-side sort by x (seasonality mode - preserving backend order)')
+            return
+          }
           arr = [...arr].sort((a, b) => {
             const ax = a?.x; const bx = b?.x
             const ca = (typeof ax === 'number' && typeof bx === 'number') ? cmpAsc(ax, bx) : cmpAsc(String(ax ?? ''), String(bx ?? ''))
@@ -3238,6 +3304,27 @@ export default function ChartCard({
     ) && (type === 'bar' || type === 'column' || type === 'line' || type === 'area')
     if ((((options as any)?.advancedMode) || forceAdvanced) && (type === 'bar' || type === 'column' || type === 'line' || type === 'area')) {
       const xLabels = (displayData as any[]).map((d) => d.x)
+      const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
+      const xFieldStr = String(((querySpec as any)?.x || '') as any)
+      const legendRaw = (() => {
+        const lg: any = (querySpec as any)?.legend
+        if (Array.isArray(lg) && lg.length > 0) return String(lg[0] ?? '')
+        return typeof lg === 'string' ? lg : ''
+      })()
+      let seasonalityMode = false
+      try {
+        const m = legendRaw.match(/^(.*)\s*\(Year\)$/i)
+        if (m) {
+          const base = m[1].trim()
+          if (gb === 'month' && base === xFieldStr) {
+            seasonalityMode = true
+            console.log('[ChartCard] ✅ 12-MONTH SEASONALITY ENABLED (advanced)', { gb, xFieldStr, legendRaw, base })
+          }
+        }
+        if (!seasonalityMode) {
+          console.log('[ChartCard] ❌ Seasonality NOT detected (advanced)', { gb, xFieldStr, legendRaw, legendMatch: !!m })
+        }
+      } catch {}
       const stacked = (options?.barMode === 'stacked')
       const barGap = typeof options?.barGap === 'number' ? `${options!.barGap}%` : '30%'
       const dataLabelsShow = !!options?.dataLabelsShow
@@ -3318,10 +3405,10 @@ export default function ChartCard({
         const seriesType = (type === 'line' || type === 'area') ? 'line' : 'bar'
         // Check if we're using time-series mode
         const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
-        const isTimeSeries = gb && gb !== 'none'
+        const isTimeSeries = (gb && gb !== 'none') && !seasonalityMode
         // For horizontal bars and area charts (which use category axis), use simple values
         // Only line and column charts can use [x,y] pairs with time axis
-        const useTimeSeriesFormat = isTimeSeries && type !== 'bar' && type !== 'area'
+        const useTimeSeriesFormat = (isTimeSeries && type !== 'bar' && type !== 'area')
         const seriesData = (() => {
           if (wantValueGrad) {
             return rawValues.map((v, i) => {

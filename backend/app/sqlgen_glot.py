@@ -151,6 +151,34 @@ class SQLGlotBuilder:
                 
                 return field, False
             
+            # SEASONALITY DETECTION: Check for 12-month pattern (x=date, legend=Year, groupBy=month)
+            seasonality_mode = False
+            legend_base_col = None
+            legend_kind = None
+            
+            # Parse legend field to detect date part pattern
+            legend_raw = None
+            if legend_fields and len(legend_fields) > 0:
+                legend_raw = legend_fields[0]
+            elif legend_field:
+                legend_raw = legend_field
+            
+            if legend_raw:
+                legend_match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", legend_raw, flags=re.IGNORECASE)
+                if legend_match:
+                    legend_base_col = legend_match.group(1).strip()
+                    legend_kind = legend_match.group(2).lower()
+            
+            # Detect 12-month seasonality pattern
+            print(f"[SQLGlot] Seasonality check: group_by={group_by}, legend_base_col={legend_base_col}, legend_kind={legend_kind}, x_field={x_field}")
+            if (group_by == "month" and 
+                legend_base_col and legend_kind == "year" and 
+                x_field and x_field == legend_base_col):
+                seasonality_mode = True
+                print(f"[SQLGlot] [OK] 12-MONTH SEASONALITY ENABLED: x={x_field}, legend={legend_raw}, groupBy=month")
+            else:
+                print(f"[SQLGlot] [SKIP] Seasonality NOT detected")
+            
             # Resolve fields before building query
             x_field_resolved, x_is_expr = resolve_field(x_field)
             y_field_resolved, y_is_expr = resolve_field(y_field)
@@ -219,10 +247,22 @@ class SQLGlotBuilder:
             # Build SELECT clause
             select_exprs = []
             group_positions = []
+            x_order_expr = None  # For ordering by month number in seasonality mode
             
             # X field (with optional time bucketing)
             if x_field:
-                if x_is_expr:
+                if seasonality_mode:
+                    # SEASONALITY MODE: Extract month name/short for x, add numeric month for ordering
+                    print(f"[SQLGlot] Building 12-month seasonality x-axis for {x_field}")
+                    # Build month short expression (Jan, Feb, Mar...)
+                    month_expr = self._build_datepart_expr(x_field, "month short", ds_type or self.dialect)
+                    x_expr = sqlglot.parse_one(month_expr, dialect=self.dialect)
+                    # Build numeric month for ordering (1-12)
+                    month_num_expr = self._build_month_number_expr(x_field, ds_type or self.dialect)
+                    x_order_expr = sqlglot.parse_one(month_num_expr, dialect=self.dialect)
+                    print(f"[SQLGlot] Month label expr: {month_expr}")
+                    print(f"[SQLGlot] Month order expr: {month_num_expr}")
+                elif x_is_expr:
                     # Parse as raw SQL expression
                     x_expr = sqlglot.parse_one(x_field, dialect=self.dialect)
                 elif group_by and group_by != "none":
@@ -231,6 +271,11 @@ class SQLGlotBuilder:
                     x_expr = exp.Column(this=exp.Identifier(this=x_field, quoted=True))
                 select_exprs.append(x_expr.as_("x"))
                 group_positions.append(1)
+                
+                # Add ordering column in seasonality mode
+                if seasonality_mode and x_order_expr:
+                    select_exprs.append(x_order_expr.as_("_xo"))
+                    group_positions.append(len(select_exprs))
             
             # Legend field
             if legend_field:
@@ -262,7 +307,17 @@ class SQLGlotBuilder:
                 print(f"[SQLGlot] Applied GROUP BY with positions: {group_positions}")
             
             # Apply ORDER BY
-            if order_by:
+            if seasonality_mode and x_order_expr:
+                # SEASONALITY MODE: Order by numeric month (_xo), then legend
+                print(f"[SQLGlot] [OK] Applying seasonality ordering: ORDER BY _xo, legend")
+                # Apply ORDER BY inside the query before wrapping
+                query = query.order_by(exp.Column(this=exp.Identifier(this="_xo", quoted=False)))
+                if legend_field:
+                    query = query.order_by(exp.Column(this=exp.Identifier(this="legend", quoted=False)))
+                # Wrap in subquery to select only x, legend, value (exclude _xo from output)
+                subquery = query.subquery("_seasonality")
+                query = sqlglot.select("x", "legend", "value").from_(subquery)
+            elif order_by:
                 # Order by specified field
                 order_col = exp.Column(this=exp.Identifier(this=order_by, quoted=True))
                 if order.lower() == "desc":
@@ -869,6 +924,30 @@ class SQLGlotBuilder:
         # Fallback
         return q
     
+    def _build_month_number_expr(self, base_col: str, dialect: str) -> str:
+        """Build dialect-specific numeric month extraction (1-12) for ordering"""
+        q = f'"{base_col}"'
+        dial = dialect.lower()
+        
+        # DuckDB
+        if "duckdb" in dial:
+            return f"EXTRACT(month FROM {q})"
+        
+        # PostgreSQL
+        elif "postgres" in dial or "postgre" in dial:
+            return f"EXTRACT(month FROM {q})"
+        
+        # MSSQL
+        elif "mssql" in dial or "sqlserver" in dial or "tsql" in dial:
+            return f"MONTH({q})"
+        
+        # MySQL
+        elif "mysql" in dial:
+            return f"MONTH({q})"
+        
+        # Fallback
+        return f"EXTRACT(month FROM {q})"
+    
     def _to_literal(self, value: Any) -> exp.Literal:
         """Convert Python value to SQL literal"""
         if isinstance(value, (int, float)):
@@ -967,8 +1046,17 @@ class SQLGlotBuilder:
                 table_expr = exp.to_table(s_source, dialect=normalized_dialect)
             query = exp.select("*").from_(table_expr)
             
-            # Resolve all dimension fields
-            all_dims = rows + cols
+            # Resolve all dimension fields (deduplicate to avoid "column specified multiple times" errors)
+            all_dims_raw = rows + cols
+            # Preserve order but remove duplicates (case-insensitive)
+            seen_dims = set()
+            all_dims = []
+            for dim in all_dims_raw:
+                dim_lower = dim.lower()
+                if dim_lower not in seen_dims:
+                    all_dims.append(dim)
+                    seen_dims.add(dim_lower)
+            
             select_exprs = []
             group_positions = []  # Positions for GROUP BY (DuckDB, Postgres)
             group_columns = []    # Column names for GROUP BY (SQL Server)
@@ -1195,7 +1283,42 @@ class SQLGlotBuilder:
                 
                 # Wrap query to combine original legend (if any) with series name
                 # Extract just the SELECT part without ORDER BY and LIMIT
-                single_query = single_query.split(" ORDER BY ")[0].split(" LIMIT ")[0]
+                # Only split if ORDER BY appears at top level (not inside subquery)
+                def strip_top_level_clauses(sql: str) -> str:
+                    """Remove ORDER BY and LIMIT only if they're at the top level, not inside subqueries"""
+                    # Count parentheses to detect if we're inside a subquery
+                    paren_depth = 0
+                    order_by_pos = -1
+                    limit_pos = -1
+                    
+                    # Find ORDER BY at depth 0
+                    i = 0
+                    while i < len(sql):
+                        if sql[i] == '(':
+                            paren_depth += 1
+                        elif sql[i] == ')':
+                            paren_depth -= 1
+                        elif paren_depth == 0 and order_by_pos == -1:
+                            if sql[i:i+9].upper() == ' ORDER BY':
+                                order_by_pos = i
+                        elif paren_depth == 0 and limit_pos == -1:
+                            if sql[i:i+6].upper() == ' LIMIT':
+                                limit_pos = i
+                        i += 1
+                    
+                    # Cut at the earliest top-level clause
+                    cut_pos = len(sql)
+                    if order_by_pos != -1:
+                        cut_pos = min(cut_pos, order_by_pos)
+                    if limit_pos != -1:
+                        cut_pos = min(cut_pos, limit_pos)
+                    
+                    return sql[:cut_pos]
+                
+                stripped_query = strip_top_level_clauses(single_query)
+                print(f"[SQLGlot] Original query length: {len(single_query)}, stripped length: {len(stripped_query)}")
+                print(f"[SQLGlot] Stripped query (first 200 chars): {stripped_query[:200]}")
+                single_query = stripped_query
                 
                 if has_legend:
                     # Combine original legend with series name using dialect-aware concatenation
@@ -1210,6 +1333,7 @@ class SQLGlotBuilder:
                     # Just series name as legend
                     wrapped = f"SELECT x, '{series_name}' as legend, value FROM ({single_query}) AS _s{idx}"
                 
+                print(f"[SQLGlot] Wrapped query for series '{series_name}' (first 300 chars): {wrapped[:300]}")
                 queries.append(wrapped)
                 
             except Exception as e:
@@ -1221,11 +1345,18 @@ class SQLGlotBuilder:
         
         # Combine with UNION ALL
         combined = " UNION ALL ".join(queries)
+        print(f"[SQLGlot] Combined query (first 500 chars): {combined[:500]}")
         
         # Add ORDER BY and LIMIT to outer query
         final_sql = f"SELECT * FROM ({combined}) AS _multi_series"
         
-        if order_by:
+        # Check if queries already have seasonality ordering (ORDER BY _xo inside)
+        # If so, don't add outer ORDER BY as it would override the correct month order
+        has_seasonality_ordering = "ORDER BY _xo" in combined
+        
+        if has_seasonality_ordering:
+            print(f"[SQLGlot] Skipping outer ORDER BY - queries have seasonality ordering")
+        elif order_by:
             if order_by.lower() == "value":
                 final_sql += f" ORDER BY value {order.upper()}"
             elif order_by.lower() == "x":
@@ -1239,6 +1370,9 @@ class SQLGlotBuilder:
             final_sql += f" LIMIT {limit}"
         
         print(f"[SQLGlot] Generated multi-series SQL with {len(queries)} series")
+        print(f"[SQLGlot] Final multi-series SQL (first 500 chars): {final_sql[:500]}")
+        print(f"[SQLGlot] Full multi-series SQL:")
+        print(final_sql)
         return final_sql
 
 

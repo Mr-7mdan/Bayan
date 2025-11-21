@@ -1557,19 +1557,13 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             # Derived/complex expression: add alias
             sel_parts.append(f"{e} AS {a}")
     # Check if SQLGlot should be used
+    print(f"[PIVOT] About to check should_use_sqlglot with actorId={actorId}")
+    import sys
+    sys.stdout.flush()
     use_sqlglot = should_use_sqlglot(actorId)
-    # IMPORTANT: For DuckDB, force legacy path. SQLGlot currently generates queries
-    # that reference custom column aliases (e.g. ClientCode) directly on the raw
-    # DuckDB table, which does not have those aliases materialized. The legacy path
-    # correctly builds a transformed subquery with custom columns applied via
-    # build_sql and then aggregates on top of that. Until SQLGlot fully supports
-    # DuckDB + datasource transforms, we route DuckDB pivot requests through the
-    # legacy builder to avoid Binder errors like "Referenced column 'ClientCode' not found".
-    if (ds_type or '').lower() == 'duckdb':
-        import sys
-        sys.stderr.write("[SQLGlot] Pivot: Forcing legacy path for DuckDB (ds_type=duckdb)\n")
-        sys.stderr.flush()
-        use_sqlglot = False
+    print(f"[PIVOT] should_use_sqlglot returned: {use_sqlglot}")
+    sys.stdout.flush()
+    # SQLGlot now properly handles DuckDB custom columns by materializing them in _base subquery (lines 1700-1747)
     inner = None
     
     if use_sqlglot:
@@ -1660,10 +1654,10 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                         refs_custom_aliases = refs - available_cols_lower
                         if refs_custom_aliases:
                             # This column references other custom columns - exclude from _base subquery
-                            print(f"[SQLGlot] ✓ Including custom column '{cc['name']}' (derived, will be computed in outer query)")
+                            print(f"[SQLGlot]  Including custom column '{cc['name']}' (derived, will be computed in outer query)")
                         else:
                             # This column only references base columns - include in _base subquery
-                            print(f"[SQLGlot] ✓ Including custom column '{cc['name']}' (leaf)")
+                            print(f"[SQLGlot]  Including custom column '{cc['name']}' (leaf)")
                             custom_cols_leaf_sg.append(cc)
                         
                         # Add this custom column's alias to available columns for subsequent checks
@@ -1703,11 +1697,11 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                         refs_custom_aliases = refs & available_with_aliases_sg
                         if refs_custom_aliases:
                             # This column references other custom columns - need to materialize in ORDER
-                            print(f"[SQLGlot] ✓ Including custom column '{cc['name']}' (derived from {refs_custom_aliases})", flush=True)
+                            print(f"[SQLGlot]  Including custom column '{cc['name']}' (derived from {refs_custom_aliases})", flush=True)
                             custom_cols_leaf_sg.append(cc)  # Include derived columns too!
                         else:
                             # This column only references base columns - include in _base subquery
-                            print(f"[SQLGlot] ✓ Including custom column '{cc['name']}' (leaf)", flush=True)
+                            print(f"[SQLGlot]  Including custom column '{cc['name']}' (leaf)", flush=True)
                             custom_cols_leaf_sg.append(cc)
                         # Add this custom column's alias to available columns for subsequent checks
                         available_with_aliases_sg.add(cc['name'].lower())
@@ -1717,7 +1711,34 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 __custom_cols_sqlglot = custom_cols_leaf_sg
                 print(f"[SQLGlot] Including {len(custom_cols_leaf_sg)} custom columns in _base subquery", flush=True)
                 
-                __transforms_eff_sqlglot = __transforms_eff
+                # Filter transforms - even for DuckDB synced tables, validate against probed columns if available
+                __transforms_eff_sqlglot = []
+                if available_cols:
+                    # We have probed columns - use them to filter transforms
+                    available_cols_lower = {c.lower() for c in available_cols}
+                    print(f"[SQLGlot] Filtering {len(__transforms_eff)} transforms using {len(available_cols)} probed columns...")
+                    for t in __transforms_eff:
+                        if not isinstance(t, dict):
+                            __transforms_eff_sqlglot.append(t)
+                            continue
+                            
+                        if t.get("type") == "computed":
+                            name = t.get("name")
+                            expr = t.get("expr")
+                            if name and expr:
+                                expr_normalized = normalize_sql_expression(str(expr), ds_type or 'duckdb')
+                                refs = extract_refs_sg(expr_normalized)
+                                missing = refs - available_cols_lower
+                                if missing:
+                                    print(f"[SQLGlot] SKIP computed transform '{name}': references missing columns {missing}")
+                                    continue
+                                print(f"[SQLGlot] OK including computed transform '{name}'")
+                        __transforms_eff_sqlglot.append(t)
+                else:
+                    # No probed columns - can't validate, use all transforms
+                    print(f"[SQLGlot] No probed columns available - using all {len(__transforms_eff)} transforms without validation")
+                    __transforms_eff_sqlglot = __transforms_eff
+                print(f"[SQLGlot] Final: {len(__custom_cols_sqlglot)} custom columns, {len(__transforms_eff_sqlglot)} transforms")
             
             # If datasource transforms exist, use transformed subquery as source
             # This ensures custom columns and joins are available to pivot dimensions

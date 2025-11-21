@@ -182,61 +182,69 @@ npm run build
 Pop-Location
 
 Write-Heading "Configuring reverse proxy (Caddy)"
-# Prefer ProgramData location to avoid spaces in path
-$caddyPreferred = 'C:\ProgramData\Caddy\caddy.exe'
-# Check if winget is available for Caddy installation
-if (-not (Ensure-Command winget)) {
-  if (Test-Path $caddyPreferred) {
-    Write-Host "Found Caddy at $caddyPreferred"
-    if (-not (Get-Command caddy -ErrorAction SilentlyContinue)) { Set-Alias -Name caddy -Value $caddyPreferred -Scope Global }
-    try { & $caddyPreferred version | Out-Null } catch {}
-    $proxyScript = Join-Path $InstallDir 'scripts\setup_reverse_proxy_windows.ps1'
-  } else {
-    Write-Warning "winget not found. Caddy automatic install unavailable."
-    $defaultCaddyDir = 'C:\ProgramData\Caddy'
-    $defaultCaddyExe = Join-Path $defaultCaddyDir 'caddy.exe'
-    Write-Host "Manual steps (recommended location):" -ForegroundColor Cyan
-    Write-Host "  1) Download Caddy (Windows amd64) from: https://caddyserver.com/download"
-    Write-Host "  2) Rename the downloaded file (e.g., caddy_windows_amd64.exe) to: caddy.exe"
-    Write-Host "  3) Create folder: $defaultCaddyDir"
-    Write-Host "  4) Move caddy.exe to: $defaultCaddyExe"
-    Write-Host ""
-    $cont = Read-Host "Press Enter when done to continue, or type 'S' to skip proxy setup"
-    if ($cont -match '^(?i:s|skip)$') { Write-Host "Skipping proxy setup."; $proxyScript = $null }
-    else {
-      $caddyPathInput = Read-Host "If you used a different location, enter full path to caddy.exe (or press Enter to use default)"
-      $caddyExePath = if ([string]::IsNullOrWhiteSpace($caddyPathInput)) { $defaultCaddyExe } else { $caddyPathInput }
-      if (-not (Test-Path $caddyExePath)) {
-        Write-Warning "caddy.exe not found at '$caddyExePath'. Skipping proxy setup."
-        $proxyScript = $null
-      } else {
-        $caddyDir = Split-Path $caddyExePath -Parent
-        # Add to current PATH
-        if ($env:Path -notlike ("*" + $caddyDir + "*")) { $env:Path += ";" + $caddyDir }
-        # Persist to machine PATH
-        try {
-          $machinePath = [Environment]::GetEnvironmentVariable('Path','Machine')
-          if ($machinePath -notlike ("*" + $caddyDir + "*")) {
-            [Environment]::SetEnvironmentVariable('Path', $machinePath + ';' + $caddyDir, 'Machine')
-          }
-        } catch {}
-        # Ensure 'caddy' resolves in this session
-        if (-not (Get-Command caddy -ErrorAction SilentlyContinue)) { Set-Alias -Name caddy -Value $caddyExePath -Scope Global }
-        try { & $caddyExePath version | Out-Null } catch {}
-        $proxyScript = Join-Path $InstallDir 'scripts\setup_reverse_proxy_windows.ps1'
+$caddyConfigDir = 'C:\ProgramData\Caddy'
+$caddyFilePath = Join-Path $caddyConfigDir 'Caddyfile'
+$proxyScript = $null
+
+if (Test-Path $caddyFilePath) {
+  Write-Host "Existing Caddy configuration detected at $caddyFilePath. Skipping reverse proxy setup. To change domain or upstreams later, run scripts\setup_reverse_proxy_windows.ps1 manually."
+} else {
+  # Prefer ProgramData location to avoid spaces in path
+  $caddyPreferred = 'C:\ProgramData\Caddy\caddy.exe'
+  # Check if winget is available for Caddy installation
+  if (-not (Ensure-Command winget)) {
+    if (Test-Path $caddyPreferred) {
+      Write-Host "Found Caddy at $caddyPreferred"
+      if (-not (Get-Command caddy -ErrorAction SilentlyContinue)) { Set-Alias -Name caddy -Value $caddyPreferred -Scope Global }
+      try { & $caddyPreferred version | Out-Null } catch {}
+      $proxyScript = Join-Path $InstallDir 'scripts\setup_reverse_proxy_windows.ps1'
+    } else {
+      Write-Warning "winget not found. Caddy automatic install unavailable."
+      $defaultCaddyDir = 'C:\ProgramData\Caddy'
+      $defaultCaddyExe = Join-Path $defaultCaddyDir 'caddy.exe'
+      Write-Host "Manual steps (recommended location):" -ForegroundColor Cyan
+      Write-Host "  1) Download Caddy (Windows amd64) from: https://caddyserver.com/download"
+      Write-Host "  2) Rename the downloaded file (e.g., caddy_windows_amd64.exe) to: caddy.exe"
+      Write-Host "  3) Create folder: $defaultCaddyDir"
+      Write-Host "  4) Move caddy.exe to: $defaultCaddyExe"
+      Write-Host ""
+      $cont = Read-Host "Press Enter when done to continue, or type 'S' to skip proxy setup"
+      if ($cont -match '^(?i:s|skip)$') { Write-Host "Skipping proxy setup."; $proxyScript = $null }
+      else {
+        $caddyPathInput = Read-Host "If you used a different location, enter full path to caddy.exe (or press Enter to use default)"
+        $caddyExePath = if ([string]::IsNullOrWhiteSpace($caddyPathInput)) { $defaultCaddyExe } else { $caddyPathInput }
+        if (-not (Test-Path $caddyExePath)) {
+          Write-Warning "caddy.exe not found at '$caddyExePath'. Skipping proxy setup."
+          $proxyScript = $null
+        } else {
+          $caddyDir = Split-Path $caddyExePath -Parent
+          # Add to current PATH
+          if ($env:Path -notlike ("*" + $caddyDir + "*")) { $env:Path += ";" + $caddyDir }
+          # Persist to machine PATH
+          try {
+            $machinePath = [Environment]::GetEnvironmentVariable('Path','Machine')
+            if ($machinePath -notlike ("*" + $caddyDir + "*")) {
+              [Environment]::SetEnvironmentVariable('Path', $machinePath + ';' + $caddyDir, 'Machine')
+            }
+          } catch {}
+          # Ensure 'caddy' resolves in this session
+          if (-not (Get-Command caddy -ErrorAction SilentlyContinue)) { Set-Alias -Name caddy -Value $caddyExePath -Scope Global }
+          try { & $caddyExePath version | Out-Null } catch {}
+          $proxyScript = Join-Path $InstallDir 'scripts\setup_reverse_proxy_windows.ps1'
+        }
       }
     }
-  }
-} else {
-  $proxyScript = Join-Path $InstallDir 'scripts\setup_reverse_proxy_windows.ps1'
-}
-
-if ($proxyScript) {
-  if (Test-Path $proxyScript) {
-    # Run the proxy setup (prompts for domain and upstreams). This may register a Caddy service which we'll replace with NSSM for consistency.
-    & powershell -ExecutionPolicy Bypass -File $proxyScript
   } else {
-    Write-Host "Proxy script not found at $proxyScript. Skipping reverse proxy setup."
+    $proxyScript = Join-Path $InstallDir 'scripts\setup_reverse_proxy_windows.ps1'
+  }
+
+  if ($proxyScript) {
+    if (Test-Path $proxyScript) {
+      # Run the proxy setup (prompts for domain and upstreams). This may register a Caddy service which we'll replace with NSSM for consistency.
+      & powershell -ExecutionPolicy Bypass -File $proxyScript
+    } else {
+      Write-Host "Proxy script not found at $proxyScript. Skipping reverse proxy setup."
+    }
   }
 }
 
