@@ -137,6 +137,10 @@ class SQLGlotBuilder:
                     # Only strip short lowercase identifiers (typical aliases), not schema names
                     expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
                     expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
+                    expr = re.sub(r'\[([a-z][a-z_]{0,4})\]\.', '', expr)  # SQL Server bracket aliases
+                    # Convert SQL Server bracket notation to double quotes for DuckDB
+                    if 'duckdb' in (ds_type or self.dialect).lower():
+                        expr = re.sub(r'\[([^\]]+)\]', r'"\1"', expr)
                     print(f"[SQLGlot] [OK] Resolving custom column '{field}' in SELECT -> {expr[:80]}...")
                     return expr, True
                 
@@ -335,6 +339,11 @@ class SQLGlotBuilder:
             # Generate SQL for target dialect
             sql = query.sql(dialect=self.dialect, pretty=False)
             
+            # Post-process: Convert SQL Server bracket notation to DuckDB double quotes
+            if 'duckdb' in self.dialect.lower():
+                sql = re.sub(r'\[([^\]]+)\]', r'"\1"', sql)
+                print(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB")
+            
             # Print full SQL for debugging
             logger.info(f"[SQLGlot] Generated SQL ({self.dialect}): {sql[:500]}...")
             print(f"[SQLGlot] Generated FULL SQL ({self.dialect}):")
@@ -386,6 +395,10 @@ class SQLGlotBuilder:
                     # Strip table aliases
                     expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
                     expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
+                    expr = re.sub(r'\[([a-z][a-z_]{0,4})\]\.', '', expr)  # SQL Server bracket aliases
+                    # Convert SQL Server bracket notation to double quotes for DuckDB
+                    if 'duckdb' in (ds_type or self.dialect).lower():
+                        expr = re.sub(r'\[([^\]]+)\]', r'"\1"', expr)
                     print(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in DISTINCT")
                     return expr, True
                 
@@ -450,6 +463,11 @@ class SQLGlotBuilder:
             # Generate SQL
             sql = query.sql(dialect=self.dialect, pretty=False)
             
+            # Post-process: Convert SQL Server bracket notation to DuckDB double quotes
+            if 'duckdb' in self.dialect.lower():
+                sql = re.sub(r'\[([^\]]+)\]', r'"\1"', sql)
+                print(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB")
+            
             logger.info(f"[SQLGlot] Generated DISTINCT SQL ({self.dialect}): {sql[:150]}...")
             print(f"[SQLGlot] Generated DISTINCT SQL ({self.dialect}): {sql[:150]}...")
             return sql
@@ -503,6 +521,10 @@ class SQLGlotBuilder:
                     # Strip table aliases
                     expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
                     expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
+                    expr = re.sub(r'\[([a-z][a-z_]{0,4})\]\.', '', expr)  # SQL Server bracket aliases
+                    # Convert SQL Server bracket notation to double quotes for DuckDB
+                    if 'duckdb' in (ds_type or self.dialect).lower():
+                        expr = re.sub(r'\[([^\]]+)\]', r'"\1"', expr)
                     print(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in period-totals")
                     return expr, True
                 
@@ -577,6 +599,11 @@ class SQLGlotBuilder:
             
             # Generate SQL
             sql = query.sql(dialect=self.dialect, pretty=False)
+            
+            # Post-process: Convert SQL Server bracket notation to DuckDB double quotes
+            if 'duckdb' in self.dialect.lower():
+                sql = re.sub(r'\[([^\]]+)\]', r'"\1"', sql)
+                print(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB")
             
             logger.info(f"[SQLGlot] Generated period-totals SQL ({self.dialect}): {sql[:150]}...")
             print(f"[SQLGlot] Generated period-totals SQL ({self.dialect}): {sql[:150]}...")
@@ -720,6 +747,10 @@ class SQLGlotBuilder:
                 # Strip table aliases (e.g., s.ClientID -> ClientID)
                 expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
                 expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
+                expr = re.sub(r'\[([a-z][a-z_]{0,4})\]\.', '', expr)  # SQL Server bracket aliases
+                # Convert SQL Server bracket notation to double quotes for DuckDB
+                if 'duckdb' in self.dialect.lower():
+                    expr = re.sub(r'\[([^\]]+)\]', r'"\1"', expr)
                 print(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in WHERE -> {expr[:80]}...")
                 # Parse the expression and return it
                 try:

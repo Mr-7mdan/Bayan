@@ -9,6 +9,10 @@ export type DeltaMode =
   | 'TY_LY'
   | 'YTD_LYTD'
   | 'TQ_LQ'
+  | 'Q_TY_VS_Q_LY'
+  | 'QTD_TY_VS_QTD_LY'
+  | 'M_TY_VS_M_LY'
+  | 'MTD_TY_VS_MTD_LY'
 
 export type SeriesSpec = {
   label?: string

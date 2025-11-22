@@ -1,7 +1,7 @@
 "use client"
 
 import * as Popover from "@radix-ui/react-popover"
-import React, { useMemo, useState } from "react"
+import React, { useMemo, useState, useEffect } from "react"
 
 export default function DatePickerField({
   value,
@@ -20,7 +20,17 @@ export default function DatePickerField({
 }) {
   const parsed = useMemo(() => parseLocal(value), [value])
   const [open, setOpen] = useState(false)
-  const [month, setMonth] = useState<Date>(() => new Date(parsed?.getFullYear() || new Date().getFullYear(), (parsed?.getMonth() ?? new Date().getMonth()), 1))
+  const [month, setMonth] = useState<Date>(() => {
+    if (parsed) return new Date(parsed.getFullYear(), parsed.getMonth(), 1)
+    return new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  })
+  
+  // Reset to today's month when opening with no value
+  useEffect(() => {
+    if (open && !value) {
+      setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+    }
+  }, [open, value])
 
   const label = value || placeholder
 

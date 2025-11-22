@@ -16,6 +16,10 @@ DeltaMode = Literal[
     "TY_LY",
     "YTD_LYTD",
     "TQ_LQ",
+    "Q_TY_VS_Q_LY",
+    "QTD_TY_VS_QTD_LY",
+    "M_TY_VS_M_LY",
+    "MTD_TY_VS_MTD_LY",
 ]
 
 WeekStart = Literal["sat", "sun", "mon"]
@@ -141,6 +145,37 @@ def resolve_periods(payload: ResolvePeriodsRequest) -> ResolvePeriodsResponse:
         cur_end = now
         prev_start = _prev_quarter_start(now)
         prev_end = qs - timedelta(microseconds=1)
+    elif mode == "Q_TY_VS_Q_LY":
+        qs = _quarter_start(now)
+        cur_start = qs
+        cur_end = now
+        prev_start = qs.replace(year=qs.year - 1)
+        prev_end = qs - timedelta(microseconds=1)
+    elif mode == "QTD_TY_VS_QTD_LY":
+        qs = _quarter_start(now)
+        cur_start = qs
+        cur_end = now
+        prev_start = qs.replace(year=qs.year - 1)
+        # Align last year to same day-of-quarter
+        prev_end = prev_start + (cur_end - cur_start)
+    elif mode == "M_TY_VS_M_LY":
+        ms = _month_start(now)
+        cur_start = ms
+        cur_end = now
+        prev_start = ms.replace(year=ms.year - 1)
+        prev_end = ms - timedelta(microseconds=1)
+    elif mode == "MTD_TY_VS_MTD_LY":
+        ms = _month_start(now)
+        cur_start = ms
+        cur_end = now
+        prev_start = ms.replace(year=ms.year - 1)
+        # Align last year to same day-of-month (cap at month end)
+        day = now.day
+        # get last day of previous month same time last year
+        next_of_prev_ms = ms.replace(year=ms.year - 1).replace(month=ms.month + 1 if ms.month < 12 else 1, year=ms.year - 1 if ms.month < 12 else ms.year)
+        last_day_prev_month = (next_of_prev_ms - timedelta(days=1)).day
+        align_day = min(day, last_day_prev_month)
+        prev_end = prev_start.replace(day=align_day, hour=now.hour, minute=now.minute, second=now.second, microsecond=now.microsecond)
     else:
         cur_start = _floor_to_day(now)
         cur_end = now

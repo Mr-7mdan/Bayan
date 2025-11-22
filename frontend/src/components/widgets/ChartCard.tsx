@@ -2382,7 +2382,7 @@ export default function ChartCard({
   // Delta helper (server-side): compute period deltas when configured (component scope)
   const deltaUI = options?.deltaUI || 'none'
   const preconfiguredMode = options?.deltaMode && options.deltaMode !== 'off' ? options.deltaMode : undefined
-  const [filterbarMode, setFilterbarMode] = useState<'TD_YSTD'|'TW_LW'|'MONTH_LMONTH'|'MTD_LMTD'|'TY_LY'|'YTD_LYTD'|'TQ_LQ'|undefined>(preconfiguredMode as any)
+  const [filterbarMode, setFilterbarMode] = useState<'TD_YSTD'|'TW_LW'|'MONTH_LMONTH'|'MTD_LMTD'|'TY_LY'|'YTD_LYTD'|'TQ_LQ'|'Q_TY_VS_Q_LY'|'QTD_TY_VS_QTD_LY'|'M_TY_VS_M_LY'|'MTD_TY_VS_MTD_LY'|undefined>(preconfiguredMode as any)
   const activeDeltaMode = (deltaUI === 'filterbar' ? filterbarMode : preconfiguredMode)
   const deltaDateField = useMemo(() => {
     try {
@@ -2429,8 +2429,12 @@ export default function ChartCard({
       case 'MONTH_LMONTH': { const x = new Date(date); x.setMonth(x.getMonth()-1); return x }
       case 'MTD_LMTD': { const x = new Date(date); x.setMonth(x.getMonth()-1); return x }
       case 'TQ_LQ': { const x = new Date(date); x.setMonth(x.getMonth()-3); return x }
-      case 'TY_LY': { const x = new Date(date); x.setFullYear(x.getFullYear()-1); return x }
-      case 'YTD_LYTD': { const x = new Date(date); x.setFullYear(x.getFullYear()-1); return x }
+      case 'TY_LY':
+      case 'YTD_LYTD':
+      case 'Q_TY_VS_Q_LY':
+      case 'QTD_TY_VS_QTD_LY':
+      case 'M_TY_VS_M_LY':
+      case 'MTD_TY_VS_MTD_LY': { const x = new Date(date); x.setFullYear(x.getFullYear()-1); return x }
       default: return null
     }
   }
@@ -2703,8 +2707,12 @@ export default function ChartCard({
     TY_LY: 'This Year vs Last Year',
     YTD_LYTD: 'YTD vs LYTD',
     TQ_LQ: 'This Quarter vs Last Quarter',
+    Q_TY_VS_Q_LY: 'Q-TY vs Q-LY',
+    QTD_TY_VS_QTD_LY: 'QTD-TY vs QTD-LY',
+    M_TY_VS_M_LY: 'M-TY vs M-LY',
+    MTD_TY_VS_MTD_LY: 'MTD-TY vs MTD-LY',
   }
-  const deltaModes = ['TD_YSTD','TW_LW','MONTH_LMONTH','MTD_LMTD','TY_LY','YTD_LYTD','TQ_LQ'] as const
+  const deltaModes = ['TD_YSTD','TW_LW','MONTH_LMONTH','MTD_LMTD','TY_LY','YTD_LYTD','TQ_LQ','Q_TY_VS_Q_LY','QTD_TY_VS_QTD_LY','M_TY_VS_M_LY','MTD_TY_VS_MTD_LY'] as const
 
   const deltaKey = useMemo(() => JSON.stringify(uiTruthWhere), [uiTruthWhere])
   const deltaQ = useQuery({
@@ -2887,8 +2895,12 @@ export default function ChartCard({
           case 'MONTH_LMONTH': return shiftDate(curDate, { months: -1 })
           case 'MTD_LMTD': return shiftDate(curDate, { months: -1 })
           case 'TQ_LQ': return shiftDate(curDate, { months: -3 })
-          case 'TY_LY': return shiftDate(curDate, { years: -1 })
-          case 'YTD_LYTD': return shiftDate(curDate, { years: -1 })
+          case 'TY_LY':
+          case 'YTD_LYTD':
+          case 'Q_TY_VS_Q_LY':
+          case 'QTD_TY_VS_QTD_LY':
+          case 'M_TY_VS_M_LY':
+          case 'MTD_TY_VS_MTD_LY': return shiftDate(curDate, { years: -1 })
           default: return null
         }
       })()
@@ -3153,8 +3165,12 @@ export default function ChartCard({
             case 'MONTH_LMONTH': { const d = new Date(cur); d.setMonth(d.getMonth()-1); return d }
             case 'MTD_LMTD': { const d = new Date(cur); d.setMonth(d.getMonth()-1); return d }
             case 'TQ_LQ': { const d = new Date(cur); d.setMonth(d.getMonth()-3); return d }
-            case 'TY_LY': { const d = new Date(cur); d.setFullYear(d.getFullYear()-1); return d }
-            case 'YTD_LYTD': { const d = new Date(cur); d.setFullYear(d.getFullYear()-1); return d }
+            case 'TY_LY':
+            case 'YTD_LYTD':
+            case 'Q_TY_VS_Q_LY':
+            case 'QTD_TY_VS_QTD_LY':
+            case 'M_TY_VS_M_LY':
+            case 'MTD_TY_VS_MTD_LY': { const d = new Date(cur); d.setFullYear(d.getFullYear()-1); return d }
             default: return null
           }
         })()
@@ -3696,7 +3712,11 @@ export default function ChartCard({
                         case 'MTD_LMTD': { const x = new Date(d); x.setMonth(x.getMonth()-1); return x }
                         case 'TQ_LQ': { const x = new Date(d); x.setMonth(x.getMonth()-3); return x }
                         case 'TY_LY':
-                        case 'YTD_LYTD': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
+                        case 'YTD_LYTD':
+                        case 'Q_TY_VS_Q_LY':
+                        case 'QTD_TY_VS_QTD_LY':
+                        case 'M_TY_VS_M_LY':
+                        case 'MTD_TY_VS_MTD_LY': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
                         default: return null
                       }
                     })()
@@ -4057,7 +4077,11 @@ export default function ChartCard({
                         case 'MTD_LMTD': { const x = new Date(d); x.setMonth(x.getMonth()-1); return x }
                         case 'TQ_LQ': { const x = new Date(d); x.setMonth(x.getMonth()-3); return x }
                         case 'TY_LY':
-                        case 'YTD_LYTD': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
+                        case 'YTD_LYTD':
+                        case 'Q_TY_VS_Q_LY':
+                        case 'QTD_TY_VS_QTD_LY':
+                        case 'M_TY_VS_M_LY':
+                        case 'MTD_TY_VS_MTD_LY': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
                         default: return null
                       }
                     })()
@@ -4970,7 +4994,11 @@ export default function ChartCard({
                       case 'MTD_LMTD': { const x = new Date(d); x.setMonth(x.getMonth()-1); return x }
                       case 'TQ_LQ': { const x = new Date(d); x.setMonth(x.getMonth()-3); return x }
                       case 'TY_LY':
-                      case 'YTD_LYTD': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
+                      case 'YTD_LYTD':
+                      case 'Q_TY_VS_Q_LY':
+                      case 'QTD_TY_VS_QTD_LY':
+                      case 'M_TY_VS_M_LY':
+                      case 'MTD_TY_VS_MTD_LY': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
                       default: return null
                     }
                   })()
@@ -6253,7 +6281,11 @@ export default function ChartCard({
                 case 'MTD_LMTD': { const x = new Date(d); x.setMonth(x.getMonth()-1); return x }
                 case 'TQ_LQ': { const x = new Date(d); x.setMonth(x.getMonth()-3); return x }
                 case 'TY_LY':
-                case 'YTD_LYTD': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
+                case 'YTD_LYTD':
+                case 'Q_TY_VS_Q_LY':
+                case 'QTD_TY_VS_QTD_LY':
+                case 'M_TY_VS_M_LY':
+                case 'MTD_TY_VS_MTD_LY': { const x = new Date(d); x.setFullYear(x.getFullYear()-1); return x }
                 default: return null
               }
             })()

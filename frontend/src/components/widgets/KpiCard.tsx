@@ -264,7 +264,7 @@ export default function KpiCard({
   }, [querySpec, schemaDateField])
 
   // KPI-effective delta settings from configurator (kpi.* overrides top-level)
-  type KPIDeltaMode = 'TD_YSTD' | 'TW_LW' | 'MONTH_LMONTH' | 'MTD_LMTD' | 'TY_LY' | 'YTD_LYTD' | 'TQ_LQ'
+  type KPIDeltaMode = 'TD_YSTD' | 'TW_LW' | 'MONTH_LMONTH' | 'MTD_LMTD' | 'TY_LY' | 'YTD_LYTD' | 'TQ_LQ' | 'Q_TY_VS_Q_LY' | 'QTD_TY_VS_QTD_LY' | 'M_TY_VS_M_LY' | 'MTD_TY_VS_MTD_LY'
   const normalizeDeltaMode = (raw?: string): KPIDeltaMode | undefined => {
     const m = String(raw || '').toUpperCase()
     const allowed: Record<string, KPIDeltaMode> = {
@@ -275,6 +275,10 @@ export default function KpiCard({
       TY_LY: 'TY_LY',
       YTD_LYTD: 'YTD_LYTD',
       TQ_LQ: 'TQ_LQ',
+      Q_TY_VS_Q_LY: 'Q_TY_VS_Q_LY',
+      QTD_TY_VS_QTD_LY: 'QTD_TY_VS_QTD_LY',
+      M_TY_VS_M_LY: 'M_TY_VS_M_LY',
+      MTD_TY_VS_MTD_LY: 'MTD_TY_VS_MTD_LY',
     }
     return (allowed as any)[m] as KPIDeltaMode | undefined
   }

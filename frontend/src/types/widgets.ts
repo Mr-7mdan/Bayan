@@ -351,7 +351,7 @@ export type WidgetConfig = {
     filtersExpose?: Record<string, boolean>
     // Deltas configuration
     deltaUI?: 'none' | 'filterbar' | 'preconfigured'
-    deltaMode?: 'off' | 'TD_YSTD' | 'TW_LW' | 'MONTH_LMONTH' | 'MTD_LMTD' | 'TY_LY' | 'YTD_LYTD' | 'TQ_LQ'
+    deltaMode?: 'off' | 'TD_YSTD' | 'TW_LW' | 'MONTH_LMONTH' | 'MTD_LMTD' | 'TY_LY' | 'YTD_LYTD' | 'TQ_LQ' | 'Q_TY_VS_Q_LY' | 'QTD_TY_VS_QTD_LY' | 'M_TY_VS_M_LY' | 'MTD_TY_VS_MTD_LY'
     deltaDateField?: string
     deltaWeekStart?: 'sat' | 'sun' | 'mon'
     seriesStackMap?: Record<string, string>

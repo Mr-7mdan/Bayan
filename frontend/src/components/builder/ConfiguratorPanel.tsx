@@ -3803,7 +3803,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                             <label className="block text-xs text-muted-foreground mb-1">Delta mode</label>
                             <select className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs" value={local.options?.deltaMode || 'off'}
                               onChange={(e) => { const opts = { ...(local.options || {}), deltaMode: e.target.value as any }; const next = { ...local, options: opts }; setLocal(next); updateConfig(next) }}>
-                              {(['off','TD_YSTD','TW_LW','MONTH_LMONTH','MTD_LMTD','TY_LY','YTD_LYTD','TQ_LQ'] as const).map((m) => <option key={m} value={m}>{m}</option>)}
+                              {(['off','TD_YSTD','TW_LW','MONTH_LMONTH','MTD_LMTD','TY_LY','YTD_LYTD','TQ_LQ','Q_TY_VS_Q_LY','QTD_TY_VS_QTD_LY','M_TY_VS_M_LY','MTD_TY_VS_MTD_LY'] as const).map((m) => <option key={m} value={m}>{m}</option>)}
                             </select>
                           </div>
                           <div>
@@ -5081,7 +5081,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         <label className="block text-xs text-muted-foreground mb-1">Delta mode</label>
                         <select className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs" value={local.options?.deltaMode || 'TD_YSTD'}
                           onChange={(e) => { const opts = { ...(local.options || {}), deltaMode: e.target.value as any }; const next = { ...local, options: opts }; setLocal(next); updateConfig(next) }}>
-                          {(['TD_YSTD','TW_LW','MONTH_LMONTH','MTD_LMTD','TY_LY','YTD_LYTD','TQ_LQ','off'] as const).map((m) => <option key={m} value={m}>{m}</option>)}
+                          {(['TD_YSTD','TW_LW','MONTH_LMONTH','MTD_LMTD','TY_LY','YTD_LYTD','TQ_LQ','Q_TY_VS_Q_LY','QTD_TY_VS_QTD_LY','M_TY_VS_M_LY','MTD_TY_VS_MTD_LY','off'] as const).map((m) => <option key={m} value={m}>{m}</option>)}
                         </select>
                       </div>
                       <div>
