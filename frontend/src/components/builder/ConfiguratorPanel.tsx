@@ -7,7 +7,8 @@ import { Api, DatasourceOut, IntrospectResponse, QueryApi } from '@/lib/api'
 import { colorKeyToToken, tokenToColorKey, chartColors, type AvailableChartColorsKeys } from '@/lib/chartUtils'
 import { PivotBuilder, type PivotAssignments } from '@/components/builder/PivotBuilder'
 import type { WidgetConfig, CompositionComponent } from '@/types/widgets'
-import { TabGroup, TabList, Tab, TabPanels, TabPanel, TextInput } from '@tremor/react'
+import { TabGroup, TabList, Tab, TabPanels, TabPanel } from '@tremor/react'
+import DatePickerField from '@/components/shared/DatePickerField'
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/Select'
 import { Switch } from '@/components/Switch'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/Accordion'
@@ -877,6 +878,8 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
   const [op, setOp] = useState<CustomOp>('between')
   const [a, setA] = useState<string>('')
   const [b, setB] = useState<string>('')
+  const [pendingA, setPendingA] = useState<string>('')
+  const [pendingB, setPendingB] = useState<string>('')
   const interactedRef = useRef(false)
   const editingRef = useRef(false)
   const editTimerRef = useRef<number | null>(null)
@@ -884,7 +887,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     editingRef.current = true
     if (typeof window !== 'undefined') {
       if (editTimerRef.current) window.clearTimeout(editTimerRef.current)
-      editTimerRef.current = window.setTimeout(() => { editingRef.current = false }, 600) as any
+      editTimerRef.current = window.setTimeout(() => { editingRef.current = false }, 1200) as any
     }
   }
   // Hydrate UI state on field change (handles remounts or parent re-renders)
@@ -902,8 +905,8 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
         if (match) { setMode('preset'); setPreset(match) }
         else {
           setMode('custom')
-          if (gte) setA(gte)
-          if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); setB(`${y}-${m}-${da}`) }
+          if (gte) { setA(gte); setPendingA(gte) }
+          if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const formatted = `${y}-${m}-${da}`; setB(formatted); setPendingB(formatted) }
         }
       } else {
         const raw = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null
@@ -912,8 +915,8 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
           if (st.mode) setMode(st.mode)
           if (st.preset) setPreset(st.preset)
           if (st.op) setOp(st.op)
-          if (typeof st.a === 'string') setA(st.a)
-          if (typeof st.b === 'string') setB(st.b)
+          if (typeof st.a === 'string') { setA(st.a); setPendingA(st.a) }
+          if (typeof st.b === 'string') { setB(st.b); setPendingB(st.b) }
         }
       }
     } catch {}
@@ -930,6 +933,8 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       const gte = (where as any)?.[`${field}__gte`] as string | undefined
       const lt = (where as any)?.[`${field}__lt`] as string | undefined
       if (editingRef.current) return
+      // Don't override if user has already interacted and is in custom mode
+      if (interactedRef.current && mode === 'custom') return
       if (!gte && !lt) return
       const presets: Preset[] = ['today','yesterday','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
       const match = presets.find((p) => {
@@ -946,16 +951,16 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       const hasL = !!lt
       if (hasG && hasL) {
         if (op !== 'between') setOp('between')
-        if (a !== (gte || '')) setA(gte || '')
-        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const prev = `${y}-${m}-${da}`; if (b !== prev) setB(prev) } } catch {}
+        if (a !== (gte || '')) { setA(gte || ''); setPendingA(gte || '') }
+        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const prev = `${y}-${m}-${da}`; if (b !== prev) { setB(prev); setPendingB(prev) } } } catch {}
       } else if (hasG) {
         if (op !== 'after') setOp('after')
-        if (a !== (gte || '')) setA(gte || '')
-        if (b !== '') setB('')
+        if (a !== (gte || '')) { setA(gte || ''); setPendingA(gte || '') }
+        if (b !== '') { setB(''); setPendingB('') }
       } else if (hasL) {
         if (op !== 'before') setOp('before')
-        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const prev = `${y}-${m}-${da}`; if (b !== prev) setB(prev) } } catch {}
-        if (a !== '') setA('')
+        try { if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const prev = `${y}-${m}-${da}`; if (b !== prev) { setB(prev); setPendingB(prev) } } } catch {}
+        if (a !== '') { setA(''); setPendingA('') }
       }
     } catch {}
   }, [field, (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lt`]])
@@ -995,9 +1000,18 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     }
   }
 
+  // Apply handler for manual application
+  const handleApply = () => {
+    interactedRef.current = true
+    markEditing()
+    setA(pendingA)
+    setB(pendingB)
+  }
+
   const lastSigRef = useRef<string>('')
   useEffect(() => {
     if (!interactedRef.current) return
+    
     const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }
     if (mode === 'preset') {
       const r = rangeForPreset(preset)
@@ -1007,7 +1021,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       if (sig !== lastSigRef.current) { lastSigRef.current = sig; onPatch(patch) }
       return
     }
-    // custom
+    // custom - only apply when a/b change (via Apply button)
     if (op === 'after') {
       patch[`${field}__gte`] = a || undefined
     } else if (op === 'before') {
@@ -1025,7 +1039,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     <div className="rounded-md border bg-card p-2">
       <div className="flex items-center justify-between">
         <div className="text-xs font-medium">Date rule: {field}</div>
-        <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setOp('between'); setA(''); setB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }) }}>Clear</button>
+        <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setOp('between'); setA(''); setB(''); setPendingA(''); setPendingB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }) }}>Clear</button>
       </div>
       <div className="mt-2 flex items-center gap-2 text-xs">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={()=>{ interactedRef.current = true; markEditing(); setMode('preset') }} /> Preset</label>
@@ -1045,21 +1059,43 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
           </select>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2 mt-2 items-center">
-          <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{ interactedRef.current = true; markEditing(); setOp(e.target.value as CustomOp) }}>
-            <option value="after">After</option>
-            <option value="before">Before</option>
-            <option value="between">Between</option>
-          </select>
-          {op !== 'between' ? (
-            <input type="date" className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={op==='after'?a:b} onChange={(e)=> { interactedRef.current = true; markEditing(); (op==='after'? setA(e.target.value) : setB(e.target.value)) }} />
-          ) : (
-            <>
-              <input type="date" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Start" value={a} onChange={(e)=>{ interactedRef.current = true; markEditing(); setA(e.target.value) }} />
-              <input type="date" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="End" value={b} onChange={(e)=>{ interactedRef.current = true; markEditing(); setB(e.target.value) }} />
-            </>
-          )}
-        </div>
+        <>
+          <div className="grid grid-cols-3 gap-2 mt-2 items-center">
+            <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{ markEditing(); const newOp = e.target.value as CustomOp; setOp(newOp); if (newOp === 'after') { setPendingB(''); setB('') } else if (newOp === 'before') { setPendingA(''); setA('') } }}>
+              <option value="after">After</option>
+              <option value="before">Before</option>
+              <option value="between">Between</option>
+            </select>
+            {op !== 'between' ? (
+              <div className="col-span-3 sm:col-span-2">
+                <DatePickerField 
+                  value={op==='after'?pendingA:pendingB} 
+                  onChangeAction={(v?: string)=> { markEditing(); (op==='after'? setPendingA(v||'') : setPendingB(v||'')) }} 
+                  placeholder="Select date"
+                  className="w-full"
+                />
+              </div>
+            ) : (
+              <>
+                <DatePickerField 
+                  value={pendingA} 
+                  onChangeAction={(v?: string)=>{ markEditing(); setPendingA(v||'') }} 
+                  placeholder="Start date"
+                  className="col-span-3 sm:col-span-1"
+                />
+                <DatePickerField 
+                  value={pendingB} 
+                  onChangeAction={(v?: string)=>{ markEditing(); setPendingB(v||'') }} 
+                  placeholder="End date"
+                  className="col-span-3 sm:col-span-1"
+                />
+              </>
+            )}
+          </div>
+          <div className="mt-2 flex justify-end">
+            <button className="text-xs px-3 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleApply}>Apply</button>
+          </div>
+        </>
       )}
     </div>
   )
@@ -1613,6 +1649,85 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
       }
     }
   }
+  // Fetch base field values for derived date fields (Year, Month, etc.)
+  const derivedFetchedRef = useRef<string | null>(null)
+  useEffect(() => {
+    // Skip if already fetched for this field
+    if (derivedFetchedRef.current === field) return
+    
+    let abort = false
+    async function runDerived() {
+      console.log('[FilterEditor] runDerived called for field:', field, 'isDerived:', isDerived, 'baseField:', baseField)
+      setLoadingSamples(true)
+      try {
+        if (!isDerived || !baseField || !source || !datasourceId) {
+          console.log('[FilterEditor] Skipping derived field fetch - missing:', { isDerived, baseField, source: !source, datasourceId: !datasourceId })
+          if (!abort) setLoadingSamples(false)
+          return
+        }
+        // Fetch base field values and derive the samples
+        console.log('[FilterEditor] Fetching base field', baseField, 'to derive', partName, 'values')
+        
+        // Try DISTINCT endpoint first for base field
+        const set = new Set<string>()
+        try {
+          if (typeof (Api as any).distinct === 'function') {
+            const res = await (Api as any).distinct({ source: String(source), field: String(baseField), where: undefined, datasourceId })
+            const baseValues = ((res?.values || []) as any[]).filter((v) => v != null)
+            console.log('[FilterEditor] Got', baseValues.length, 'distinct base values via DISTINCT endpoint')
+            baseValues.forEach((baseVal) => {
+              const derivedVal = derive(baseVal)
+              if (derivedVal !== null && derivedVal !== undefined) set.add(String(derivedVal))
+            })
+          } else {
+            throw new Error('DISTINCT endpoint not available')
+          }
+        } catch (distinctErr) {
+          console.warn('[FilterEditor] DISTINCT endpoint failed, falling back to pagination:', distinctErr)
+          // Fallback: page through data (up to 50k rows)
+          for (let i = 0; i < 10; i++) {
+            const offset = i * 5000
+            const spec: any = { source, select: [baseField], where: undefined, limit: 5000, offset }
+            const res = await QueryApi.querySpec({ spec, datasourceId, limit: 5000, offset, includeTotal: true })
+            ;(res.rows || []).forEach((arr: any[]) => {
+              const baseVal = Array.isArray(arr) ? arr[0] : arr
+              const derivedVal = derive(baseVal)
+              if (derivedVal !== null && derivedVal !== undefined) set.add(String(derivedVal))
+            })
+            const got = (res.rows || []).length
+            const total = Number(res.totalRows || 0)
+            console.log('[FilterEditor] Page', i, '- got', got, 'rows, total:', total, 'unique years so far:', set.size)
+            if (got < 5000 || (total > 0 && offset + got >= total) || abort) break
+          }
+        }
+        
+        const finalSamples = Array.from(set.values()).sort((a, b) => {
+          const na = Number(a), nb = Number(b)
+          if (!isNaN(na) && !isNaN(nb)) return na - nb
+          return a.localeCompare(b)
+        })
+        console.log('[FilterEditor] Derived', finalSamples.length, 'distinct values for', field, ':', finalSamples)
+        if (!abort) {
+          setExtraSamples(finalSamples)
+          setLoadingSamples(false)
+          derivedFetchedRef.current = field
+        }
+      } catch (err) {
+        console.error('[FilterEditor] Error fetching derived field samples:', err)
+        if (!abort) {
+          setExtraSamples([])
+          setLoadingSamples(false)
+        }
+      }
+    }
+    if (isDerived && baseField) {
+      runDerived()
+    } else {
+      setLoadingSamples(false)
+    }
+    return () => { abort = true }
+  }, [field, source, datasourceId, isDerived, baseField, partName])
+  
   // Client-side fallback to compute distinct values for custom columns when no sampleRows
   // (moved outside conditional to comply with React Hooks rules)
   useEffect(() => {
@@ -1656,9 +1771,12 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
         }
       }
     }
-    runCustom()
+    // Only run for custom columns, not derived date fields
+    if (custom && !isDerived) {
+      runCustom()
+    }
     return () => { abort = true }
-  }, [custom?.formula, source, datasourceId, Array.isArray(sampleRows) ? sampleRows.length : 0, customColumns])
+  }, [custom?.formula, source, datasourceId, Array.isArray(sampleRows) ? sampleRows.length : 0, customColumns, isDerived])
   const baseSamples = (samplesByField?.[field] || []) as string[]
   // Merge fallback distinct values with existing samples/computed
   const mergedPool = Array.from(new Set<string>([...computedSamples, ...baseSamples, ...extraSamples]))
@@ -1724,7 +1842,27 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
     const exists = selected.some((x) => x === v)
     const next = exists ? selected.filter((x) => x !== v) : [...selected, v]
     setSelected(next)
-    onChange(next)
+    // Don't auto-apply - user must click Apply button
+  }
+  
+  // Helper to convert string values to numbers for numeric derived fields
+  const handleApply = () => {
+    // Check if this is a numeric derived field (Year, Quarter, Month, Week, Day)
+    const NUMERIC_PARTS = ['Year', 'Quarter', 'Month', 'Week', 'Day']
+    const DERIVED_RE = /^(.*) \((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/
+    const match = DERIVED_RE.exec(field)
+    const isNumericDerived = match && NUMERIC_PARTS.includes(match[2])
+    
+    if (isNumericDerived) {
+      // Convert string values to numbers
+      const numericValues = selected.map(v => {
+        const n = Number(v)
+        return isNaN(n) ? v : n
+      })
+      onChange(numericValues)
+    } else {
+      onChange(selected)
+    }
   }
   
   return (
@@ -1739,7 +1877,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
           >
             Clear
           </button>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => onChange(selected)}>Apply</button>
+          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={handleApply}>Apply</button>
         </div>
       </div>
       <div className="mt-2 space-y-2">
@@ -1929,18 +2067,21 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
   const [start, setStart] = useState<string>(a0 || '')
   const [end, setEnd] = useState<string>(b0 ? (() => { const d = new Date(b0 + 'T00:00:00'); d.setDate(d.getDate() - 1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); return `${y}-${m}-${da}` })() : '')
 
-  useEffect(() => {
+  const handleApply = () => {
     const patch: Record<string, any> = {}
     patch[`${field}__gte`] = start || undefined
     patch[`${field}__lt`] = normalizeEnd(end)
     onPatch(patch)
-  }, [start, end])
+  }
 
   return (
     <div className="rounded-md border bg-card p-2">
       <div className="flex items-center justify-between">
         <div className="text-xs font-medium">Date range: {field}</div>
-        <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setStart(''); setEnd(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }) }}>Clear</button>
+        <div className="flex items-center gap-2">
+          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted bg-primary text-primary-foreground" onClick={handleApply}>Apply</button>
+          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setStart(''); setEnd(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }) }}>Clear</button>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-2 mt-2 items-center">
         <div className="flex flex-col gap-1">
@@ -5233,8 +5374,9 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               <div>
                 <label className="block text-xs text-muted-foreground mb-1">Source (table/view)</label>
                 <div className="grid grid-cols-[1fr,auto] gap-2 mb-1">
-                  <TextInput
-                    className="h-8 text-xs rounded-md bg-[hsl(var(--secondary))]"
+                  <input
+                    type="text"
+                    className="h-8 px-2 text-xs rounded-md bg-[hsl(var(--secondary))] border border-[hsl(var(--border))]"
                     placeholder="Search tables/views"
                     value={srcFilter}
                     onChange={(e) => setSrcFilter(e.target.value)}

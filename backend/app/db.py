@@ -995,9 +995,12 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
         while batches < max_batches:
             if should_abort:
                 try:
-                    if should_abort():
+                    abort_flag = should_abort()
+                    if abort_flag:
+                        print(f"[ABORT] Sequence sync detected abort flag=True, stopping sync. batches={batches}, total_rows={total_rows}", flush=True)
                         return {"row_count": total_rows, "last_sequence_value": max_seq_seen, "aborted": True}
-                except Exception:
+                except Exception as e:
+                    print(f"[ABORT] Error checking abort in sequence sync: {e}", flush=True)
                     pass
             batches += 1
             seq_col = _quote_ident(sequence_column, src_dialect)
@@ -1129,9 +1132,12 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
             while True:
                 if should_abort:
                     try:
-                        if should_abort():
+                        abort_flag = should_abort()
+                        if abort_flag:
+                            print(f"[ABORT] Snapshot sync detected abort flag=True, stopping sync. total_rows={total_rows}, offset={offset}", flush=True)
                             return {"row_count": total_rows, "aborted": True}
-                    except Exception:
+                    except Exception as e:
+                        print(f"[ABORT] Error checking abort in snapshot sync: {e}", flush=True)
                         pass
                 if on_phase:
                     try: on_phase('fetch')

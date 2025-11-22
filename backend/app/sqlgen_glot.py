@@ -875,13 +875,13 @@ class SQLGlotBuilder:
         
         # DuckDB
         if "duckdb" in dial:
-            if kind_l == 'year': return f"strftime({q}, '%Y')"
-            if kind_l == 'quarter': return f"concat(strftime({q}, '%Y'), '-Q', CAST(EXTRACT(QUARTER FROM {q}) AS INTEGER))"
-            if kind_l == 'month': return f"strftime({q}, '%Y-%m')"
+            if kind_l == 'year': return f"EXTRACT(YEAR FROM {q})"  # Return integer, not string
+            if kind_l == 'quarter': return f"EXTRACT(QUARTER FROM {q})"  # Return integer, not string
+            if kind_l == 'month': return f"EXTRACT(MONTH FROM {q})"  # Return integer, not string
             if kind_l == 'month name': return f"strftime({q}, '%B')"
             if kind_l == 'month short': return f"strftime({q}, '%b')"
-            if kind_l == 'week': return f"concat(strftime({q}, '%Y'), '-W', substr('00' || strftime({q}, '%W'), -2))"
-            if kind_l == 'day': return f"strftime({q}, '%Y-%m-%d')"
+            if kind_l == 'week': return f"EXTRACT(WEEK FROM {q})"  # Return integer, not string
+            if kind_l == 'day': return f"EXTRACT(DAY FROM {q})"  # Return integer, not string
             if kind_l == 'day name': return f"strftime({q}, '%A')"
             if kind_l == 'day short': return f"strftime({q}, '%a')"
         
@@ -899,13 +899,13 @@ class SQLGlotBuilder:
         
         # MSSQL
         elif "mssql" in dial or "sqlserver" in dial or "tsql" in dial:
-            if kind_l == 'year': return f"CAST(YEAR({q}) AS varchar(10))"
-            if kind_l == 'quarter': return f"CAST(YEAR({q}) AS varchar(4)) + '-Q' + CAST(DATEPART(QUARTER, {q}) AS varchar(1))"
-            if kind_l == 'month': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-', RIGHT('0' + CAST(MONTH({q}) AS varchar(2)), 2))"
+            if kind_l == 'year': return f"YEAR({q})"  # Return integer, not string
+            if kind_l == 'quarter': return f"DATEPART(QUARTER, {q})"  # Return integer, not string
+            if kind_l == 'month': return f"MONTH({q})"  # Return integer, not string
             if kind_l == 'month name': return f"DATENAME(month, {q})"
             if kind_l == 'month short': return f"LEFT(DATENAME(month, {q}), 3)"
-            if kind_l == 'week': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-W', RIGHT('0' + CAST(DATEPART(ISO_WEEK, {q}) AS varchar(2)), 2))"
-            if kind_l == 'day': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-', RIGHT('0'+CAST(MONTH({q}) AS varchar(2)),2), '-', RIGHT('0'+CAST(DAY({q}) AS varchar(2)),2))"
+            if kind_l == 'week': return f"DATEPART(ISO_WEEK, {q})"  # Return integer, not string
+            if kind_l == 'day': return f"DAY({q})"  # Return integer, not string
             if kind_l == 'day name': return f"DATENAME(weekday, {q})"
             if kind_l == 'day short': return f"LEFT(DATENAME(weekday, {q}), 3)"
         

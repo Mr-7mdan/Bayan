@@ -588,7 +588,7 @@ export const Api = {
   createSyncTask: (id: string, payload: SyncTaskCreate, actorId?: string) => http<SyncTaskOut>(`/datasources/${id}/sync-tasks${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST', body: JSON.stringify(payload) }),
   updateSyncTask: (id: string, taskId: string, payload: SyncTaskCreate, actorId?: string) => http<SyncTaskOut>(`/datasources/${id}/sync-tasks/${taskId}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteSyncTask: (id: string, taskId: string, actorId?: string) => http<void>(`/datasources/${id}/sync-tasks/${taskId}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'DELETE' }),
-  runSyncNow: (id: string, taskId?: string, actorId?: string) => http<{ ok: boolean; count?: number; results?: any[]; message?: string }>(`/datasources/${id}/sync/run${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}${(!taskId && actorId) ? `?actorId=${encodeURIComponent(actorId)}` : (taskId && actorId) ? `&actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST' }),
+  runSyncNow: (id: string, taskId?: string, actorId?: string) => http<{ ok: boolean; count?: number; results?: any[]; message?: string }>(`/datasources/${id}/sync/run?execute=true${taskId ? `&taskId=${encodeURIComponent(taskId)}` : ''}${actorId ? `&actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST' }),
   abortSync: (id: string, taskId?: string, actorId?: string) =>
     http<{ ok: boolean; updated?: number }>(
       `/datasources/${id}/sync/abort${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}${actorId ? `${taskId ? '&' : '?'}actorId=${encodeURIComponent(actorId)}` : ''}`,

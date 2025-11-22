@@ -711,13 +711,31 @@ def run_sync_now(
 
     # Run snapshots first, then sequences to avoid overlap in a single call
     tasks_sorted = sorted(tasks, key=lambda t: 0 if t.mode == "snapshot" else 1)
+    print(f"[ABORT] Execute path: found {len(tasks_sorted)} tasks to sync", flush=True)
     results: list[dict] = []
 
     # Acquire locks per group key to ensure idempotent runs across processes
     acquired_keys: list[str] = []
     busy_keys: list[str] = []
+    print(f"[ABORT] About to acquire locks for {len(tasks_sorted)} tasks", flush=True)
     try:
         uniq_groups = sorted({t.group_key for t in tasks_sorted})
+        
+        # When execute=True (force run), clear any existing locks for these groups
+        if execute:
+            for gk in uniq_groups:
+                try:
+                    deleted = db.query(SyncLock).filter(SyncLock.group_key == gk).delete()
+                    if deleted:
+                        print(f"[ABORT] Force-cleared existing lock for group: {gk}", flush=True)
+                    db.commit()
+                except Exception as clear_err:
+                    print(f"[ABORT] Failed to clear lock for group {gk}: {clear_err}", flush=True)
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+        
         for gk in uniq_groups:
             try:
                 existed = db.query(SyncLock).filter(SyncLock.group_key == gk).first()
@@ -731,6 +749,7 @@ def run_sync_now(
                 # If we fail to create, consider it busy
                 busy_keys.append(gk)
         if busy_keys:
+            print(f"[ABORT] Cannot sync - groups locked: {busy_keys}", flush=True)
             try: counter_inc("sync_lock_busy_total")
             except Exception: pass
             # Release any previously acquired locks before returning
@@ -739,10 +758,12 @@ def run_sync_now(
                 except Exception: pass
             return {"ok": False, "message": f"Groups locked: {', '.join(busy_keys)}"}
         else:
+            print(f"[ABORT] Successfully acquired locks for groups: {acquired_keys}", flush=True)
             try: counter_inc("sync_lock_acquired_total")
             except Exception: pass
-    except Exception:
+    except Exception as lock_err:
         # Best-effort; proceed without hard lock if lock table unavailable
+        print(f"[ABORT] Lock acquisition failed (will proceed anyway): {lock_err}", flush=True)
         pass
 
     # Parse options once
@@ -757,14 +778,34 @@ def run_sync_now(
             print(f"[ds] api_opts present={bool(api_opts)} keys={(list(api_opts.keys()) if api_opts else [])}", flush=True)
     except Exception:
         pass
+    
+    # Helper to check abort flag - uses separate session to avoid affecting main session cache
+    def _check_abort(state_id: str) -> bool:
+        try:
+            # Use a separate session to avoid expiring the main session's objects
+            check_db = SessionLocal()
+            try:
+                fresh_state = check_db.query(SyncState).filter(SyncState.id == state_id).first()
+                abort_flag = bool(getattr(fresh_state, 'cancel_requested', False)) if fresh_state else False
+                print(f"[ABORT_CHECK] state_id={state_id}, cancel_requested={abort_flag}, in_progress={getattr(fresh_state, 'in_progress', None) if fresh_state else None}", flush=True)
+                return abort_flag
+            finally:
+                check_db.close()
+        except Exception as e:
+            print(f"[ABORT_CHECK] Error checking abort flag for state_id={state_id}: {e}", flush=True)
+            return False
 
+    print(f"[ABORT] Processing {len(tasks_sorted)} tasks for sync", flush=True)
     for t in tasks_sorted:
+        print(f"[ABORT] Processing task: task_id={t.id}, mode={t.mode}, dest_table={t.dest_table_name}", flush=True)
         st = db.query(SyncState).filter(SyncState.task_id == t.id).first()
         if not st:
+            print(f"[ABORT] Creating new SyncState for task_id={t.id}", flush=True)
             st = SyncState(id=str(uuid4()), task_id=t.id, in_progress=False)
             db.add(st)
             db.commit()
         # Mark in progress and clear any previous cancel flag
+        print(f"[ABORT] Starting sync: state_id={st.id}, task_id={t.id}, setting in_progress=True, cancel_requested=False", flush=True)
         st.in_progress = True
         st.cancel_requested = False  # type: ignore[attr-defined]
         st.progress_current = 0
@@ -772,6 +813,7 @@ def run_sync_now(
         st.progress_phase = 'fetch'  # type: ignore[attr-defined]
         db.add(st)
         db.commit()
+        print(f"[ABORT] Committed sync start for state_id={st.id}", flush=True)
         # Create a run log row
         run = SyncRun(id=str(uuid4()), task_id=t.id, datasource_id=ds_id, mode=t.mode)
         db.add(run)
@@ -834,7 +876,7 @@ def run_sync_now(
                     last_sequence_value=st.last_sequence_value,
                     on_progress=lambda cur, tot: _update_progress(db, st.id, cur, tot),
                     select_columns=(t.select_columns or None),
-                    should_abort=lambda: bool(getattr(db.query(SyncState).filter(SyncState.id == st.id).first(), 'cancel_requested', False)),
+                    should_abort=lambda: _check_abort(st.id),
                     on_phase=lambda ph: _set_phase(db, st.id, ph),
                 )
                 st.last_sequence_value = res.get("last_sequence_value")
@@ -863,7 +905,7 @@ def run_sync_now(
                     batch_size=int(t.batch_size or 50000),
                     on_progress=lambda cur, tot: _update_progress(db, st.id, cur, tot),
                     select_columns=(t.select_columns or None),
-                    should_abort=lambda: bool(getattr(db.query(SyncState).filter(SyncState.id == st.id).first(), 'cancel_requested', False)),
+                    should_abort=lambda: _check_abort(st.id),
                     on_phase=lambda ph: _set_phase(db, st.id, ph),
                 )
                 st.last_row_count = res.get("row_count")
@@ -942,6 +984,7 @@ def run_sync_now(
             except Exception:
                 pass
         finally:
+            print(f"[ABORT] Finally block: Setting in_progress=False for state_id={st.id}, cancel_requested={getattr(st, 'cancel_requested', None)}", flush=True)
             st.in_progress = False
             try:
                 st.progress_phase = None  # type: ignore[attr-defined]
@@ -950,6 +993,7 @@ def run_sync_now(
             db.add(st)
             db.add(run)
             db.commit()
+            print(f"[ABORT] Committed in_progress=False for state_id={st.id}", flush=True)
 
     # Release locks
     try:
@@ -1047,6 +1091,7 @@ def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorI
 
 @router.post("/{ds_id}/sync/abort")
 def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    print(f"[ABORT] Endpoint called: ds_id={ds_id}, taskId={taskId}", flush=True)
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -1058,17 +1103,22 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
     if taskId:
         q = q.filter(SyncState.task_id == taskId)
     rows = q.all()
+    print(f"[ABORT] Found {len(rows)} in-progress sync states to abort", flush=True)
     updated = 0
     for st in rows:
         try:
+            print(f"[ABORT] Setting cancel_requested=True for state_id={st.id}, task_id={st.task_id}", flush=True)
             setattr(st, 'cancel_requested', True)
             db.add(st)
             updated += 1
-        except Exception:
+        except Exception as e:
+            print(f"[ABORT] Failed to set cancel_requested for state_id={st.id}: {e}", flush=True)
             continue
     try:
         db.commit()
-    except Exception:
+        print(f"[ABORT] Committed {updated} cancel_requested flags to database", flush=True)
+    except Exception as e:
+        print(f"[ABORT] Commit failed: {e}", flush=True)
         try: db.rollback()
         except Exception: pass
     return {"ok": True, "updated": int(updated)}

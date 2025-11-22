@@ -1201,18 +1201,24 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             # Helper to extract column references (re is imported at module level)
             def extract_refs(expr_str: str) -> set[str]:
                 refs: set[str] = set()
-                # Match qualified identifiers like "s"."Col" first: keep only the column part
-                for match in re.finditer(r'"[^"]+"\."([^\"]+)"', expr_str):
+                # Match qualified identifiers (quoted): "s"."Col" or [s].[Col] - keep only column part
+                for match in re.finditer(r'["\[`][^"\]`]+["\]`]\.["\[`]([^"\]`]+)["\]`]', expr_str):
                     refs.add(match.group(1).lower())
+                # Match qualified identifiers (unquoted): s.Col - keep only column part
+                for match in re.finditer(r'\b[a-z_][a-z0-9_]*\.([A-Za-z_][A-Za-z0-9_]*)\b', expr_str, re.IGNORECASE):
+                    col = match.group(1).lower()
+                    if col != 's':  # Skip table alias
+                        refs.add(col)
                 # Match quoted identifiers: "col", [col], `col`
                 for match in re.finditer(r'["\[`]([^"\]`]+)["\]`]', expr_str):
-                    refs.add(match.group(1).lower())
+                    col = match.group(1).lower()
+                    if col != 's':  # Skip table alias
+                        refs.add(col)
                 # Also match parenthesized bare identifiers: (col)
                 for match in re.finditer(r'\(([A-Za-z_][A-Za-z0-9_]*)\)', expr_str):
-                    refs.add(match.group(1).lower())
-                # Never treat short table alias 's' as a base column reference
-                if 's' in refs:
-                    refs.discard('s')
+                    col = match.group(1).lower()
+                    if col != 's':  # Skip table alias
+                        refs.add(col)
                 return refs
             
             # Filter custom columns - track aliases as they're added
@@ -1237,15 +1243,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 expr_str = str(expr)
                 # Normalize SQL dialect before parsing column references
                 expr_normalized = normalize_sql_expression(expr_str, ds_type or 'duckdb')
-                import sys
-                if name in ('ClientCode', 'ClientType'):
-                    sys.stderr.write(f"[DEBUG] {name}: Original: {expr_str[:100]}\n")
-                    sys.stderr.write(f"[DEBUG] {name}: Normalized: {expr_normalized[:100]}\n")
-                    sys.stderr.flush()
                 refs = extract_refs(expr_normalized)
-                if name in ('ClientCode', 'ClientType'):
-                    sys.stderr.write(f"[DEBUG] {name}: Extracted refs: {refs}\n")
-                    sys.stderr.flush()
                 missing = refs - available_with_aliases
                 if missing:
                     # Use ASCII-only markers for Windows console compatibility
@@ -1621,20 +1619,31 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             # Helper to extract column references (re is imported at module level)
             def extract_refs_sg(expr_str: str) -> set[str]:
                 refs = set()
+                # Match qualified identifiers (quoted): "s"."Col" or [s].[Col] - keep only column part
+                for match in re.finditer(r'["\[`][^"\]`]+["\]`]\.["\[`]([^"\]`]+)["\]`]', expr_str):
+                    refs.add(match.group(1).lower())
+                # Match qualified identifiers (unquoted): s.Col - keep only column part
+                for match in re.finditer(r'\b[a-z_][a-z0-9_]*\.([A-Za-z_][A-Za-z0-9_]*)\b', expr_str, re.IGNORECASE):
+                    col = match.group(1).lower()
+                    if col != 's':  # Skip table alias
+                        refs.add(col)
                 # Match quoted identifiers: "col", [col], `col`
                 for match in re.finditer(r'["\[`]([^"\]`]+)["\]`]', expr_str):
-                    refs.add(match.group(1).lower())
+                    col = match.group(1).lower()
+                    if col != 's':  # Skip table alias
+                        refs.add(col)
                 # Also match parenthesized bare identifiers: (col)
                 for match in re.finditer(r'\(([A-Za-z_][A-Za-z0-9_]*)\)', expr_str):
-                    refs.add(match.group(1).lower())
+                    col = match.group(1).lower()
+                    if col != 's':  # Skip table alias
+                        refs.add(col)
                 return refs
             
             # Filter custom columns to match available columns
             __custom_cols_sqlglot = []
-            # For DuckDB synced tables, skip strict validation since custom columns
-            # are defined on the source datasource but queried on the synced copy
-            skip_validation_for_duckdb = (ds_type == 'duckdb' and ds_transforms and ds_transforms.get('customColumns'))
-            if available_cols and not skip_validation_for_duckdb:
+            # Always validate custom columns if we have probed columns - even for DuckDB
+            # This prevents including columns that reference non-existent base columns
+            if available_cols:
                 available_cols_lower = {c.lower() for c in available_cols}
                 # Track available columns including aliases as we add them
                 available_with_aliases_sg = available_cols_lower.copy()
@@ -1647,7 +1656,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                         missing = refs - available_with_aliases_sg
                         print(f"[SQLGlot] Column '{cc['name']}': expr='{expr_str[:60]}', refs={refs}, missing={missing}")
                         if missing:
-                            print(f"[SQLGlot] ✗ Skipping custom column '{cc['name']}': references missing columns {missing}")
+                            print(f"[SQLGlot] SKIP custom column '{cc['name']}': references missing columns {missing}")
                             continue
                         
                         # Check if this column references any custom column aliases (not just base columns)
@@ -1680,11 +1689,8 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                                 continue
                     __transforms_eff_sqlglot.append(t)
             else:
-                # Probe failed OR DuckDB synced table - apply leaf/derived separation without column checking
-                if skip_validation_for_duckdb:
-                    print(f"[SQLGlot] Skipping validation for DuckDB synced table - including all custom columns")
-                else:
-                    print(f"[SQLGlot] Probe failed - filtering without base column validation")
+                # Probe failed - apply leaf/derived separation without column checking
+                print(f"[SQLGlot] Probe failed - including all custom columns without base column validation")
                 available_with_aliases_sg = set()
                 custom_cols_leaf_sg = []
                 
@@ -3121,13 +3127,13 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         
         # DuckDB
         if "duckdb" in dialect.lower():
-            if kind_l == 'year': return f"strftime({q}, '%Y')"
-            if kind_l == 'quarter': return f"concat(strftime({q}, '%Y'), '-Q', CAST(EXTRACT(QUARTER FROM {q}) AS INTEGER))"
-            if kind_l == 'month': return f"strftime({q}, '%Y-%m')"
+            if kind_l == 'year': return f"EXTRACT(YEAR FROM {q})"  # Return integer, not string
+            if kind_l == 'quarter': return f"EXTRACT(QUARTER FROM {q})"  # Return integer, not string
+            if kind_l == 'month': return f"EXTRACT(MONTH FROM {q})"  # Return integer, not string
             if kind_l == 'month name': return f"strftime({q}, '%B')"
             if kind_l == 'month short': return f"strftime({q}, '%b')"
-            if kind_l == 'week': return f"concat(strftime({q}, '%Y'), '-W', substr('00' || strftime({q}, '%W'), -2))"
-            if kind_l == 'day': return f"strftime({q}, '%Y-%m-%d')"
+            if kind_l == 'week': return f"EXTRACT(WEEK FROM {q})"  # Return integer, not string
+            if kind_l == 'day': return f"EXTRACT(DAY FROM {q})"  # Return integer, not string
             if kind_l == 'day name': return f"strftime({q}, '%A')"
             if kind_l == 'day short': return f"strftime({q}, '%a')"
         
@@ -3145,13 +3151,13 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         
         # MSSQL
         elif "mssql" in dialect.lower() or "sqlserver" in dialect.lower():
-            if kind_l == 'year': return f"CAST(YEAR({q}) AS varchar(10))"
-            if kind_l == 'quarter': return f"CAST(YEAR({q}) AS varchar(4)) + '-Q' + CAST(DATEPART(QUARTER, {q}) AS varchar(1))"
-            if kind_l == 'month': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-', RIGHT('0' + CAST(MONTH({q}) AS varchar(2)), 2))"
+            if kind_l == 'year': return f"YEAR({q})"  # Return integer, not string
+            if kind_l == 'quarter': return f"DATEPART(QUARTER, {q})"  # Return integer, not string
+            if kind_l == 'month': return f"MONTH({q})"  # Return integer, not string
             if kind_l == 'month name': return f"DATENAME(month, {q})"
             if kind_l == 'month short': return f"LEFT(DATENAME(month, {q}), 3)"
-            if kind_l == 'week': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-W', RIGHT('0' + CAST(DATEPART(ISO_WEEK, {q}) AS varchar(2)), 2))"
-            if kind_l == 'day': return f"CONCAT(CAST(YEAR({q}) AS varchar(4)), '-', RIGHT('0'+CAST(MONTH({q}) AS varchar(2)),2), '-', RIGHT('0'+CAST(DAY({q}) AS varchar(2)),2))"
+            if kind_l == 'week': return f"DATEPART(ISO_WEEK, {q})"  # Return integer, not string
+            if kind_l == 'day': return f"DAY({q})"  # Return integer, not string
             if kind_l == 'day name': return f"DATENAME(weekday, {q})"
             if kind_l == 'day short': return f"LEFT(DATENAME(weekday, {q}), 3)"
         
@@ -4898,7 +4904,7 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                 source=effective_source,
                 field=str(payload.field),
                 where=where_resolved,
-                limit=1000,  # Default limit for distinct values
+                limit=None,  # No limit - get all distinct values
                 expr_map=expr_map if not base_from_sql else {},  # No resolution needed if subquery
                 ds_type=ds_type,
             )

@@ -1199,6 +1199,9 @@ export default function ChartCard({
             let offset = Number(querySpec.offset ?? 0)
             while (true) {
               const res = await QueryApi.querySpec({ spec: { ...rawSpec, limit: pageSize, offset }, datasourceId, limit: pageSize, offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+              if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production' && offset === 0) {
+                try { console.debug('[ChartCard] [RAW BACKEND RESPONSE] client-path', { columns: res?.columns, rowCount: res?.rows?.length, firstRow: res?.rows?.[0], secondRow: res?.rows?.[1] }) } catch {}
+              }
               const cols = (res?.columns || []) as string[]
               const pageRows = ((res?.rows || []) as any[]).map((arr) => {
                 const obj: Row = {}
@@ -1858,11 +1861,18 @@ export default function ChartCard({
           const legendFilterArr = legendField ? (mergedWhere as any)?.[legendField] as any[] | undefined : undefined
           if (legendField && Array.isArray(legendFilterArr) && legendFilterArr.length > 0) {
             const allowed = new Set<string>(legendFilterArr.map((v) => String(v)))
-            categories = categories.filter((c) => allowed.has(String(c)))
+            // Handle composite legends like "2024 - OrderUID" when filter has just "2024"
+            const extractBase = (cat: string): string => {
+              const s = String(cat)
+              if (s.includes(' - ')) return s.split(' - ')[0]
+              if (s.includes(' • ')) return s.split(' • ')[0]
+              return s
+            }
+            categories = categories.filter((c) => allowed.has(String(c)) || allowed.has(extractBase(String(c))))
             // Strip disallowed legend keys from each row
             Array.from(map.values()).forEach((obj) => {
               Object.keys(obj).forEach((k) => {
-                if (k !== 'x' && !allowed.has(String(k))) delete obj[k]
+                if (k !== 'x' && !allowed.has(String(k)) && !allowed.has(extractBase(String(k)))) delete obj[k]
               })
             })
             if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
@@ -1878,6 +1888,9 @@ export default function ChartCard({
             } catch {}
           }
           return { columns: ['x', ...categories], rows: Array.from(map.values()), categories } as any
+        }
+        if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+          try { console.debug('[ChartCard] [RAW BACKEND RESPONSE] server-agg-path', { columns: res?.columns, rowCount: res?.rows?.length, firstRow: res?.rows?.[0], secondRow: res?.rows?.[1], hasCategories: !!(res as any)?.categories }) } catch {}
         }
         return res
       }
@@ -1901,8 +1914,24 @@ export default function ChartCard({
   // Transform rows -> Tremor format: first column as index key 'x', second column as category 'value'
   type XType = string | number | Date
   const isMulti = (Array.isArray(series) && (series || []).length > 0 && !!(querySpec as any)?.source) || hasLegend
-  // Infer categories robustly when missing
+  // Infer categories robustly when missing - MUST use raw q.data before any transformation
   const categories: string[] = useMemo(() => {
+    // CRITICAL: Extract from RAW backend response columns/rows, not transformed data
+    const rawCols = ((q.data as any)?.columns as string[] | undefined) || []
+    const rawRows = ((q.data as any)?.rows as any[] | undefined) || []
+    
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      try {
+        console.debug('[ChartCard] [categories.useMemo] START - RAW DATA', {
+          hasCategories: !!((q.data as any)?.categories),
+          categoriesValue: (q.data as any)?.categories,
+          isMulti,
+          rawCols,
+          rawRowsCount: rawRows.length,
+          firstRawRow: rawRows[0]
+        })
+      } catch {}
+    }
     const got = (q.data as any)?.categories as string[] | undefined
     if (Array.isArray(got) && got.length > 0) {
       if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
@@ -1939,13 +1968,35 @@ export default function ChartCard({
       return applyTopNToCats(got)
     }
     if (isMulti) {
-      const cols = ((q.data as any)?.columns as string[] | undefined) || []
-      const rows = ((q.data as any)?.rows as any[] | undefined) || []
+      // Use RAW columns/rows from backend response, not transformed data
+      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        try { console.debug('[ChartCard] [categories.useMemo] isMulti branch', { rawCols, rawRowsCount: rawRows.length }) } catch {}
+      }
+      const legendIdx0 = rawCols.indexOf('legend')
+      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        try { console.debug('[ChartCard] [categories.useMemo] legendIdx0 check', { legendIdx0, rawCols, hasRows: rawRows.length > 0 }) } catch {}
+      }
+      if (legendIdx0 !== -1 && rawRows.length > 0) {
+        const s = new Set<string>()
+        rawRows.forEach((r: any) => { const v = Array.isArray(r) ? r[legendIdx0] : r?.legend; if (v != null) s.add(String(v)) })
+        const arr0 = Array.from(s)
+        if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+          try { console.debug('[ChartCard] [categories.useMemo] extracted from legendIdx0', { arr0, returning: arr0.length > 0 }) } catch {}
+        }
+        if (arr0.length > 0) return arr0
+      }
+      // Heuristic: when columns metadata is absent but rows look like [x, legend, value]
+      if ((rawCols.length === 0) && rawRows.length > 0 && Array.isArray(rawRows[0]) && (rawRows[0] as any[]).length >= 3) {
+        const setH = new Set<string>()
+        rawRows.forEach((r: any) => { try { const v = Array.isArray(r) ? r[1] : r?.legend; if (v != null) setH.add(String(v)) } catch {} })
+        const arrH = Array.from(setH)
+        if (arrH.length > 0) return arrH
+      }
       // If server sent [x,legend,value] arrays
-      const legendIdx = cols.indexOf('legend')
+      const legendIdx = rawCols.indexOf('legend')
       if (legendIdx !== -1) {
         const set = new Set<string>()
-        rows.forEach((r) => { const v = r?.[legendIdx]; if (v != null) set.add(String(v)) })
+        rawRows.forEach((r) => { const v = r?.[legendIdx]; if (v != null) set.add(String(v)) })
         const arr = Array.from(set)
         if (set.size > 0) {
           if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
@@ -1958,9 +2009,9 @@ export default function ChartCard({
               const n = Number(dd?.topN?.n || 0)
               if (!Array.isArray(cats) || cats.length === 0 || n <= 0) return cats
               const ascTop = String(dd.topN.direction || 'desc') === 'asc'
-              const valueIdx = cols.indexOf('value')
+              const valueIdx = rawCols.indexOf('value')
               const totals: Record<string, number> = {}
-              if (valueIdx !== -1) rows.forEach((r: any[]) => { const lg = String(r?.[legendIdx]); const v = Number(r?.[valueIdx] ?? 0); if (Number.isFinite(v)) totals[lg] = (totals[lg] || 0) + v })
+              if (valueIdx !== -1) rawRows.forEach((r: any[]) => { const lg = String(r?.[legendIdx]); const v = Number(r?.[valueIdx] ?? 0); if (Number.isFinite(v)) totals[lg] = (totals[lg] || 0) + v })
               const uniqueCats = Array.from(new Set(cats))
               uniqueCats.sort((a, b) => { const av = totals[a] || 0; const bv = totals[b] || 0; return ascTop ? (av - bv) : (bv - av) })
               return uniqueCats.slice(0, Math.max(1, n))
@@ -1970,8 +2021,8 @@ export default function ChartCard({
         }
       }
       // If rows are objects { x, cat1, cat2, ... }
-      if (rows.length > 0 && rows.every((r) => r && typeof r === 'object' && !Array.isArray(r))) {
-        const keys = Object.keys(rows[0] as any).filter((k) => k !== 'x' && k !== 'value')
+      if (rawRows.length > 0 && rawRows.every((r) => r && typeof r === 'object' && !Array.isArray(r))) {
+        const keys = Object.keys(rawRows[0] as any).filter((k) => k !== 'x' && k !== 'value')
         if (keys.length > 0) {
           if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
             try { console.debug('[ChartCard] [FiltersDebug] categories.source', { source: 'object-keys', cats: keys }) } catch {}
@@ -1983,7 +2034,7 @@ export default function ChartCard({
               if (!Array.isArray(cats) || cats.length === 0 || n <= 0) return cats
               const ascTop = String(dd.topN.direction || 'desc') === 'asc'
               const totals: Record<string, number> = {}
-              rows.forEach((obj: any) => { cats.forEach((c) => { const v = Number(obj?.[c] ?? 0); if (Number.isFinite(v)) totals[c] = (totals[c] || 0) + v }) })
+              rawRows.forEach((obj: any) => { cats.forEach((c) => { const v = Number(obj?.[c] ?? 0); if (Number.isFinite(v)) totals[c] = (totals[c] || 0) + v }) })
               const uniqueCats = Array.from(new Set(cats))
               uniqueCats.sort((a, b) => { const av = totals[a] || 0; const bv = totals[b] || 0; return ascTop ? (av - bv) : (bv - av) })
               return uniqueCats.slice(0, Math.max(1, n))
@@ -1992,8 +2043,22 @@ export default function ChartCard({
           return applyTopNToCats(keys)
         }
       }
-      // Fallback to declared series
-      const fallback = (series || []).map((s, i) => (s?.label || s?.y || s?.measure || `series_${i + 1}`) as string)
+      // Prefer legend values from rows if present, otherwise fallback to declared series
+      const fromRows = (() => {
+        try {
+          const li = rawCols.indexOf('legend')
+          if (li !== -1 && rawRows.length > 0) {
+            const s = new Set<string>()
+            rawRows.forEach((r: any) => { const v = Array.isArray(r) ? r[li] : r?.legend; if (v != null) s.add(String(v)) })
+            const arr2 = Array.from(s)
+            if (arr2.length > 0) return arr2
+          }
+        } catch {}
+        return [] as string[]
+      })()
+      const fallback = fromRows.length > 0
+        ? fromRows
+        : (series || []).map((s, i) => (s?.label || s?.y || s?.measure || `series_${i + 1}`) as string)
       if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
         try { console.debug('[ChartCard] [FiltersDebug] categories.source', { source: 'series-fallback', cats: fallback }) } catch {}
       }
@@ -3332,7 +3397,19 @@ export default function ChartCard({
       const wantValueGrad = ((options as any)?.colorMode === 'valueGradient')
       const baseKeyForVG = ((options as any)?.colorBaseKey || chartColorsTokens[0] || 'blue')
       const baseHexVG = tremorNameToHex(baseKeyForVG as any)
-      const rowTotals = (displayData as any[]).map((d) => (categories || []).reduce((s, c) => s + Number((d as any)?.[c] ?? 0), 0))
+      const seriesNames: string[] = (() => {
+        try {
+          const first = (displayData as any[])[0]
+          if (first && typeof first === 'object' && !Array.isArray(first)) {
+            const keys = Object.keys(first).filter((k) => k !== 'x' && k !== 'value')
+            if (keys.length > 0) return keys
+          }
+          const cats = (categories || []) as string[]
+          if (Array.isArray(cats) && cats.length > 0) return cats
+        } catch {}
+        return (categories || []) as string[]
+      })()
+      const rowTotals = (displayData as any[]).map((d) => (seriesNames || []).reduce((s, c) => s + Number((d as any)?.[c] ?? 0), 0))
       const seriesMax: Record<string, number> = {}
       // Map per-series metadata by label for overrides (style, stack, secondary axis)
       const metaByName = new Map<string, any>()
@@ -3340,14 +3417,14 @@ export default function ChartCard({
         const label = s?.label || s?.y || s?.measure || `series_${i + 1}`
         metaByName.set(String(label), s)
       })
-      ;(categories || []).forEach((c) => { seriesMax[c] = (displayData as any[]).reduce((m, d) => Math.max(m, Number((d as any)?.[c] ?? 0)), 0) })
+      ;(seriesNames || []).forEach((c) => { seriesMax[c] = (displayData as any[]).reduce((m, d) => Math.max(m, Number((d as any)?.[c] ?? 0)), 0) })
       // Color derivations per base series for virtual categories
       const vmetaColor = (((q?.data as any)?.virtualMeta) || {}) as Record<string, { baseSeriesLabel: string }>
       const groupOrders: Record<string, { pos: number; count: number; base: string; baseFirstIdx: number }> = {}
       ;(() => {
         try {
           const tmp = new Map<string, string[]>()
-          ;(categories || []).forEach((cc: any) => {
+          ;(seriesNames || []).forEach((cc: any) => {
             const name = String(cc)
             const base = vmetaColor[name]?.baseSeriesLabel || extractBaseLabel(name)
             const arr = tmp.get(base) || []
@@ -3355,7 +3432,7 @@ export default function ChartCard({
             tmp.set(base, arr)
           })
           tmp.forEach((arr, base) => {
-            const firstIdx = Math.max(0, (categories as string[]).indexOf(arr[0] || ''))
+            const firstIdx = Math.max(0, (seriesNames as string[]).indexOf(arr[0] || ''))
             arr.forEach((name, i) => { groupOrders[name] = { pos: i, count: arr.length, base, baseFirstIdx: firstIdx } })
           })
         } catch {}
@@ -3363,7 +3440,7 @@ export default function ChartCard({
       if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
         try { console.log('[ChartCard] ===  CHART RENDER START ===', { type, categories, displayDataLen: (displayData as any[]).length, xLabelsLen: xLabels.length }) } catch {}
       }
-      const seriesList = (categories || []).map((c, idx) => {
+      const seriesList = (seriesNames || []).map((c, idx) => {
         const nameC = String(c)
         const baseHex = wantValueGrad ? baseHexVG : tremorNameToHex(chartColorsTokens[idx % chartColorsTokens.length])
         const rounded = options?.barRounded ? (type === 'bar' ? [0, 6, 6, 0] : [6, 6, 0, 0]) : 0
@@ -4409,9 +4486,11 @@ export default function ChartCard({
               const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
               const xFieldStr = String(((querySpec as any)?.x || '') as any)
               const isDerivedDatePart = /\s+\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/.test(xFieldStr)
-              // Use time-series axis only if groupBy is set AND x-field is not a derived date part
-              // Derived date parts should use category axis to show discrete values (e.g., "2015", "2016")
-              const isTimeSeries = (gb && gb !== 'none') && !isDerivedDatePart
+              // Detect 12-month seasonality (legend like "OrderDate (Year)", groupBy=month, x=OrderDate)
+              const legendRawAxis = (() => { const lg: any = (querySpec as any)?.legend; if (Array.isArray(lg) && lg.length > 0) return String(lg[0] ?? ''); return (typeof lg === 'string') ? lg : '' })()
+              const seasonalityModeAxis = (() => { try { const m = legendRawAxis.match(/^(.*)\s*\(Year\)$/i); if (m) { const base = m[1].trim(); return (gb === 'month' && base === xFieldStr) } } catch {} return false })()
+              // Use time-series axis only if groupBy is set, x-field is not a derived part, and NOT in seasonality mode
+              const isTimeSeries = (gb && gb !== 'none') && !isDerivedDatePart && !seasonalityModeAxis
               return isTimeSeries ? { type: 'time', axisLabel: { rotate: xRotate, fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => { try { return fmtXLabel(val) } catch { return String(val ?? '') } } }, ...(buildAxisGrid('x') as any) } : { type: 'category', data: xLabelsFmt, axisLabel: { rotate: xRotate, interval: (xInterval as any), fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) } })()),
         yAxis: (type === 'bar')
           ? { type: 'category', data: xLabelsFmt, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGrid('y') as any) }
@@ -6412,6 +6491,27 @@ export default function ChartCard({
         }
       }
       const displayData2 = Array.isArray(displayData) ? (displayData as any[]).map((r) => ({ ...r, x: formatX(r?.x) })) : displayData
+      // Safety: filter categories and sanitize row values to never pass NaN to Tremor/Recharts
+      const catsSafe: string[] = Array.isArray(categories)
+        ? (categories as string[]).map((c) => String(c ?? '')).filter((s) => s.trim() !== '')
+        : ([] as string[])
+      const cleanData: any[] = Array.isArray(displayData2)
+        ? (displayData2 as any[]).map((row) => {
+            const out: any = { ...row }
+            catsSafe.forEach((c) => {
+              const v: any = out[c]
+              if (v === null || v === undefined || v === '') { out[c] = 0; return }
+              const n = Number(v)
+              out[c] = Number.isFinite(n) ? n : 0
+            })
+            return out
+          })
+        : ([] as any[])
+      const rowCats = (() => { try { const r = cleanData?.[0] || {}; return Object.keys(r).filter((k)=>k!=='x' && k!=='value') } catch { return [] as string[] } })()
+      const inter = new Set<string>(rowCats.filter((k)=>catsSafe.includes(k)))
+      const catsEff = (inter.size === 0 && rowCats.length > 0) ? rowCats : catsSafe
+      const yMinSafe = (() => { const n = Number((options as any)?.yMin); return Number.isFinite(n) ? n : undefined })()
+      const yMaxSafe = (() => { const n = Number((options as any)?.yMax); return Number.isFinite(n) ? n : undefined })()
       // Compute y-axis label width for horizontal bars to avoid clipping
       const yFontSize = Math.max(8, Number(((options as any)?.yAxisFontSize ?? 11)))
       const labelStrings = Array.isArray(displayData2) ? (displayData2 as any[]).map((r) => String(r?.x ?? '')) : []
@@ -6423,15 +6523,15 @@ export default function ChartCard({
         <div className="absolute inset-0 chart-axis-scope chart-grid-scope" style={{ ['--x-axis-color' as any]: ((options as any)?.xAxisFontColor || axisTextColor), ['--y-axis-color' as any]: ((options as any)?.yAxisFontColor || axisTextColor), ['--x-axis-weight' as any]: ((options as any)?.xAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--y-axis-weight' as any]: ((options as any)?.yAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--x-axis-size' as any]: `${(options as any)?.xAxisFontSize ?? 11}px`, ['--y-axis-size' as any]: `${(options as any)?.yAxisFontSize ?? 11}px`, ...(buildTremorGridStyle() as any) } as any}>
           <BarChart
           key={chartInstanceKey}
-          data={displayData2}
+          data={cleanData}
           index="x"
-          categories={categories}
+          categories={catsEff}
           colors={chartColorsTokens}
           showLegend={chartLegend}
           yAxisWidth={yAxisWidthPx}
           valueFormatter={(v: number) => valueFormatter(v)}
-          minValue={options?.yMin}
-          maxValue={options?.yMax}
+          minValue={yMinSafe}
+          maxValue={yMaxSafe}
           className="h-full text-[11px]"
           {...(type === 'bar' ? ({ layout: 'vertical' } as any) : {})}
           customTooltip={options?.richTooltip ? renderTooltip : undefined}
@@ -6484,13 +6584,31 @@ export default function ChartCard({
         }
       }
       const displayData2 = Array.isArray(displayData) ? (displayData as any[]).map((r) => ({ ...r, x: formatX(r?.x) })) : displayData
+      // Safety: sanitize categories and data (avoid NaN/null in Tremor)
+      const catsSafe: string[] = Array.isArray(categories)
+        ? (categories as string[]).map((c) => String(c ?? '')).filter((s) => s.trim() !== '')
+        : ([] as string[])
+      const cleanData: any[] = Array.isArray(displayData2)
+        ? (displayData2 as any[]).map((row) => {
+            const out: any = { ...row }
+            catsSafe.forEach((c) => {
+              const v: any = out[c]
+              if (v === null || v === undefined || v === '') { out[c] = 0; return }
+              const n = Number(v)
+              out[c] = Number.isFinite(n) ? n : 0
+            })
+            return out
+          })
+        : ([] as any[])
+      const yMinSafe = (() => { const n = Number((options as any)?.yMin); return Number.isFinite(n) ? n : undefined })()
+      const yMaxSafe = (() => { const n = Number((options as any)?.yMax); return Number.isFinite(n) ? n : undefined })()
       // Calculate Y-axis width based on maximum Y value to prevent label cutoff
       const yAxisWidthArea = (() => {
         try {
           const allYValues: number[] = []
-          if (Array.isArray(displayData2) && Array.isArray(categories)) {
-            displayData2.forEach((row: any) => {
-              categories.forEach((cat: string) => {
+          if (Array.isArray(cleanData) && Array.isArray(catsSafe)) {
+            cleanData.forEach((row: any) => {
+              catsSafe.forEach((cat: string) => {
                 const val = Number(row?.[cat] ?? 0)
                 if (!isNaN(val)) allYValues.push(Math.abs(val))
               })
@@ -6509,16 +6627,16 @@ export default function ChartCard({
         <div className="absolute inset-0 chart-axis-scope chart-grid-scope" style={{ ['--x-axis-color' as any]: ((options as any)?.xAxisFontColor || axisTextColor), ['--y-axis-color' as any]: ((options as any)?.yAxisFontColor || axisTextColor), ['--x-axis-weight' as any]: ((options as any)?.xAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--y-axis-weight' as any]: ((options as any)?.yAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--x-axis-size' as any]: `${(options as any)?.xAxisFontSize ?? 11}px`, ['--y-axis-size' as any]: `${(options as any)?.yAxisFontSize ?? 11}px`, ...(buildTremorGridStyle() as any) } as any}>
           <AreaChart
           key={chartInstanceKey}
-          data={displayData2}
+          data={cleanData}
           index="x"
-          categories={categories}
+          categories={catsSafe}
           colors={chartColorsTokens}
           showLegend={chartLegend}
           yAxisWidth={yAxisWidthArea}
           curveType="monotone"
           valueFormatter={(v: number) => valueFormatter(v)}
-          minValue={options?.yMin}
-          maxValue={options?.yMax}
+          minValue={yMinSafe}
+          maxValue={yMaxSafe}
           className="h-full text-[11px]"
           customTooltip={options?.richTooltip ? renderTooltip : undefined}
           startEndOnly={denseX}
@@ -6739,22 +6857,50 @@ export default function ChartCard({
     })()
     return (
       <div className="absolute inset-0 chart-axis-scope chart-grid-scope" style={{ ['--x-axis-color' as any]: ((options as any)?.xAxisFontColor || axisTextColor), ['--y-axis-color' as any]: ((options as any)?.yAxisFontColor || axisTextColor), ['--x-axis-weight' as any]: ((options as any)?.xAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--y-axis-weight' as any]: ((options as any)?.yAxisFontWeight === 'bold' ? 'bold' : 'normal'), ['--x-axis-size' as any]: `${(options as any)?.xAxisFontSize ?? 11}px`, ['--y-axis-size' as any]: `${(options as any)?.yAxisFontSize ?? 11}px`, ...(buildTremorGridStyle() as any) } as any}>
-      <LineChart
-        key={chartInstanceKey}
-        data={displayData2}
-        index="x"
-        categories={categories}
-        colors={chartColorsTokens}
-        showLegend={chartLegend}
-        yAxisWidth={yAxisWidthLine}
-        curveType="monotone"
-        valueFormatter={(v: number) => valueFormatter(v)}
-        minValue={options?.yMin}
-        maxValue={options?.yMax}
-        className="h-full text-[11px]"
-        customTooltip={options?.richTooltip ? renderTooltip : undefined}
-        startEndOnly={denseX}
-        />
+      {(() => {
+        // Sanitize categories and data for Tremor LineChart
+        const catsSafe: string[] = Array.isArray(categories)
+          ? (categories as string[]).map((c) => String(c ?? '')).filter((s) => s.trim() !== '')
+          : ([] as string[])
+        const yMinSafe = (() => { const n = Number((options as any)?.yMin); return Number.isFinite(n) ? n : undefined })()
+        const yMaxSafe = (() => { const n = Number((options as any)?.yMax); return Number.isFinite(n) ? n : undefined })()
+        const displayData2 = Array.isArray(displayData)
+          ? (displayData as any[]).map((r) => ({ ...r, x: (r?.x ?? r?.x === 0) ? r.x : r?.x }))
+          : ([] as any[])
+        const cleanData = Array.isArray(displayData2)
+          ? (displayData2 as any[]).map((row) => {
+              const out: any = { ...row }
+              catsSafe.forEach((c) => {
+                const v: any = out[c]
+                if (v === null || v === undefined || v === '') { out[c] = 0; return }
+                const n = Number(v)
+                out[c] = Number.isFinite(n) ? n : 0
+              })
+              return out
+            })
+          : ([] as any[])
+        const rowCats = (() => { try { const r = cleanData?.[0] || {}; return Object.keys(r).filter((k)=>k!=='x' && k!=='value') } catch { return [] as string[] } })()
+        const inter = new Set<string>(rowCats.filter((k)=>catsSafe.includes(k)))
+        const catsEff = (inter.size === 0 && rowCats.length > 0) ? rowCats : catsSafe
+        return (
+          <LineChart
+            key={chartInstanceKey}
+            data={cleanData}
+            index="x"
+            categories={catsEff}
+            colors={chartColorsTokens}
+            showLegend={chartLegend}
+            yAxisWidth={yAxisWidthLine}
+            curveType="monotone"
+            valueFormatter={(v: number) => valueFormatter(v)}
+            minValue={yMinSafe}
+            maxValue={yMaxSafe}
+            className="h-full text-[11px]"
+            customTooltip={options?.richTooltip ? renderTooltip : undefined}
+            startEndOnly={denseX}
+          />
+        )
+      })()}
       </div>
     )
   })()
