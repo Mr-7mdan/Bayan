@@ -308,6 +308,52 @@ export default function DatasourceDetailPage() {
         </div>
       </Card>
 
+      {/* Running/Stuck Sync Tasks Panel */}
+      {syncSummary.running > 0 && (
+        <Card className="p-3">
+          <div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-2">
+            <h3 className="text-sm font-semibold">Running Sync Tasks</h3>
+            <button
+              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-700 dark:text-gray-200 px-2 py-1 text-xs hover:bg-[hsl(var(--muted))]"
+              onClick={async () => {
+                if (!confirm(`Reset ${syncSummary.running} stuck sync task(s)? This will mark them as no longer in progress.`)) return
+                try {
+                  const result = await Api.resetStuckSyncs(id, user?.id)
+                  show('Success', `Reset ${result.reset_count} stuck sync task(s)`)
+                  // Refresh tasks
+                  const updated = await Api.getSyncStatus(id, user?.id)
+                  setTasks(updated)
+                } catch (err: any) {
+                  show('Error', err?.message || 'Failed to reset stuck syncs')
+                }
+              }}
+            >
+              Reset All Stuck Syncs
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {tasks?.filter(t => t.inProgress).map(t => (
+              <div key={t.id} className="flex items-center justify-between p-2 rounded-md border bg-background">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{t.destTableName || 'Unknown'}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Mode: {t.mode} • Last run: {t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : '—'}
+                  </div>
+                  {t.progressPhase && (
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Phase: {t.progressPhase} {t.progressCurrent != null && t.progressTotal != null && `(${t.progressCurrent}/${t.progressTotal})`}
+                    </div>
+                  )}
+                </div>
+                <div className="ml-3">
+                  <Badge color="amber">In Progress</Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Local Stats Panel */}
       <Card className="p-3">
         <div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-2">

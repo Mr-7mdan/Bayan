@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Api, DatasourceOut, IntrospectResponse, QueryApi } from '@/lib/api'
 import { colorKeyToToken, tokenToColorKey, chartColors, type AvailableChartColorsKeys } from '@/lib/chartUtils'
-import { PivotBuilder, type PivotAssignments } from '@/components/builder/PivotBuilder'
+import { PivotBuilder, type PivotAssignments, type PivotValue } from '@/components/builder/PivotBuilder'
 import type { WidgetConfig, CompositionComponent } from '@/types/widgets'
 import { TabGroup, TabList, Tab, TabPanels, TabPanel } from '@tremor/react'
 import DatePickerField from '@/components/shared/DatePickerField'
@@ -2105,6 +2105,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           field: s.y as string,
           agg: (s.agg as any) || 'count',
           label: s.label,
+          format: s.format,
           colorToken: s.colorToken as 1|2|3|4|5 | undefined,
           stackId: s.stackId,
           style: s.style,
@@ -2112,7 +2113,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           conditionalRules: s.conditionalRules,
         }))
       : (ql.measure || ql.y)
-        ? ([{ field: (ql.measure || ql.y) as string, agg: (ql.agg as any) || 'count' }])
+        ? ([{ field: (ql.measure || ql.y) as string, agg: (ql.agg as any) || 'count', format: ql.seriesFormat }])
         : (((selected as any).series || []).filter((s: any) => !!s.y).map((s: any) => ({ field: s.y, agg: (s.agg as any) || 'count', label: s.name })))
     const legend = (() => {
       const spec: any = local?.querySpec || {}
@@ -2144,6 +2145,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           field: s.y as string,
           agg: (s.agg as any) || 'count',
           label: s.label,
+          format: s.format,
           colorToken: s.colorToken as 1|2|3|4|5 | undefined,
           stackId: s.stackId,
           style: s.style,
@@ -2151,7 +2153,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           conditionalRules: s.conditionalRules,
         }))
       : (q.measure || q.y)
-        ? ([{ field: (q.measure || q.y) as string, agg: (q.agg as any) || 'count' }])
+        ? ([{ field: (q.measure || q.y) as string, agg: (q.agg as any) || 'count', format: q.seriesFormat }])
         : (((selected as any).series || []).filter((s: any) => !!s.y).map((s: any) => ({ field: s.y, agg: (s.agg as any) || 'count', label: s.name })))
     const nextP: PivotAssignments = {
       x: q.x,
@@ -2229,9 +2231,9 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
     const nextSeriesQs = (p.values || []).map((v) => {
       if (v.measureId) {
         const m = (local?.measures || []).find(mm => mm.id === v.measureId)
-        return { label: v.label || m?.name, measure: m?.formula, colorToken: v.colorToken, stackId: v.stackId, style: v.style, conditionalRules: v.conditionalRules, secondaryAxis: v.secondaryAxis }
+        return { label: v.label || m?.name, measure: m?.formula, format: v.format, colorToken: v.colorToken, stackId: v.stackId, style: v.style, conditionalRules: v.conditionalRules, secondaryAxis: v.secondaryAxis }
       }
-      return { label: v.label, y: v.field, agg: (v.agg || 'count') as any, colorToken: v.colorToken, stackId: v.stackId, style: v.style, conditionalRules: v.conditionalRules, secondaryAxis: v.secondaryAxis }
+      return { label: v.label, y: v.field, agg: (v.agg || 'count') as any, format: v.format, colorToken: v.colorToken, stackId: v.stackId, style: v.style, conditionalRules: v.conditionalRules, secondaryAxis: v.secondaryAxis }
     })
     const nextSeriesTop = (p.values || []).map((v, i) => ({ id: `s${i + 1}`, x: p.x || '', y: v.field || '', agg: (v.agg || 'count') as any, secondaryAxis: v.secondaryAxis }))
 
@@ -2247,9 +2249,16 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
     }
     baseSpec.where = curWhere
 
-    // For KPI widgets, keep top-level aggregator (y/agg/measure) instead of multi-series
+    // For KPI widgets: use multi-series if > 1 value, else keep top-level aggregator
     if ((local?.type || '').toLowerCase() === 'kpi') {
-      if ((p.values?.length || 0) > 0) {
+      if ((p.values?.length || 0) > 1) {
+        // Multiple values: use series format
+        baseSpec.series = nextSeriesQs as any
+        delete baseSpec.y
+        delete baseSpec.agg
+        delete baseSpec.measure
+      } else if ((p.values?.length || 0) === 1) {
+        // Single value: use top-level y/agg/measure but preserve format
         const v0 = p.values[0]
         if (v0?.measureId) {
           const m = (local?.measures || []).find(mm => mm.id === v0.measureId)
@@ -2261,12 +2270,20 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           baseSpec.agg = (v0.agg || 'count') as any
           delete baseSpec.measure
         }
+        // Preserve per-series format even for single series
+        if (v0?.format && v0.format !== 'none') {
+          baseSpec.seriesFormat = v0.format
+        } else {
+          delete baseSpec.seriesFormat
+        }
+        delete baseSpec.series
       } else {
+        // No values
         delete baseSpec.y
         delete baseSpec.agg
         delete baseSpec.measure
+        delete baseSpec.series
       }
-      delete baseSpec.series
     } else {
       // Charts: prefer multi-series QuerySpec so ChartCard can virtualize categories per series when legend is set
       if ((p.values?.length || 0) > 0) {
@@ -5743,12 +5760,38 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           <label className="block text-xs text-muted-foreground mb-1">Data Labels format</label>
           <select
             className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
-            value={local.options?.yAxisFormat || 'none'}
+            value={(() => {
+              // If editing a specific value series, use its format
+              if (selKind === 'value' && selField) {
+                const seriesValue = (pivot.values || []).find(v => (v.measureId || v.field) === selField)
+                return seriesValue?.format || 'none'
+              }
+              // Otherwise use global format
+              return local.options?.yAxisFormat || 'none'
+            })()}
             onChange={(e) => {
-              const opts = { ...(local.options || {}), yAxisFormat: e.target.value as any }
-              const next = { ...local, options: opts }
-              setLocal(next)
-              updateConfig(next)
+              // If editing a specific value series, update its format
+              if (selKind === 'value' && selField) {
+                const values = [...(pivot.values || [])]
+                const idx = values.findIndex(v => (v.measureId || v.field) === selField)
+                if (idx >= 0) {
+                  values[idx] = { ...values[idx], format: e.target.value as any }
+                  const nextPivot = { 
+                    x: pivot.x, 
+                    legend: pivot.legend, 
+                    values, 
+                    filters: pivot.filters 
+                  }
+                  setPivot(nextPivot)
+                  applyPivot(nextPivot)
+                }
+              } else {
+                // Otherwise update global format
+                const opts = { ...(local.options || {}), yAxisFormat: e.target.value as any }
+                const next = { ...local, options: opts }
+                setLocal(next)
+                updateConfig(next)
+              }
             }}
           >
             <option value="none">None</option>
@@ -6146,7 +6189,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                             className="text-[10px] px-2 py-0.5 rounded border hover:bg-muted"
                             onClick={() => {
                               const rules = [...(sel?.conditionalRules || []), { when: '>', value: 0, color: 'rose' } as any]
-                              const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
+                              const nextP: PivotAssignments = { ...pivot, values: pivot.values.map((v: PivotValue) => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
                               applyPivot(nextP)
                             }}
                           >Add rule</button>
@@ -6159,7 +6202,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                 value={r.when}
                                 onChange={(e) => {
                                   const rules = (sel?.conditionalRules || []).map((rr, i) => i===idx ? { ...rr, when: e.target.value as any } : rr)
-                                  const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
+                                  const nextP: PivotAssignments = { ...pivot, values: pivot.values.map((v: PivotValue) => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
                                   applyPivot(nextP)
                                 }}
                               >
@@ -6174,7 +6217,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                     const parts = e.target.value.split(',').map(v => Number(v.trim()))
                                     const val: [number, number] = [Number(parts[0]||0), Number(parts[1]||0)]
                                     const rules = (sel?.conditionalRules || []).map((rr, i) => i===idx ? { ...rr, value: val } : rr)
-                                    const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
+                                    const nextP: PivotAssignments = { ...pivot, values: pivot.values.map((v: PivotValue) => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
                                     applyPivot(nextP)
                                   }}
                                 />
@@ -6186,7 +6229,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                   onChange={(e) => {
                                     const val = Number(e.target.value)
                                     const rules = (sel?.conditionalRules || []).map((rr, i) => i===idx ? { ...rr, value: val } : rr)
-                                    const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
+                                    const nextP: PivotAssignments = { ...pivot, values: pivot.values.map((v: PivotValue) => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
                                     applyPivot(nextP)
                                   }}
                                 />
@@ -6197,7 +6240,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                 onChange={(e) => {
                                   const color = e.target.value as any
                                   const rules = (sel?.conditionalRules || []).map((rr, i) => i===idx ? { ...rr, color } : rr)
-                                  const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
+                                  const nextP: PivotAssignments = { ...pivot, values: pivot.values.map((v: PivotValue) => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
                                   applyPivot(nextP)
                                 }}
                               >
@@ -6207,7 +6250,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                 className="text-[10px] px-2 py-0.5 rounded border hover:bg-muted"
                                 onClick={() => {
                                   const rules = (sel?.conditionalRules || []).filter((_, i) => i !== idx)
-                                  const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
+                                  const nextP: PivotAssignments = { ...pivot, values: pivot.values.map((v: PivotValue) => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, conditionalRules: rules } : v) }
                                   applyPivot(nextP)
                                 }}
                               >Remove</button>

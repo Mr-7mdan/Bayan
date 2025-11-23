@@ -234,17 +234,38 @@ function AdminSchedulesInner() {
       void qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
       void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
     },
-    onError: (e: any) => show('Sync', e?.message || 'Failed to start'),
+    onError: (e: any) => {
+      const isTimeout = e?.message?.toLowerCase().includes('timeout') || e?.message?.toLowerCase().includes('timed out')
+      if (isTimeout) {
+        // Sync likely started but response timed out - start monitoring anyway
+        show('Sync Started', 'Sync is running (response timed out, but sync continues in background)')
+        if (selectedId) startMonitoring(selectedId, user?.id)
+        void qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
+        void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
+      } else {
+        show('Sync', e?.message || 'Failed to start')
+      }
+    },
   })
 
   const abortOne = useMutation({
     mutationFn: async (taskId?: string) => Api.abortSync(selectedId as string, taskId, user?.id),
-    onSuccess: () => {
-      show('Sync', 'Abort requested')
+    onSuccess: (result) => {
+      // Show detailed feedback based on what actually happened
+      const { cancel_requested, force_reset, message } = result
+      if (force_reset > 0 && cancel_requested > 0) {
+        show('Sync Abort', `Reset ${force_reset} stuck sync(s), flagged ${cancel_requested} active sync(s) for cancellation`)
+      } else if (force_reset > 0) {
+        show('Sync Abort', `Force reset ${force_reset} stuck sync(s)`)
+      } else if (cancel_requested > 0) {
+        show('Sync Abort', `Flagged ${cancel_requested} active sync(s) for cancellation`)
+      } else {
+        show('Sync Abort', message || 'No syncs to abort')
+      }
       void qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
       void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
     },
-    onError: (e: any) => show('Sync', e?.message || 'Abort failed'),
+    onError: (e: any) => show('Sync Abort', e?.message || 'Abort failed'),
   })
 
   const clearLogs = useMutation({

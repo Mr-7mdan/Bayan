@@ -620,11 +620,12 @@ export default function KpiCard({
     return () => { ignore = true }
   }, [deltaEnabled, queryMode, querySpec, JSON.stringify(effectiveWhere), datasourceId])
 
-  // Value formatting (expanded)
-  const formatNumber = (n: number | string | undefined) => {
+  // Value formatting (expanded) - can take optional format override for multi-series
+  const formatNumber = (n: number | string | undefined, formatOverride?: string) => {
     if (n == null) return '-'
     const num = Number(n) || 0
-    const fmt = options?.yAxisFormat || 'none'
+    // Use override first, then per-series format, then global format
+    const fmt = formatOverride || (querySpec as any)?.seriesFormat || options?.yAxisFormat || 'none'
     switch (fmt) {
       // Back-compat aliases
       case 'short':
@@ -690,6 +691,21 @@ export default function KpiCard({
         return num.toLocaleString()
     }
   }
+
+  // Build series format map for multi-series KPIs
+  const seriesFormatMap = useMemo(() => {
+    const map = new Map<string, string>()
+    const seriesArr = (querySpec as any)?.series
+    if (Array.isArray(seriesArr)) {
+      seriesArr.forEach((s: any) => {
+        const label = s.label || s.y || s.measure || ''
+        if (label && s.format && s.format !== 'none') {
+          map.set(label, s.format)
+        }
+      })
+    }
+    return map
+  }, [querySpec])
 
   const downIsGood = !!options?.kpi?.downIsGood
   const sparkType = ((options?.kpi as any)?.sparkType || 'line') as 'line'|'area'|'bar'
@@ -979,18 +995,44 @@ export default function KpiCard({
                   {entries.map(([name, v]: any) => {
                     const pctLocal = Number(v?.percentChange || 0)
                     const pctLocalStr = `${pctLocal >= 0 ? '+' : ''}${Number(pctLocal||0).toFixed(1)}%`
+                    
+                    // Check if this legend value has multi-series inside
+                    const hasSeries = v?.bySeries && Object.keys(v.bySeries).length > 1
+                    
                     if (preset === 'badge') {
                       return (
                         <div key={name} className="rounded-lg border bg-card p-[clamp(10px,1.3vw,14px)]">
                           <div className={`${labelClass} mb-1 truncate`} title={name}>{displayKpiLabel(name)}</div>
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-2">
-                              <Metric className={metricClass}>{formatNumber(v.current)}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                          {hasSeries ? (
+                            <div className="space-y-2">
+                              {Object.entries(v.bySeries).map(([seriesName, seriesData]: [string, any]) => {
+                                const seriesFmt = seriesFormatMap.get(seriesName)
+                                const seriesVStr = formatNumber(seriesData.current, seriesFmt)
+                                const seriesPct = seriesData.percentChange
+                                const seriesPctStr = seriesPct == null ? undefined : `${seriesPct >= 0 ? '+' : ''}${seriesPct.toFixed(1)}%`
+                                return (
+                                  <div key={seriesName}>
+                                    <div className={`${labelClass} text-xs opacity-70`}>{seriesName}</div>
+                                    <div className="flex items-start justify-between">
+                                      <Metric className={metricClass}>{seriesVStr}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                                      {deltaEnabled && seriesPctStr != null && (
+                                        <span className={`ml-2 ${pctTextClass} px-2 py-0.5 rounded-md ${deltaBadge(seriesPct || 0)}`}>{seriesPctStr}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })}
                             </div>
-                            {deltaEnabled && (
-                              <span className={`ml-2 ${pctTextClass} px-2 py-0.5 rounded-md ${deltaBadge(pctLocal || 0)}`}>{pctLocalStr}</span>
-                            )}
-                          </div>
+                          ) : (
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-center gap-2">
+                                <Metric className={metricClass}>{formatNumber(v.current)}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                              </div>
+                              {deltaEnabled && (
+                                <span className={`ml-2 ${pctTextClass} px-2 py-0.5 rounded-md ${deltaBadge(pctLocal || 0)}`}>{pctLocalStr}</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     }
@@ -998,13 +1040,33 @@ export default function KpiCard({
                       return (
                         <div key={name} className="rounded-lg border bg-card p-[clamp(10px,1.3vw,14px)]">
                           <div className={`${labelClass} mb-1 truncate`} title={name}>{displayKpiLabel(name)}</div>
-                          <div className="leading-tight">
-                            <Metric className={metricClass}>{formatNumber(v.current)}{suffix ? <span className="ml-1 text-sm align-super">{suffix}</span> : null}</Metric>
-                            <div className={`${totalTextClass}`}>of {formatNumber(curTotalAll)}</div>
-                            {deltaEnabled && (
-                              <div className={`${pctTextClass} mt-0.5 ${deltaColor(pctLocal || 0)}`}>{pctLocalStr}</div>
-                            )}
-                          </div>
+                          {hasSeries ? (
+                            <div className="space-y-2">
+                              {Object.entries(v.bySeries).map(([seriesName, seriesData]: [string, any]) => {
+                                const seriesFmt = seriesFormatMap.get(seriesName)
+                                const seriesVStr = formatNumber(seriesData.current, seriesFmt)
+                                const seriesPct = seriesData.percentChange
+                                const seriesPctStr = seriesPct == null ? undefined : `${seriesPct >= 0 ? '+' : ''}${seriesPct.toFixed(1)}%`
+                                return (
+                                  <div key={seriesName} className="leading-tight">
+                                    <div className={`${labelClass} text-xs opacity-70`}>{seriesName}</div>
+                                    <Metric className={metricClass}>{seriesVStr}{suffix ? <span className="ml-1 text-sm align-super">{suffix}</span> : null}</Metric>
+                                    {deltaEnabled && seriesPctStr != null && (
+                                      <div className={`${pctTextClass} mt-0.5 ${deltaColor(seriesPct || 0)}`}>{seriesPctStr}</div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          ) : (
+                            <div className="leading-tight">
+                              <Metric className={metricClass}>{formatNumber(v.current)}{suffix ? <span className="ml-1 text-sm align-super">{suffix}</span> : null}</Metric>
+                              <div className={`${totalTextClass}`}>of {formatNumber(curTotalAll)}</div>
+                              {deltaEnabled && (
+                                <div className={`${pctTextClass} mt-0.5 ${deltaColor(pctLocal || 0)}`}>{pctLocalStr}</div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     }
@@ -1012,12 +1074,34 @@ export default function KpiCard({
                     return (
                       <div key={name} className="rounded-lg border bg-card p-[clamp(10px,1.3vw,14px)]">
                         <div className={`${labelClass} mb-1 truncate`} title={name}>{formatLabelCase(name)}</div>
-                        <div className="flex items-center gap-2">
-                          <Metric className={metricClass}>{formatNumber(v.current)}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
-                          {deltaEnabled && (
-                            <span className={`${pctTextClass} ${deltaColor(pctLocal || 0)}`}>{pctLocalStr}</span>
-                          )}
-                        </div>
+                        {hasSeries ? (
+                          <div className="space-y-2">
+                            {Object.entries(v.bySeries).map(([seriesName, seriesData]: [string, any]) => {
+                              const seriesFmt = seriesFormatMap.get(seriesName)
+                              const seriesVStr = formatNumber(seriesData.current, seriesFmt)
+                              const seriesPct = seriesData.percentChange
+                              const seriesPctStr = seriesPct == null ? undefined : `${seriesPct >= 0 ? '+' : ''}${seriesPct.toFixed(1)}%`
+                              return (
+                                <div key={seriesName}>
+                                  <div className={`${labelClass} text-xs opacity-70`}>{seriesName}</div>
+                                  <div className="flex items-center gap-2">
+                                    <Metric className={metricClass}>{seriesVStr}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                                    {deltaEnabled && seriesPctStr != null && (
+                                      <span className={`${pctTextClass} ${deltaColor(seriesPct || 0)}`}>{seriesPctStr}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Metric className={metricClass}>{formatNumber(v.current)}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                            {deltaEnabled && (
+                              <span className={`${pctTextClass} ${deltaColor(pctLocal || 0)}`}>{pctLocalStr}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -1448,6 +1532,47 @@ export default function KpiCard({
                 </div>
               )
             }
+            
+            // Multi-series rendering for basic and badge presets
+            const hasSeries = kpi.data?.bySeries && Object.keys(kpi.data.bySeries).length > 1
+            if (hasSeries && (preset === 'basic' || preset === 'badge')) {
+              const seriesEntries = Object.entries(kpi.data!.bySeries!)
+              return (
+                <div className="space-y-3">
+                  {seriesEntries.map(([seriesName, seriesData]) => {
+                    const seriesFmt = seriesFormatMap.get(seriesName)
+                    const seriesVStr = formatNumber(seriesData.current, seriesFmt)
+                    const seriesPct = seriesData.percentChange
+                    const seriesPctStr = seriesPct == null ? undefined : `${seriesPct >= 0 ? '+' : ''}${seriesPct.toFixed(1)}%`
+                    
+                    if (preset === 'badge') {
+                      return (
+                        <div key={seriesName} className="flex flex-col gap-1">
+                          <div className={`${labelClass} text-xs opacity-70`}>{seriesName}</div>
+                          <div className="flex items-start justify-between">
+                            <Metric className={metricClass}>{seriesVStr}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                            {deltaEnabled && seriesPctStr != null && (<span className={`ml-2 text-xs px-2 py-0.5 rounded-md bg-muted ${deltaColor(seriesPct ?? 0)}`}>{seriesPctStr}</span>)}
+                          </div>
+                        </div>
+                      )
+                    }
+                    
+                    // basic
+                    return (
+                      <div key={seriesName} className="flex flex-col gap-1">
+                        <div className={`${labelClass} text-xs opacity-70`}>{seriesName}</div>
+                        <div className="flex items-center gap-2">
+                          <Metric className={metricClass}>{seriesVStr}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                          {deltaEnabled && seriesPctStr != null && (<span className={`text-sm ${deltaColor(seriesPct || 0)}`}>{seriesPctStr}</span>)}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            }
+            
+            // Single value rendering (when no multi-series)
             if (preset === 'badge') {
               return (
                 <div className="flex items-start justify-between">

@@ -50,7 +50,8 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive }: { ds:
               <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>Edit</button>
               <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); try {
                 const data = await Api.exportDatasource(ds.id, true, user?.id)
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+                const exportPayload = { items: [data] }
+                const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' })
                 const a = document.createElement('a')
                 const ts = new Date()
                 const safe = ds.name.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()

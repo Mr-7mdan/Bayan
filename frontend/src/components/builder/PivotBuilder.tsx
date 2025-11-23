@@ -8,6 +8,7 @@ export type PivotValue = {
   measureId?: string
   agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'
   label?: string
+  format?: 'none'|'short'|'abbrev'|'currency'|'percent'|'bytes'|'wholeNumber'|'number'|'thousands'|'millions'|'billions'|'oneDecimal'|'twoDecimals'|'percentWhole'|'percentOneDecimal'|'timeHours'|'timeMinutes'|'distance-km'|'distance-mi'
   colorToken?: 1|2|3|4|5
   colorKey?: 'blue' | 'emerald' | 'violet' | 'amber' | 'gray' | 'rose' | 'indigo' | 'cyan' | 'pink' | 'lime' | 'fuchsia'
   stackId?: string

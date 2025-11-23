@@ -1,0 +1,102 @@
+{
+  "items": [
+    {
+      "id": "e8039514-0657-4b27-81c6-812c1838fd23",
+      "name": "BOI Exchange Rates",
+      "type": "api",
+      "connectionUri": null,
+      "options": {
+        "sync": {
+          "maxConcurrentQueries": 1,
+          "blackoutDaily": []
+        },
+        "defaultPivotParallelism": 2,
+        "api": {
+          "endpoint": "https://edge.boi.gov.il/FusionEdgeServer/sdmx/v2/data/dataflow/BOI.STATISTICS/EXR/1.0/",
+          "method": "GET",
+          "headers": [],
+          "query": [
+            {
+              "key": "c[DATA_TYPE]",
+              "value": "OF00"
+            },
+            {
+              "key": "startperiod",
+              "value": "2019-01-01"
+            },
+            {
+              "key": "endperiod",
+              "value": "{today}"
+            },
+            {
+              "key": "format",
+              "value": "csv"
+            }
+          ],
+          "body": "",
+          "placeholders": [
+            {
+              "name": "today",
+              "kind": "date",
+              "value": "today",
+              "format": "YYYY-MM-DD"
+            }
+          ],
+          "destTable": "fx_rates",
+          "jsonRoot": "",
+          "gapFill": {
+            "enabled": false,
+            "keyFields": "base,quote",
+            "dateField": "rate_date"
+          },
+          "sequence": {
+            "enabled": false,
+            "mode": "date-range",
+            "startParam": "start",
+            "endParam": "end",
+            "windowDays": 1,
+            "dateField": "rate_date"
+          },
+          "auth": {
+            "type": "none",
+            "username": "admin@example.com",
+            "password": "admin"
+          },
+          "pagination": {
+            "type": "none",
+            "pageParam": "page",
+            "pageSizeParam": "limit",
+            "pageSize": 100,
+            "pageStart": 1,
+            "maxPages": 10,
+            "cursorParam": "cursor",
+            "nextCursorPath": ""
+          },
+          "writeMode": "replace",
+          "parse": "csv"
+        }
+      },
+      "userId": "03766424-cf71-46d4-a3bd-6a35ea5dc886",
+      "active": true,
+      "createdAt": "2025-10-24T07:45:30",
+      "syncTasks": [
+        {
+          "id": "30880cda-cf2f-413f-887c-9b07c215c18c",
+          "datasourceId": "e8039514-0657-4b27-81c6-812c1838fd23",
+          "sourceSchema": null,
+          "sourceTable": "api",
+          "destTableName": "fx_rates",
+          "mode": "snapshot",
+          "pkColumns": [],
+          "selectColumns": [],
+          "sequenceColumn": null,
+          "batchSize": 10000,
+          "scheduleCron": "0 2 * * *",
+          "enabled": true,
+          "groupKey": "e8039514-0657-4b27-81c6-812c1838fd23:public.api->fx_rates",
+          "createdAt": "2025-10-24T09:50:54"
+        }
+      ]
+    }
+  ]
+}

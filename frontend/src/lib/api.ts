@@ -590,8 +590,13 @@ export const Api = {
   deleteSyncTask: (id: string, taskId: string, actorId?: string) => http<void>(`/datasources/${id}/sync-tasks/${taskId}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'DELETE' }),
   runSyncNow: (id: string, taskId?: string, actorId?: string) => http<{ ok: boolean; count?: number; results?: any[]; message?: string }>(`/datasources/${id}/sync/run?execute=true${taskId ? `&taskId=${encodeURIComponent(taskId)}` : ''}${actorId ? `&actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST' }),
   abortSync: (id: string, taskId?: string, actorId?: string) =>
-    http<{ ok: boolean; updated?: number }>(
+    http<{ ok: boolean; cancel_requested: number; force_reset: number; total_processed: number; message: string }>(
       `/datasources/${id}/sync/abort${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}${actorId ? `${taskId ? '&' : '?'}actorId=${encodeURIComponent(actorId)}` : ''}`,
+      { method: 'POST' }
+    ),
+  resetStuckSyncs: (id: string, actorId?: string) =>
+    http<{ ok: boolean; reset_count: number; states_reset: string[] }>(
+      `/datasources/${id}/sync/reset-stuck${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`,
       { method: 'POST' }
     ),
   getSyncLogs: (id: string, taskId?: string, limit: number = 50, actorId?: string) => http<SyncRunOut[]>(`/datasources/${id}/sync/logs${taskId ? `?taskId=${encodeURIComponent(taskId)}&limit=${limit}` : `?limit=${limit}`}${actorId ? `${taskId ? '&' : '&'}actorId=${encodeURIComponent(actorId)}` : ''}`),

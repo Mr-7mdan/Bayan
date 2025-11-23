@@ -1091,6 +1091,8 @@ def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorI
 
 @router.post("/{ds_id}/sync/abort")
 def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    from datetime import datetime, timedelta
+    
     print(f"[ABORT] Endpoint called: ds_id={ds_id}, taskId={taskId}", flush=True)
     ds = db.get(Datasource, ds_id)
     if not ds:
@@ -1099,29 +1101,126 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
+    
     q = db.query(SyncState).join(SyncTask, SyncTask.id == SyncState.task_id).filter(SyncTask.datasource_id == ds_id, SyncState.in_progress == True)
     if taskId:
         q = q.filter(SyncState.task_id == taskId)
     rows = q.all()
-    print(f"[ABORT] Found {len(rows)} in-progress sync states to abort", flush=True)
-    updated = 0
+    print(f"[ABORT] Found {len(rows)} in-progress sync states to check", flush=True)
+    
+    cancel_requested = 0
+    force_reset = 0
+    stuck_threshold_minutes = 30  # Consider a sync stuck if in_progress for > 30 min without updates
+    
     for st in rows:
         try:
-            print(f"[ABORT] Setting cancel_requested=True for state_id={st.id}, task_id={st.task_id}", flush=True)
-            setattr(st, 'cancel_requested', True)
-            db.add(st)
-            updated += 1
+            # Check if sync is actually stuck (no updates in last N minutes)
+            is_stuck = False
+            
+            # Determine if stuck based on last_run_at timestamp on SyncState
+            if st.last_run_at:
+                last_update = st.last_run_at
+                time_since_update = datetime.utcnow() - last_update
+                if time_since_update > timedelta(minutes=stuck_threshold_minutes):
+                    is_stuck = True
+                    print(f"[ABORT] Sync appears STUCK: state_id={st.id}, last_run_at={st.last_run_at}, minutes_since={time_since_update.total_seconds()/60:.1f}", flush=True)
+                else:
+                    print(f"[ABORT] Sync appears ACTIVE: state_id={st.id}, last_run_at={st.last_run_at}, minutes_since={time_since_update.total_seconds()/60:.1f}", flush=True)
+            else:
+                # No last_run_at means it never started properly - definitely stuck
+                is_stuck = True
+                print(f"[ABORT] Sync never started properly (no last_run_at): state_id={st.id}, forcing reset", flush=True)
+            
+            if is_stuck:
+                # Force reset stuck sync
+                print(f"[ABORT] FORCE RESET stuck sync: state_id={st.id}, task_id={st.task_id}", flush=True)
+                st.in_progress = False
+                st.cancel_requested = False  # type: ignore[attr-defined]
+                st.progress_current = None
+                st.progress_total = None
+                st.progress_phase = None  # type: ignore[attr-defined]
+                db.add(st)
+                force_reset += 1
+            else:
+                # Active sync - just set cancel flag
+                print(f"[ABORT] Setting cancel_requested=True for ACTIVE sync: state_id={st.id}, task_id={st.task_id}", flush=True)
+                setattr(st, 'cancel_requested', True)
+                db.add(st)
+                cancel_requested += 1
+                
         except Exception as e:
-            print(f"[ABORT] Failed to set cancel_requested for state_id={st.id}: {e}", flush=True)
+            print(f"[ABORT] Failed to process state_id={st.id}: {e}", flush=True)
             continue
+    
     try:
         db.commit()
-        print(f"[ABORT] Committed {updated} cancel_requested flags to database", flush=True)
+        print(f"[ABORT] Committed changes: {cancel_requested} active syncs flagged for cancellation, {force_reset} stuck syncs reset", flush=True)
     except Exception as e:
         print(f"[ABORT] Commit failed: {e}", flush=True)
         try: db.rollback()
         except Exception: pass
-    return {"ok": True, "updated": int(updated)}
+        raise HTTPException(status_code=500, detail=f"Failed to abort syncs: {e}")
+    
+    return {
+        "ok": True, 
+        "cancel_requested": cancel_requested,
+        "force_reset": force_reset,
+        "total_processed": cancel_requested + force_reset,
+        "message": f"Flagged {cancel_requested} active sync(s) for cancellation, force reset {force_reset} stuck sync(s)"
+    }
+
+
+@router.post("/{ds_id}/sync/reset-stuck")
+def reset_stuck_syncs(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    """
+    Reset stuck sync states that are marked as in_progress but are not actually running.
+    This is a recovery endpoint for when syncs crash or are killed without cleanup.
+    """
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if not _is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if ds.user_id and ds.user_id != actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    
+    # Find all stuck sync states (in_progress=True)
+    stuck_states = (
+        db.query(SyncState)
+        .join(SyncTask, SyncTask.id == SyncState.task_id)
+        .filter(SyncTask.datasource_id == ds_id, SyncState.in_progress == True)
+        .all()
+    )
+    
+    print(f"[RESET_STUCK] Found {len(stuck_states)} stuck sync states for datasource {ds_id}", flush=True)
+    
+    reset_count = 0
+    for st in stuck_states:
+        try:
+            print(f"[RESET_STUCK] Resetting state_id={st.id}, task_id={st.task_id}", flush=True)
+            st.in_progress = False
+            st.cancel_requested = False  # type: ignore[attr-defined]
+            st.progress_current = None
+            st.progress_total = None
+            st.progress_phase = None  # type: ignore[attr-defined]
+            db.add(st)
+            reset_count += 1
+        except Exception as e:
+            print(f"[RESET_STUCK] Failed to reset state_id={st.id}: {e}", flush=True)
+            continue
+    
+    try:
+        db.commit()
+        print(f"[RESET_STUCK] Successfully reset {reset_count} stuck sync states", flush=True)
+    except Exception as e:
+        print(f"[RESET_STUCK] Commit failed: {e}", flush=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to reset stuck syncs: {e}")
+    
+    return {"ok": True, "reset_count": reset_count, "states_reset": [st.id for st in stuck_states]}
 
 
 @router.patch("/{ds_id}/sync-tasks/{task_id}", response_model=SyncTaskOut)
