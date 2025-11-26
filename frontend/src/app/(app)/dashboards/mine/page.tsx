@@ -207,6 +207,22 @@ export default function MyDashboardsPage() {
   const onExport = async (d: DashboardListItem) => {
     try {
       const data = await Api.exportDashboard(d.id, true, true, user?.id || undefined)
+      
+      // Log export summary for debugging
+      if (data.dashboards && data.dashboards.length > 0) {
+        const dash = data.dashboards[0]
+        const widgets = Object.values((dash.definition as any)?.widgets || {})
+        const widgetsWithCustomCols = widgets.filter((w: any) => Array.isArray(w?.customColumns) && w.customColumns.length > 0)
+        console.log('[Export] Dashboard:', dash.name)
+        console.log('[Export] Total widgets:', widgets.length)
+        console.log('[Export] Widgets with custom columns:', widgetsWithCustomCols.length)
+        if (widgetsWithCustomCols.length > 0) {
+          widgetsWithCustomCols.forEach((w: any) => {
+            console.log('[Export]   -', w.title, ':', w.customColumns.length, 'custom columns')
+          })
+        }
+      }
+      
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
       const a = document.createElement('a')
       const ts = new Date()
@@ -266,6 +282,23 @@ export default function MyDashboardsPage() {
           // Continue with dashboard import even if datasources fail
         }
       }
+      
+      // Log import summary for debugging
+      dashboards.forEach((dash: any) => {
+        const widgets = Object.values((dash.definition as any)?.widgets || {})
+        const widgetsWithCustomCols = widgets.filter((w: any) => Array.isArray(w?.customColumns) && w.customColumns.length > 0)
+        console.log('[Import] Dashboard:', dash.name)
+        console.log('[Import] Total widgets:', widgets.length)
+        console.log('[Import] Widgets with custom columns:', widgetsWithCustomCols.length)
+        if (widgetsWithCustomCols.length > 0) {
+          widgetsWithCustomCols.forEach((w: any) => {
+            console.log('[Import]   -', w.title, ':', w.customColumns.length, 'custom columns')
+            w.customColumns.forEach((col: any) => {
+              console.log('[Import]     •', col.name, '=', col.formula)
+            })
+          })
+        }
+      })
       
       // Import dashboards with mappings
       await Api.importDashboards({ 

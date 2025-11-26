@@ -111,6 +111,38 @@ def _collect_datasource_ids_from_definition(defn: dict) -> set[str]:
 
 def _rewrite_datasource_ids(defn: dict, id_map: dict[str, str], table_map: dict[str, str] | None = None) -> dict:
     """Rewrite datasourceId and optionally table/source names in dashboard definition."""
+    import re
+    
+    def rewrite_formula(formula: str, table_map: dict[str, str]) -> str:
+        """Rewrite column references in formulas like [table.column] when table names change."""
+        if not formula or not table_map:
+            return formula
+        # Pattern matches: [table.column] or [schema.table.column]
+        def replacer(match):
+            full_ref = match.group(1)  # e.g., "main.customers.first_name"
+            parts = full_ref.split('.')
+            if len(parts) >= 2:
+                # Check if first part (schema.table or just table) matches any old table name
+                for old_table, new_table in table_map.items():
+                    # Try exact match first
+                    if parts[0] == old_table:
+                        parts[0] = new_table
+                        return f"[{'.'.join(parts)}]"
+                    # Try schema.table match
+                    if len(parts) >= 3:
+                        schema_table = f"{parts[0]}.{parts[1]}"
+                        if schema_table == old_table:
+                            # Replace schema.table with new name
+                            new_parts = new_table.split('.')
+                            if len(new_parts) == 2:
+                                parts[0], parts[1] = new_parts[0], new_parts[1]
+                            else:
+                                parts[0] = new_table
+                                parts.pop(1)  # Remove old table part
+                            return f"[{'.'.join(parts)}]"
+            return match.group(0)  # No change
+        return re.sub(r'\[([^\]]+)\]', replacer, formula)
+    
     def walk(node):
         if isinstance(node, dict):
             out = {}
@@ -119,6 +151,17 @@ def _rewrite_datasource_ids(defn: dict, id_map: dict[str, str], table_map: dict[
                     out[k] = id_map[v]
                 elif table_map and k in ("source", "table", "tableName") and isinstance(v, str) and v in table_map:
                     out[k] = table_map[v]
+                elif table_map and k == "formula" and isinstance(v, str):
+                    # Rewrite column references in formulas
+                    out[k] = rewrite_formula(v, table_map)
+                elif table_map and k == "customColumns" and isinstance(v, list):
+                    # Special handling for customColumns array
+                    out[k] = [
+                        {**col, "formula": rewrite_formula(col.get("formula", ""), table_map)} 
+                        if isinstance(col, dict) and "formula" in col 
+                        else col 
+                        for col in v
+                    ]
                 else:
                     out[k] = walk(v)
             return out
@@ -682,7 +725,11 @@ def import_dashboards(payload: DashboardImportRequest, actorId: str | None = Que
         # Rewrite datasource IDs and table names if mappings are provided
         defn = it.definition.model_dump()
         if id_map or table_map:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[Import] Rewriting dashboard '{it.name}' with datasource_map={id_map}, table_map={table_map}")
             defn = _rewrite_datasource_ids(defn, id_map, table_map if table_map else None)
+            logger.info(f"[Import] Dashboard '{it.name}' rewritten successfully")
         # Upsert by id or (name, owner)
         d: Dashboard | None = None
         if it.id:
