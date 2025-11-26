@@ -109,13 +109,16 @@ def _collect_datasource_ids_from_definition(defn: dict) -> set[str]:
     return ids
 
 
-def _rewrite_datasource_ids(defn: dict, id_map: dict[str, str]) -> dict:
+def _rewrite_datasource_ids(defn: dict, id_map: dict[str, str], table_map: dict[str, str] | None = None) -> dict:
+    """Rewrite datasourceId and optionally table/source names in dashboard definition."""
     def walk(node):
         if isinstance(node, dict):
             out = {}
             for k, v in node.items():
                 if k == "datasourceId" and isinstance(v, str) and v in id_map:
                     out[k] = id_map[v]
+                elif table_map and k in ("source", "table", "tableName") and isinstance(v, str) and v in table_map:
+                    out[k] = table_map[v]
                 else:
                     out[k] = walk(v)
             return out
@@ -662,22 +665,24 @@ def import_dashboards(payload: DashboardImportRequest, actorId: str | None = Que
     id_map: dict[str, str] = {}
     if isinstance(payload.datasourceIdMap, dict):
         id_map.update({str(k): str(v) for k, v in payload.datasourceIdMap.items() if k and v})
+    # Build table name map if provided
+    table_map: dict[str, str] = {}
+    if isinstance(payload.tableNameMap, dict):
+        table_map.update({str(k): str(v) for k, v in payload.tableNameMap.items() if k and v})
     # Optionally import datasources first (cannot auto-build id_map without old IDs; rely on caller-provided map)
-    # Non-admin: force user ownership to actor
+    # Force all imported dashboards to be owned by actorId (for both admin and non-admin users)
     created = 0
     out: list[DashboardOut] = []
     for it in payload.dashboards:
-        # Determine owner
-        owner = (it.userId or actorId or "").strip()
-        if not _is_admin(db, actorId):
-            actor = (actorId or "").strip()
-            if not actor:
-                raise HTTPException(status_code=403, detail="Forbidden")
-            owner = actor
-        # Rewrite datasource IDs if a mapping is provided
+        # Force owner to actorId for all users
+        actor = (actorId or "").strip()
+        if not actor:
+            raise HTTPException(status_code=403, detail="actorId is required for import")
+        owner = actor
+        # Rewrite datasource IDs and table names if mappings are provided
         defn = it.definition.model_dump()
-        if id_map:
-            defn = _rewrite_datasource_ids(defn, id_map)
+        if id_map or table_map:
+            defn = _rewrite_datasource_ids(defn, id_map, table_map if table_map else None)
         # Upsert by id or (name, owner)
         d: Dashboard | None = None
         if it.id:

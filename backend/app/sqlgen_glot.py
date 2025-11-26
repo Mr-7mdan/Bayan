@@ -1114,6 +1114,12 @@ class SQLGlotBuilder:
                         group_columns.append(exp.column(dim))  # Use the alias for GROUP BY
                     group_positions.append(idx)
             
+            # NOTE: Do NOT apply Sankey-specific column aliases here.
+            # Both pivot tables and Sankey charts use this function, but they need different formats:
+            # - Pivot tables need actual column names
+            # - Sankey charts can rename columns on the frontend if needed
+            # Applying Sankey aliases here breaks pivot table widgets.
+            
             # Build aggregation expression
             agg_lower = agg.lower()
             if agg_lower == "count":
@@ -1352,14 +1358,20 @@ class SQLGlotBuilder:
                 single_query = stripped_query
                 
                 if has_legend:
-                    # Combine original legend with series name using dialect-aware concatenation
-                    dialect_lower = (ds_type or self.dialect).lower()
-                    if "mssql" in dialect_lower or "sqlserver" in dialect_lower or "mysql" in dialect_lower:
-                        # MSSQL/MySQL: CONCAT(legend, ' - ', 'series_name')
-                        wrapped = f"SELECT x, CONCAT(legend, ' - ', '{series_name}') as legend, value FROM ({single_query}) AS _s{idx}"
+                    # For single-series queries (Sankey, simple charts), don't append series name
+                    # Only combine legend + series name for actual multi-series charts
+                    if len(series) == 1:
+                        # Single series: just use the legend value (for Sankey, etc.)
+                        wrapped = f"SELECT x, legend, value FROM ({single_query}) AS _s{idx}"
                     else:
-                        # DuckDB/PostgreSQL/SQLite: legend || ' - ' || 'series_name'
-                        wrapped = f"SELECT x, legend || ' - ' || '{series_name}' as legend, value FROM ({single_query}) AS _s{idx}"
+                        # Multi-series: combine original legend with series name using dialect-aware concatenation
+                        dialect_lower = (ds_type or self.dialect).lower()
+                        if "mssql" in dialect_lower or "sqlserver" in dialect_lower or "mysql" in dialect_lower:
+                            # MSSQL/MySQL: CONCAT(legend, ' - ', 'series_name')
+                            wrapped = f"SELECT x, CONCAT(legend, ' - ', '{series_name}') as legend, value FROM ({single_query}) AS _s{idx}"
+                        else:
+                            # DuckDB/PostgreSQL/SQLite: legend || ' - ' || 'series_name'
+                            wrapped = f"SELECT x, legend || ' - ' || '{series_name}' as legend, value FROM ({single_query}) AS _s{idx}"
                 else:
                     # Just series name as legend
                     wrapped = f"SELECT x, '{series_name}' as legend, value FROM ({single_query}) AS _s{idx}"

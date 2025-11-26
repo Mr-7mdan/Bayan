@@ -992,6 +992,59 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             sys.stderr.write(f"[Pivot] Failed to extract datasourceId from widget: {e}\n")
             sys.stderr.flush()
     
+    # FALLBACK 2: If still no datasourceId, try to find DuckDB datasource that owns this table
+    if not datasource_id_to_use and payload.source and ds_type == "duckdb":
+        try:
+            import sys
+            sys.stderr.write(f"[Pivot] Attempting to find DuckDB datasource for table: {payload.source}\n")
+            sys.stderr.flush()
+            # Extract table name from source (handle schema.table format)
+            table_name = payload.source.split('.')[-1].strip('"').strip('`').strip('[').strip(']')
+            sys.stderr.write(f"[Pivot] Normalized table name: {table_name}\n")
+            sys.stderr.flush()
+            # Query all DuckDB datasources
+            all_ds = db.query(Datasource).filter(Datasource.type.like('duckdb%')).all()
+            sys.stderr.write(f"[Pivot] Found {len(all_ds)} DuckDB datasources to search\n")
+            sys.stderr.flush()
+            for ds_candidate in all_ds:
+                try:
+                    opts = json.loads(ds_candidate.options_json or "{}")
+                    # Check if this datasource has transforms for this table
+                    transforms = opts.get("transforms") or {}
+                    custom_cols = transforms.get("customColumns") or []
+                    # Check scope of custom columns for table match
+                    for col in custom_cols:
+                        if isinstance(col, dict):
+                            scope = col.get("scope") or {}
+                            scope_table = str(scope.get("table") or "").strip()
+                            if scope_table:
+                                # Normalize scope table name
+                                scope_table_norm = scope_table.split('.')[-1].strip('"').strip('`').strip('[').strip(']').lower()
+                                if scope_table_norm == table_name.lower():
+                                    datasource_id_to_use = ds_candidate.id
+                                    sys.stderr.write(f"[Pivot] Found matching datasource: {datasource_id_to_use} (matched table: {scope_table})\n")
+                                    sys.stderr.flush()
+                                    break
+                    if datasource_id_to_use:
+                        break
+                except Exception as ex:
+                    sys.stderr.write(f"[Pivot] Error checking datasource {ds_candidate.id}: {ex}\n")
+                    sys.stderr.flush()
+                    continue
+            if not datasource_id_to_use:
+                # FALLBACK 3: If only one DuckDB datasource exists, use it
+                if len(all_ds) == 1:
+                    datasource_id_to_use = all_ds[0].id
+                    sys.stderr.write(f"[Pivot] Using only DuckDB datasource: {datasource_id_to_use}\n")
+                    sys.stderr.flush()
+                else:
+                    sys.stderr.write(f"[Pivot] No matching datasource found for table {table_name} (checked {len(all_ds)} datasources)\n")
+                    sys.stderr.flush()
+        except Exception as e:
+            import sys
+            sys.stderr.write(f"[Pivot] Failed to find datasource by table: {e}\n")
+            sys.stderr.flush()
+    
     import sys
     sys.stderr.write(f"[DEBUG] About to check datasource_id_to_use: {datasource_id_to_use}, type={type(datasource_id_to_use)}, bool={bool(datasource_id_to_use)}\n")
     sys.stderr.flush()
@@ -1572,37 +1625,78 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             # Initialize transforms early (needed by filtering logic below)
             __transforms_eff = ds_transforms.get('transforms', []) if isinstance(ds_transforms, dict) else []
             
-            # Probe available columns from transformed source (with joins) to filter custom columns
+            # Probe available columns from base table, then filter joins, then probe with filtered joins
             # Only probe for DuckDB - for remote datasources, skip probing
             available_cols = set()
+            probe_joins_filtered = []
             if ds_type == 'duckdb':
                 try:
-                    # Use build_sql to build base with joins but no custom columns/transforms
-                    # Get joins from ds_transforms if available
-                    probe_joins = ds_transforms.get("joins", []) if ds_transforms else []
-                    probe_result = build_sql(
+                    # PHASE 1: Probe base table WITHOUT joins to get base columns
+                    print(f"[SQLGlot] Pivot: Phase 1 - Probing base table without joins")
+                    probe_result_base = build_sql(
                         dialect=ds_type,
                         source=_q_source(payload.source),
                         base_select=["*"],
-                        custom_columns=[],  # Don't include custom columns
-                        transforms=[],  # Don't include transforms - they may reference missing columns!
-                        joins=probe_joins,
+                        custom_columns=[],
+                        transforms=[],
+                        joins=[],  # NO joins in phase 1
                         defaults={},
                         limit=None,
                     )
-                    # Handle different return value formats (3 or 4 elements)
-                    if len(probe_result) == 3:
-                        probe_base, _, _ = probe_result
-                    elif len(probe_result) == 4:
-                        probe_base, _, _, _ = probe_result
+                    if len(probe_result_base) == 3:
+                        probe_base_sql, _, _ = probe_result_base
+                    elif len(probe_result_base) == 4:
+                        probe_base_sql, _, _, _ = probe_result_base
                     else:
-                        probe_base = probe_result[0] if probe_result else ""
+                        probe_base_sql = probe_result_base[0] if probe_result_base else ""
                     
-                    probe_sql = f"SELECT * FROM ({probe_base}) AS _probe LIMIT 0"
+                    probe_sql_phase1 = f"SELECT * FROM ({probe_base_sql}) AS _probe LIMIT 0"
                     with open_duck_native(None) as conn:
-                        probe_cursor = conn.execute(probe_sql)
-                        available_cols = {str(col[0]).strip() for col in probe_cursor.description}
-                        print(f"[SQLGlot] Pivot: Probed {len(available_cols)} columns (including joins): {sorted(list(available_cols)[:20])}")
+                        probe_cursor = conn.execute(probe_sql_phase1)
+                        base_cols = {str(col[0]).strip() for col in probe_cursor.description}
+                        print(f"[SQLGlot] Pivot: Phase 1 - Found {len(base_cols)} base columns")
+                    
+                    # PHASE 2: Filter joins - keep only those whose sourceKey exists in base_cols
+                    all_joins = ds_transforms.get("joins", []) if ds_transforms else []
+                    base_cols_lower = {c.lower() for c in base_cols}
+                    for join in all_joins:
+                        source_key = str((join or {}).get('sourceKey') or '').strip()
+                        if source_key and source_key.lower() in base_cols_lower:
+                            probe_joins_filtered.append(join)
+                        else:
+                            print(f"[SQLGlot] Pivot: Phase 2 - Skipping join (sourceKey '{source_key}' not in base table)")
+                    print(f"[SQLGlot] Pivot: Phase 2 - Kept {len(probe_joins_filtered)}/{len(all_joins)} joins")
+                    
+                    # PHASE 3: Probe WITH filtered joins to get final column list
+                    if probe_joins_filtered:
+                        print(f"[SQLGlot] Pivot: Phase 3 - Probing with {len(probe_joins_filtered)} filtered joins")
+                        probe_result_final = build_sql(
+                            dialect=ds_type,
+                            source=_q_source(payload.source),
+                            base_select=["*"],
+                            custom_columns=[],
+                            transforms=[],
+                            joins=probe_joins_filtered,
+                            defaults={},
+                            limit=None,
+                        )
+                        if len(probe_result_final) == 3:
+                            probe_final_sql, _, _ = probe_result_final
+                        elif len(probe_result_final) == 4:
+                            probe_final_sql, _, _, _ = probe_result_final
+                        else:
+                            probe_final_sql = probe_result_final[0] if probe_result_final else ""
+                        
+                        probe_sql_phase3 = f"SELECT * FROM ({probe_final_sql}) AS _probe LIMIT 0"
+                        with open_duck_native(None) as conn:
+                            probe_cursor = conn.execute(probe_sql_phase3)
+                            available_cols = {str(col[0]).strip() for col in probe_cursor.description}
+                            print(f"[SQLGlot] Pivot: Phase 3 - Found {len(available_cols)} total columns (base + joins)")
+                    else:
+                        # No valid joins, use base columns only
+                        available_cols = base_cols
+                        print(f"[SQLGlot] Pivot: Phase 3 - No valid joins, using {len(available_cols)} base columns only")
+                        
                 except Exception as e:
                     print(f"[SQLGlot] Pivot: Failed to probe columns, skipping validation: {e}")
                     import traceback
@@ -1613,7 +1707,27 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             # Build expr_map for ALL custom columns (including derived ones for resolution)
             # Don't filter by available_cols here - filtering happens later for __custom_cols_sqlglot
             print(f"[SQLGlot] Pivot: ds_info is None: {ds_info is None}, ds_transforms custom cols: {len(ds_transforms.get('customColumns', [])) if ds_transforms else 0}", flush=True)
-            expr_map = _build_expr_map_helper(ds_info, payload.source, ds_type, _apply_scope, None) if ds_info else {}
+            
+            # Build expr_map from ds_transforms (already scope-filtered) when ds_info is None
+            if ds_info:
+                expr_map = _build_expr_map_helper(ds_info, payload.source, ds_type, _apply_scope, None)
+            else:
+                # Fallback: build expr_map directly from ds_transforms (already loaded and scope-filtered above)
+                from ..sqlgen import _normalize_expr_idents
+                expr_map = {}
+                if ds_transforms:
+                    # From customColumns
+                    for col in (ds_transforms.get("customColumns") or []):
+                        if isinstance(col, dict) and col.get("name") and col.get("expr"):
+                            expr = _normalize_expr_idents(ds_type, col["expr"])
+                            expr_map[col["name"]] = expr
+                    # From computed transforms
+                    for t in (ds_transforms.get("transforms") or []):
+                        if isinstance(t, dict) and t.get("type") == "computed":
+                            if t.get("name") and t.get("expr"):
+                                expr = _normalize_expr_idents(ds_type, t["expr"])
+                                expr_map[t["name"]] = expr
+            
             print(f"[SQLGlot] Pivot: expr_map has {len(expr_map)} entries: {list(expr_map.keys())}", flush=True)
             
             # Helper to extract column references (re is imported at module level)
@@ -1750,6 +1864,11 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             # This ensures custom columns and joins are available to pivot dimensions
             effective_source = payload.source
             if ds_transforms:
+                # Use filtered joins from probe phase (if available), otherwise use unfiltered joins
+                # probe_joins_filtered will be populated for DuckDB if probe succeeded
+                joins_to_use = probe_joins_filtered if (ds_type == 'duckdb' and probe_joins_filtered is not None) else (ds_transforms.get("joins", []) or [])
+                print(f"[SQLGlot] Pivot: Using {len(joins_to_use)} joins for final query")
+                
                 # Extract base_sql from legacy builder's construction (lines 1009-1018)
                 # This applies custom columns, transforms, and joins
                 result = build_sql(
@@ -1758,7 +1877,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                     base_select=["*"],
                     custom_columns=__custom_cols_sqlglot,
                     transforms=__transforms_eff_sqlglot,
-                    joins=__joins_eff,
+                    joins=joins_to_use,
                     defaults={},
                     limit=None,
                 )
@@ -1812,7 +1931,14 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
     
     if not use_sqlglot:
         # LEGACY PATH: String-based SQL building
-        sel = ", ".join(sel_parts + [f"{value_expr} AS value"]) or f"{value_expr} AS value"
+        # For Sankey charts: if exactly 1 row dim and 1 col dim, use standardized aliases 'x', 'legend', 'value'
+        if len(r_exprs) == 1 and len(c_exprs) == 1:
+            # Sankey format: source (x), target (legend), value
+            r_expr, r_alias = r_exprs[0]
+            c_expr, c_alias = c_exprs[0]
+            sel = f"{r_expr} AS x, {c_expr} AS legend, {value_expr} AS value"
+        else:
+            sel = ", ".join(sel_parts + [f"{value_expr} AS value"]) or f"{value_expr} AS value"
         # Use ordinals for DuckDB/Postgres/MySQL/SQLite; use expressions only for SQL Server
         dim_count = len(r_exprs) + len(c_exprs)
         if dim_count > 0:
@@ -5148,13 +5274,62 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         except Exception:
             pass
     
+    # Load datasource transforms (custom columns) - needed to resolve legend/y fields
+    ds_transforms: dict = {}
+    expr_map: dict[str, str] = {}
+    import sys
+    
+    # Get legend early for debugging
+    legend = payload.get("legend")
     y = payload.get("y")
+    
+    sys.stderr.write(f"[PT] datasource_id={datasource_id}, ds={ds}, source={source}, legend={legend}\n")
+    sys.stderr.flush()
+    if ds:
+        try:
+            opts = json.loads(ds.options_json or "{}")
+            raw_transforms = opts.get("transforms") or {}
+            sys.stderr.write(f"[PT] raw_transforms has {len(raw_transforms.get('customColumns', []))} custom columns\n")
+            sys.stderr.flush()
+            # Apply scope filtering (table-specific transforms)
+            def _apply_scope_pt(transforms_dict: dict, source_name: str) -> dict:
+                if not isinstance(transforms_dict, dict):
+                    return {}
+                def _matches(scope: str) -> bool:
+                    if not scope:
+                        return True  # datasource-level
+                    s_norm = scope.strip().strip('[]').strip('"').strip('`').lower()
+                    t_norm = str(source_name or '').strip().strip('[]').strip('"').strip('`').lower()
+                    return s_norm == t_norm
+                def _filter_list(items):
+                    return [item for item in (items or []) if _matches(item.get('table', ''))]
+                return {
+                    'customColumns': _filter_list(transforms_dict.get('customColumns', [])),
+                    'transforms': _filter_list(transforms_dict.get('transforms', [])),
+                    'joins': transforms_dict.get('joins', []),
+                    'defaults': transforms_dict.get('defaults', {}),
+                }
+            ds_transforms = _apply_scope_pt(raw_transforms, source)
+            
+            # Build expr_map for custom column expansions
+            for cc in (ds_transforms.get('customColumns') or []):
+                if isinstance(cc, dict) and cc.get('name') and cc.get('expr'):
+                    expr_map[cc['name']] = cc['expr']
+                    sys.stderr.write(f"[PT] Added custom column '{cc.get('name')}': {cc.get('expr')[:50]}...\n")
+                    sys.stderr.flush()
+            sys.stderr.write(f"[PT] Loaded {len(expr_map)} custom columns: {list(expr_map.keys())}, legend='{legend}'\n")
+            sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f"[PT] Failed to load custom columns: {e}\n")
+            sys.stderr.flush()
+            pass
+    
+    # y and legend already defined above for debugging
     measure = payload.get("measure")
     agg = (payload.get("agg") or "count").lower()
     date_field = payload.get("dateField")
     start = payload.get("start")
     end = payload.get("end")
-    legend = payload.get("legend")
     base_where = payload.get("where") or {}
     
     print(f"[DEBUG period_totals] dateField={date_field}, start={start}, end={end}")
@@ -5258,7 +5433,15 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             # Default: double-quote each part for DuckDB/Postgres/SQLite
             parts = s.split('.')
             return '.'.join([p if ((p.startswith('"') and p.endswith('"')) or (p.startswith('[') and p.endswith(']')) or (p.startswith('`') and p.endswith('`'))) else f'"{p}"' for p in parts])
-        qy = _q_ident_local(y) if y else None
+        # Expand y if it's a custom column, otherwise quote it
+        if y:
+            if y in expr_map:
+                qy = f"({expr_map[y]})"
+            else:
+                qy = _q_ident_local(y)
+        else:
+            qy = None
+        
         if agg == "count":
             value_expr = "COUNT(*)"
         elif agg == "distinct" and qy:
@@ -5725,7 +5908,7 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                 return q
             return q
 
-        # Build a raw expression for a part: derived date-part or quoted identifier
+        # Build a raw expression for a part: derived date-part, custom column, or quoted identifier
         def part_expr(p: str) -> str:
             s = str(p).strip()
             # Unwrap identifier quoting wrappers if present
@@ -5743,7 +5926,15 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             if m:
                 base = m.group(1).strip()
                 kind = m.group(2).lower()
+                # Check if base is a custom column before applying date part
+                if base in expr_map:
+                    # Expand custom column first, then apply date part
+                    expanded = expr_map[base]
+                    return datepart_expr(expanded, kind)
                 return datepart_expr(base, kind)
+            # Check if this is a custom column and expand it
+            if s in expr_map:
+                return f"({expr_map[s]})"
             return quote_ident(s)
 
         # Legend may be list or string (or stringified list)
@@ -5791,18 +5982,45 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         try:
             print(f"[SQLGlot] Period-totals: ENABLED for user={actorId}, dialect={dialect_name}")
             
-            # Build expr_map from ds_transforms
-            expr_map_local = {}
-            if ds_transforms:
-                # From customColumns
-                for col in ds_transforms.get("customColumns", []):
-                    if isinstance(col, dict) and col.get("name") and col.get("expr"):
-                        expr_map_local[col["name"]] = col["expr"]
-                # From computed transforms
-                for t in ds_transforms.get("transforms", []):
-                    if isinstance(t, dict) and t.get("type") == "computed":
-                        if t.get("name") and t.get("expr"):
-                            expr_map_local[t["name"]] = t["expr"]
+            # Build expr_map for custom / computed columns using shared helper
+            expr_map_local: dict[str, str] = {}
+            if ds:
+                try:
+                    def _pt_apply_scope(ds_tr: dict, source_name: str) -> dict:
+                        """Apply basic datasource/table scoping for period_totals.
+
+                        We don't have widgetId here, so we include datasource-level and table-level
+                        items, similar to pivot but without widget filtering.
+                        """
+                        if not isinstance(ds_tr, dict):
+                            return {}
+                        def norm(s: str) -> str:
+                            s = (s or '').strip().strip('[]').strip('"').strip('`')
+                            parts = s.split('.')
+                            return parts[-1].lower() if parts else ''
+                        def filt(arr):
+                            out = []
+                            for it in (arr or []):
+                                sc = (it or {}).get('scope')
+                                if not sc:
+                                    out.append(it); continue
+                                lvl = str(sc.get('level') or '').lower()
+                                if lvl == 'datasource':
+                                    out.append(it)
+                                elif lvl == 'table' and sc.get('table') and norm(str(sc.get('table'))) == norm(source_name):
+                                    out.append(it)
+                            return out
+                        return {
+                            'customColumns': filt(ds_tr.get('customColumns')),
+                            'transforms': filt(ds_tr.get('transforms')),
+                            'joins': ds_tr.get('joins') or [],
+                            'defaults': ds_tr.get('defaults') or {},
+                        }
+                    expr_map_local = _build_expr_map_helper(ds, source, dialect_name, _pt_apply_scope, None)
+                    print(f"[SQLGlot] Period-totals: expr_map has {len(expr_map_local)} entries for legend='{legend}'")
+                except Exception as e:
+                    print(f"[SQLGlot] Period-totals: expr_map build failed: {e}")
+                    expr_map_local = {}
             
             # Build the aggregation query using SQLGlot
             builder = SQLGlotBuilder(dialect=dialect_name)
@@ -5810,14 +6028,33 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             # Handle legend: can be string, list, or None
             legend_field_arg = None
             legend_fields_arg = None
-            if legend:
-                if isinstance(legend, list):
-                    if len(legend) == 1:
-                        legend_field_arg = legend[0]
-                    else:
-                        legend_fields_arg = legend
+
+            # Normalize legend for validation
+            legend_eff = legend
+            legend_names: list[str] = []
+            if legend_eff:
+                if isinstance(legend_eff, list):
+                    legend_names = [str(x) for x in legend_eff]
                 else:
-                    legend_field_arg = legend
+                    legend_names = [str(legend_eff)]
+
+            # If legend requests ClientCode but this view has no such custom column,
+            # drop legend entirely to avoid DuckDB Binder errors. ClientCode exists
+            # as a custom column only on some views (e.g. vault reports), not on
+            # main.View_CIT_Invoice_Details_PriceList3.
+            if legend_names and "ClientCode" in legend_names and "ClientCode" not in (expr_map_local or {}):
+                print("[SQLGlot] Period-totals: legend 'ClientCode' not available on this source; dropping legend for period_totals")
+                legend_eff = None
+                legend_names = []
+
+            if legend_eff:
+                if isinstance(legend_eff, list):
+                    if len(legend_eff) == 1:
+                        legend_field_arg = legend_eff[0]
+                    else:
+                        legend_fields_arg = legend_eff
+                else:
+                    legend_field_arg = legend_eff
             
             # Add date range filters to where clause for SQLGlot
             where_with_dates = {**base_where}
@@ -5846,6 +6083,29 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                 expr_map=expr_map_local,
                 ds_type=dialect_name,
             )
+
+            # Safety patch for DuckDB: if legend is a custom column, make sure the
+            # generated SQL uses the expanded expression instead of a bare column
+            # reference like "ClientCode" which may not exist physically.
+            try:
+                if legend and isinstance(legend, str) and isinstance(expr_map_local, dict) and legend in expr_map_local:
+                    if ("duckdb" in str(dialect_name or "").lower()) and isinstance(sql_inner, str):
+                        expr = expr_map_local.get(legend)
+                        if expr:
+                            # Try a few common patterns produced by SQLGlot
+                            patterns = [
+                                f'"{legend}" AS legend',
+                                f'"{legend}" AS "legend"',
+                            ]
+                            for pat in patterns:
+                                if pat in sql_inner:
+                                    patched = sql_inner.replace(pat, f"{expr} AS legend", 1)
+                                    print(f"[SQLGlot] Period-totals: Patched legend '{legend}' to expression in SQL")
+                                    sql_inner = patched
+                                    break
+            except Exception as e:
+                print(f"[SQLGlot] Period-totals: Legend patch skipped due to error: {e}")
+
             print(f"[SQLGlot] Period-totals: Generated SQL: {sql_inner[:150]}...")
             
         except Exception as e:
@@ -5884,7 +6144,9 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
     if cached:
         # print(f"[DEBUG period_totals] CACHE HIT - returning cached data: {cached}", file=sys.stderr)
         cols, rows = cached
-        if legend:
+        has_legend_rows = bool(rows and rows[0] and len(rows[0]) >= 2)
+        if legend and has_legend_rows:
+            # Legend output: expect (k, v) per row
             try:
                 out = {"totals": {str(r[0]): float(r[1] or 0) for r in (rows or [])}}
                 try:
@@ -5898,21 +6160,21 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                 return out
             except Exception:
                 pass
-        else:
+        # Fallback: treat as single aggregated total
+        try:
+            v = float(rows[0][0] or 0) if rows and rows[0] else 0.0
+            out = {"total": v}
             try:
-                v = float(rows[0][0] or 0) if rows and rows[0] else 0.0
-                out = {"total": v}
-                try:
-                    counter_inc("query_cache_hit_total", {"endpoint": "period_totals", "kind": "data"})
-                except Exception:
-                    pass
-                try:
-                    summary_observe("query_duration_ms", int((time.perf_counter() - _pt_start) * 1000), {"endpoint": "period_totals"})
-                except Exception:
-                    pass
-                return out
+                counter_inc("query_cache_hit_total", {"endpoint": "period_totals", "kind": "data"})
             except Exception:
                 pass
+            try:
+                summary_observe("query_duration_ms", int((time.perf_counter() - _pt_start) * 1000), {"endpoint": "period_totals"})
+            except Exception:
+                pass
+            return out
+        except Exception:
+            pass
 
     _HEAVY_SEM.acquire()
     __actor_acq = False
@@ -5956,13 +6218,16 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                 cur = conn.execute(sql_qm, vals)
                 rows = cur.fetchall()
                 # print(f"[DEBUG period_totals] Rows returned: {len(rows)}, First row: {rows[0] if rows else 'None'}", file=sys.stderr)
-            if legend:
+            has_legend_rows = bool(rows and rows[0] and len(rows[0]) >= 2)
+            if legend and has_legend_rows:
+                # Legend output: expect (k, v)
                 out = {"totals": {str(r[0]): float(r[1] or 0) for r in rows}}
                 try:
                     _cache_set(cache_key, ["k","v"], [[str(r[0]), float(r[1] or 0)] for r in rows])
                 except Exception:
                     pass
             else:
+                # Single aggregated total
                 val = float(rows[0][0] or 0) if rows and rows[0] else 0.0
                 out = {"total": val}
                 try:
@@ -5994,7 +6259,8 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
                     pass
                 result = conn.execute(text(sql_inner), params)
                 rows = result.fetchall()
-                if legend:
+                has_legend_rows = bool(rows and rows[0] and len(rows[0]) >= 2)
+                if legend and has_legend_rows:
                     out = {"totals": {str(r[0]): float(r[1] or 0) for r in rows}}
                     try:
                         _cache_set(cache_key, ["k","v"], [[str(r[0]), float(r[1] or 0)] for r in rows])

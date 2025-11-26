@@ -6,6 +6,7 @@ import { Card, Title, Text, Select, SelectItem } from '@tremor/react'
 import * as Tabs from '@radix-ui/react-tabs'
 import CreateDashboardDialog from '@/components/dashboards/CreateDashboardDialog'
 import DashboardCard from '@/components/dashboards/DashboardCard'
+import ImportMappingDialog from '@/components/dashboards/ImportMappingDialog'
 import { Api, type DashboardListItem, type FavoriteOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
@@ -77,6 +78,8 @@ export default function MyDashboardsPage() {
   // Export/Import
   const fileRef = useRef<HTMLInputElement | null>(null)
   const [busyImport, setBusyImport] = useState(false)
+  const [showMappingDialog, setShowMappingDialog] = useState(false)
+  const [pendingImportData, setPendingImportData] = useState<{ dashboards: any[], datasources: any[] } | null>(null)
   // Search & pagination
   const [query, setQuery] = useState('')
   const [pageSize, setPageSize] = useState(8)
@@ -201,6 +204,25 @@ export default function MyDashboardsPage() {
       window.setTimeout(() => setToast(''), 2000)
     }
   }
+  const onExport = async (d: DashboardListItem) => {
+    try {
+      const data = await Api.exportDashboard(d.id, true, true, user?.id || undefined)
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const a = document.createElement('a')
+      const ts = new Date()
+      const name = `${d.name.replace(/[^a-z0-9_-]/gi, '_')}-export-${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}-${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}.json`
+      a.href = URL.createObjectURL(blob)
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setToast('Exported')
+      window.setTimeout(() => setToast(''), 1600)
+    } catch (e: any) {
+      setToast(e?.message || 'Export failed')
+      window.setTimeout(() => setToast(''), 2000)
+    }
+  }
 
   // Favorite toggle with optimistic UI and toast
   const toggleFavorite = async (d: DashboardListItem, next: boolean) => {
@@ -219,6 +241,52 @@ export default function MyDashboardsPage() {
       window.setTimeout(() => setToast(''), 1600)
     } catch {
       // best-effort; UI already updated
+    }
+  }
+
+  // Handle import confirmation after mapping
+  const handleImportConfirm = async (datasourceIdMap: Record<string, string>, tableNameMap: Record<string, string>) => {
+    if (!pendingImportData) return
+    
+    setShowMappingDialog(false)
+    setBusyImport(true)
+    
+    try {
+      const { dashboards, datasources } = pendingImportData
+      
+      // Import datasources first if provided
+      let finalDsIdMap = datasourceIdMap
+      if (datasources && datasources.length > 0) {
+        try {
+          const res = await Api.importDatasources(datasources, user?.id || undefined)
+          // Merge the auto-generated ID map with user-provided map
+          finalDsIdMap = { ...datasourceIdMap, ...(res?.idMap || {}) }
+        } catch (err) {
+          console.error('Datasource import failed:', err)
+          // Continue with dashboard import even if datasources fail
+        }
+      }
+      
+      // Import dashboards with mappings
+      await Api.importDashboards({ 
+        dashboards, 
+        datasourceIdMap: Object.keys(finalDsIdMap).length > 0 ? finalDsIdMap : null, 
+        tableNameMap: Object.keys(tableNameMap).length > 0 ? tableNameMap : null 
+      }, user?.id || undefined)
+      
+      // Refresh dashboard list
+      const next = await Api.listDashboards(user?.id || 'dev_user')
+      setItems(next || [])
+      try { window.dispatchEvent(new CustomEvent('sidebar-counts-refresh')) } catch {}
+      
+      setToast(`Imported ${dashboards.length} dashboard${dashboards.length > 1 ? 's' : ''}`)
+      window.setTimeout(() => setToast(''), 1600)
+    } catch (e: any) {
+      setToast(e?.message || 'Import failed')
+      window.setTimeout(() => setToast(''), 2000)
+    } finally {
+      setBusyImport(false)
+      setPendingImportData(null)
     }
   }
 
@@ -277,26 +345,36 @@ export default function MyDashboardsPage() {
                   try {
                     const text = await file.text()
                     const json = JSON.parse(text)
-                    // Expect DashboardExportResponse shape; handle minimal variations
-                    const dashboards = Array.isArray(json?.dashboards) ? json.dashboards : []
-                    const datasources = Array.isArray(json?.datasources) ? json.datasources : []
-                    let idMap: Record<string, string> | undefined
-                    if (datasources.length > 0) {
-                      try {
-                        const res = await Api.importDatasources(datasources, user?.id || undefined)
-                        idMap = res?.idMap || undefined
-                      } catch (err) {
-                        // If datasource import fails, we still try dashboards (they might not need remap)
-                      }
+                    
+                    // Handle both single dashboard and multiple dashboards JSON formats
+                    let dashboards: any[] = []
+                    let datasources: any[] = []
+                    
+                    // Check if it's a DashboardExportResponse (multiple dashboards)
+                    if (json?.dashboards && Array.isArray(json.dashboards)) {
+                      dashboards = json.dashboards
+                      datasources = Array.isArray(json?.datasources) ? json.datasources : []
                     }
+                    // Check if it's a single dashboard export (has dashboards array with one item)
+                    else if (Array.isArray(json) && json.length > 0) {
+                      // Array of dashboards
+                      dashboards = json
+                    }
+                    // Check if it's a single dashboard object (has name, definition, etc.)
+                    else if (json?.name && json?.definition) {
+                      dashboards = [json]
+                    }
+                    // Fallback: treat entire JSON as dashboard array
+                    else {
+                      dashboards = []
+                    }
+                    
                     if (dashboards.length > 0) {
-                      await Api.importDashboards({ dashboards, datasourceIdMap: idMap || null }, user?.id || undefined)
-                      const next = await Api.listDashboards(user?.id || 'dev_user')
-                      setItems(next || [])
-                      setToast('Imported')
-                      window.setTimeout(() => setToast(''), 1600)
+                      // Show mapping dialog
+                      setPendingImportData({ dashboards, datasources })
+                      setShowMappingDialog(true)
                     } else {
-                      setToast('No dashboards found in file'); window.setTimeout(() => setToast(''), 2000)
+                      setToast('No valid dashboards found in file'); window.setTimeout(() => setToast(''), 2000)
                     }
                   } catch (e: any) {
                     setToast(e?.message || 'Import failed'); window.setTimeout(() => setToast(''), 2000)
@@ -364,7 +442,8 @@ export default function MyDashboardsPage() {
               {!loading && visibleAll.map((d) => (
                 <DashboardCard key={d.id} d={d} widthClass="w-full" showMenu context="dashboard"
                   onOpenAction={onEdit} onDuplicateAction={onDuplicate} onPublishOpenAction={onPublishOpen}
-                  onUnpublishAction={onUnpublish} onCopyLinkAction={onCopyLink} onDeleteAction={() => setConfirmDeleteFor(d)}
+                  onUnpublishAction={onUnpublish} onCopyLinkAction={onCopyLink} onExportAction={onExport}
+                  onDeleteAction={() => setConfirmDeleteFor(d)}
                   isFavorite={favIdsSet.has(d.id)} onToggleFavoriteAction={toggleFavorite}
                 />
               ))}
@@ -410,7 +489,8 @@ export default function MyDashboardsPage() {
                 {!loading && visiblePublished.map((d) => (
                   <DashboardCard key={d.id} d={d} widthClass="w-full" showMenu context="dashboard"
                     onOpenAction={onEdit} onDuplicateAction={onDuplicate} onPublishOpenAction={onPublishOpen}
-                    onUnpublishAction={onUnpublish} onCopyLinkAction={onCopyLink} onDeleteAction={() => setConfirmDeleteFor(d)}
+                    onUnpublishAction={onUnpublish} onCopyLinkAction={onCopyLink} onExportAction={onExport}
+                    onDeleteAction={() => setConfirmDeleteFor(d)}
                     isFavorite={favIdsSet.has(d.id)} onToggleFavoriteAction={toggleFavorite}
                   />
                 ))}
@@ -629,6 +709,20 @@ export default function MyDashboardsPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      {/* Import Mapping Dialog */}
+      {pendingImportData && (
+        <ImportMappingDialog
+          open={showMappingDialog}
+          onClose={() => {
+            setShowMappingDialog(false)
+            setPendingImportData(null)
+          }}
+          onConfirm={handleImportConfirm}
+          importData={pendingImportData}
+          userId={user?.id || 'dev_user'}
+        />
+      )}
     </div>
   )
 }

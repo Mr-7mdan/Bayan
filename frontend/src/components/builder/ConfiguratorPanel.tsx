@@ -1563,7 +1563,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
     } else {
       console.log('[FilterEditor] Skipping base field fetch - will use', isDerivedField ? 'derived' : 'custom', 'column logic')
       setExtraSamples([])
-      setLoadingSamples(false)
+      // Don't set loadingSamples(false) here - let the derived/custom handlers manage loading state
     }
     return () => { abort = true }
   }, [field, source, datasourceId, customColumns])
@@ -1723,7 +1723,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
     if (isDerived && baseField) {
       runDerived()
     } else {
-      setLoadingSamples(false)
+      // Don't set loadingSamples(false) - let custom column effect handle it if needed
     }
     return () => { abort = true }
   }, [field, source, datasourceId, isDerived, baseField, partName])
@@ -1774,6 +1774,9 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
     // Only run for custom columns, not derived date fields
     if (custom && !isDerived) {
       runCustom()
+    } else if (!custom && !isDerived) {
+      // Not a base field (handled above), not derived, not custom - stop loading
+      setLoadingSamples(false)
     }
     return () => { abort = true }
   }, [custom?.formula, source, datasourceId, Array.isArray(sampleRows) ? sampleRows.length : 0, customColumns, isDerived])

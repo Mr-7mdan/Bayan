@@ -551,6 +551,7 @@ class DashboardImportItem(BaseModel):
 class DashboardImportRequest(BaseModel):
     dashboards: list[DashboardImportItem]
     datasourceIdMap: Dict[str, str] | None = None
+    tableNameMap: Dict[str, str] | None = None
     datasources: list[DatasourceImportItem] | None = None
 
 

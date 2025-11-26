@@ -45,7 +45,8 @@ export default function FiltersProvider({ children }: { children?: ReactNode }) 
   const urlSyncEnabled = useMemo(() => {
     try {
       const segs = String(pathname || '').split('/').filter(Boolean)
-      return segs[0] === 'builder'
+      // Enable for /builder route OR root route (dashboard builder at /)
+      return segs[0] === 'builder' || segs.length === 0
     } catch { return false }
   }, [pathname])
 

@@ -378,8 +378,7 @@ export default function ChartCard({
   title: string
   sql: string
   datasourceId?: string
-  type?: 'line' | 'bar' | 'area' | 'column' | 'donut' | 'categoryBar' | 'spark' | 'combo' | 'badges' | 'progress' | 'tracker' | 'scatter' | 'tremorTable' | 'barList'
-  | 'gantt' | 'sankey'
+  type?: 'line' | 'bar' | 'area' | 'column' | 'donut' | 'categoryBar' | 'spark' | 'combo' | 'badges' | 'progress' | 'tracker' | 'scatter' | 'tremorTable' | 'barList' | 'gantt' | 'sankey'
   options?: WidgetConfig['options']
   queryMode?: 'sql' | 'spec'
   querySpec?: QuerySpec
@@ -977,6 +976,35 @@ export default function ChartCard({
           // If xField is a derived label like "Date (Month)" use the base column as delta date field
           const xBaseForDelta = (() => { try { const m = String(xField || '').match(/^(.*)\s\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/); return m ? m[1] : xField } catch { return xField } })()
           if (xBaseForDelta && (gb !== 'none' || xFmtDatetime)) df = String(xBaseForDelta)
+          
+          // For Sankey and other charts without date in X/Y: auto-detect date field
+          // This ensures global date filters are applied even when date isn't visualized
+          if (!df && (filters.startDate || filters.endDate) && !ignoreGlobal) {
+            // Try to infer from querySpec fields using common date field name patterns
+            const pick = (name?: string) => {
+              const s = String(name || '')
+              return s && /(date|time|timestamp|created|updated|_at)$/i.test(s) ? s : undefined
+            }
+            // Check all querySpec fields (x, y, legend, etc.)
+            const candidates = [
+              pick((querySpec as any)?.x),
+              pick((querySpec as any)?.y),
+              pick((querySpec as any)?.legend),
+            ].filter(Boolean)
+            if (candidates.length > 0) df = candidates[0]
+            
+            // Log warning if global filters exist but no date field detected
+            if (!df && typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+              try {
+                console.warn('[ChartCard] Global date filters are active but no date field detected. Set options.deltaDateField to apply filters.', {
+                  title, type,
+                  hasStartDate: !!filters.startDate,
+                  hasEndDate: !!filters.endDate,
+                  querySpec: { x: (querySpec as any)?.x, y: (querySpec as any)?.y, legend: (querySpec as any)?.legend }
+                })
+              } catch {}
+            }
+          }
         }
         if (df && !ignoreGlobal) {
           if (filters.startDate) baseWhere[`${df}__gte`] = filters.startDate
@@ -1068,8 +1096,9 @@ export default function ChartCard({
         }
         // Prefer server aggregation when semantics are present and safe.
         // Force client pipeline when multi-legend is requested (legend array length > 1)
+        // EXCEPTION: Sankey charts MUST use server-side aggregation to get [x, legend, value] format
         const gbOverrideActive = !!((options as any)?.largeScale) && !!adaptiveGb && String(adaptiveGb).toLowerCase() !== String(((querySpec as any)?.groupBy || 'none')).toLowerCase()
-        if (legendArrayTooMany || (hasCustomAnywhere && !(serverAggWanted && safeForServerAgg)) || gbOverrideActive) {
+        if (type !== 'sankey' && (legendArrayTooMany || (hasCustomAnywhere && !(serverAggWanted && safeForServerAgg)) || gbOverrideActive)) {
           // Determine which custom columns are used
           const usedNames = new Set<string>()
           if (usingCustomInSeriesY) seriesArr.forEach((s) => { if (s?.y && customNames.has(String(s.y))) usedNames.add(String(s.y)) })
@@ -1674,6 +1703,17 @@ export default function ChartCard({
             })
           })
           const categories = Array.from(catsSet.values())
+          
+          // For Sankey charts, return raw backend response without pivoting
+          if ((type as string) === 'sankey' && results.length === 1) {
+            const res = results[0]
+            return { 
+              columns: res.columns, 
+              rows: res.rows, 
+              categories: (res as any).categories 
+            } as any
+          }
+          
           // Do not force 0s; ensure keys exist but keep nulls for missing points
           const rowsShaped = Array.from(map.values()).map((o) => { categories.forEach((c) => { if (o[c] === undefined) o[c] = null }) ; return o })
           return { columns: ['x', ...categories], rows: rowsShaped, categories, virtualMeta } as any
@@ -1887,6 +1927,10 @@ export default function ChartCard({
               console.log('[ChartCard] [FiltersDebug] pivot.single-agg', { categories, sample })
             } catch {}
           }
+          // For Sankey charts, return raw backend response without pivoting
+          if (type === 'sankey') {
+            return res
+          }
           return { columns: ['x', ...categories], rows: Array.from(map.values()), categories } as any
         }
         if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
@@ -2099,6 +2143,11 @@ export default function ChartCard({
         const xIdx = Math.max(cols.indexOf('x'), 0)
         const legendIdx = cols.indexOf('legend')
         const valueIdx = cols.indexOf('value')
+        // For Sankey charts, keep long format [x, legend, value] - don't pivot
+        if (type === 'sankey' && legendIdx !== -1 && valueIdx !== -1) {
+          // Return rows as-is for Sankey (it needs long format)
+          return rows
+        }
         // If shape is [x, legend, value], pivot into { x, [legend]: value }
         if (legendIdx !== -1 && valueIdx !== -1) {
           const byX = new Map<any, any>()
@@ -2152,7 +2201,7 @@ export default function ChartCard({
     // Single-series: expect [x, value]
     const base = rows.map((row: any) => ({ x: row[0] as XType, value: toNum(row[1]) }))
     return base
-  }, [q.data, isMulti, categories])
+  }, [q.data, isMulti, categories, type])
 
   
 
@@ -3268,12 +3317,26 @@ export default function ChartCard({
   const content = (() => {
     const config = { options }
     const showLegend = config.options?.showLegend ?? true
-    const fmt = config.options?.yAxisFormat ?? 'none'
+    // Try to get format from first series/value, fallback to global yAxisFormat
+    const seriesFormat = (() => {
+      // Check querySpec.series[0].format
+      const seriesArr = (querySpec as any)?.series
+      if (Array.isArray(seriesArr) && seriesArr.length > 0 && seriesArr[0]?.format) {
+        return seriesArr[0].format
+      }
+      // Check pivot.values[0].format
+      const pivotValues = (pivot as any)?.values
+      if (Array.isArray(pivotValues) && pivotValues.length > 0 && pivotValues[0]?.format) {
+        return pivotValues[0].format
+      }
+      return null
+    })()
+    const fmt = seriesFormat || config.options?.yAxisFormat || 'none'
     const valueFormatter = (n: number) => {
       // Coerce non-finite to 0 before any formatting
       if (!Number.isFinite(n)) n = 0
       // Currency with custom locale/currency
-      if ((options?.yAxisFormat || 'none') === 'currency' && options?.valueCurrency) {
+      if ((seriesFormat || options?.yAxisFormat || 'none') === 'currency' && options?.valueCurrency) {
         try {
           const s = new Intl.NumberFormat(options?.valueFormatLocale || 'en-US', { style: 'currency', currency: options.valueCurrency, maximumFractionDigits: 2 }).format(n)
           return `${options?.valuePrefix || ''}${s}${options?.valueSuffix || ''}`
@@ -6678,21 +6741,30 @@ export default function ChartCard({
     }
     if (type === 'sankey') {
       // Transform data for Sankey diagram: expects { nodes: [], links: [] }
-      // Data comes with standardized column names: 'x' (source), 'legend' (target), 'value'
-      const rowsArr: any[] = Array.isArray(displayData)
-        ? (displayData as any[])
-        : (Array.isArray((q.data as any)?.rows) ? ((q.data as any).rows as any[]) : [])
+      // Data comes in long format from the pivot query
+      // Column structure: [row_dimension, column_dimension, value]
+      // For pivots: [FromClientCode, ToClientCode, value] or [x, legend, value]
       const cols: string[] = ((q.data as any)?.columns as string[]) || []
+      const rowsArr: any[] = Array.isArray(data) ? (data as any[]) : []
       
-      // Look for standardized column names
-      const sourceIdx = cols.indexOf('x')
-      const targetIdx = cols.indexOf('legend')
-      const valueIdx = cols.indexOf('value')
+      // Try to find standardized column names first ('x', 'legend', 'value')
+      let sourceIdx = cols.indexOf('x')
+      let targetIdx = cols.indexOf('legend')
+      let valueIdx = cols.indexOf('value')
       
+      // If standardized names not found, use column positions
+      // (First col = source, second col = target, third col = value)
       if (sourceIdx === -1 || targetIdx === -1 || valueIdx === -1) {
-        return <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-          Sankey requires X-axis (source) and Legend (target) to be configured in the pivot builder
-        </div>
+        if (cols.length >= 3) {
+          sourceIdx = 0
+          targetIdx = 1
+          valueIdx = 2
+          console.log('[Sankey] Using column positions:', { source: cols[0], target: cols[1], value: cols[2] })
+        } else {
+          return <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+            Sankey requires X-axis (source) and Legend (target) to be configured in the pivot builder
+          </div>
+        }
       }
       
       console.log('[Sankey] Data structure:', { cols, rowCount: rowsArr.length, sourceIdx, targetIdx, valueIdx })
@@ -6719,7 +6791,8 @@ export default function ChartCard({
           const target = String(row[targetIdx] || '')
           const value = Number(row[valueIdx] || 0)
           
-          if (source && target && value > 0 && source !== target) {
+          // Allow self-loops (source === target) for intra-region flows
+          if (source && target && value > 0) {
             allFlows.push({ source, target, value })
           }
         } else if (row && typeof row === 'object') {
@@ -6745,10 +6818,8 @@ export default function ChartCard({
               target = key.split('-')[0].trim()
             }
             
-            // Skip self-loops but allow bidirectional flows
-            if (source !== target) {
-              allFlows.push({ source, target, value })
-            }
+            // Allow self-loops for intra-region flows
+            allFlows.push({ source, target, value })
           })
         }
       })
@@ -6776,6 +6847,14 @@ export default function ChartCard({
       }))
       
       console.log('[Sankey] Built data:', { nodeCount: nodes.length, linkCount: finalLinks.length, nodes: nodes.slice(0, 10), links: finalLinks.slice(0, 5) })
+      
+      // Validate data before rendering to prevent ECharts errors
+      if (nodes.length === 0 || finalLinks.length === 0) {
+        return <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+          {q.isLoading ? 'Loading...' : 'No data available for Sankey chart'}
+        </div>
+      }
+      
       const hexColors = legendHexColors || (chartColorsTokens || [])
       const vf = (n: number) => valueFormatter(n)
       const showLabels = (options?.dataLabelsShow ?? true)

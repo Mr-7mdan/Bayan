@@ -182,6 +182,7 @@ export type DashboardImportItem = {
 export type DashboardImportRequest = {
   dashboards: DashboardImportItem[]
   datasourceIdMap?: Record<string, string> | null
+  tableNameMap?: Record<string, string> | null
   datasources?: DatasourceImportItem[] | null
 }
 

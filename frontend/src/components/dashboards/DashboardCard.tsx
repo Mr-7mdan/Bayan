@@ -59,6 +59,7 @@ export default function DashboardCard({
   onUnpublishAction,
   onDeleteAction,
   onCopyLinkAction,
+  onExportAction,
   // Collections
   onRemoveFromCollectionAction,
   context = 'dashboard',
@@ -80,6 +81,7 @@ export default function DashboardCard({
   onUnpublishAction?: (d: DashboardListItem) => void | Promise<void>
   onDeleteAction?: (d: DashboardListItem) => void | Promise<void>
   onCopyLinkAction?: (d: DashboardListItem) => void | Promise<void>
+  onExportAction?: (d: DashboardListItem) => void | Promise<void>
   onRemoveFromCollectionAction?: (d: DashboardListItem) => void | Promise<void>
   context?: 'dashboard' | 'collection'
   widthClass?: string
@@ -163,6 +165,9 @@ export default function DashboardCard({
                       )}
                       {!!onCopyLinkAction && d.published && (
                         <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onCopyLinkAction(d) }}>Copy link</button>
+                      )}
+                      {!!onExportAction && (
+                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onExportAction(d) }}>Export (.json)</button>
                       )}
                       {!!onDeleteAction && (
                         <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onDeleteAction(d) }}>Delete</button>
