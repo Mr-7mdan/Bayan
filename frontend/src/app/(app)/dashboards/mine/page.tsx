@@ -270,16 +270,24 @@ export default function MyDashboardsPage() {
     try {
       const { dashboards, datasources } = pendingImportData
       
-      // Import datasources first if provided
-      let finalDsIdMap = datasourceIdMap
+      // Import only datasources that user did NOT map to existing ones
+      let finalDsIdMap = { ...datasourceIdMap }
       if (datasources && datasources.length > 0) {
-        try {
-          const res = await Api.importDatasources(datasources, user?.id || undefined)
-          // Merge the auto-generated ID map with user-provided map
-          finalDsIdMap = { ...datasourceIdMap, ...(res?.idMap || {}) }
-        } catch (err) {
-          console.error('Datasource import failed:', err)
-          // Continue with dashboard import even if datasources fail
+        // Filter out datasources that are already mapped by the user
+        const unmappedDatasources = datasources.filter((ds: any) => !datasourceIdMap[ds.id])
+        
+        if (unmappedDatasources.length > 0) {
+          try {
+            console.log('[Import] Creating new datasources for unmapped:', unmappedDatasources.map((ds: any) => ds.name))
+            const res = await Api.importDatasources(unmappedDatasources, user?.id || undefined)
+            // Merge only the auto-generated IDs (for unmapped datasources)
+            finalDsIdMap = { ...datasourceIdMap, ...(res?.idMap || {}) }
+          } catch (err) {
+            console.error('Datasource import failed:', err)
+            // Continue with dashboard import even if datasources fail
+          }
+        } else {
+          console.log('[Import] All datasources already mapped, skipping datasource import')
         }
       }
       
