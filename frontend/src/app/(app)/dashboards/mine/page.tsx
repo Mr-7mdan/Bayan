@@ -287,7 +287,125 @@ export default function MyDashboardsPage() {
             // Continue with dashboard import even if datasources fail
           }
         } else {
-          console.log('[Import] All datasources already mapped, skipping datasource import')
+          console.log('[Import] All datasources already mapped, skipping datasource creation')
+        }
+        
+        // For mapped datasources, merge transforms (custom columns, joins, etc.) into target datasources
+        for (const ds of datasources) {
+          const targetDsId = datasourceIdMap[ds.id]
+          if (targetDsId && ds.options?.transforms) {
+            try {
+              console.log(`[Import] Merging transforms from ${ds.name} into target datasource ${targetDsId}`)
+              
+              // Fetch current target datasource
+              const targetDs = await Api.getDatasource(targetDsId, user?.id || undefined)
+              if (!targetDs) continue
+              
+              // Parse current options
+              const currentOptions = targetDs.options || {}
+              const currentTransforms = (currentOptions.transforms || {}) as any
+              
+              // Clone transforms from export
+              const importedTransforms = JSON.parse(JSON.stringify(ds.options.transforms)) as any
+              
+              // Update scope.table in custom columns, joins, and transforms based on tableNameMap
+              if (tableNameMap && Object.keys(tableNameMap).length > 0) {
+                // Update custom columns scope
+                if (Array.isArray(importedTransforms.customColumns)) {
+                  importedTransforms.customColumns.forEach((col: any) => {
+                    if (col.scope?.table && tableNameMap[col.scope.table]) {
+                      console.log(`[Import]   Remapping custom column "${col.name}" scope: ${col.scope.table} → ${tableNameMap[col.scope.table]}`)
+                      col.scope.table = tableNameMap[col.scope.table]
+                    }
+                  })
+                }
+                
+                // Update transforms scope
+                if (Array.isArray(importedTransforms.transforms)) {
+                  importedTransforms.transforms.forEach((t: any) => {
+                    if (t.scope?.table && tableNameMap[t.scope.table]) {
+                      console.log(`[Import]   Remapping transform scope: ${t.scope.table} → ${tableNameMap[t.scope.table]}`)
+                      t.scope.table = tableNameMap[t.scope.table]
+                    }
+                  })
+                }
+                
+                // Update joins scope
+                if (Array.isArray(importedTransforms.joins)) {
+                  importedTransforms.joins.forEach((j: any) => {
+                    if (j.scope?.table && tableNameMap[j.scope.table]) {
+                      console.log(`[Import]   Remapping join scope: ${j.scope.table} → ${tableNameMap[j.scope.table]}`)
+                      j.scope.table = tableNameMap[j.scope.table]
+                    }
+                  })
+                }
+              }
+              
+              // Merge transforms (imported transforms override existing ones with same name/scope)
+              const mergedTransforms = { ...currentTransforms }
+              
+              // Merge custom columns
+              const existingCustomCols = currentTransforms.customColumns || []
+              const importedCustomCols = importedTransforms.customColumns || []
+              const customColsMap = new Map()
+              existingCustomCols.forEach((col: any) => {
+                const key = `${col.name}__${col.scope?.table || ''}`
+                customColsMap.set(key, col)
+              })
+              importedCustomCols.forEach((col: any) => {
+                const key = `${col.name}__${col.scope?.table || ''}`
+                customColsMap.set(key, col) // Override
+              })
+              mergedTransforms.customColumns = Array.from(customColsMap.values())
+              
+              // Merge transforms
+              const existingTransforms = currentTransforms.transforms || []
+              const importedTransformsList = importedTransforms.transforms || []
+              const transformsMap = new Map()
+              existingTransforms.forEach((t: any) => {
+                const key = `${t.name}__${t.scope?.table || ''}`
+                transformsMap.set(key, t)
+              })
+              importedTransformsList.forEach((t: any) => {
+                const key = `${t.name}__${t.scope?.table || ''}`
+                transformsMap.set(key, t) // Override
+              })
+              mergedTransforms.transforms = Array.from(transformsMap.values())
+              
+              // Merge joins
+              const existingJoins = currentTransforms.joins || []
+              const importedJoins = importedTransforms.joins || []
+              const joinsMap = new Map()
+              existingJoins.forEach((j: any) => {
+                const key = `${j.targetTable}__${j.scope?.table || ''}`
+                joinsMap.set(key, j)
+              })
+              importedJoins.forEach((j: any) => {
+                const key = `${j.targetTable}__${j.scope?.table || ''}`
+                joinsMap.set(key, j) // Override
+              })
+              mergedTransforms.joins = Array.from(joinsMap.values())
+              
+              // Update target datasource with merged transforms
+              await Api.updateDatasource(targetDsId, {
+                options: {
+                  ...currentOptions,
+                  transforms: mergedTransforms
+                }
+              })
+              
+              console.log(`[Import]   Merged ${importedCustomCols.length} custom columns, ${importedTransformsList.length} transforms, ${importedJoins.length} joins`)
+              console.log(`[Import]   Total custom columns after merge: ${mergedTransforms.customColumns?.length || 0}`)
+              if (mergedTransforms.customColumns && mergedTransforms.customColumns.length > 0) {
+                mergedTransforms.customColumns.forEach((col: any) => {
+                  console.log(`[Import]     - ${col.name} (scope: ${col.scope?.table || 'datasource-level'})`)
+                })
+              }
+            } catch (err) {
+              console.error(`[Import] Failed to merge transforms for datasource ${ds.name}:`, err)
+              // Continue anyway
+            }
+          }
         }
       }
       
