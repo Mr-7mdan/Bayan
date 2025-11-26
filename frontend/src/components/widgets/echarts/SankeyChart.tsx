@@ -75,6 +75,48 @@ export function renderSankey({
   const textColor = dark ? '#e5e7eb' : '#0f172a'
   const shadowColor = dark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.8)'
 
+  // Validate data structure to prevent ECharts errors
+  const validNodes = Array.isArray(data?.nodes) ? data.nodes.filter(n => n && n.name) : []
+  const nodeNames = new Set(validNodes.map(n => n.name))
+  
+  // Filter links to only include those with valid source and target nodes
+  const validLinks = Array.isArray(data?.links) 
+    ? data.links.filter(l => 
+        l && 
+        l.source && 
+        l.target && 
+        nodeNames.has(l.source) && 
+        nodeNames.has(l.target) &&
+        typeof l.value === 'number' &&
+        !isNaN(l.value)
+      )
+    : []
+
+  // If no valid data, return empty state
+  if (validNodes.length === 0 || validLinks.length === 0) {
+    console.warn('[Sankey] Invalid data filtered:', {
+      originalNodes: data?.nodes?.length ?? 0,
+      validNodes: validNodes.length,
+      originalLinks: data?.links?.length ?? 0,
+      validLinks: validLinks.length
+    })
+    return (
+      <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+        No valid data for Sankey chart
+      </div>
+    )
+  }
+  
+  // Log data validation results
+  if (data?.nodes?.length !== validNodes.length || data?.links?.length !== validLinks.length) {
+    console.log('[Sankey] Data validation:', {
+      nodesFiltered: (data?.nodes?.length ?? 0) - validNodes.length,
+      linksFiltered: (data?.links?.length ?? 0) - validLinks.length,
+      validNodesCount: validNodes.length,
+      validLinksCount: validLinks.length
+    })
+  }
+
   const option = {
     color: Array.isArray(colors) && colors.length ? colors : undefined,
     tooltip: {
@@ -84,21 +126,30 @@ export function renderSankey({
       borderWidth: 0,
       extraCssText: 'box-shadow:none;padding:0;',
       formatter: (params: any) => {
-        if (params.dataType === 'edge') {
-          // Link tooltip
-          const source = String(params.data?.source ?? '')
-          const target = String(params.data?.target ?? '')
-          const value = Number(params.data?.value ?? 0)
-          return buildTooltipHtml(`${source} → ${target}`, [
-            { label: 'Value', value: valueFormatterAction(value) }
-          ])
-        } else {
-          // Node tooltip
-          const name = String(params.name ?? '')
-          const value = Number(params.value ?? 0)
-          return buildTooltipHtml(name, [
-            { label: 'Total', value: valueFormatterAction(value) }
-          ])
+        // Defensive check: params can be undefined during ECharts initialization
+        if (!params) return ''
+        
+        try {
+          if (params.dataType === 'edge') {
+            // Link tooltip
+            const source = String(params.data?.source ?? '')
+            const target = String(params.data?.target ?? '')
+            const value = Number(params.data?.value ?? 0)
+            return buildTooltipHtml(`${source} → ${target}`, [
+              { label: 'Value', value: valueFormatterAction(value) }
+            ])
+          } else {
+            // Node tooltip
+            const name = String(params.name ?? '')
+            const value = Number(params.value ?? 0)
+            return buildTooltipHtml(name, [
+              { label: 'Total', value: valueFormatterAction(value) }
+            ])
+          }
+        } catch (e) {
+          // Fallback in case of any formatter error
+          console.error('[Sankey] Tooltip formatter error:', e)
+          return ''
         }
       }
     },
@@ -114,8 +165,8 @@ export function renderSankey({
         nodeWidth,
         nodeGap,
         layoutIterations,
-        data: data.nodes,
-        links: data.links,
+        data: validNodes,
+        links: validLinks,
         label: {
           show: showLabels,
           position: labelPosition,
@@ -123,7 +174,10 @@ export function renderSankey({
           fontSize: 12,
           textShadowColor: shadowColor,
           textShadowBlur: 3,
-          formatter: (params: any) => String(params.name ?? '')
+          formatter: (params: any) => {
+            if (!params) return ''
+            return String(params.name ?? '')
+          }
         },
         lineStyle: {
           color: 'gradient',

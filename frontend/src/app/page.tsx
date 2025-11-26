@@ -19,6 +19,7 @@ import CompositionCard from '@/components/widgets/CompositionCard'
 import DataNavigator from '@/components/builder/DataNavigator'
 import ConfiguratorPanel from '@/components/builder/ConfiguratorPanel'
 import GlobalFiltersBar from '@/components/builder/GlobalFiltersBar'
+import { useFilters } from '@/components/providers/FiltersProvider'
 import { ConfigUpdateContext } from '@/components/builder/ConfigUpdateContext'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
 import TitleBar from '@/components/builder/TitleBar'
@@ -68,6 +69,9 @@ export default function HomePage() {
   // Dashboard-level options
   const [dashOptions, setDashOptions] = useState<Record<string, any>>({ publicShowFilters: true, publicLockFilters: false, gridSize: 'lg' })
   const [configs, setConfigs] = useState<Record<string, WidgetConfig>>({})
+  
+  // Access global filters from context
+  const { filters, setFilters } = useFilters()
 
   const selectedConfig = selectedId ? configs[selectedId] : null
   const userEditedRef = useRef<boolean>(false)
@@ -233,6 +237,37 @@ export default function HomePage() {
   const [toast, setToast] = useState<string>('')
   const [hydrated, setHydrated] = useState<boolean>(false)
   const queryClient = useQueryClient()
+  
+  // Sync global filters to dashOptions for persistence in dashboard JSON
+  useEffect(() => {
+    if (!hydrated || !dashboardId) return
+    
+    const hasFilters = filters.startDate || filters.endDate || filters.filterPreset
+    if (hasFilters) {
+      setDashOptions((prev) => {
+        const newOptions = {
+          ...prev,
+          globalFilters: {
+            startDate: filters.startDate,
+            endDate: filters.endDate,
+            filterPreset: filters.filterPreset
+          }
+        }
+        // Save to server with debounce
+        scheduleServerSave(undefined, newOptions)
+        return newOptions
+      })
+    } else {
+      setDashOptions((prev) => {
+        if (!prev.globalFilters) return prev
+        // Clear global filters from options if none are set
+        const { globalFilters, ...rest } = prev
+        scheduleServerSave(undefined, rest)
+        return rest
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.startDate, filters.endDate, filters.filterPreset, hydrated, dashboardId])
   // Navigator visibility and collapse behavior (builder-only)
   const [showNavigator, setShowNavigator] = useState<boolean>(() => {
     try { return localStorage.getItem('show_nav') !== '0' } catch { return true }
@@ -361,13 +396,31 @@ export default function HomePage() {
     window.setTimeout(() => setToast(''), 1000)
   }
 
+  // Helper function to load dashboard options and apply global filters
+  const loadDashboardOptions = (options: any) => {
+    const opts = options || { publicShowFilters: true, publicLockFilters: false }
+    setDashOptions(opts)
+    
+    // Load saved global filters from dashboard options and apply them
+    if (opts.globalFilters) {
+      const { startDate, endDate, filterPreset } = opts.globalFilters
+      if (startDate || endDate || filterPreset) {
+        setFilters({
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+          filterPreset: filterPreset || undefined
+        })
+      }
+    }
+  }
+
   async function onLoad() {
     if (!dashboardId) return
     const res = await Api.getDashboard(dashboardId, user?.id)
     const def = res.definition
     setLayoutState(def.layout)
     setConfigs(def.widgets as Record<string, WidgetConfig>)
-    setDashOptions((def as any).options || { publicShowFilters: true, publicLockFilters: false })
+    loadDashboardOptions((def as any).options)
     try { localStorage.setItem('dashboardDraft', JSON.stringify(def)) } catch {}
   }
 
@@ -456,7 +509,7 @@ export default function HomePage() {
         if (draft?.layout && draft?.widgets) {
           setLayoutState(draft.layout)
           setConfigs(draft.widgets)
-          setDashOptions((draft as any).options || { publicShowFilters: true, publicLockFilters: false })
+          loadDashboardOptions((draft as any).options)
         }
         void (async () => {
           try {
@@ -485,7 +538,7 @@ export default function HomePage() {
               
               setLayoutState(finalLayout)
               setConfigs(def.widgets as Record<string, WidgetConfig>)
-              setDashOptions((def as any).options || { publicShowFilters: true, publicLockFilters: false })
+              loadDashboardOptions((def as any).options)
               try { localStorage.setItem('dashboardDraft', JSON.stringify({ ...def, layout: finalLayout })) } catch {}
             }
           } catch { /* ignore */ }
@@ -517,7 +570,7 @@ export default function HomePage() {
             if (def?.layout && def?.widgets) {
               setLayoutState(def.layout)
               setConfigs(def.widgets as Record<string, WidgetConfig>)
-              setDashOptions((def as any).options || { publicShowFilters: true, publicLockFilters: false })
+              loadDashboardOptions((def as any).options)
               try { localStorage.setItem('dashboardDraft', JSON.stringify(def)) } catch {}
             }
           } catch { /* ignore first-run create errors */ }

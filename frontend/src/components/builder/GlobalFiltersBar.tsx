@@ -12,7 +12,9 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
   const { filters, setFilters, reset } = useFilters()
   const [showMapping, setShowMapping] = useState(false)
   const [showBreakPanel, setShowBreakPanel] = useState(false)
-  const [selectedPreset, setSelectedPreset] = useState<string>('all')
+  
+  // Use filterPreset from filters context (defaults to 'all' if not set)
+  const selectedPreset = filters.filterPreset || 'all'
 
   const presetLabels: Record<string, string> = {
     all: 'All time',
@@ -39,7 +41,6 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
   ] as const
 
   function applyPreset(v: string) {
-    setSelectedPreset(v) // Track which preset was selected
     const now = new Date()
     const fmt = (d: Date) => {
       const y = d.getFullYear()
@@ -84,68 +85,68 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
 
     switch (v) {
       case 'all':
-        setFilters({})
+        setFilters({ filterPreset: v })
         break
       case 'today':
-        setFilters({ startDate: todayStr, endDate: todayStr })
+        setFilters({ startDate: todayStr, endDate: todayStr, filterPreset: v })
         break
       case '7d':
-        setFilters({ startDate: daysAgo(7), endDate: todayStr })
+        setFilters({ startDate: daysAgo(7), endDate: todayStr, filterPreset: v })
         break
       case '30d':
         // Last 30 days: start = today-30, end = today
-        setFilters({ startDate: daysAgo(30), endDate: todayStr })
+        setFilters({ startDate: daysAgo(30), endDate: todayStr, filterPreset: v })
         break
       case 'this-week': {
         const sun = startOfWeekSun(now)
-        setFilters({ startDate: fmt(sun), endDate: todayStr })
+        setFilters({ startDate: fmt(sun), endDate: todayStr, filterPreset: v })
         break
       }
       case 'last-week': {
         const sun = startOfWeekSun(now)
         const lastSun = addDays(sun, -7)
         const lastSat = addDays(sun, -1)
-        setFilters({ startDate: fmt(lastSun), endDate: fmt(lastSat) })
+        setFilters({ startDate: fmt(lastSun), endDate: fmt(lastSat), filterPreset: v })
         break
       }
       case 'this-month':
-        setFilters({ startDate: fmt(startOfMonth), endDate: fmt(monthEnd(now)) })
+        setFilters({ startDate: fmt(startOfMonth), endDate: fmt(monthEnd(now)), filterPreset: v })
         break
       case 'prev-month': {
         const prevEnd = monthEnd(prevMonthStart)
-        setFilters({ startDate: fmt(prevMonthStart), endDate: fmt(prevEnd) })
+        setFilters({ startDate: fmt(prevMonthStart), endDate: fmt(prevEnd), filterPreset: v })
         break
       }
       case 'mtd':
-        setFilters({ startDate: fmt(startOfMonth), endDate: todayStr })
+        setFilters({ startDate: fmt(startOfMonth), endDate: todayStr, filterPreset: v })
         break
       case 'this-quarter': {
         const soq = startOfQuarter(now)
         const eoq = endOfQuarter(now)
-        setFilters({ startDate: fmt(soq), endDate: fmt(eoq) })
+        setFilters({ startDate: fmt(soq), endDate: fmt(eoq), filterPreset: v })
         break
       }
       case 'last-quarter': {
         const thisQ = startOfQuarter(now)
         const lastQ = new Date(thisQ.getFullYear(), thisQ.getMonth() - 3, 1)
         const lastQEnd = endOfQuarter(lastQ)
-        setFilters({ startDate: fmt(lastQ), endDate: fmt(lastQEnd) })
+        setFilters({ startDate: fmt(lastQ), endDate: fmt(lastQEnd), filterPreset: v })
         break
       }
       case 'this-year': {
         const yStart = new Date(now.getFullYear(), 0, 1)
-        setFilters({ startDate: fmt(yStart), endDate: todayStr })
+        setFilters({ startDate: fmt(yStart), endDate: todayStr, filterPreset: v })
         break
       }
       case 'last-year': {
         const lastYStart = new Date(now.getFullYear() - 1, 0, 1)
         const lastYEnd = new Date(now.getFullYear() - 1, 11, 31)
-        setFilters({ startDate: fmt(lastYStart), endDate: fmt(lastYEnd) })
+        setFilters({ startDate: fmt(lastYStart), endDate: fmt(lastYEnd), filterPreset: v })
         break
       }
       case 'ytd': {
         const yStart = new Date(now.getFullYear(), 0, 1)
-        setFilters({ startDate: fmt(yStart), endDate: todayStr })
+        setFilters({ startDate: fmt(yStart), endDate: todayStr, filterPreset: v })
         break
       }
     }
@@ -165,8 +166,7 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
         <DatePickerField
           value={filters.startDate}
           onChangeAction={(v) => {
-            setSelectedPreset('all') // Clear preset when manually changing dates
-            setFilters({ ...filters, startDate: v })
+            setFilters({ ...filters, startDate: v, filterPreset: undefined })
           }}
           disabled={!!disabled}
           ariaLabel="Start date"
@@ -175,8 +175,7 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
         <DatePickerField
           value={filters.endDate}
           onChangeAction={(v) => {
-            setSelectedPreset('all') // Clear preset when manually changing dates
-            setFilters({ ...filters, endDate: v })
+            setFilters({ ...filters, endDate: v, filterPreset: undefined })
           }}
           disabled={!!disabled}
           ariaLabel="End date"
@@ -185,7 +184,6 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
           type="button"
           className={`text-[12px] h-8 px-2 rounded-md border ${disabled?'opacity-60 cursor-not-allowed':'hover:bg-[hsl(var(--muted))]'} bg-[hsl(var(--card))] text-[hsl(var(--foreground))] border-[hsl(var(--border))]`}
           onClick={disabled ? undefined : () => {
-            setSelectedPreset('all') // Reset preset to "All time"
             reset()
           }}
           disabled={!!disabled}

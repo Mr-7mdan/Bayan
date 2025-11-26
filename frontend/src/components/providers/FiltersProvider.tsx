@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 export type Filters = {
   startDate?: string
   endDate?: string
+  filterPreset?: string // e.g. 'all', 'this-year', '30d', etc.
 }
 
 type Ctx = {
@@ -55,12 +56,13 @@ export default function FiltersProvider({ children }: { children?: ReactNode }) 
     if (!urlSyncEnabled) { setFiltersState({}); return }
     const start = searchParams.get('start') || undefined
     const end = searchParams.get('end') || undefined
-    if (start || end) { setFiltersState({ startDate: start, endDate: end }); return }
+    const preset = searchParams.get('preset') || undefined
+    if (start || end || preset) { setFiltersState({ startDate: start, endDate: end, filterPreset: preset }); return }
     try {
       const raw = typeof window !== 'undefined' ? localStorage.getItem(scopeKey) : null
       if (raw) {
         const obj = JSON.parse(raw) as Filters
-        setFiltersState({ startDate: obj.startDate, endDate: obj.endDate })
+        setFiltersState({ startDate: obj.startDate, endDate: obj.endDate, filterPreset: obj.filterPreset })
       } else {
         setFiltersState({})
       }
@@ -74,6 +76,7 @@ export default function FiltersProvider({ children }: { children?: ReactNode }) 
       // Strip builder-only params on routes where URL sync is disabled
       params.delete('start')
       params.delete('end')
+      params.delete('preset')
       const qs = params.toString()
       const nextUrl = `${pathname}${qs ? `?${qs}` : ''}`
       const curr = `${pathname}${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`
@@ -84,13 +87,15 @@ export default function FiltersProvider({ children }: { children?: ReactNode }) 
     else params.delete('start')
     if (filters.endDate) params.set('end', filters.endDate)
     else params.delete('end')
+    if (filters.filterPreset) params.set('preset', filters.filterPreset)
+    else params.delete('preset')
     const qs = params.toString()
     const nextUrl = `${pathname}${qs ? `?${qs}` : ''}`
     const curr = `${pathname}${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`
     if (nextUrl !== curr) router.replace(nextUrl as any)
     try {
       if (typeof window !== 'undefined') {
-        if (filters.startDate || filters.endDate) localStorage.setItem(scopeKey, JSON.stringify(filters))
+        if (filters.startDate || filters.endDate || filters.filterPreset) localStorage.setItem(scopeKey, JSON.stringify(filters))
         else localStorage.removeItem(scopeKey)
       }
     } catch {}
