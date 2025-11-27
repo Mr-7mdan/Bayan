@@ -105,6 +105,12 @@ def _build_expr_map_helper(ds: Any, source_name: str, ds_type: str, _apply_scope
                 # Normalize bracket identifiers for target dialect
                 expr = _normalize_expr_idents(ds_type, col["expr"])
                 expr_map[col["name"]] = expr
+                # Debug: Log full expression for CASE statements
+                if "CASE" in expr.upper():
+                    logger.info(f"[expr_map] Custom column '{col['name']}' CASE expression: {expr}")
+                    sys.stderr.write(f"[expr_map] Custom column '{col['name']}' has CASE expression length={len(expr)}\n")
+                    sys.stderr.write(f"[expr_map] Expression: {expr}\n")
+                    sys.stderr.flush()
         
         # From computed transforms
         transforms = ds_transforms.get("transforms") or []

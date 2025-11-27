@@ -133,6 +133,13 @@ class SQLGlotBuilder:
                 # Check if it's a custom column
                 if expr_map and field in expr_map:
                     expr = expr_map[field]
+                    # Debug: Check CASE statements for completeness
+                    if "CASE" in expr.upper():
+                        has_end = "END" in expr.upper()
+                        print(f"[SQLGlot] CASE expression for '{field}': length={len(expr)}, has_END={has_end}")
+                        if not has_end:
+                            print(f"[SQLGlot] ERROR: CASE expression missing END keyword!")
+                            print(f"[SQLGlot] Expression: {expr}")
                     # Strip table aliases (e.g., s.ClientID -> ClientID, src.OrderDate -> OrderDate)
                     # Only strip short lowercase identifiers (typical aliases), not schema names
                     expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases

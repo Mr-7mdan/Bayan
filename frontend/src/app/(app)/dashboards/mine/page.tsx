@@ -191,7 +191,7 @@ export default function MyDashboardsPage() {
   }
   const onDuplicate = async (d: DashboardListItem) => {
     try {
-      const src = await Api.getDashboard(d.id)
+      const src = await Api.getDashboard(d.id, user?.id)
       await Api.saveDashboard({ name: `${d.name} (copy)`, userId: user?.id || 'dev_user', definition: src.definition })
       // Refresh list to include the new dashboard
       const next = await Api.listDashboards(user?.id || 'dev_user')

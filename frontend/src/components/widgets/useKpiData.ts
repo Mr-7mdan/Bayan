@@ -145,7 +145,8 @@ export function useKpiData({
         const prevEndIso = asIsoZ(prevEndYmd)
 
         // Multi-series + Legend path (both present - create tiles per legend, each with multiple series)
-        if (seriesArr.length > 1 && legend) {
+        const hasLegend = Array.isArray(legend) ? legend.length > 0 : !!legend
+        if (seriesArr.length > 1 && hasLegend) {
           const requests: Array<any> = []
           seriesArr.forEach((s, idx) => {
             const aggS = ((s.agg ?? reqBase.agg) as any)
@@ -256,7 +257,8 @@ export function useKpiData({
         }
 
         // Legend only path
-        if (legend) {
+        const hasLegendOnly = Array.isArray(legend) ? legend.length > 0 : !!legend
+        if (hasLegendOnly) {
           const aggEff = (reqBase.agg as any)
           const cmp = await Api.periodTotalsCompare({
             source,
@@ -327,7 +329,8 @@ export function useKpiData({
       }
 
       // Multi-series + Legend path (both present)
-      if (seriesArr.length > 1 && legend) {
+      const hasLegend = Array.isArray(legend) ? legend.length > 0 : !!legend
+      if (seriesArr.length > 1 && hasLegend) {
         // Fetch data for each series with legend breakdown separately
         const seriesResults = await Promise.all(
           seriesArr.map(s => {
@@ -433,7 +436,8 @@ export function useKpiData({
       }
 
       // Legend only path
-      if (legend) {
+      const hasLegendOnly = Array.isArray(legend) ? legend.length > 0 : !!legend
+      if (hasLegendOnly) {
         const res = await computePeriodDeltas({ ...reqBase, legend })
         const keys = new Set<string>([
           ...Object.keys(res.curTotals || {}),

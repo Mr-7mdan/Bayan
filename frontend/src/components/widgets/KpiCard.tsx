@@ -936,8 +936,20 @@ export default function KpiCard({
 
   // Debug: log final displayed numbers
   useEffect(() => {
-    try { console.log('[KPICardDebug] displayed', { displayed, deltaEnabled, baseValue, hasKpiData: !!kpi.data }) } catch {}
-  }, [displayed, deltaEnabled, baseValue, kpi.data])
+    try { 
+      console.log('[KPICardDebug] displayed', { 
+        displayed, 
+        deltaEnabled, 
+        baseValue, 
+        hasKpiData: !!kpi.data,
+        kpiData: kpi.data,
+        kpiIsLoading: kpi.isLoading,
+        kpiError: kpi.error,
+        seriesArr: (querySpec as any)?.series,
+        visible,
+      }) 
+    } catch {}
+  }, [displayed, deltaEnabled, baseValue, kpi.data, kpi.isLoading, kpi.error, querySpec, visible])
 
   // Ensure KPI numeric value uses neutral foreground (black) and scale responsively via container queries
   const metricClass = 'text-foreground font-semibold [font-size:var(--kpi-fs)] leading-[1.1]'
