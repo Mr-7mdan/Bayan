@@ -1,0 +1,754 @@
+{
+  "dashboards": [
+    {
+      "id": "b7e195ca-4cab-4f1e-a29e-ca1ed9ac0f4d",
+      "name": "Cash GeoFlow",
+      "userId": "580efcf5-d573-4816-97cc-22275567366c",
+      "definition": {
+        "layout": [
+          {
+            "w": 6,
+            "h": 21,
+            "x": 0,
+            "y": 0,
+            "i": "chart_zrn49z",
+            "moved": false,
+            "static": false
+          },
+          {
+            "w": 6,
+            "h": 21,
+            "x": 6,
+            "y": 0,
+            "i": "chart_mvec6r",
+            "moved": false,
+            "static": false
+          },
+          {
+            "w": 5,
+            "h": 29,
+            "x": 0,
+            "y": 21,
+            "i": "chart_9m9szu",
+            "moved": false,
+            "static": false
+          },
+          {
+            "w": 7,
+            "h": 29,
+            "x": 5,
+            "y": 50,
+            "i": "chart_cp1h6h",
+            "moved": false,
+            "static": false
+          },
+          {
+            "w": 5,
+            "h": 29,
+            "x": 0,
+            "y": 50,
+            "i": "chart_nd52a9",
+            "moved": false,
+            "static": false
+          },
+          {
+            "w": 6,
+            "h": 29,
+            "x": 6,
+            "y": 21,
+            "i": "chart_6dzt17",
+            "moved": false,
+            "static": false
+          }
+        ],
+        "widgets": {
+          "chart_zrn49z": {
+            "id": "chart_zrn49z",
+            "type": "chart",
+            "title": "Shipping to IL",
+            "sql": "",
+            "queryMode": "spec",
+            "querySpec": {
+              "source": "main.View_CIT_Invoice_Details_PriceList3",
+              "sourceTableId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311__main.View_CIT_Invoice_Details_PriceList3",
+              "select": [],
+              "where": {
+                "FromClientType": [
+                  "Bank"
+                ],
+                "DestRegion": [
+                  "IL"
+                ]
+              },
+              "x": [
+                "FromClientCode"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "series": [
+                {
+                  "y": "Amount_NIS",
+                  "agg": "sum",
+                  "format": "millions",
+                  "secondaryAxis": false
+                }
+              ]
+            },
+            "chartType": "sankey",
+            "options": {
+              "deltaDateField": "OrderDate"
+            },
+            "datasourceId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311",
+            "series": [
+              {
+                "id": "s1",
+                "x": [
+                  "FromClientCode"
+                ],
+                "y": "Amount_NIS",
+                "agg": "sum",
+                "secondaryAxis": false
+              }
+            ],
+            "pivot": {
+              "x": [
+                "FromClientCode"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "values": [
+                {
+                  "field": "Amount_NIS",
+                  "agg": "sum",
+                  "secondaryAxis": false
+                }
+              ],
+              "filters": [
+                "FromClientType",
+                "ToClientType",
+                "DestRegion"
+              ]
+            }
+          },
+          "chart_mvec6r": {
+            "id": "chart_mvec6r",
+            "type": "chart",
+            "title": "Retail Deposits in Local Banks",
+            "sql": "",
+            "queryMode": "spec",
+            "querySpec": {
+              "source": "main.View_CIT_Invoice_Details_PriceList3",
+              "sourceTableId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311__main.View_CIT_Invoice_Details_PriceList3",
+              "select": [],
+              "where": {
+                "FromClientType": [
+                  "Retail"
+                ],
+                "ToClientType": [
+                  "Bank"
+                ]
+              },
+              "x": [
+                "FromClientCode"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "series": [
+                {
+                  "y": "Amount_NIS",
+                  "agg": "sum",
+                  "format": "millions",
+                  "secondaryAxis": false
+                }
+              ]
+            },
+            "chartType": "sankey",
+            "options": {
+              "filtersExpose": {
+                "DestRegion": false
+              },
+              "deltaDateField": "OrderDate"
+            },
+            "datasourceId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311",
+            "series": [
+              {
+                "id": "s1",
+                "x": [
+                  "FromClientCode"
+                ],
+                "y": "Amount_NIS",
+                "agg": "sum",
+                "secondaryAxis": false
+              }
+            ],
+            "pivot": {
+              "x": [
+                "FromClientCode"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "values": [
+                {
+                  "field": "Amount_NIS",
+                  "agg": "sum",
+                  "secondaryAxis": false
+                }
+              ],
+              "filters": [
+                "FromClientType",
+                "ToClientType"
+              ]
+            }
+          },
+          "chart_9m9szu": {
+            "id": "chart_9m9szu",
+            "type": "chart",
+            "title": "Cross Bank Local Banks",
+            "sql": "",
+            "queryMode": "spec",
+            "querySpec": {
+              "source": "main.View_CIT_Invoice_Details_PriceList3",
+              "sourceTableId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311__main.View_CIT_Invoice_Details_PriceList3",
+              "select": [],
+              "where": {
+                "FromClientType": [
+                  "Bank"
+                ],
+                "ToClientType": [
+                  "Bank"
+                ],
+                "DestRegion": [
+                  "WB",
+                  "GZ"
+                ],
+                "SourceRegion": [
+                  "GZ",
+                  "WB"
+                ]
+              },
+              "x": [
+                "FromClientCode"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "series": [
+                {
+                  "y": "Amount_NIS",
+                  "agg": "sum",
+                  "format": "millions",
+                  "secondaryAxis": false
+                }
+              ]
+            },
+            "chartType": "sankey",
+            "options": {
+              "filtersExpose": {
+                "DestRegion": false
+              },
+              "deltaDateField": "OrderDate"
+            },
+            "datasourceId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311",
+            "series": [
+              {
+                "id": "s1",
+                "x": [
+                  "FromClientCode"
+                ],
+                "y": "Amount_NIS",
+                "agg": "sum",
+                "secondaryAxis": false
+              }
+            ],
+            "pivot": {
+              "x": [
+                "FromClientCode"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "values": [
+                {
+                  "field": "Amount_NIS",
+                  "agg": "sum",
+                  "secondaryAxis": false
+                }
+              ],
+              "filters": [
+                "FromClientType",
+                "ToClientType",
+                "DestRegion",
+                "SourceRegion"
+              ]
+            }
+          },
+          "chart_cp1h6h": {
+            "id": "chart_cp1h6h",
+            "type": "chart",
+            "title": "Inbound JOD to Local Banks",
+            "sql": "",
+            "queryMode": "spec",
+            "querySpec": {
+              "source": "main.View_CIT_Invoice_Details_PriceList3",
+              "sourceTableId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311__main.View_CIT_Invoice_Details_PriceList3",
+              "select": [],
+              "where": {
+                "SourceRegion": [
+                  "JO"
+                ]
+              },
+              "x": [
+                "SourceRegion"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "series": [
+                {
+                  "y": "Amount_JOD",
+                  "agg": "sum"
+                }
+              ]
+            },
+            "chartType": "sankey",
+            "options": {
+              "filtersExpose": {
+                "DestRegion": false,
+                "FromClientType": false,
+                "ToClientType": false
+              },
+              "deltaDateField": "OrderDate"
+            },
+            "datasourceId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311",
+            "series": [
+              {
+                "id": "s1",
+                "x": [
+                  "SourceRegion"
+                ],
+                "y": "Amount_JOD",
+                "agg": "sum"
+              }
+            ],
+            "pivot": {
+              "x": [
+                "SourceRegion"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "values": [
+                {
+                  "field": "Amount_JOD",
+                  "agg": "sum"
+                }
+              ],
+              "filters": [
+                "SourceRegion"
+              ]
+            }
+          },
+          "chart_nd52a9": {
+            "id": "chart_nd52a9",
+            "type": "chart",
+            "title": "Outbound USD to Jordan",
+            "sql": "",
+            "queryMode": "spec",
+            "querySpec": {
+              "source": "main.View_CIT_Invoice_Details_PriceList3",
+              "sourceTableId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311__main.View_CIT_Invoice_Details_PriceList3",
+              "select": [],
+              "where": {
+                "DestRegion": [
+                  "JO"
+                ],
+                "FromClientType": [
+                  "Bank"
+                ]
+              },
+              "x": [
+                "FromClientCode"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "series": [
+                {
+                  "y": "Amount_USD",
+                  "agg": "sum",
+                  "secondaryAxis": false
+                }
+              ]
+            },
+            "chartType": "sankey",
+            "options": {
+              "filtersExpose": {
+                "DestRegion": false,
+                "FromClientType": false,
+                "ToClientType": false,
+                "SourceRegion": false
+              },
+              "deltaDateField": "OrderDate"
+            },
+            "datasourceId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311",
+            "series": [
+              {
+                "id": "s1",
+                "x": [
+                  "FromClientCode"
+                ],
+                "y": "Amount_USD",
+                "agg": "sum",
+                "secondaryAxis": false
+              }
+            ],
+            "pivot": {
+              "x": [
+                "FromClientCode"
+              ],
+              "legend": [
+                "ToClientCode"
+              ],
+              "values": [
+                {
+                  "field": "Amount_USD",
+                  "agg": "sum",
+                  "secondaryAxis": false
+                }
+              ],
+              "filters": [
+                "DestRegion",
+                "FromClientType"
+              ]
+            }
+          },
+          "chart_6dzt17": {
+            "id": "chart_6dzt17",
+            "type": "chart",
+            "title": "Between Governates Flow",
+            "sql": "",
+            "queryMode": "spec",
+            "querySpec": {
+              "source": "main.View_CIT_Invoice_Details_PriceList3",
+              "sourceTableId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311__main.View_CIT_Invoice_Details_PriceList3",
+              "select": [],
+              "where": {
+                "FromClientType": [
+                  "Bank",
+                  "Retail"
+                ],
+                "ToClientType": [
+                  "Bank",
+                  "Retail"
+                ],
+                "DestRegion": [
+                  "WB",
+                  "GZ",
+                  "JR"
+                ],
+                "SourceRegion": [
+                  "GZ",
+                  "WB",
+                  "JR"
+                ]
+              },
+              "x": [
+                "FromGovernorateName"
+              ],
+              "legend": [
+                "ToGovernorateName"
+              ],
+              "series": [
+                {
+                  "y": "Amount_NIS",
+                  "agg": "sum",
+                  "format": "millions",
+                  "secondaryAxis": false
+                }
+              ]
+            },
+            "chartType": "sankey",
+            "options": {
+              "filtersExpose": {
+                "DestRegion": false
+              },
+              "deltaDateField": "OrderDate"
+            },
+            "datasourceId": "9eb8f9f7-7286-466a-aa81-6f885fbc8311",
+            "series": [
+              {
+                "id": "s1",
+                "x": [
+                  "FromGovernorateName"
+                ],
+                "y": "Amount_NIS",
+                "agg": "sum",
+                "secondaryAxis": false
+              }
+            ],
+            "pivot": {
+              "x": [
+                "FromGovernorateName"
+              ],
+              "legend": [
+                "ToGovernorateName"
+              ],
+              "values": [
+                {
+                  "field": "Amount_NIS",
+                  "agg": "sum",
+                  "secondaryAxis": false
+                }
+              ],
+              "filters": [
+                "FromClientType",
+                "ToClientType",
+                "DestRegion",
+                "SourceRegion"
+              ]
+            }
+          }
+        },
+        "options": {
+          "publicShowFilters": true,
+          "publicLockFilters": false,
+          "globalFilters": {
+            "startDate": "2025-01-01",
+            "endDate": "2025-11-26",
+            "filterPreset": "this-year"
+          }
+        }
+      },
+      "createdAt": "2025-11-10T12:57:37",
+      "updatedAt": "2025-11-26T14:08:12"
+    }
+  ],
+  "datasources": [
+    {
+      "id": "9eb8f9f7-7286-466a-aa81-6f885fbc8311",
+      "name": "New",
+      "type": "duckdb",
+      "connectionUri": "duckdb:///.data/new-20251030-1557.duckdb",
+      "options": {
+        "transforms": {
+          "customColumns": [
+            {
+              "name": "FromClientCode",
+              "expr": "CASE  WHEN [s].[FromClientID] = '2' THEN 'BOP'  WHEN [s].[FromClientID] = '4' THEN 'BOJ'  WHEN [s].[FromClientID] = '11' THEN 'JAB'  WHEN [s].[FromClientID] = '5' THEN 'CAB'  WHEN [s].[FromClientID] = '9' THEN 'AIB'  WHEN [s].[FromClientID] = '10' THEN 'PIB'  WHEN [s].[FromClientID] = '31' THEN 'Anabtawi'  WHEN [s].[FromClientID] = '21' THEN 'Jebrini'  WHEN [s].[FromClientID] = '18' THEN 'UniPal'  WHEN [s].[FromClientID] = '30' THEN 'Jawwal'  WHEN [s].[FromClientID] = '29' THEN 'Paltel'  WHEN [s].[FromClientID] = '15' THEN 'Jawwal'  WHEN [s].[FromClientID] = '17' THEN 'Bravo'  WHEN [s].[FromClientID] = '13' THEN 'Paltel'  WHEN [s].[FromClientID] = '12' THEN 'HBTF'  WHEN [s].[FromClientID] = '6' THEN 'QB'  WHEN [s].[FromClientID] = '16' THEN 'UNRWRA'  WHEN [s].[FromClientID] = '14' THEN 'Safa'  WHEN [s].[FromClientID] = '19' THEN 'EALB'  WHEN [s].[FromClientID] = '20' THEN 'PIBBank'  WHEN [s].[FromClientID] = '34' THEN 'PIB'  WHEN [s].[FromClientID] = '3' THEN 'TNB'  WHEN [s].[FromClientID] = '28' THEN 'UniPal'  WHEN [s].[FromClientID] = '33' THEN 'AIB'  WHEN [s].[FromClientID] = '35' THEN 'AMAN'  WHEN [s].[FromClientID] = '32' THEN 'QB'  WHEN [s].[FromClientID] = '36' THEN 'JCC'  WHEN [s].[FromClientID] = '37' THEN 'PIBBank'  WHEN [s].[FromClientID] = '24' THEN 'AB'  WHEN [s].[FromClientID] = '1' THEN 'AMAN'  WHEN [s].[FromClientID] = '38' THEN 'BOJ'  WHEN [s].[FromClientID] = '22' THEN 'BRINKS IL'  WHEN [s].[FromClientID] = '25' THEN 'IDB'  WHEN [s].[FromClientID] = '26' THEN 'BRINKS JO'  WHEN [s].[FromClientID] = '8' THEN 'JCB'  WHEN [s].[FromClientID] = '41' THEN 'JDECO'  WHEN [s].[FromClientID] = '46' THEN 'Juneidi'  WHEN [s].[FromClientID] = '47' THEN 'BPC'  WHEN [s].[FromClientID] = '52' THEN 'GrandPharm'  WHEN [s].[FromClientID] = '48' THEN 'Izhiman'  WHEN [s].[FromClientID] = '51' THEN 'GrandHealth'  WHEN [s].[FromClientID] = '49' THEN 'NEDCO'  WHEN [s].[FromClientID] = '50' THEN 'JEPharm'  WHEN [s].[FromClientID] = '43' THEN 'Aziza'  WHEN [s].[FromClientID] = '53' THEN 'PalLease'  WHEN [s].[FromClientID] = '54' THEN 'PalGaz'  WHEN [s].[FromClientID] = '42' THEN 'BeSAFE'END",
+              "type": null,
+              "scope": {
+                "level": "datasource",
+                "widgetId": null,
+                "table": null
+              }
+            },
+            {
+              "name": "ClientType",
+              "expr": "CASE  WHEN [s].[ClientID] = '2' THEN 'Bank'  WHEN [s].[ClientID] = '4' THEN 'Bank'  WHEN [s].[ClientID] = '11' THEN 'Bank'  WHEN [s].[ClientID] = '5' THEN 'Bank'  WHEN [s].[ClientID] = '9' THEN 'Bank'  WHEN [s].[ClientID] = '10' THEN 'Bank'  WHEN [s].[ClientID] = '31' THEN 'Retail'  WHEN [s].[ClientID] = '21' THEN 'Retail'  WHEN [s].[ClientID] = '18' THEN 'Retail'  WHEN [s].[ClientID] = '30' THEN 'Retail'  WHEN [s].[ClientID] = '29' THEN 'Retail'  WHEN [s].[ClientID] = '15' THEN 'Retail'  WHEN [s].[ClientID] = '17' THEN 'Retail'  WHEN [s].[ClientID] = '13' THEN 'Retail'  WHEN [s].[ClientID] = '12' THEN 'Bank'  WHEN [s].[ClientID] = '6' THEN 'Bank'  WHEN [s].[ClientID] = '16' THEN 'Retail'  WHEN [s].[ClientID] = '14' THEN 'Bank'  WHEN [s].[ClientID] = '19' THEN 'Bank'  WHEN [s].[ClientID] = '20' THEN 'Bank'  WHEN [s].[ClientID] = '34' THEN 'Bank'  WHEN [s].[ClientID] = '3' THEN 'Bank'  WHEN [s].[ClientID] = '28' THEN 'Retail'  WHEN [s].[ClientID] = '33' THEN 'Bank'  WHEN [s].[ClientID] = '35' THEN 'CIT Company'  WHEN [s].[ClientID] = '32' THEN 'Bank'  WHEN [s].[ClientID] = '36' THEN 'Retail'  WHEN [s].[ClientID] = '37' THEN 'Bank'  WHEN [s].[ClientID] = '24' THEN 'Bank'  WHEN [s].[ClientID] = '1' THEN 'CIT Company'  WHEN [s].[ClientID] = '38' THEN 'Bank'  WHEN [s].[ClientID] = '22' THEN 'CIT Company'  WHEN [s].[ClientID] = '25' THEN 'Bank'  WHEN [s].[ClientID] = '26' THEN 'CIT Company'  WHEN [s].[ClientID] = '8' THEN 'Bank'  WHEN [s].[ClientID] = '41' THEN 'Retail'  WHEN [s].[ClientID] = '46' THEN 'Retail'  WHEN [s].[ClientID] = '47' THEN 'Retail'  WHEN [s].[ClientID] = '52' THEN 'Retail'  WHEN [s].[ClientID] = '48' THEN 'Retail'  WHEN [s].[ClientID] = '51' THEN 'Retail'  WHEN [s].[ClientID] = '49' THEN 'Retail'  WHEN [s].[ClientID] = '50' THEN 'Retail'  WHEN [s].[ClientID] = '43' THEN 'Retail'  WHEN [s].[ClientID] = '53' THEN 'Retail'  WHEN [s].[ClientID] = '54' THEN 'Retail'  WHEN [s].[ClientID] = '42' THEN 'CIT Company'END",
+              "type": null,
+              "scope": {
+                "level": "datasource",
+                "widgetId": null,
+                "table": null
+              }
+            },
+            {
+              "name": "20",
+              "expr": "[Category1]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "dbo.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "50",
+              "expr": "[Category2]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "dbo.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "100",
+              "expr": "[Category3]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "dbo.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "200",
+              "expr": "[Category4]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "dbo.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "5",
+              "expr": "[Category5]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "dbo.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "10",
+              "expr": "[Category6]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "dbo.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "1",
+              "expr": "[Category7]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "dbo.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "2",
+              "expr": "[Category8]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "main.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "Total",
+              "expr": "[200] + [100] + [50] + [20] + [10] + [5] + [2] + [1]",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "dbo.View_Client_Vault_Report_By_Category1"
+              }
+            },
+            {
+              "name": "ToClientCode",
+              "expr": "CASE  WHEN [s].[ToClientID] = '2' THEN 'BOP'  WHEN [s].[ToClientID] = '4' THEN 'BOJ'  WHEN [s].[ToClientID] = '11' THEN 'JAB'  WHEN [s].[ToClientID] = '5' THEN 'CAB'  WHEN [s].[ToClientID] = '9' THEN 'AIB'  WHEN [s].[ToClientID] = '10' THEN 'PIB'  WHEN [s].[ToClientID] = '31' THEN 'Anabtawi'  WHEN [s].[ToClientID] = '21' THEN 'Jebrini'  WHEN [s].[ToClientID] = '18' THEN 'UniPal'  WHEN [s].[ToClientID] = '30' THEN 'Jawwal'  WHEN [s].[ToClientID] = '29' THEN 'Paltel'  WHEN [s].[ToClientID] = '15' THEN 'Jawwal'  WHEN [s].[ToClientID] = '17' THEN 'Bravo'  WHEN [s].[ToClientID] = '13' THEN 'Paltel'  WHEN [s].[ToClientID] = '12' THEN 'HBTF'  WHEN [s].[ToClientID] = '6' THEN 'QB'  WHEN [s].[ToClientID] = '16' THEN 'UNRWRA'  WHEN [s].[ToClientID] = '14' THEN 'Safa'  WHEN [s].[ToClientID] = '19' THEN 'EALB'  WHEN [s].[ToClientID] = '20' THEN 'PIBBank'  WHEN [s].[ToClientID] = '34' THEN 'PIB'  WHEN [s].[ToClientID] = '3' THEN 'TNB'  WHEN [s].[ToClientID] = '28' THEN 'UniPal'  WHEN [s].[ToClientID] = '33' THEN 'AIB'  WHEN [s].[ToClientID] = '35' THEN 'AMAN'  WHEN [s].[ToClientID] = '32' THEN 'QB'  WHEN [s].[ToClientID] = '36' THEN 'JCC'  WHEN [s].[ToClientID] = '37' THEN 'PIBBank'  WHEN [s].[ToClientID] = '24' THEN 'AB'  WHEN [s].[ToClientID] = '1' THEN 'AMAN'  WHEN [s].[ToClientID] = '38' THEN 'BOJ'  WHEN [s].[ToClientID] = '22' THEN 'BRINKS IL'  WHEN [s].[ToClientID] = '25' THEN 'IDB'  WHEN [s].[ToClientID] = '26' THEN 'BRINKS JO'  WHEN [s].[ToClientID] = '8' THEN 'JCB'  WHEN [s].[ToClientID] = '41' THEN 'JDECO'  WHEN [s].[ToClientID] = '46' THEN 'Juneidi'  WHEN [s].[ToClientID] = '47' THEN 'BPC'  WHEN [s].[ToClientID] = '52' THEN 'GrandPharm'  WHEN [s].[ToClientID] = '48' THEN 'Izhiman'  WHEN [s].[ToClientID] = '51' THEN 'GrandHealth'  WHEN [s].[ToClientID] = '49' THEN 'NEDCO'  WHEN [s].[ToClientID] = '50' THEN 'JEPharm'  WHEN [s].[ToClientID] = '43' THEN 'Aziza'  WHEN [s].[ToClientID] = '53' THEN 'PalLease'  WHEN [s].[ToClientID] = '54' THEN 'PalGaz'  WHEN [s].[ToClientID] = '42' THEN 'BeSAFE'END",
+              "type": null,
+              "scope": {
+                "level": "table",
+                "widgetId": null,
+                "table": "main.View_CIT_Invoice_Details_PriceList3"
+              }
+            },
+            {
+              "name": "ToClientType",
+              "expr": "CASE  WHEN [s].[ToClientID] = '2' THEN 'Bank'  WHEN [s].[ToClientID] = '4' THEN 'Bank'  WHEN [s].[ToClientID] = '11' THEN 'Bank'  WHEN [s].[ToClientID] = '5' THEN 'Bank'  WHEN [s].[ToClientID] = '9' THEN 'Bank'  WHEN [s].[ToClientID] = '10' THEN 'Bank'  WHEN [s].[ToClientID] = '31' THEN 'Retail'  WHEN [s].[ToClientID] = '21' THEN 'Retail'  WHEN [s].[ToClientID] = '18' THEN 'Retail'  WHEN [s].[ToClientID] = '30' THEN 'Retail'  WHEN [s].[ToClientID] = '29' THEN 'Retail'  WHEN [s].[ToClientID] = '15' THEN 'Retail'  WHEN [s].[ToClientID] = '17' THEN 'Retail'  WHEN [s].[ToClientID] = '13' THEN 'Retail'  WHEN [s].[ToClientID] = '12' THEN 'Bank'  WHEN [s].[ToClientID] = '6' THEN 'Bank'  WHEN [s].[ToClientID] = '16' THEN 'Retail'  WHEN [s].[ToClientID] = '14' THEN 'Bank'  WHEN [s].[ToClientID] = '19' THEN 'Bank'  WHEN [s].[ToClientID] = '20' THEN 'Bank'  WHEN [s].[ToClientID] = '34' THEN 'Bank'  WHEN [s].[ToClientID] = '3' THEN 'Bank'  WHEN [s].[ToClientID] = '28' THEN 'Retail'  WHEN [s].[ToClientID] = '33' THEN 'Bank'  WHEN [s].[ToClientID] = '35' THEN 'CIT Company'  WHEN [s].[ToClientID] = '32' THEN 'Bank'  WHEN [s].[ToClientID] = '36' THEN 'Retail'  WHEN [s].[ToClientID] = '37' THEN 'Bank'  WHEN [s].[ToClientID] = '24' THEN 'Bank'  WHEN [s].[ToClientID] = '1' THEN 'CIT Company'  WHEN [s].[ToClientID] = '38' THEN 'Bank'  WHEN [s].[ToClientID] = '22' THEN 'CIT Company'  WHEN [s].[ToClientID] = '25' THEN 'Bank'  WHEN [s].[ToClientID] = '26' THEN 'CIT Company'  WHEN [s].[ToClientID] = '8' THEN 'Bank'  WHEN [s].[ToClientID] = '41' THEN 'Retail'  WHEN [s].[ToClientID] = '46' THEN 'Retail'  WHEN [s].[ToClientID] = '47' THEN 'Retail'  WHEN [s].[ToClientID] = '52' THEN 'Retail'  WHEN [s].[ToClientID] = '48' THEN 'Retail'  WHEN [s].[ToClientID] = '51' THEN 'Retail'  WHEN [s].[ToClientID] = '49' THEN 'Retail'  WHEN [s].[ToClientID] = '50' THEN 'Retail'  WHEN [s].[ToClientID] = '43' THEN 'Retail'  WHEN [s].[ToClientID] = '53' THEN 'Retail'  WHEN [s].[ToClientID] = '54' THEN 'Retail'  WHEN [s].[ToClientID] = '42' THEN 'CIT Company'END",
+              "type": null,
+              "scope": {
+                "level": "datasource",
+                "widgetId": null,
+                "table": null
+              }
+            },
+            {
+              "name": "FromClientType",
+              "expr": "CASE  WHEN [s].[FromClientID] = '2' THEN 'Bank'  WHEN [s].[FromClientID] = '4' THEN 'Bank'  WHEN [s].[FromClientID] = '11' THEN 'Bank'  WHEN [s].[FromClientID] = '5' THEN 'Bank'  WHEN [s].[FromClientID] = '9' THEN 'Bank'  WHEN [s].[FromClientID] = '10' THEN 'Bank'  WHEN [s].[FromClientID] = '31' THEN 'Retail'  WHEN [s].[FromClientID] = '21' THEN 'Retail'  WHEN [s].[FromClientID] = '18' THEN 'Retail'  WHEN [s].[FromClientID] = '30' THEN 'Retail'  WHEN [s].[FromClientID] = '29' THEN 'Retail'  WHEN [s].[FromClientID] = '15' THEN 'Retail'  WHEN [s].[FromClientID] = '17' THEN 'Retail'  WHEN [s].[FromClientID] = '13' THEN 'Retail'  WHEN [s].[FromClientID] = '12' THEN 'Bank'  WHEN [s].[FromClientID] = '6' THEN 'Bank'  WHEN [s].[FromClientID] = '16' THEN 'Retail'  WHEN [s].[FromClientID] = '14' THEN 'Bank'  WHEN [s].[FromClientID] = '19' THEN 'Bank'  WHEN [s].[FromClientID] = '20' THEN 'Bank'  WHEN [s].[FromClientID] = '34' THEN 'Bank'  WHEN [s].[FromClientID] = '3' THEN 'Bank'  WHEN [s].[FromClientID] = '28' THEN 'Retail'  WHEN [s].[FromClientID] = '33' THEN 'Bank'  WHEN [s].[FromClientID] = '35' THEN 'CIT Company'  WHEN [s].[FromClientID] = '32' THEN 'Bank'  WHEN [s].[FromClientID] = '36' THEN 'Retail'  WHEN [s].[FromClientID] = '37' THEN 'Bank'  WHEN [s].[FromClientID] = '24' THEN 'Bank'  WHEN [s].[FromClientID] = '1' THEN 'CIT Company'  WHEN [s].[FromClientID] = '38' THEN 'Bank'  WHEN [s].[FromClientID] = '22' THEN 'CIT Company'  WHEN [s].[FromClientID] = '25' THEN 'Bank'  WHEN [s].[FromClientID] = '26' THEN 'CIT Company'  WHEN [s].[FromClientID] = '8' THEN 'Bank'  WHEN [s].[FromClientID] = '41' THEN 'Retail'  WHEN [s].[FromClientID] = '46' THEN 'Retail'  WHEN [s].[FromClientID] = '47' THEN 'Retail'  WHEN [s].[FromClientID] = '52' THEN 'Retail'  WHEN [s].[FromClientID] = '48' THEN 'Retail'  WHEN [s].[FromClientID] = '51' THEN 'Retail'  WHEN [s].[FromClientID] = '49' THEN 'Retail'  WHEN [s].[FromClientID] = '50' THEN 'Retail'  WHEN [s].[FromClientID] = '43' THEN 'Retail'  WHEN [s].[FromClientID] = '53' THEN 'Retail'  WHEN [s].[FromClientID] = '54' THEN 'Retail'  WHEN [s].[FromClientID] = '42' THEN 'CIT Company'END",
+              "type": null,
+              "scope": {
+                "level": "datasource",
+                "widgetId": null,
+                "table": null
+              }
+            },
+            {
+              "name": "ClientCode",
+              "expr": "CASE  WHEN [s].[ClientID] = '2' THEN 'BOP'  WHEN [s].[ClientID] = '4' THEN 'BOJ'  WHEN [s].[ClientID] = '11' THEN 'JAB'  WHEN [s].[ClientID] = '5' THEN 'CAB'  WHEN [s].[ClientID] = '9' THEN 'AIB'  WHEN [s].[ClientID] = '10' THEN 'PIB'  WHEN [s].[ClientID] = '31' THEN 'Anabtawi'  WHEN [s].[ClientID] = '21' THEN 'Jebrini'  WHEN [s].[ClientID] = '18' THEN 'UniPal'  WHEN [s].[ClientID] = '30' THEN 'Jawwal'  WHEN [s].[ClientID] = '29' THEN 'Paltel'  WHEN [s].[ClientID] = '15' THEN 'Jawwal'  WHEN [s].[ClientID] = '17' THEN 'Bravo'  WHEN [s].[ClientID] = '13' THEN 'Paltel'  WHEN [s].[ClientID] = '12' THEN 'HBTF'  WHEN [s].[ClientID] = '6' THEN 'QB'  WHEN [s].[ClientID] = '16' THEN 'UNRWRA'  WHEN [s].[ClientID] = '14' THEN 'Safa'  WHEN [s].[ClientID] = '19' THEN 'EALB'  WHEN [s].[ClientID] = '20' THEN 'PIBBank'  WHEN [s].[ClientID] = '34' THEN 'PIB'  WHEN [s].[ClientID] = '3' THEN 'TNB'  WHEN [s].[ClientID] = '28' THEN 'UniPal'  WHEN [s].[ClientID] = '33' THEN 'AIB'  WHEN [s].[ClientID] = '35' THEN 'AMAN'  WHEN [s].[ClientID] = '32' THEN 'QB'  WHEN [s].[ClientID] = '36' THEN 'JCC'  WHEN [s].[ClientID] = '37' THEN 'PIBBank'  WHEN [s].[ClientID] = '24' THEN 'AB'  WHEN [s].[ClientID] = '1' THEN 'AMAN'  WHEN [s].[ClientID] = '38' THEN 'BOJ'  WHEN [s].[ClientID] = '22' THEN 'BRINKS IL'  WHEN [s].[ClientID] = '25' THEN 'IDB'  WHEN [s].[ClientID] = '26' THEN 'BRINKS JO'  WHEN [s].[ClientID] = '8' THEN 'JCB'  WHEN [s].[ClientID] = '41' THEN 'JDECO'  WHEN [s].[ClientID] = '46' THEN 'Juneidi'  WHEN [s].[ClientID] = '47' THEN 'BPC'  WHEN [s].[ClientID] = '52' THEN 'GrandPharm'  WHEN [s].[ClientID] = '48' THEN 'Izhiman'  WHEN [s].[ClientID] = '51' THEN 'GrandHealth'  WHEN [s].[ClientID] = '49' THEN 'NEDCO'  WHEN [s].[ClientID] = '50' THEN 'JEPharm'  WHEN [s].[ClientID] = '43' THEN 'Aziza'  WHEN [s].[ClientID] = '53' THEN 'PalLease'  WHEN [s].[ClientID] = '54' THEN 'PalGaz'  WHEN [s].[ClientID] = '42' THEN 'BeSAFE'END",
+              "type": null,
+              "scope": {
+                "level": "datasource",
+                "widgetId": null,
+                "table": null
+              }
+            }
+          ],
+          "transforms": [
+            {
+              "type": "computed",
+              "name": "VisitType",
+              "expr": "CASE WHEN ([ToBranchID] IN (508, 600, 305, 306, 307, 308, 309, 618, 617, 593, 594, 595, 596, 597, 598, 599) AND [ToGovernorateID] IN (9, 18)) THEN 'To IL' WHEN ([FromBranchID] IN (508, 600, 305, 306, 307, 308, 309, 618, 617, 593, 594, 595, 596, 597, 598, 599)) THEN 'From IL' WHEN ([FromBranchID] IN (315, 385, 384)) THEN 'From Allenby' WHEN ([ToBranchID] IN (315, 385, 384)) THEN 'To Allenby' WHEN ([FromGovernorateID] = [ToGovernorateID]) THEN 'In-City' ELSE 'Between Cities' END",
+              "valueType": null,
+              "scope": {
+                "level": "datasource",
+                "widgetId": null,
+                "table": null
+              }
+            },
+            {
+              "type": "computed",
+              "name": "SourceRegion",
+              "expr": "CASE WHEN ([FromGovernorateID] = 9) THEN 'IL' WHEN ([FromGovernorateID] IN (22)) THEN 'JO' WHEN ([FromGovernorateID] IN (20, 13, 15, 16, 12, 11, 10)) THEN 'GZ' WHEN ([FromGovernorateID] = 18) THEN 'JR' ELSE 'WB' END",
+              "valueType": null,
+              "scope": {
+                "level": "datasource",
+                "widgetId": null,
+                "table": null
+              }
+            },
+            {
+              "type": "computed",
+              "name": "DestRegion",
+              "expr": "CASE WHEN ([ToGovernorateID] = 9) THEN 'IL' WHEN ([ToGovernorateID] = 22) THEN 'JO' WHEN ([ToGovernorateID] IN (20, 16, 15, 13, 12, 11, 10)) THEN 'GZ' WHEN ([ToGovernorateID] = 18) THEN 'JR' ELSE 'WB' END",
+              "valueType": null,
+              "scope": {
+                "level": "datasource",
+                "widgetId": null,
+                "table": null
+              }
+            }
+          ],
+          "joins": [
+            {
+              "joinType": "left",
+              "targetTable": "main.SYS_Lookups",
+              "sourceKey": "VaultID",
+              "targetKey": "LKP_ID",
+              "columns": [
+                {
+                  "name": "EnName",
+                  "alias": "VaultName"
+                }
+              ],
+              "aggregate": null,
+              "filter": {
+                "op": "eq",
+                "left": "t.LKP_Type",
+                "right": "Vault"
+              }
+            }
+          ],
+          "defaults": null
+        }
+      },
+      "userId": "03766424-cf71-46d4-a3bd-6a35ea5dc886",
+      "active": true,
+      "createdAt": "2025-10-30T13:57:48",
+      "syncTasks": []
+    }
+  ]
+}

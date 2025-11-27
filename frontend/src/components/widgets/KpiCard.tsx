@@ -563,11 +563,16 @@ export default function KpiCard({
     return () => { ignore = true }
   }, [deltaEnabled, queryMode, querySpec, JSON.stringify(effectiveWhere), datasourceId, sql, filters, ignoreGlobal, breakSeq])
 
+  // Value-only per-legend totals when delta is OFF (declare before use)
+  const [baseByLegend, setBaseByLegend] = useState<Record<string, number>>({})
+  // Value-only per-series totals when delta is OFF (declare before use)
+  const [baseBySeries, setBaseBySeries] = useState<Record<string, number>>({})
+
   // Signal to embed snapshot that visible data is ready (after baseValue is in scope)
   const readyFiredRef = useRef(false)
   useEffect(() => {
     try {
-      const hasData = (!!kpi.data) || (baseValue !== undefined)
+      const hasData = (!!kpi.data) || (baseValue !== undefined) || (Object.keys(baseBySeries).length > 0) || (Object.keys(baseByLegend).length > 0)
       const done = !kpi.isLoading && hasData
       if (done && !readyFiredRef.current) {
         readyFiredRef.current = true
@@ -577,10 +582,9 @@ export default function KpiCard({
         }
       }
     } catch {}
-  }, [kpi.isLoading, !!kpi.data, baseValue])
+  }, [kpi.isLoading, !!kpi.data, baseValue, baseBySeries, baseByLegend])
 
-  // Value-only per-legend totals when delta is OFF
-  const [baseByLegend, setBaseByLegend] = useState<Record<string, number>>({})
+  // Fetch baseByLegend values
   useEffect(() => {
     let ignore = false
     async function run() {
@@ -614,6 +618,70 @@ export default function KpiCard({
         if (!ignore) setBaseByLegend(Object.fromEntries(map.entries()))
       } catch {
         if (!ignore) setBaseByLegend({})
+      }
+    }
+    void run()
+    return () => { ignore = true }
+  }, [deltaEnabled, queryMode, querySpec, JSON.stringify(effectiveWhere), datasourceId])
+
+  // Fetch baseBySeries values
+  useEffect(() => {
+    let ignore = false
+    async function run() {
+      try {
+        try { console.log('[KPICardDebug] baseBySeries check', { deltaEnabled, queryMode, hasQuerySpec: !!querySpec, querySpec }) } catch {}
+        if (deltaEnabled) { try { console.log('[KPICardDebug] baseBySeries skip: delta enabled') } catch {}; if (!ignore) setBaseBySeries({}); return }
+        if (queryMode !== 'spec' || !querySpec) { try { console.log('[KPICardDebug] baseBySeries skip: no querySpec') } catch {}; if (!ignore) setBaseBySeries({}); return }
+        const source = (querySpec as any)?.source as string | undefined
+        const seriesArr = (Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []) as Array<{ label?: string; y?: string; measure?: string; agg?: string }>
+        try { console.log('[KPICardDebug] baseBySeries series check', { source, seriesArrLength: seriesArr.length, seriesArr }) } catch {}
+        if (!source || seriesArr.length <= 1) { try { console.log('[KPICardDebug] baseBySeries skip: no source or single series') } catch {}; if (!ignore) setBaseBySeries({}); return }
+        
+        // Fetch each series separately
+        const results = await Promise.all(
+          seriesArr.map(async (s) => {
+            const seriesLabel = s.label || s.y || s.measure || 'value'
+            const spec: any = { source, where: effectiveWhere }
+            if (s.y) {
+              spec.y = s.y
+              spec.agg = s.agg || 'sum'
+            } else if (s.measure) {
+              spec.measure = s.measure
+            }
+            try {
+              const r = await QueryApi.querySpec({ spec, datasourceId, limit: 1000, offset: 0, includeTotal: false })
+              const cols = (r?.columns as string[] | undefined) || []
+              const rows = (r?.rows as any[]) || []
+              let val = 0
+              if (Array.isArray(rows) && rows.length > 0) {
+                const first = rows[0]
+                if (Array.isArray(first)) {
+                  const len = first.length
+                  if (len === 1) {
+                    val = Number(first[0] ?? 0)
+                  } else {
+                    const valueIdx = cols.includes('value') ? Math.max(0, cols.indexOf('value')) : (len === 2 ? 1 : (len - 1))
+                    let sum = 0
+                    rows.forEach((r) => { const v = Number(r[valueIdx] ?? 0); if (!isNaN(v)) sum += v })
+                    val = sum
+                  }
+                } else if (typeof first === 'number') {
+                  val = Number(first)
+                }
+              }
+              return [seriesLabel, val] as [string, number]
+            } catch {
+              return [seriesLabel, 0] as [string, number]
+            }
+          })
+        )
+        
+        const seriesObj = Object.fromEntries(results)
+        try { console.log('[KPICardDebug] baseBySeries loaded', seriesObj) } catch {}
+        if (!ignore) setBaseBySeries(seriesObj)
+      } catch (e) {
+        try { console.log('[KPICardDebug] baseBySeries error', e) } catch {}
+        if (!ignore) setBaseBySeries({})
       }
     }
     void run()
@@ -1534,9 +1602,12 @@ export default function KpiCard({
             }
             
             // Multi-series rendering for basic and badge presets
-            const hasSeries = kpi.data?.bySeries && Object.keys(kpi.data.bySeries).length > 1
+            const hasSeries = (deltaEnabled && kpi.data?.bySeries && Object.keys(kpi.data.bySeries).length > 1) || 
+                             (!deltaEnabled && Object.keys(baseBySeries).length > 1)
             if (hasSeries && (preset === 'basic' || preset === 'badge')) {
-              const seriesEntries = Object.entries(kpi.data!.bySeries!)
+              const seriesEntries = deltaEnabled 
+                ? Object.entries(kpi.data!.bySeries!)
+                : Object.entries(baseBySeries).map(([k, v]) => [k, { current: v, previous: 0, absoluteDelta: 0, percentChange: 0 }] as [string, any])
               return (
                 <div className="space-y-3">
                   {seriesEntries.map(([seriesName, seriesData]) => {

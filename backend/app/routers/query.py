@@ -1091,13 +1091,24 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 out = []
                 for it in (arr or []):
                     sc = (it or {}).get('scope')
+                    col_name = (it or {}).get('name', '<unnamed>')
                     if not sc:
-                        out.append(it); continue
+                        out.append(it)
+                        sys.stderr.write(f"[Pivot] Custom column '{col_name}' has no scope, including it\n")
+                        sys.stderr.flush()
+                        continue
                     lvl = str(sc.get('level') or '').lower()
                     if lvl == 'datasource':
                         out.append(it)
-                    elif lvl == 'table' and sc.get('table') and _matches_table(str(sc.get('table')), payload.source):
-                        out.append(it)
+                        sys.stderr.write(f"[Pivot] Custom column '{col_name}' is datasource-level, including it\n")
+                        sys.stderr.flush()
+                    elif lvl == 'table' and sc.get('table'):
+                        scope_table = str(sc.get('table'))
+                        matches = _matches_table(scope_table, payload.source)
+                        sys.stderr.write(f"[Pivot] Custom column '{col_name}' scope table '{scope_table}' vs source '{payload.source}': {'MATCH' if matches else 'NO MATCH'}\n")
+                        sys.stderr.flush()
+                        if matches:
+                            out.append(it)
                     elif lvl == 'widget':
                         try:
                             wid = str((sc or {}).get('widgetId') or '').strip()
@@ -1112,10 +1123,18 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 'joins': filt(ds_tr.get('joins')),
                 'defaults': ds_tr.get('defaults') or {},
             }
+        sys.stderr.write(f"[Pivot] Applying scope filter for source: {payload.source}\n")
+        sys.stderr.flush()
+        all_custom_cols = ((opts or {}).get("transforms") or {}).get('customColumns', [])
+        sys.stderr.write(f"[Pivot] Total custom columns before scope filter: {len(all_custom_cols)}\n")
+        for col in all_custom_cols:
+            scope = col.get('scope', {})
+            sys.stderr.write(f"[Pivot]   - {col.get('name')}: level={scope.get('level')}, table={scope.get('table')}\n")
+        sys.stderr.flush()
         ds_transforms = _apply_scope((opts or {}).get("transforms") or {}, payload.source)
         if ds_transforms:
             custom_cols_count = len(ds_transforms.get('customColumns', []))
-            sys.stderr.write(f"[Pivot] Loaded {custom_cols_count} custom columns from datasource transforms\n")
+            sys.stderr.write(f"[Pivot] Loaded {custom_cols_count} custom columns from datasource transforms after scope filter\n")
             sys.stderr.flush()
     base_from_sql = f" FROM {_q_source(payload.source)}"
     if ds_transforms:
@@ -2162,6 +2181,13 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
     ds_transforms = None
     if isinstance((opts or {}).get("transforms"), dict):
         ds_tr = (opts or {}).get("transforms") or {}
+        all_custom_cols = ds_tr.get('customColumns', [])
+        sys.stderr.write(f"[Query] Applying scope filter for source: {payload.source}\n")
+        sys.stderr.write(f"[Query] Total custom columns before scope filter: {len(all_custom_cols)}\n")
+        for col in all_custom_cols:
+            scope = col.get('scope', {})
+            sys.stderr.write(f"[Query]   - {col.get('name')}: level={scope.get('level')}, table={scope.get('table')}\n")
+        sys.stderr.flush()
         def _apply_scope(model: dict, src: str):
             if not isinstance(model, dict):
                 return None
@@ -2176,16 +2202,25 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
                 out = []
                 for it in (arr or []):
                     sc = (it or {}).get('scope') or {}
+                    col_name = (it or {}).get('name', '<unnamed>')
                     lvl = (sc or {}).get('level')
                     if not lvl:
                         out.append(it)
+                        sys.stderr.write(f"[Query] Custom column '{col_name}' has no level, including it\n")
+                        sys.stderr.flush()
                         continue
                     if str(lvl).lower() == 'datasource':
                         out.append(it)
+                        sys.stderr.write(f"[Query] Custom column '{col_name}' is datasource-level, including it\n")
+                        sys.stderr.flush()
                     elif str(lvl).lower() == 'table':
                         t = (sc or {}).get('table')
-                        if t and _matches_table(str(t), str(src)):
-                            out.append(it)
+                        if t:
+                            matches = _matches_table(str(t), str(src))
+                            sys.stderr.write(f"[Query] Custom column '{col_name}' scope table '{t}' vs source '{src}': {'MATCH' if matches else 'NO MATCH'}\n")
+                            sys.stderr.flush()
+                            if matches:
+                                out.append(it)
                     elif str(lvl).lower() == 'widget':
                         try:
                             wid = str((sc or {}).get('widgetId') or '').strip()
