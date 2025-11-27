@@ -3557,8 +3557,15 @@ export default function ChartCard({
           return undefined
         }
 
-        const rawValues = (displayData as any[]).map((d) => toNum((d as any)[c] ?? (c === 'value' ? (d as any).value : 0)))
         const seriesType = (type === 'line' || type === 'area') ? 'line' : 'bar'
+        // For line/area charts, preserve null values so lines stop at last data point instead of dropping to zero
+        const rawValues = (displayData as any[]).map((d) => {
+          const val = (d as any)[c] ?? (c === 'value' ? (d as any).value : undefined)
+          if (val === null || val === undefined) {
+            return (seriesType === 'line') ? null : 0
+          }
+          return toNum(val, 0)
+        })
         // Check if we're using time-series mode
         const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
         const isTimeSeries = (gb && gb !== 'none') && !seasonalityMode
@@ -3568,6 +3575,7 @@ export default function ChartCard({
         const seriesData = (() => {
           if (wantValueGrad) {
             return rawValues.map((v, i) => {
+              if (v === null) return null
               const override = rules.length > 0 ? calcColor(v) : undefined
               const pct = ((categories || []).length > 1)
                 ? (rowTotals[i] > 0 ? (v / rowTotals[i]) : 0)
@@ -3579,6 +3587,7 @@ export default function ChartCard({
           }
           if (seriesType === 'bar' && rules.length > 0) {
             return rawValues.map((v, i) => {
+              if (v === null) return null
               const override = calcColor(v)
               const useColor = override ? (options?.barGradient ? {
                 type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -3648,7 +3657,7 @@ export default function ChartCard({
           data: seriesData,
           areaStyle: (type === 'area') ? { opacity: 0.2, color: gradient } : undefined,
           itemStyle: (seriesType === 'bar') ? { color: gradient, borderRadius: rounded } : { color: baseHex },
-          ...(seriesType === 'line' ? { lineStyle: { width: (options?.lineWidth ?? 2) } } : {}),
+          ...(seriesType === 'line' ? { lineStyle: { width: (options?.lineWidth ?? 2) }, connectNulls: false } : {}),
           // Secondary axis: for horizontal bars, use xAxis; otherwise yAxis
           ...((type === 'bar')
             ? ((sMeta?.secondaryAxis) ? { xAxisIndex: 1 } : {})
@@ -5759,15 +5768,16 @@ export default function ChartCard({
       )
     }
     if (type === 'combo') {
-      // Default rule: last category as line, others as bars; support secondary axis per series (details panel)
+      // Support multi-series with legend: virtual categories like "2023 - OrderUID", "2024 - Amount_NIS"
+      // Extract series label from virtual category name and check series metadata for type
       const xLabels = (data as any[]).map((d) => d.x)
       const cats = categories || []
-      const barCats = cats.slice(0, Math.max(0, cats.length - 1))
-      const lineCat = cats.length > 0 ? cats[cats.length - 1] : undefined
       const baseSeries: any[] = []
       const metaByName = new Map<string, any>()
+      const seriesLabels: string[] = []
       ;(Array.isArray(series) ? series : []).forEach((s: any, i: number) => {
         const label = s.label || s.y || s.measure || `series_${i + 1}`
+        seriesLabels.push(String(label))
         metaByName.set(String(label), s)
       })
       const wantValueGrad = ((options as any)?.colorMode === 'valueGradient')
@@ -5780,31 +5790,88 @@ export default function ChartCard({
       const wantLabels = !!(options as any)?.dataLabelsShow
       const gridTopPad = wantLabels ? 24 : 0
       const gridBottomPad = Math.abs(xRotate) >= 60 ? Math.max(28, fontSize * 2) : 0
-      barCats.forEach((c, idx) => {
-        const baseHex = wantValueGrad ? baseHexVG : tremorNameToHex(chartColorsTokens[idx % chartColorsTokens.length])
-        const values = (data as any[]).map((d) => Number(d?.[c] ?? 0))
-        const sMeta = metaByName.get(String(c))
-        const seriesData = wantValueGrad
-          ? values.map((v, i) => ({ value: v, itemStyle: { color: saturateHexBy(baseHexVG, Math.max(0, Math.min(1, rowTotals[i] > 0 ? (v / rowTotals[i]) : 0))) } }))
-          : values
-        baseSeries.push({ name: c, type: 'bar', data: seriesData, itemStyle: { color: baseHex }, emphasis: { focus: 'series' },
-          ...(wantLabels ? { label: { show: true, position: 'top', fontSize: 10, color: axisTextColor, textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 2, textShadowOffsetY: 1 } } : {}),
-          ...(sMeta?.secondaryAxis ? { yAxisIndex: 1 } : {})
-        })
-      })
-      if (lineCat) {
-        const idx = Math.max(0, cats.length - 1)
-        const baseHex = wantValueGrad ? baseHexVG : tremorNameToHex(chartColorsTokens[idx % chartColorsTokens.length])
-        const values = (data as any[]).map((d) => Number(d?.[lineCat] ?? 0))
-        const sMeta = metaByName.get(String(lineCat))
-        baseSeries.push({ name: lineCat, type: 'line', data: values, smooth: true, lineStyle: { width: (options?.lineWidth ?? 2), color: baseHex }, ...(sMeta?.secondaryAxis ? { yAxisIndex: 1 } : {}) })
+      
+      // Helper: extract series label from virtual category name (e.g., "2023 - OrderUID" -> "OrderUID")
+      const extractSeriesLabel = (catName: string): string | null => {
+        // Pattern 1: "legendValue - seriesLabel" or "legendValue • seriesLabel"
+        const match1 = catName.match(/^.+?\s*[-•·]\s*(.+)$/)
+        if (match1) return match1[1].trim()
+        // Pattern 2: "seriesLabel • legendValue" or "seriesLabel - legendValue"
+        const match2 = catName.match(/^(.+?)\s*[-•·]\s*.+$/)
+        if (match2) return match2[1].trim()
+        // No separator: return as-is
+        return catName
       }
+      
+      // Default rule: last series as line, others as bars (if no explicit series metadata)
+      const defaultLastAsLine = seriesLabels.length === 0 || !Array.isArray(series) || series.length === 0
+      const lastSeriesLabel = seriesLabels.length > 0 ? seriesLabels[seriesLabels.length - 1] : null
+      
+      cats.forEach((c, idx) => {
+        const baseHex = wantValueGrad ? baseHexVG : tremorNameToHex(chartColorsTokens[idx % chartColorsTokens.length])
+        const values = (data as any[]).map((d) => {
+          const val = (d as any)?.[c]
+          if (val === null || val === undefined) return null
+          return Number(val)
+        })
+        
+        // Extract series label and lookup metadata
+        const seriesLabel = extractSeriesLabel(String(c))
+        const sMeta = seriesLabel ? metaByName.get(seriesLabel) : null
+        
+        // Determine type: secondary axis series are lines, primary axis are bars
+        // Fallback: last series as line if no series metadata
+        const isLine = sMeta?.secondaryAxis === true || (defaultLastAsLine && idx === cats.length - 1)
+        
+        const seriesType = isLine ? 'line' : 'bar'
+        
+        if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+          try { 
+            console.log('[ChartCard] [Combo] Series type determination:', { 
+              category: c, 
+              seriesLabel, 
+              secondaryAxis: sMeta?.secondaryAxis, 
+              type: seriesType 
+            }) 
+          } catch {}
+        }
+        
+        const seriesData = wantValueGrad
+          ? values.map((v, i) => (v === null ? null : { value: v, itemStyle: { color: saturateHexBy(baseHexVG, Math.max(0, Math.min(1, rowTotals[i] > 0 ? (v / rowTotals[i]) : 0))) } }))
+          : values
+        
+        if (seriesType === 'line') {
+          baseSeries.push({ 
+            name: c, 
+            type: 'line', 
+            data: seriesData, 
+            smooth: true, 
+            connectNulls: false,
+            lineStyle: { width: (options?.lineWidth ?? 2), color: baseHex }, 
+            itemStyle: { color: baseHex },
+            emphasis: { focus: 'series' },
+            ...(sMeta?.secondaryAxis ? { yAxisIndex: 1 } : {})
+          })
+        } else {
+          baseSeries.push({ 
+            name: c, 
+            type: 'bar', 
+            data: seriesData, 
+            itemStyle: { color: baseHex }, 
+            emphasis: { focus: 'series' },
+            ...(wantLabels ? { label: { show: true, position: 'top', fontSize: 10, color: axisTextColor, textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 2, textShadowOffsetY: 1 } } : {}),
+            ...(sMeta?.secondaryAxis ? { yAxisIndex: 1 } : {})
+          })
+        }
+      })
       const hasSecondary = baseSeries.some((s) => s.yAxisIndex === 1)
       const visualMap = (() => {
-        if (!wantValueGrad || !lineCat) return undefined
+        if (!wantValueGrad) return undefined
         const idxLine = baseSeries.findIndex((s) => s.type === 'line')
         if (idxLine < 0) return undefined
-        const gmax = Math.max(1, ...((data as any[]).map((d) => Number((d as any)?.[lineCat] ?? 0))))
+        const lineSeries = baseSeries[idxLine]
+        const lineData = Array.isArray(lineSeries?.data) ? lineSeries.data : []
+        const gmax = Math.max(1, ...lineData.map((v: any) => Number(v ?? 0)))
         const c1 = saturateHexBy(baseHexVG, 0.25)
         const c2 = saturateHexBy(baseHexVG, 0.95)
         return [{ show: false, type: 'continuous', min: 0, max: gmax, dimension: 0, seriesIndex: idxLine, inRange: { color: [c1, c2] } }] as any
@@ -6688,9 +6755,10 @@ export default function ChartCard({
             const out: any = { ...row }
             catsSafe.forEach((c) => {
               const v: any = out[c]
-              if (v === null || v === undefined || v === '') { out[c] = 0; return }
+              // For area charts, preserve null for missing data so lines stop instead of dropping to zero
+              if (v === null || v === undefined || v === '') { out[c] = null; return }
               const n = Number(v)
-              out[c] = Number.isFinite(n) ? n : 0
+              out[c] = Number.isFinite(n) ? n : null
             })
             return out
           })
@@ -6983,9 +7051,10 @@ export default function ChartCard({
               const out: any = { ...row }
               catsSafe.forEach((c) => {
                 const v: any = out[c]
-                if (v === null || v === undefined || v === '') { out[c] = 0; return }
+                // For line charts, preserve null for missing data so lines stop instead of dropping to zero
+                if (v === null || v === undefined || v === '') { out[c] = null; return }
                 const n = Number(v)
-                out[c] = Number.isFinite(n) ? n : 0
+                out[c] = Number.isFinite(n) ? n : null
               })
               return out
             })

@@ -1613,9 +1613,9 @@ export default function KpiCard({
               )
             }
             
-            // Multi-series rendering for basic and badge presets
-            const hasSeries = (deltaEnabled && kpi.data?.bySeries && Object.keys(kpi.data.bySeries).length > 1) || 
-                             (!deltaEnabled && Object.keys(baseBySeries).length > 1)
+            // Multi-series rendering for basic and badge presets (show labels even for single series)
+            const hasSeries = (deltaEnabled && kpi.data?.bySeries && Object.keys(kpi.data.bySeries).length >= 1) || 
+                             (!deltaEnabled && Object.keys(baseBySeries).length >= 1)
             if (hasSeries && (preset === 'basic' || preset === 'badge')) {
               const seriesEntries = deltaEnabled 
                 ? Object.entries(kpi.data!.bySeries!)
@@ -1655,7 +1655,42 @@ export default function KpiCard({
               )
             }
             
-            // Single value rendering (when no multi-series)
+            // Single series with label (when series is defined but bySeries not populated)
+            const seriesArr = Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []
+            const hasSimpleY = !!(querySpec as any)?.y
+            const shouldShowLabel = (seriesArr.length === 1 || hasSimpleY) && (preset === 'basic' || preset === 'badge')
+            
+            if (shouldShowLabel) {
+              // Extract label from either series array or simple y field
+              const seriesLabel = seriesArr.length === 1 
+                ? (seriesArr[0].label || seriesArr[0].y || seriesArr[0].measure || 'Value')
+                : ((querySpec as any)?.y || 'Value')
+              
+              if (preset === 'badge') {
+                return (
+                  <div className="flex flex-col gap-1">
+                    <div className={`${labelClass} text-xs opacity-70`}>{seriesLabel}</div>
+                    <div className="flex items-start justify-between">
+                      <Metric className={metricClass}>{vStr}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                      {deltaEnabled && pctStr != null && (<span className={`ml-2 text-xs px-2 py-0.5 rounded-md bg-muted ${deltaColor(pct ?? 0)}`}>{pctStr}</span>)}
+                    </div>
+                  </div>
+                )
+              }
+              
+              // basic
+              return (
+                <div className="flex flex-col gap-1">
+                  <div className={`${labelClass} text-xs opacity-70`}>{seriesLabel}</div>
+                  <div className="flex items-center gap-2">
+                    <Metric className={metricClass}>{vStr}{suffix ? <span className="ml-1 text-base align-super">{suffix}</span> : null}</Metric>
+                    {deltaEnabled && pctStr != null && (<span className={`text-sm ${deltaColor(displayed.pct || 0)}`}>{pctStr}</span>)}
+                  </div>
+                </div>
+              )
+            }
+            
+            // Single value rendering (when no series defined)
             if (preset === 'badge') {
               return (
                 <div className="flex items-start justify-between">

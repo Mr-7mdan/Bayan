@@ -40,6 +40,8 @@ function prepareAreaSeries(seriesIn: any[], opts: any) {
     // Ensure line type + smooth + areaStyle
     next.type = 'line'
     next.smooth = true
+    // Don't connect across null values (stop lines at last data point)
+    next.connectNulls = false
     // Preserve existing areaStyle if present; otherwise add a mild opacity
     if (!next.areaStyle) next.areaStyle = { opacity: 0.2 }
     // Stacking
