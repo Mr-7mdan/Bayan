@@ -506,6 +506,29 @@ export default function DataModelPage() {
                             setAdv({ open: true, dsId: r.datasourceId, dsType: r.datasourceType, source: r.table, schema: schemaOne })
                           }}
                         >Advanced SQL</button>
+                        {task && (
+                          <button
+                            className="text-xs px-2 py-1 rounded-md border hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+                            title="Flush local data and reset sync state for this table"
+                            onClick={async () => {
+                              try {
+                                await Api.flushSyncTask(r.datasourceId, task.id, user?.id)
+                                // Optimistically clear stats so user sees it needs a fresh sync
+                                setRows((arr) => arr.map((x) =>
+                                  (x.datasourceId === r.datasourceId && x.table === r.table)
+                                    ? { ...x, rowCount: null, lastSyncAt: null }
+                                    : x
+                                ))
+                                setToast({ message: `Flushed local table "${r.table}". Run sync again to reload data.`, type: 'success' })
+                                setTimeout(() => setToast(null), 4000)
+                              } catch (err) {
+                                console.error('[DataModel] Failed to flush table:', err)
+                                setToast({ message: `Failed to flush table: ${(err as any)?.message || 'Unknown error'}`, type: 'error' })
+                                setTimeout(() => setToast(null), 5000)
+                              }
+                            }}
+                          >Flush</button>
+                        )}
                         <button 
                           className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" 
                           onClick={() => setConfirmDeleteTable({ open: true, dsId: r.datasourceId, table: r.table })}

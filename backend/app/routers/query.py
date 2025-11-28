@@ -1134,7 +1134,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
         all_custom_cols = ((opts or {}).get("transforms") or {}).get('customColumns', [])
         sys.stderr.write(f"[Pivot] Total custom columns before scope filter: {len(all_custom_cols)}\n")
         for col in all_custom_cols:
-            scope = col.get('scope', {})
+            scope = col.get('scope') or {}
             sys.stderr.write(f"[Pivot]   - {col.get('name')}: level={scope.get('level')}, table={scope.get('table')}\n")
         sys.stderr.flush()
         ds_transforms = _apply_scope((opts or {}).get("transforms") or {}, payload.source)
@@ -1592,12 +1592,16 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
     if agg in ("sum", "avg", "min", "max") and not val_field:
         agg = 'count'
     # Sanitize invalid valueField for non-count aggregations (e.g., numeric-only like '2')
+    # BUT allow numeric names if they're valid custom column aliases
     try:
         is_numeric_name = bool(re.fullmatch(r"\d+", str(val_field or '').strip()))
+        # Check if it's a valid custom column even if numeric
+        is_valid_custom_col = is_numeric_name and (val_field in (expr_map or {}))
     except Exception:
         is_numeric_name = False
+        is_valid_custom_col = False
     if agg in ("sum", "avg", "min", "max", "distinct"):
-        if (not val_field) or is_numeric_name:
+        if (not val_field) or (is_numeric_name and not is_valid_custom_col):
             if unpivot_val_col:
                 val_field = unpivot_val_col
             else:
@@ -1942,6 +1946,9 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 ds_type=ds_type,
             )
             print(f"[SQLGlot] Pivot: Generated SQL: {inner[:150]}...")
+            import sys
+            sys.stderr.write(f"[DEBUG] About to execute pivot query via run_query, SQL length: {len(inner)}\n")
+            sys.stderr.flush()
             
         except Exception as e:
             print(f"[SQLGlot] Pivot: Error: {e}")
@@ -1985,8 +1992,13 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
         inner = f"SELECT {sel}{base_from_sql}{where_sql}{gb_sql}{order_by}"
 
     # Delegate execution to /query. If no explicit limit is provided, fetch all pages.
+    import sys
+    sys.stderr.write(f"[DEBUG] Acquiring semaphore for query execution...\n")
+    sys.stderr.flush()
     _HEAVY_SEM.acquire()
     try:
+        sys.stderr.write(f"[DEBUG] Semaphore acquired, creating QueryRequest...\n")
+        sys.stderr.flush()
         if payload.limit is not None:
             q = QueryRequest(
                 sql=inner,
@@ -1996,6 +2008,8 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 includeTotal=False,
                 params=params or None,
             )
+            sys.stderr.write(f"[DEBUG] Calling run_query with limit={payload.limit}...\n")
+            sys.stderr.flush()
             return run_query(q, db, actorId=actorId, publicId=publicId, token=token)
 
         # Unlimited mode: page through results until exhaustion
@@ -2004,6 +2018,8 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
         cols: list[str] | None = None
         offset = 0
         start_time = time.perf_counter()
+        sys.stderr.write(f"[DEBUG] Starting unlimited mode pagination with page_size={page_size}...\n")
+        sys.stderr.flush()
         while True:
             q = QueryRequest(
                 sql=inner,
@@ -2013,7 +2029,11 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 includeTotal=False,
                 params=params or None,
             )
+            sys.stderr.write(f"[DEBUG] Calling run_query for page at offset={offset}...\n")
+            sys.stderr.flush()
             res = run_query(q, db, actorId=actorId, publicId=publicId, token=token)
+            sys.stderr.write(f"[DEBUG] Got {len(res.rows or [])} rows from run_query\n")
+            sys.stderr.flush()
             if cols is None:
                 cols = list(res.columns or [])
             page_rows = list(res.rows or [])
@@ -2060,6 +2080,54 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
             ds_type = "duckdb"
     except Exception:
         pass
+    
+    # Check if SQLGlot should be used (same as run_pivot)
+    use_sqlglot = should_use_sqlglot(actorId)
+    inner = None
+    if use_sqlglot:
+        try:
+            # Generate SQL using SQLGlot (same logic as run_pivot, but without execution)
+            print(f"[SQLGlot] /pivot/sql: ENABLED for user={actorId}, dialect={ds_type}")
+            
+            # For remote datasources, custom columns are materialized in _base subquery
+            # so we don't need expr_map. For local DuckDB, we also don't build it here.
+            expr_map = {}
+            
+            # Prepare dimensions
+            r_dims = list(payload.rows or [])
+            c_dims = list(payload.cols or [])
+            val_field = (payload.valueField or "").strip()
+            agg = (payload.aggregator or "count").lower()
+            
+            # For /pivot/sql with SQLGlot, custom columns are materialized in _base subquery
+            # so numeric column names like "200" are valid as-is. Don't apply validation.
+            
+            # Build SQLGlot pivot query
+            from ..sqlgen_glot import SQLGlotBuilder
+            builder = SQLGlotBuilder(dialect=ds_type)
+            inner = builder.build_pivot_query(
+                source=payload.source,
+                rows=r_dims,
+                cols=c_dims,
+                value_field=val_field if val_field else None,
+                agg=agg,
+                where=payload.where,
+                group_by=payload.groupBy if hasattr(payload, 'groupBy') else None,
+                week_start=payload.weekStart if hasattr(payload, 'weekStart') else 'mon',
+                limit=payload.limit,
+                expr_map=expr_map,
+                ds_type=ds_type,
+            )
+            print(f"[SQLGlot] /pivot/sql: Generated SQL ({len(inner)} chars)")
+            return {"sql": inner}
+        except Exception as e:
+            print(f"[SQLGlot] /pivot/sql: Error: {e}")
+            import traceback
+            print(f"[SQLGlot] /pivot/sql: Traceback:\n{traceback.format_exc()}")
+            logger.warning(f"[SQLGlot] /pivot/sql failed: {e}")
+            # Fall through to legacy path
+            use_sqlglot = False
+    
     # Helpers duplicated from run_pivot for consistent quoting and derived expressions
     def _q_ident(name: str) -> str:
         s = str(name or '').strip()
@@ -2825,11 +2893,11 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                             pass
                         try:
                             if is_pg:
-                                conn.execute(text("SET statement_timeout = 30000"))
+                                conn.execute(text("SET statement_timeout = 120000"))
                             elif is_mysql:
-                                conn.execute(text("SET SESSION MAX_EXECUTION_TIME=30000"))
+                                conn.execute(text("SET SESSION MAX_EXECUTION_TIME=120000"))
                             elif is_mssql:
-                                conn.execute(text("SET LOCK_TIMEOUT 30000"))
+                                conn.execute(text("SET LOCK_TIMEOUT 120000"))
                         except Exception:
                             pass
                         result = conn.execution_options(stream_results=True).execute(sql_text, params)

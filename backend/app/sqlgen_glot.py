@@ -1193,11 +1193,14 @@ class SQLGlotBuilder:
                             # Parse the entire cleaned expression
                             clean_expr = sqlglot.parse_one(val_resolved, dialect=normalized_dialect)
                         else:
-                            # For simple columns, apply numeric cleaning
-                            clean_expr = sqlglot.parse_one(
-                                f"COALESCE(try_cast(regexp_replace(CAST({val_resolved or value_field} AS VARCHAR), '[^0-9\\\\.-]', '') AS DOUBLE), try_cast({val_resolved or value_field} AS DOUBLE), 0.0)",
-                                dialect=normalized_dialect
-                            )
+                            # For simple columns, use TRY_CAST only (no aggressive REGEXP_REPLACE)
+                            # This preserves original values and matches source database results
+                            col_name = val_resolved or value_field
+                            col_ref = exp.column(col_name)
+                            
+                            # Build: TRY_CAST(col AS DOUBLE)
+                            # DuckDB's TRY_CAST returns NULL for invalid values, SUM ignores NULLs
+                            clean_expr = exp.TryCast(this=col_ref, to=exp.DataType.build("DOUBLE"))
                         value_expr = getattr(exp, agg_lower.capitalize())(this=clean_expr)
                     else:
                         value_expr = getattr(exp, agg_lower.capitalize())(this=exp.column(val_resolved or value_field))

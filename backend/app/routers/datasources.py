@@ -802,6 +802,38 @@ def run_sync_now(
         if not st:
             print(f"[ABORT] Creating new SyncState for task_id={t.id}", flush=True)
             st = SyncState(id=str(uuid4()), task_id=t.id, in_progress=False)
+            # For sequence tasks, initialize watermark from existing destination data if available
+            if t.mode == "sequence" and t.sequence_column:
+                try:
+                    dest_name = t.dest_table_name
+                    if str(os.getenv("DUCKDB_USER_SCOPED_TABLES", "0")).strip().lower() in ("1", "true", "yes", "on"):
+                        owner = (actorId or ds.user_id or "dev_user").strip() or "dev_user"
+                        safe = re.sub(r"[^A-Za-z0-9_]", "_", owner)
+                        dest_name = f"{safe}__{t.dest_table_name}"
+                    # Check if destination table exists and has data
+                    if _duckdb is not None:
+                        con = open_duck_native(curr_duck_path)
+                        try:
+                            def _q_duck(name: str) -> str:
+                                return '"' + str(name).replace('"', '""') + '"'
+                            # Check if table exists
+                            check_sql = f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{dest_name}'"
+                            table_exists = con.execute(check_sql).fetchone()[0] > 0
+                            if table_exists:
+                                # Get MAX(sequence_column) from existing data
+                                max_sql = f"SELECT MAX({_q_duck(t.sequence_column)}) FROM {_q_duck(dest_name)}"
+                                row = con.execute(max_sql).fetchone()
+                                max_val = (row[0] if row else None)
+                                if max_val is not None:
+                                    st.last_sequence_value = int(max_val)
+                                    print(f"[SEQUENCE] Initialized watermark for task_id={t.id} from existing data: {max_val}", flush=True)
+                        except Exception as e:
+                            print(f"[SEQUENCE] Could not initialize watermark from existing data: {e}", flush=True)
+                            # Default to 0 for new sequence tasks without existing data
+                            st.last_sequence_value = 0
+                except Exception as e:
+                    print(f"[SEQUENCE] Error initializing watermark for task_id={t.id}: {e}", flush=True)
+                    st.last_sequence_value = 0
             db.add(st)
             db.commit()
         # Mark in progress and clear any previous cancel flag
@@ -1269,6 +1301,114 @@ def delete_sync_task(ds_id: str, task_id: str, actorId: str | None = Query(defau
     db.delete(t)
     db.commit()
     return Response(status_code=204)
+
+
+@router.post("/{ds_id}/sync-tasks/{task_id}/flush")
+def flush_sync_task(ds_id: str, task_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    """Flush/reset a sync task's local DuckDB table without deleting the task itself.
+
+    This drops the materialized table (including user-scoped variants) and resets the
+    associated SyncState so that the next sync run will fully rebuild the table with
+    freshly inferred types. Widgets and dashboards that reference the table by name
+    continue to work after the table is rebuilt.
+    """
+    t = db.get(SyncTask, task_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+
+    # Determine whether this endpoint is being called in the context of a DuckDB
+    # datasource (Data Model page) or the original remote/API datasource.
+    is_duckdb = str(ds.type or "").lower().startswith("duckdb")
+
+    # For non-DuckDB datasources, enforce that the task truly belongs to this
+    # datasource. For DuckDB datasources, tasks may belong to remote sources but
+    # share the same DuckDB file via last_duck_path, so we only require that the
+    # task exists.
+    if not is_duckdb and t.datasource_id != ds_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # owner or admin
+    if not _is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if ds.user_id and ds.user_id != actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Determine DuckDB file path
+    duck_path = None
+    if is_duckdb:
+        # DuckDB datasource: derive path from its own connection URI
+        if ds.connection_encrypted:
+            try:
+                dsn = decrypt_text(ds.connection_encrypted)
+                if dsn:
+                    duck_path = dsn.replace("duckdb:///", "")
+            except Exception:
+                duck_path = None
+    if not duck_path:
+        # Fallback to global active DuckDB path (used for remote->DuckDB syncs)
+        try:
+            duck_path = get_active_duck_path()
+        except Exception:
+            duck_path = settings.duckdb_path
+
+    # Compute table names to drop: base dest and optional user-scoped variant
+    dest = (t.dest_table_name or "").strip()
+    if not dest:
+        raise HTTPException(status_code=400, detail="Task has no destination table name")
+
+    tables_to_drop: set[str] = set()
+    tables_to_drop.add(dest)
+
+    # User-scoped table naming mirrors run_sync_now logic
+    try:
+        if str(os.getenv("DUCKDB_USER_SCOPED_TABLES", "0")).strip().lower() in ("1", "true", "yes", "on"):
+            owner = (actorId or ds.user_id or "dev_user").strip() or "dev_user"
+            safe = re.sub(r"[^A-Za-z0-9_]", "_", owner)
+            tables_to_drop.add(f"{safe}__{dest}")
+    except Exception:
+        pass
+
+    dropped = 0
+    if _duckdb is not None and duck_path:
+        def _q_duck(name: str) -> str:
+            return '"' + str(name).replace('"', '""') + '"'
+        try:
+            with open_duck_native(duck_path) as conn:
+                for tbl in sorted(tables_to_drop):
+                    try:
+                        conn.execute(f"DROP TABLE IF EXISTS {_q_duck(tbl)}")
+                        dropped += 1
+                    except Exception:
+                        # Best-effort per table
+                        continue
+        except Exception:
+            # If we cannot open DuckDB, surface a 500 as this is a flush operation
+            raise HTTPException(status_code=500, detail="Failed to open DuckDB for flush")
+
+    # Reset sync state watermark and counters for this task
+    st = db.query(SyncState).filter(SyncState.task_id == task_id).first()
+    if st:
+        st.last_sequence_value = None
+        st.last_run_at = None
+        st.last_row_count = None
+        st.progress_current = None
+        st.progress_total = None
+        st.progress_phase = None  # type: ignore[attr-defined]
+        st.error = None
+        st.in_progress = False
+        try:
+            st.cancel_requested = False  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        st.last_duck_path = None
+        db.add(st)
+        db.commit()
+
+    return {"ok": True, "dropped": int(dropped), "tables": sorted(tables_to_drop)}
 
 
 # --- Local DuckDB stats for a datasource ---

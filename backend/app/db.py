@@ -840,12 +840,18 @@ def _infer_duck_type_value(v) -> str:
             return "TIMESTAMP"
         if isinstance(v, date):
             return "DATE"
-        # Strings: best-effort parse for ISO date/time
+        # Strings: best-effort parse for ISO date/time or numeric
         if isinstance(v, str):
             s = v.strip()
             if not s:
                 return "TEXT"
-            # Try datetime first
+            # Try numeric first (common for SQL Server DECIMAL/MONEY columns)
+            try:
+                float(s)
+                return "DOUBLE"
+            except ValueError:
+                pass
+            # Try datetime
             try:
                 # datetime.fromisoformat handles both date and timestamp when formatted
                 dt = datetime.fromisoformat(s)
@@ -893,6 +899,17 @@ def _create_table_typed(conn, table_name: str, columns: list[str], sample_rows: 
     except Exception:
         # keep TEXT defaults
         pass
+    
+    # Log inferred types for debugging
+    try:
+        import sys
+        sys.stderr.write(f"[SYNC] Creating table {table_name} with inferred types:\n")
+        for c, t in types.items():
+            sys.stderr.write(f"  {c}: {t}\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+    
     cols_sql = ", ".join(f"{_quote_duck_ident(c)} {types[c]}" for c in columns)
     conn.exec_driver_sql(f"CREATE TABLE IF NOT EXISTS {qtable} ({cols_sql})")
 def _table_exists(conn, table_name: str) -> bool:
