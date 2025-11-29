@@ -5,14 +5,8 @@ const nextConfig = {
   typedRoutes: true,
   // Silence workspace root inference warning (point to monorepo root if applicable)
   outputFileTracingRoot: __dirname,
-  experimental: {
-    allowedDevOrigins: [
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'http://172.16.4.120:3000',
-      'http://192.168.31.43:3000',
-    ],
-  },
+  // Note: allowedDevOrigins was removed as it's no longer supported in Next.js 15+
+  // Note: eslint config moved to .eslintrc or next lint CLI options
   async rewrites() {
     const backend = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '')
     if (!backend) return []
@@ -23,9 +17,6 @@ const nextConfig = {
       },
     ]
   },
-  eslint: {
-    ignoreDuringBuilds: true
-  }
 };
 
 /** @type {import('next').NextConfig} */

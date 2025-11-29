@@ -1,3 +1,9 @@
+@import 'quill/dist/quill.snow.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* Hide scrollbars utility (preserve scrolling) */
 .no-scrollbar {
   -ms-overflow-style: none; /* IE and Edge */
@@ -6,12 +12,8 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Opera */
 }
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 /* Quill theme */
-@import 'quill/dist/quill.snow.css';
 
 /* Light theme — neutral, limited palette */
 :root {

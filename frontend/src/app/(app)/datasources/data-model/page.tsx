@@ -104,11 +104,19 @@ export default function DataModelPage() {
         })
         setRows(agg)
         const taskLists = await Promise.all(duckOnly.map(async (d) => {
-          try { return await Api.getSyncStatus(d.id, user?.id) } catch { return [] as SyncTaskOut[] }
+          try { 
+            const res = await Api.getSyncStatus(d.id, user?.id)
+            console.log('[DataModel] Fetched sync status for', d.id, res)
+            return res
+          } catch (e) { 
+            console.error('[DataModel] Failed to fetch sync status for', d.id, e)
+            return [] as SyncTaskOut[] 
+          }
         }))
         if (stop) return
         const tmap: Record<string, SyncTaskOut[]> = {}
         duckOnly.forEach((d, i) => { tmap[d.id] = taskLists[i] || [] })
+        console.log('[DataModel] tasksByDs map:', tmap)
         setTasksByDs(tmap)
         // Load default ds id from localStorage (initial)
         try { if (typeof window !== 'undefined') setDefaultDsId((prev)=> prev ?? localStorage.getItem('default_ds_id')) } catch {}
@@ -412,7 +420,7 @@ export default function DataModelPage() {
             )}
             {!loading && !error && visible.map((r) => {
               const tasks = tasksByDs[r.datasourceId] || []
-              const task = tasks.find((t) => String(t.destTableName || '') === r.table)
+              const task = tasks.find((t) => String(t.destTableName || '').toLowerCase() === r.table.toLowerCase())
               const nextSync = task?.scheduleCron || null
               const cols = columnsByTable[r.table] || []
               const isExp = !!expanded[r.table]

@@ -516,12 +516,20 @@ def list_sync_tasks(ds_id: str, actorId: str | None = Query(default=None), db: S
         if not duck_path:
             duck_path = get_active_duck_path()
         
+        # Normalize path for comparison (handle Windows slashes and casing)
+        norm_duck_path = None
+        if duck_path:
+            norm_duck_path = os.path.normpath(duck_path).lower()
+
         all_tasks = db.query(SyncTask).order_by(SyncTask.created_at.asc()).all()
         tasks = []
         for t in all_tasks:
             st = db.query(SyncState).filter(SyncState.task_id == t.id).first()
-            if st and st.last_duck_path and duck_path and duck_path in st.last_duck_path:
-                tasks.append(t)
+            if st and st.last_duck_path and norm_duck_path:
+                # Normalize stored path too
+                st_path = os.path.normpath(st.last_duck_path).lower()
+                if norm_duck_path in st_path or st_path in norm_duck_path:
+                    tasks.append(t)
     else:
         tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).order_by(SyncTask.created_at.asc()).all()
     
@@ -602,12 +610,33 @@ def get_sync_status(ds_id: str, actorId: str | None = Query(default=None), db: S
         if not duck_path:
             duck_path = get_active_duck_path()
         
+        # Normalize path for comparison (handle Windows slashes and casing)
+        norm_duck_path = None
+        if duck_path:
+            norm_duck_path = os.path.normpath(duck_path).lower()
+
+        print(f"[DEBUG] get_sync_status ds_id={ds_id} duck_path={duck_path} norm={norm_duck_path}", flush=True)
+
         all_tasks = db.query(SyncTask).all()
         tasks = []
+        seen_ids = set()
+
         for t in all_tasks:
-            st = db.query(SyncState).filter(SyncState.task_id == t.id).first()
-            if st and st.last_duck_path and duck_path and duck_path in st.last_duck_path:
+            # Match by ID directly (Primary)
+            if str(t.datasource_id) == str(ds_id):
                 tasks.append(t)
+                seen_ids.add(t.id)
+                continue
+
+            # Match by Path (Secondary - for shared DBs)
+            st = db.query(SyncState).filter(SyncState.task_id == t.id).first()
+            if st and st.last_duck_path and norm_duck_path:
+                st_path = os.path.normpath(st.last_duck_path).lower()
+                # print(f"[DEBUG] Check task {t.id} st_path={st_path}", flush=True)
+                if (norm_duck_path in st_path or st_path in norm_duck_path):
+                    if t.id not in seen_ids:
+                        tasks.append(t)
+                        seen_ids.add(t.id)
     else:
         tasks = db.query(SyncTask).filter(SyncTask.datasource_id == ds_id).all()
     

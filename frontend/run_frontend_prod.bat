@@ -32,6 +32,10 @@ if not exist node_modules (
   )
 )
 
+if exist .next (
+  rmdir /S /Q .next
+)
+
 REM Build if .next missing
 if not exist .next (
   call npm run build

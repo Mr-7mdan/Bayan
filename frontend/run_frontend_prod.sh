@@ -13,6 +13,7 @@ fi
 if [ ! -d node_modules ]; then
   npm ci
 fi
+rm -rf .next
 if [ ! -d .next ]; then
   npm run build
 fi
