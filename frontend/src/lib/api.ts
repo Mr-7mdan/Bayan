@@ -1004,7 +1004,8 @@ export type QuerySpec = {
   limit?: number
   offset?: number
   // Optional chart semantics for aggregated queries
-  x?: string
+  // x can be a single field or array for multi-level axis (e.g., ["Day", "Year"])
+  x?: string | string[]
   y?: string
   agg?: 'none' | 'count' | 'distinct' | 'avg' | 'sum' | 'min' | 'max'
   groupBy?: 'none' | 'day' | 'week' | 'month' | 'quarter' | 'year'
@@ -1045,7 +1046,7 @@ export const QueryApi = {
       }
       // Normalize optional fields that sometimes arrive as arrays
       const spec: any = { ...specAny }
-      if (Array.isArray(spec.x)) spec.x = spec.x[0]
+      // Preserve x as string | string[] for multi-level X support; only normalize legend
       if (Array.isArray(spec.legend)) spec.legend = spec.legend[0]
       // Forward the normalized payload
       return await http<QueryResponse>('/query/spec', { method: 'POST', body: JSON.stringify({ ...payload, spec }) })

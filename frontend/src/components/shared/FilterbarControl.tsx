@@ -22,26 +22,27 @@ export function FilterbarRuleControl(props: {
   className?: string
   disabled?: boolean
   distinctCache?: Record<string, string[]>
+  loadingCache?: Record<string, boolean>
   loadDistinctAction?: (field: string) => void
 }) {
-  const { label, kind, field, where, onPatchAction, className, disabled, distinctCache, loadDistinctAction } = props
+  const { label, kind, field, where, onPatchAction, className, disabled, distinctCache, loadingCache, loadDistinctAction } = props
   const icon = kind === 'date' ? <RiCalendar2Line className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden /> : kind === 'number' ? <RiHashtag className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden /> : <RiTextWrap className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden />
   return (
     <FilterbarShell label={label} icon={icon} className={className}>
       {kind === 'number' && (
-        <NumberRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadDistinctAction={loadDistinctAction} />
+        <NumberRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadingCache={loadingCache} loadDistinctAction={loadDistinctAction} />
       )}
       {kind === 'date' && (
-        <DateRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadDistinctAction={loadDistinctAction} />
+        <DateRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadingCache={loadingCache} loadDistinctAction={loadDistinctAction} />
       )}
       {kind === 'string' && (
-        <StringRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadDistinctAction={loadDistinctAction} />
+        <StringRuleInline field={field} where={where} onPatchAction={onPatchAction} distinctCache={distinctCache} loadingCache={loadingCache} loadDistinctAction={loadDistinctAction} />
       )}
     </FilterbarShell>
   )
 }
 
-function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadDistinctAction?: (field: string) => void }) {
+function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadingCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadingCache?: Record<string, boolean>; loadDistinctAction?: (field: string) => void }) {
   type NumberOp = 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'between'
   type Mode = 'rule' | 'manual'
   const gte = (where as any)?.[`${field}__gte`] as number | undefined
@@ -230,7 +231,13 @@ function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadDist
                   <span className="truncate" title={v}>{v}</span>
                 </li>
               ))}
-              {filtered.length === 0 && (
+              {filtered.length === 0 && loadingCache?.[field] && (
+                <li className="text-xs text-muted-foreground flex items-center gap-2">
+                  <span className="inline-block size-3 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+                  Loading values...
+                </li>
+              )}
+              {filtered.length === 0 && !loadingCache?.[field] && (
                 <li className="text-xs text-muted-foreground">No values</li>
               )}
             </ul>
@@ -245,7 +252,7 @@ function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadDist
   )
 }
 
-function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadDistinctAction?: (field: string) => void }) {
+function StringRuleInline({ field, where, onPatchAction, distinctCache, loadingCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadingCache?: Record<string, boolean>; loadDistinctAction?: (field: string) => void }) {
   type StrOp = 'contains'|'not_contains'|'eq'|'ne'|'starts_with'|'ends_with'
   type Mode = 'criteria' | 'manual'
   const initialArr = Array.isArray((where as any)?.[field]) ? ((where as any)?.[field] as any[]).map((v) => String(v)) : []
@@ -403,7 +410,13 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
                   <span className="truncate" title={v}>{v}</span>
                 </li>
               ))}
-              {filtered.length === 0 && (
+              {filtered.length === 0 && loadingCache?.[field] && (
+                <li className="text-xs text-muted-foreground flex items-center gap-2">
+                  <span className="inline-block size-3 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+                  Loading values...
+                </li>
+              )}
+              {filtered.length === 0 && !loadingCache?.[field] && (
                 <li className="text-xs text-muted-foreground">No values</li>
               )}
             </ul>
@@ -418,7 +431,7 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadDist
   )
 }
 
-function DateRuleInline({ field, where, onPatchAction, distinctCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadDistinctAction?: (field: string) => void }) {
+function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadingCache?: Record<string, boolean>; loadDistinctAction?: (field: string) => void }) {
   type Mode = 'preset'|'custom'|'manual'
   type Preset = 'today'|'yesterday'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
   type CustomOp = 'after'|'before'|'between'
@@ -665,7 +678,13 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadDistin
                   <span className="truncate" title={v}>{v}</span>
                 </li>
               ))}
-              {filtered.length === 0 && (
+              {filtered.length === 0 && loadingCache?.[field] && (
+                <li className="text-xs text-muted-foreground flex items-center gap-2">
+                  <span className="inline-block size-3 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+                  Loading values...
+                </li>
+              )}
+              {filtered.length === 0 && !loadingCache?.[field] && (
                 <li className="text-xs text-muted-foreground">No values</li>
               )}
             </ul>

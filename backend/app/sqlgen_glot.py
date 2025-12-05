@@ -51,7 +51,7 @@ class SQLGlotBuilder:
     def build_aggregation_query(
         self,
         source: str,
-        x_field: Optional[str] = None,
+        x_field: Optional[any] = None,  # Can be str or List[str] for multi-level X
         y_field: Optional[str] = None,
         legend_field: Optional[str] = None,
         agg: str = "count",
@@ -181,21 +181,31 @@ class SQLGlotBuilder:
                     legend_kind = legend_match.group(2).lower()
             
             # Detect 12-month seasonality pattern
-            print(f"[SQLGlot] Seasonality check: group_by={group_by}, legend_base_col={legend_base_col}, legend_kind={legend_kind}, x_field={x_field}")
+            # For seasonality check, use primary x field if array
+            x_field_check = x_field[0] if isinstance(x_field, (list, tuple)) and len(x_field) > 0 else x_field
+            print(f"[SQLGlot] Seasonality check: group_by={group_by}, legend_base_col={legend_base_col}, legend_kind={legend_kind}, x_field={x_field_check}")
             if (group_by == "month" and 
                 legend_base_col and legend_kind == "year" and 
-                x_field and x_field == legend_base_col):
+                x_field_check and x_field_check == legend_base_col):
                 seasonality_mode = True
-                print(f"[SQLGlot] [OK] 12-MONTH SEASONALITY ENABLED: x={x_field}, legend={legend_raw}, groupBy=month")
+                print(f"[SQLGlot] [OK] 12-MONTH SEASONALITY ENABLED: x={x_field_check}, legend={legend_raw}, groupBy=month")
             else:
                 print(f"[SQLGlot] [SKIP] Seasonality NOT detected")
             
             # Resolve fields before building query
-            x_field_resolved, x_is_expr = resolve_field(x_field)
+            # Handle x_field as array (multi-level X) - resolve the primary (first) field,
+            # but keep the original x_field value so we can still detect multi-level X later.
+            x_field_for_resolve = x_field[0] if isinstance(x_field, (list, tuple)) and len(x_field) > 0 else x_field
+            x_field_resolved, x_is_expr = resolve_field(x_field_for_resolve)
             y_field_resolved, y_is_expr = resolve_field(y_field)
             print(f"[SQLGlot] X field resolution: '{x_field}' -> '{x_field_resolved}', is_expr={x_is_expr}")
             print(f"[SQLGlot] Y field resolution: '{y_field}' -> '{y_field_resolved}', is_expr={y_is_expr}")
-            
+
+            # x_field_primary is what we actually use for single-level X:
+            # - if resolve_field returned an expression, use that
+            # - otherwise, use the original field name
+            x_field_primary_resolved = x_field_resolved if x_is_expr else x_field_for_resolve
+
             # MULTI-LEGEND: Handle legend_fields array (single or multiple)
             legend_field_resolved = legend_field
             legend_is_expr = False
@@ -233,8 +243,8 @@ class SQLGlotBuilder:
                 # Single legend field (not in array) - resolve normally
                 legend_field_resolved, legend_is_expr = resolve_field(legend_field)
             
-            # Use resolved fields
-            x_field = x_field_resolved
+            # Use resolved fields for Y/legend; keep original x_field so we still know
+            # when the caller passed an array (multi-level X).
             y_field = y_field_resolved
             legend_field = legend_field_resolved
             
@@ -261,25 +271,76 @@ class SQLGlotBuilder:
             x_order_expr = None  # For ordering by month number in seasonality mode
             
             # X field (with optional time bucketing)
+            # Multi-level X: when x_field is an array like ["OrderDate (Day)", "OrderDate (Year)"]
+            print(f"[SQLGlot] build_aggregation_query received x_field={x_field}, type={type(x_field)}")
+            is_multi_level_x = isinstance(x_field, (list, tuple)) and len(x_field) > 1
+            x_field_primary = x_field_primary_resolved
+            print(f"[SQLGlot] is_multi_level_x={is_multi_level_x}, x_field_primary={x_field_primary}")
+            
             if x_field:
-                if seasonality_mode:
+                if is_multi_level_x:
+                    # MULTI-LEVEL X: Concatenate all x field expressions with '|' delimiter
+                    print(f"[SQLGlot] Multi-level X detected: {x_field}")
+                    x_part_exprs = []
+                    x_order_parts = []
+                    for xf in x_field:
+                        # Resolve each x field (check for derived date parts, custom columns)
+                        xf_resolved, xf_is_expr = resolve_field(xf)
+                        if xf_is_expr:
+                            part_expr = xf_resolved
+                        else:
+                            # Check for derived date part pattern (re is imported at module level)
+                            match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", xf, flags=re.IGNORECASE)
+                            if match:
+                                base_col = match.group(1).strip()
+                                kind = match.group(2).lower()
+                                part_expr = self._build_datepart_expr(base_col, kind, ds_type or self.dialect)
+                                # Also build order expr for this part
+                                if kind in ('year', 'quarter', 'month', 'week', 'day'):
+                                    x_order_parts.append(part_expr)
+                            else:
+                                part_expr = f'"{xf_resolved}"'
+                                x_order_parts.append(part_expr)
+                        x_part_exprs.append(f"CAST({part_expr} AS VARCHAR)")
+                    
+                    # Build concatenation expression based on dialect
+                    dialect_lower = (ds_type or self.dialect or "").lower()
+                    if "duckdb" in dialect_lower or "postgres" in dialect_lower:
+                        concat_expr = " || '|' || ".join(x_part_exprs)
+                    elif "mssql" in dialect_lower or "sqlserver" in dialect_lower:
+                        concat_expr = " + '|' + ".join(x_part_exprs)
+                    else:
+                        # MySQL/SQLite style CONCAT
+                        parts_with_sep = []
+                        for i, p in enumerate(x_part_exprs):
+                            parts_with_sep.append(p)
+                            if i < len(x_part_exprs) - 1:
+                                parts_with_sep.append("'|'")
+                        concat_expr = f"CONCAT({', '.join(parts_with_sep)})"
+                    
+                    x_expr = sqlglot.parse_one(concat_expr, dialect=self.dialect)
+                    # Order by outer level (last) first, then inner levels
+                    if x_order_parts:
+                        x_order_expr = sqlglot.parse_one(", ".join(reversed(x_order_parts)), dialect=self.dialect)
+                    print(f"[SQLGlot] Multi-level X expr: {concat_expr[:100]}...")
+                elif seasonality_mode:
                     # SEASONALITY MODE: Extract month name/short for x, add numeric month for ordering
-                    print(f"[SQLGlot] Building 12-month seasonality x-axis for {x_field}")
+                    print(f"[SQLGlot] Building 12-month seasonality x-axis for {x_field_primary}")
                     # Build month short expression (Jan, Feb, Mar...)
-                    month_expr = self._build_datepart_expr(x_field, "month short", ds_type or self.dialect)
+                    month_expr = self._build_datepart_expr(x_field_primary, "month short", ds_type or self.dialect)
                     x_expr = sqlglot.parse_one(month_expr, dialect=self.dialect)
                     # Build numeric month for ordering (1-12)
-                    month_num_expr = self._build_month_number_expr(x_field, ds_type or self.dialect)
+                    month_num_expr = self._build_month_number_expr(x_field_primary, ds_type or self.dialect)
                     x_order_expr = sqlglot.parse_one(month_num_expr, dialect=self.dialect)
                     print(f"[SQLGlot] Month label expr: {month_expr}")
                     print(f"[SQLGlot] Month order expr: {month_num_expr}")
                 elif x_is_expr:
                     # Parse as raw SQL expression
-                    x_expr = sqlglot.parse_one(x_field, dialect=self.dialect)
+                    x_expr = sqlglot.parse_one(x_field_primary, dialect=self.dialect)
                 elif group_by and group_by != "none":
-                    x_expr = self._build_time_bucket(x_field, group_by, week_start)
+                    x_expr = self._build_time_bucket(x_field_primary, group_by, week_start)
                 else:
-                    x_expr = exp.Column(this=exp.Identifier(this=x_field, quoted=True))
+                    x_expr = exp.Column(this=exp.Identifier(this=x_field_primary, quoted=True))
                 select_exprs.append(x_expr.as_("x"))
                 group_positions.append(1)
                 
@@ -743,6 +804,10 @@ class SQLGlotBuilder:
         Note: Does NOT validate column existence - trusts database to handle it.
         This allows derived columns and transforms to work.
         """
+        import sys
+        sys.stderr.write(f"[SQLGLOT_WHERE_DEBUG] _apply_where received WHERE keys: {list(where.keys()) if where else 'None'}\n")
+        sys.stderr.flush()
+        
         def resolve_where_field(field_name: str) -> tuple[Any, bool]:
             """Resolve a WHERE field to its SQL expression if it's a custom column"""
             if not field_name:
@@ -1266,7 +1331,7 @@ class SQLGlotBuilder:
     def _build_multi_series_query(
         self,
         source: str,
-        x_field: Optional[str],
+        x_field: Optional[any],  # Can be str or List[str] for multi-level X
         series: List[Dict[str, Any]],
         where: Optional[Dict[str, Any]],
         group_by: Optional[str],

@@ -135,6 +135,163 @@ def _build_expr_map_helper(ds: Any, source_name: str, ds_type: str, _apply_scope
         logger.error(f"[SQLGlot] Failed to build expr_map: {e}")
     
     return expr_map
+
+
+def _build_datepart_expr_helper(base_col: str, kind: str, dialect: str) -> str:
+    """Build dialect-specific date part expression (e.g., OrderDate (Year)) - module level helper"""
+    q = f'"{base_col}"'  # Quoted identifier
+    kind_l = kind.lower()
+    
+    # DuckDB
+    if "duckdb" in dialect.lower():
+        if kind_l == 'year': return f"EXTRACT(YEAR FROM {q})"
+        if kind_l == 'quarter': return f"EXTRACT(QUARTER FROM {q})"
+        if kind_l == 'month': return f"EXTRACT(MONTH FROM {q})"
+        if kind_l == 'month name': return f"strftime({q}, '%B')"
+        if kind_l == 'month short': return f"strftime({q}, '%b')"
+        if kind_l == 'week': return f"EXTRACT(WEEK FROM {q})"
+        if kind_l == 'day': return f"EXTRACT(DAY FROM {q})"
+        if kind_l == 'day name': return f"strftime({q}, '%A')"
+        if kind_l == 'day short': return f"strftime({q}, '%a')"
+    
+    # PostgreSQL
+    elif "postgres" in dialect.lower() or "postgre" in dialect.lower():
+        if kind_l == 'year': return f"to_char({q}, 'YYYY')"
+        if kind_l == 'quarter': return f"to_char({q}, 'YYYY-\"Q\"Q')"
+        if kind_l == 'month': return f"to_char({q}, 'YYYY-MM')"
+        if kind_l == 'month name': return f"to_char({q}, 'FMMonth')"
+        if kind_l == 'month short': return f"to_char({q}, 'Mon')"
+        if kind_l == 'week': return f"to_char({q}, 'YYYY') || '-W' || lpad(to_char({q}, 'IW'), 2, '0')"
+        if kind_l == 'day': return f"to_char({q}, 'DD')"
+        if kind_l == 'day name': return f"to_char({q}, 'FMDay')"
+        if kind_l == 'day short': return f"to_char({q}, 'Dy')"
+    
+    # MSSQL
+    elif "mssql" in dialect.lower() or "sqlserver" in dialect.lower():
+        if kind_l == 'year': return f"YEAR({q})"
+        if kind_l == 'quarter': return f"DATEPART(QUARTER, {q})"
+        if kind_l == 'month': return f"MONTH({q})"
+        if kind_l == 'month name': return f"DATENAME(MONTH, {q})"
+        if kind_l == 'month short': return f"LEFT(DATENAME(MONTH, {q}), 3)"
+        if kind_l == 'week': return f"DATEPART(WEEK, {q})"
+        if kind_l == 'day': return f"DAY({q})"
+        if kind_l == 'day name': return f"DATENAME(WEEKDAY, {q})"
+        if kind_l == 'day short': return f"LEFT(DATENAME(WEEKDAY, {q}), 3)"
+    
+    # MySQL
+    elif "mysql" in dialect.lower():
+        if kind_l == 'year': return f"YEAR({q})"
+        if kind_l == 'quarter': return f"QUARTER({q})"
+        if kind_l == 'month': return f"MONTH({q})"
+        if kind_l == 'month name': return f"MONTHNAME({q})"
+        if kind_l == 'month short': return f"DATE_FORMAT({q}, '%b')"
+        if kind_l == 'week': return f"WEEK({q})"
+        if kind_l == 'day': return f"DAY({q})"
+        if kind_l == 'day name': return f"DAYNAME({q})"
+        if kind_l == 'day short': return f"DATE_FORMAT({q}, '%a')"
+    
+    # Default fallback (DuckDB-like)
+    return f"EXTRACT({kind_l.upper()} FROM {q})"
+
+
+def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: str, ds_type: str) -> dict:
+    """Resolve derived column names to SQL expressions in WHERE clause - module level helper"""
+    import sys
+    sys.stderr.write(f"[SQLGlot] _resolve_derived_columns_in_where_helper CALLED with where keys: {list(where.keys()) if where else 'None'}\n")
+    sys.stderr.flush()
+    
+    if not where:
+        return where
+    
+    if not ds:
+        sys.stderr.write("[SQLGlot] No datasource provided for resolution\n")
+        sys.stderr.flush()
+        return where
+    
+    try:
+        # Build expr_map from datasource using the module-level helper
+        def _apply_scope_for_helper(ds_tr: dict, src: str) -> dict:
+            """Apply scope filtering for the helper function"""
+            if not isinstance(ds_tr, dict):
+                return {}
+            def norm(s: str) -> str:
+                s = (s or '').strip().strip('[]').strip('"').strip('`')
+                parts = s.split('.')
+                return parts[-1].lower()
+            def filt(arr):
+                out = []
+                for it in (arr or []):
+                    sc = (it or {}).get('scope')
+                    if not sc:
+                        out.append(it); continue
+                    lvl = str(sc.get('level') or '').lower()
+                    if lvl == 'datasource':
+                        out.append(it)
+                    elif lvl == 'table' and sc.get('table') and norm(str(sc.get('table'))) == norm(src):
+                        out.append(it)
+                return out
+            return {
+                'customColumns': filt(ds_tr.get('customColumns')),
+                'transforms': filt(ds_tr.get('transforms')),
+                'joins': filt(ds_tr.get('joins')),
+                'defaults': ds_tr.get('defaults') or {},
+            }
+        
+        expr_map = _build_expr_map_helper(ds, source_name, ds_type, _apply_scope_for_helper, None)
+        
+        # Resolve WHERE clause
+        sys.stderr.write(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}\n")
+        sys.stderr.write(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}\n")
+        sys.stderr.flush()
+        
+        resolved = {}
+        resolved_count = 0
+        for key, value in where.items():
+            # Extract base column name (remove operators like __ne, __gte, __in)
+            base_key = key.split("__")[0] if "__" in key else key
+            op_suffix = key.split("__", 1)[1] if "__" in key else None
+            
+            # First check if it's a custom column
+            if base_key in expr_map:
+                expr = expr_map[base_key]
+                # Strip table aliases - handle both quoted and unquoted (e.g., s.ClientID or "s"."ClientID" -> ClientID)
+                expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases like "s".
+                expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases like s.
+                # Rebuild key with operator suffix if present
+                resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
+                sys.stderr.write(f"[SQLGlot] [OK] Resolved custom column '{key}' -> {resolved_key[:80]}...\n")
+                sys.stderr.flush()
+                resolved[resolved_key] = value
+                resolved_count += 1
+            # Check if it's a date part pattern like "OrderDate (Year)"
+            elif " (" in base_key and ")" in base_key:
+                match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", base_key, flags=re.IGNORECASE)
+                if match:
+                    base_col = match.group(1).strip()
+                    kind = match.group(2).lower()
+                    expr = _build_datepart_expr_helper(base_col, kind, ds_type)
+                    # Rebuild key with operator suffix if present
+                    resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
+                    sys.stderr.write(f"[SQLGlot] [OK] Resolved date part '{key}' -> {resolved_key[:80]}...\n")
+                    sys.stderr.flush()
+                    resolved[resolved_key] = value
+                    resolved_count += 1
+                else:
+                    resolved[key] = value
+            else:
+                resolved[key] = value
+        
+        sys.stderr.write(f"[SQLGlot] Resolution complete: {resolved_count}/{len(where)} columns resolved\n")
+        sys.stderr.flush()
+        return resolved
+        
+    except Exception as e:
+        logger.error(f"[SQLGlot] Failed to resolve derived columns: {e}", exc_info=True)
+        sys.stderr.write(f"[SQLGlot] Failed to resolve derived columns: {e}\n")
+        sys.stderr.flush()
+        return where
+
+
 if _HEAVY_LIMIT <= 0:
     _HEAVY_LIMIT = 1
 _HEAVY_SEM = threading.BoundedSemaphore(_HEAVY_LIMIT)
@@ -1279,24 +1436,47 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             # Helper to extract column references (re is imported at module level)
             def extract_refs(expr_str: str) -> set[str]:
                 refs: set[str] = set()
+                # Strip single-quoted string literals so we don't treat them as identifiers
+                try:
+                    expr_no_strings = re.sub(r"'([^']|'')*'", " ", expr_str)
+                except Exception:
+                    expr_no_strings = expr_str
                 # Match qualified identifiers (quoted): "s"."Col" or [s].[Col] - keep only column part
-                for match in re.finditer(r'["\[`][^"\]`]+["\]`]\.["\[`]([^"\]`]+)["\]`]', expr_str):
+                for match in re.finditer(r'["\[`][^"\]`]+["\]`]\.["\[`]([^"\]`]+)["\]`]', expr_no_strings):
                     refs.add(match.group(1).lower())
                 # Match qualified identifiers (unquoted): s.Col - keep only column part
-                for match in re.finditer(r'\b[a-z_][a-z0-9_]*\.([A-Za-z_][A-Za-z0-9_]*)\b', expr_str, re.IGNORECASE):
+                for match in re.finditer(r'\b[a-z_][a-z0-9_]*\.([A-Za-z_][A-Za-z0-9_]*)\b', expr_no_strings, re.IGNORECASE):
                     col = match.group(1).lower()
                     if col != 's':  # Skip table alias
                         refs.add(col)
                 # Match quoted identifiers: "col", [col], `col`
-                for match in re.finditer(r'["\[`]([^"\]`]+)["\]`]', expr_str):
+                for match in re.finditer(r'["\[`]([^"\]`]+)["\]`]', expr_no_strings):
                     col = match.group(1).lower()
                     if col != 's':  # Skip table alias
                         refs.add(col)
                 # Also match parenthesized bare identifiers: (col)
-                for match in re.finditer(r'\(([A-Za-z_][A-Za-z0-9_]*)\)', expr_str):
+                for match in re.finditer(r'\(([A-Za-z_][A-Za-z0-9_]*)\)', expr_no_strings):
                     col = match.group(1).lower()
                     if col != 's':  # Skip table alias
                         refs.add(col)
+                # NEW: match bare identifiers that look like column names
+                # Exclude common SQL keywords and functions to avoid false positives.
+                sql_keywords = {
+                    'select','from','where','join','inner','left','right','full','outer','on',
+                    'and','or','not','case','when','then','else','end',
+                    'as','distinct','top','limit','offset','group','by','order','asc','desc',
+                    'null','is','in','like','between','exists','true','false',
+                    'sum','avg','min','max','count','coalesce','cast','try_cast',
+                    'regexp_replace','month','year','day','week','quarter'
+                }
+                for match in re.finditer(r'\b([A-Za-z_][A-Za-z0-9_]*)\b', expr_no_strings):
+                    token = match.group(1)
+                    tl = token.lower()
+                    if tl == 's':
+                        continue
+                    if tl in sql_keywords:
+                        continue
+                    refs.add(tl)
                 return refs
             
             # Filter custom columns - track aliases as they're added
@@ -1307,6 +1487,9 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             available_with_aliases = available_cols_lower.copy()  # Start with base columns
             custom_cols_leaf = []  # Only reference base columns
             custom_cols_derived = []  # Reference other custom columns
+            # Track dependencies between custom columns/transforms (by alias name)
+            custom_deps: dict[str, set[str]] = {}
+            transform_deps: dict[str, set[str]] = {}
             
             for cc in __custom_cols_all:
                 if not isinstance(cc, dict):
@@ -1328,6 +1511,8 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                     print(f"[Pivot] SKIP custom column '{name}': expr='{expr_str[:50]}', refs={refs}, missing={missing}")
                     continue
                 
+                # Track dependencies for reachability analysis
+                custom_deps[name.lower()] = set(refs)
                 # Check if this column references any custom column aliases (not just base columns)
                 refs_custom_aliases = refs - available_cols_lower
                 if refs_custom_aliases:
@@ -1365,9 +1550,80 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                         if missing:
                             print(f"[Pivot] SKIP computed transform '{name}': references missing columns {missing}")
                             continue
+                        # Track dependencies for reachability analysis
+                        transform_deps[name.lower()] = set(refs)
                         print(f"[Pivot] OK including computed transform '{name}'")
                 __transforms_eff_filtered.append(t)
-            __transforms_eff = __transforms_eff_filtered
+
+            # Reachability pruning: only keep custom columns/transforms that are reachable
+            # from current pivot rows/cols/value and filters, plus their dependencies.
+            # Build root set from r_dims, c_dims, value field, and where filters.
+            used_alias_roots: set[str] = set()
+            for d in (r_dims + c_dims):
+                if not d:
+                    continue
+                s = str(d).strip()
+                if not s:
+                    continue
+                used_alias_roots.add(s.lower())
+                # Also add base name for derived date parts like "OrderDate (Month)"
+                try:
+                    m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", s, flags=re.IGNORECASE)
+                    if m:
+                        used_alias_roots.add(m.group(1).strip().lower())
+                except Exception:
+                    pass
+            if val_field:
+                try:
+                    used_alias_roots.add(str(val_field).strip().lower())
+                except Exception:
+                    pass
+            if payload.where:
+                try:
+                    for k in payload.where.keys():
+                        if not isinstance(k, str):
+                            continue
+                        base = k.split("__", 1)[0]
+                        used_alias_roots.add(base.strip().lower())
+                except Exception:
+                    pass
+
+            all_alias_names = set(custom_deps.keys()) | set(transform_deps.keys())
+            needed_aliases: set[str] = set(n for n in all_alias_names if n in used_alias_roots)
+            # Follow dependencies transitively among aliases
+            queue: list[str] = list(needed_aliases)
+            while queue:
+                cur = queue.pop()
+                deps = custom_deps.get(cur, set()) | transform_deps.get(cur, set())
+                for dep in deps:
+                    dl = dep.lower()
+                    if dl in all_alias_names and dl not in needed_aliases:
+                        needed_aliases.add(dl)
+                        queue.append(dl)
+
+            if needed_aliases:
+                before_cc = len(__custom_cols_eff)
+                before_tr = len(__transforms_eff_filtered)
+                __custom_cols_eff = [
+                    cc for cc in __custom_cols_eff
+                    if isinstance(cc, dict) and cc.get("name") and cc.get("name").strip().lower() in needed_aliases
+                ]
+                __transforms_eff = []
+                for t in __transforms_eff_filtered:
+                    if not isinstance(t, dict) or t.get("type") != "computed":
+                        __transforms_eff.append(t)
+                        continue
+                    name = (t.get("name") or "").strip().lower()
+                    if name and (name in needed_aliases):
+                        __transforms_eff.append(t)
+                print(f"[Pivot] Reachability filter: kept {len(__custom_cols_eff)}/{before_cc} custom columns, {len(__transforms_eff)}/{before_tr} transforms")
+            else:
+                # No alias-based dependencies needed for this pivot; safe to drop computed
+                # custom columns and transforms entirely from _base.
+                print(f"[Pivot] Reachability filter: no custom aliases referenced; dropping all customColumns/transforms from _base")
+                __custom_cols_eff = []
+                __transforms_eff = [t for t in __transforms_eff_filtered if not (isinstance(t, dict) and t.get("type") == "computed")]
+
             print(f"[Pivot] Final: {len(__custom_cols_eff)} custom columns, {len(__transforms_eff)} transforms")
         except Exception as e:
             import traceback
@@ -1595,8 +1851,8 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
     # BUT allow numeric names if they're valid custom column aliases
     try:
         is_numeric_name = bool(re.fullmatch(r"\d+", str(val_field or '').strip()))
-        # Check if it's a valid custom column even if numeric
-        is_valid_custom_col = is_numeric_name and (val_field in (expr_map or {}))
+        # Check if it's a valid custom column even if numeric (expr_map built later, so assume valid for now)
+        is_valid_custom_col = is_numeric_name  # Will be validated later when expr_map is available
     except Exception:
         is_numeric_name = False
         is_valid_custom_col = False
@@ -1761,25 +2017,47 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             
             # Helper to extract column references (re is imported at module level)
             def extract_refs_sg(expr_str: str) -> set[str]:
-                refs = set()
+                refs: set[str] = set()
+                # Strip single-quoted string literals so we don't treat them as identifiers
+                try:
+                    expr_no_strings = re.sub(r"'([^']|'')*'", " ", expr_str)
+                except Exception:
+                    expr_no_strings = expr_str
                 # Match qualified identifiers (quoted): "s"."Col" or [s].[Col] - keep only column part
-                for match in re.finditer(r'["\[`][^"\]`]+["\]`]\.["\[`]([^"\]`]+)["\]`]', expr_str):
+                for match in re.finditer(r'["\[`][^"\]`]+["\]`]\.["\[`]([^"\]`]+)["\]`]', expr_no_strings):
                     refs.add(match.group(1).lower())
                 # Match qualified identifiers (unquoted): s.Col - keep only column part
-                for match in re.finditer(r'\b[a-z_][a-z0-9_]*\.([A-Za-z_][A-Za-z0-9_]*)\b', expr_str, re.IGNORECASE):
+                for match in re.finditer(r'\b[a-z_][a-z0-9_]*\.([A-Za-z_][A-Za-z0-9_]*)\b', expr_no_strings, re.IGNORECASE):
                     col = match.group(1).lower()
                     if col != 's':  # Skip table alias
                         refs.add(col)
                 # Match quoted identifiers: "col", [col], `col`
-                for match in re.finditer(r'["\[`]([^"\]`]+)["\]`]', expr_str):
+                for match in re.finditer(r'["\[`]([^"\]`]+)["\]`]', expr_no_strings):
                     col = match.group(1).lower()
                     if col != 's':  # Skip table alias
                         refs.add(col)
                 # Also match parenthesized bare identifiers: (col)
-                for match in re.finditer(r'\(([A-Za-z_][A-Za-z0-9_]*)\)', expr_str):
+                for match in re.finditer(r'\(([A-Za-z_][A-Za-z0-9_]*)\)', expr_no_strings):
                     col = match.group(1).lower()
                     if col != 's':  # Skip table alias
                         refs.add(col)
+                # Match bare identifiers that look like column names, excluding SQL keywords/functions
+                sql_keywords = {
+                    'select','from','where','join','inner','left','right','full','outer','on',
+                    'and','or','not','case','when','then','else','end',
+                    'as','distinct','top','limit','offset','group','by','order','asc','desc',
+                    'null','is','in','like','between','exists','true','false',
+                    'sum','avg','min','max','count','coalesce','cast','try_cast',
+                    'regexp_replace','month','year','day','week','quarter'
+                }
+                for match in re.finditer(r'\b([A-Za-z_][A-Za-z0-9_]*)\b', expr_no_strings):
+                    token = match.group(1)
+                    tl = token.lower()
+                    if tl == 's':
+                        continue
+                    if tl in sql_keywords:
+                        continue
+                    refs.add(tl)
                 return refs
             
             # Filter custom columns to match available columns
@@ -1887,7 +2165,95 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                     # No probed columns - can't validate, use all transforms
                     print(f"[SQLGlot] No probed columns available - using all {len(__transforms_eff)} transforms without validation")
                     __transforms_eff_sqlglot = __transforms_eff
-                print(f"[SQLGlot] Final: {len(__custom_cols_sqlglot)} custom columns, {len(__transforms_eff_sqlglot)} transforms")
+                print(f"[SQLGlot] Final (before reachability): {len(__custom_cols_sqlglot)} custom columns, {len(__transforms_eff_sqlglot)} transforms")
+            
+            # Reachability pruning for SQLGlot path: only keep custom columns/transforms
+            # that are reachable from current pivot rows/cols/value and filters.
+            # Build dependency graph
+            custom_deps_sg: dict[str, set[str]] = {}
+            transform_deps_sg: dict[str, set[str]] = {}
+            for cc in __custom_cols_sqlglot:
+                if isinstance(cc, dict) and cc.get("name") and cc.get("expr"):
+                    refs = extract_refs_sg(str(cc.get("expr") or ""))
+                    custom_deps_sg[cc["name"].lower()] = refs
+            for t in __transforms_eff_sqlglot:
+                if isinstance(t, dict) and t.get("type") == "computed" and t.get("name") and t.get("expr"):
+                    refs = extract_refs_sg(str(t.get("expr") or ""))
+                    transform_deps_sg[t["name"].lower()] = refs
+            
+            # Build root set from r_dims, c_dims, val_field, and where filters
+            used_alias_roots_sg: set[str] = set()
+            for d in (r_dims + c_dims):
+                if not d:
+                    continue
+                s = str(d).strip()
+                if not s:
+                    continue
+                used_alias_roots_sg.add(s.lower())
+                # Also add base name for derived date parts like "OrderDate (Month)"
+                try:
+                    m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", s, flags=re.IGNORECASE)
+                    if m:
+                        used_alias_roots_sg.add(m.group(1).strip().lower())
+                except Exception:
+                    pass
+            if val_field:
+                try:
+                    used_alias_roots_sg.add(str(val_field).strip().lower())
+                except Exception:
+                    pass
+            if payload.where:
+                try:
+                    for k in payload.where.keys():
+                        if not isinstance(k, str):
+                            continue
+                        base = k.split("__", 1)[0]
+                        used_alias_roots_sg.add(base.strip().lower())
+                except Exception:
+                    pass
+            
+            print(f"[SQLGlot] Reachability: root aliases from pivot config: {used_alias_roots_sg}")
+            
+            all_alias_names_sg = set(custom_deps_sg.keys()) | set(transform_deps_sg.keys())
+            needed_aliases_sg: set[str] = set(n for n in all_alias_names_sg if n in used_alias_roots_sg)
+            # Follow dependencies transitively among aliases
+            queue_sg: list[str] = list(needed_aliases_sg)
+            while queue_sg:
+                cur = queue_sg.pop()
+                deps = custom_deps_sg.get(cur, set()) | transform_deps_sg.get(cur, set())
+                for dep in deps:
+                    dl = dep.lower()
+                    if dl in all_alias_names_sg and dl not in needed_aliases_sg:
+                        needed_aliases_sg.add(dl)
+                        queue_sg.append(dl)
+            
+            print(f"[SQLGlot] Reachability: needed aliases after transitive closure: {needed_aliases_sg}")
+            
+            if needed_aliases_sg:
+                before_cc_sg = len(__custom_cols_sqlglot)
+                before_tr_sg = len(__transforms_eff_sqlglot)
+                __custom_cols_sqlglot = [
+                    cc for cc in __custom_cols_sqlglot
+                    if isinstance(cc, dict) and cc.get("name") and cc.get("name").strip().lower() in needed_aliases_sg
+                ]
+                __transforms_eff_sqlglot_new = []
+                for t in __transforms_eff_sqlglot:
+                    if not isinstance(t, dict) or t.get("type") != "computed":
+                        __transforms_eff_sqlglot_new.append(t)
+                        continue
+                    name = (t.get("name") or "").strip().lower()
+                    if name and (name in needed_aliases_sg):
+                        __transforms_eff_sqlglot_new.append(t)
+                __transforms_eff_sqlglot = __transforms_eff_sqlglot_new
+                print(f"[SQLGlot] Reachability filter: kept {len(__custom_cols_sqlglot)}/{before_cc_sg} custom columns, {len(__transforms_eff_sqlglot)}/{before_tr_sg} transforms")
+            else:
+                # No alias-based dependencies needed for this pivot; safe to drop computed
+                # custom columns and transforms entirely from _base.
+                print(f"[SQLGlot] Reachability filter: no custom aliases referenced; dropping all customColumns/computed transforms from _base")
+                __custom_cols_sqlglot = []
+                __transforms_eff_sqlglot = [t for t in __transforms_eff_sqlglot if not (isinstance(t, dict) and t.get("type") == "computed")]
+            
+            print(f"[SQLGlot] Final (after reachability): {len(__custom_cols_sqlglot)} custom columns, {len(__transforms_eff_sqlglot)} transforms")
             
             # If datasource transforms exist, use transformed subquery as source
             # This ensures custom columns and joins are available to pivot dimensions
@@ -1932,13 +2298,39 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             print(f"[SQLGlot] Pivot: expr_map keys: {list(expr_map.keys()) if expr_map else 'None'}")
             if not use_expr_map and expr_map:
                 print(f"[SQLGlot] Pivot: NOT passing expr_map to build_pivot_query (custom columns already materialized in _base)")
+            
+            # Resolve custom columns in WHERE clause (only if not using _base subquery)
+            resolved_where = payload.where
+            if payload.where and use_expr_map:
+                print(f"[SQLGlot] Pivot: Resolving WHERE clause with {len(use_expr_map)} custom columns")
+                print(f"[SQLGlot] Pivot: WHERE keys before resolution: {list(payload.where.keys())}")
+                resolved = {}
+                for key, value in payload.where.items():
+                    base_key = key.split("__")[0] if "__" in key else key
+                    op_suffix = key.split("__", 1)[1] if "__" in key else None
+                    
+                    if base_key in use_expr_map:
+                        expr = use_expr_map[base_key]
+                        # Strip table aliases
+                        expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)
+                        expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)
+                        resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
+                        resolved[resolved_key] = value
+                        print(f"[SQLGlot] Pivot: Resolved '{key}' -> '{resolved_key[:80]}...'")
+                    else:
+                        resolved[key] = value
+                resolved_where = resolved
+                print(f"[SQLGlot] Pivot: WHERE keys after resolution: {list(resolved_where.keys())}")
+            elif payload.where and "_base" in effective_source:
+                print(f"[SQLGlot] Pivot: Skipping WHERE resolution (custom columns already in _base subquery)")
+            
             inner = builder.build_pivot_query(
                 source=effective_source,
                 rows=r_dims,
                 cols=c_dims,
                 value_field=val_field if val_field else None,
                 agg=agg,
-                where=payload.where,
+                where=resolved_where,
                 group_by=payload.groupBy if hasattr(payload, 'groupBy') else None,
                 week_start=payload.weekStart if hasattr(payload, 'weekStart') else 'mon',
                 limit=payload.limit,
@@ -2994,6 +3386,18 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     - DuckDB: use Ibis to compile.
     - Other engines: build a generic SQL SELECT with WHERE and delegate to /query.
     """
+    # Debug: Log WHERE clause and incoming X at the start
+    import sys
+    try:
+        sys.stderr.write(
+            f"[SPEC_DEBUG] run_query_spec called, source={payload.spec.source}, "
+            f"where keys={list(payload.spec.where.keys()) if hasattr(payload.spec, 'where') and payload.spec.where else 'None'}, "
+            f"x={getattr(payload.spec, 'x', None)} (type={type(getattr(payload.spec, 'x', None))})\n"
+        )
+        sys.stderr.flush()
+    except Exception:
+        pass
+    
     if actorId:
         _ra = _throttle_take(actorId)
         if _ra:
@@ -3221,8 +3625,22 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         try:
             raw_json = ds.options_json or "{}"
             opts = json.loads(raw_json)
-            ds_transforms = opts.get("transforms") or {}
-            ds_transforms = _apply_scope(ds_transforms, source_name)
+            raw_transforms = opts.get("transforms") or {}
+            
+            # Debug: Show custom columns before scope filtering
+            import sys
+            raw_custom_cols = (raw_transforms.get("customColumns") or [])
+            sys.stderr.write(f"[WHERE_DEBUG] source_name='{source_name}', raw custom columns count: {len(raw_custom_cols)}\n")
+            sys.stderr.write(f"[WHERE_DEBUG] raw custom column names: {[c.get('name') for c in raw_custom_cols if isinstance(c, dict)]}\n")
+            sys.stderr.flush()
+            
+            ds_transforms = _apply_scope(raw_transforms, source_name)
+            
+            # Debug: Show custom columns after scope filtering
+            filtered_custom_cols = ds_transforms.get("customColumns") or []
+            sys.stderr.write(f"[WHERE_DEBUG] After scope filtering, custom columns count: {len(filtered_custom_cols)}\n")
+            sys.stderr.write(f"[WHERE_DEBUG] filtered custom column names: {[c.get('name') for c in filtered_custom_cols if isinstance(c, dict)]}\n")
+            sys.stderr.flush()
             
             # From customColumns
             custom_cols = ds_transforms.get("customColumns") or []
@@ -3235,13 +3653,33 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             
             # From computed transforms
             transforms = ds_transforms.get("transforms") or []
+            sys.stderr.write(f"[WHERE_DEBUG] Processing {len(transforms)} transforms\n")
+            sys.stderr.flush()
             for t in transforms:
-                if isinstance(t, dict) and t.get("type") == "computed":
-                    if t.get("name") and t.get("expr"):
-                        # Normalize bracket identifiers for target dialect
+                if isinstance(t, dict):
+                    t_type = t.get("type")
+                    t_name = t.get("target") or t.get("name")  # case uses "target", computed uses "name"
+                    
+                    if t_type == "computed" and t.get("expr"):
+                        # Handle computed transforms
                         from ..sqlgen import _normalize_expr_idents
                         expr = _normalize_expr_idents(ds_type, t["expr"])
-                        expr_map[t["name"]] = expr
+                        if t_name:
+                            expr_map[t_name] = expr
+                            sys.stderr.write(f"[WHERE_DEBUG] Added computed transform '{t_name}'\n")
+                            sys.stderr.flush()
+                    elif t_type == "case":
+                        # Handle case transforms
+                        sys.stderr.write(f"[WHERE_DEBUG] Building case expression for '{t_name}'\n")
+                        sys.stderr.flush()
+                        case_expr = _build_case_expression(t)
+                        if case_expr and t_name:
+                            expr_map[t_name] = case_expr
+                            sys.stderr.write(f"[WHERE_DEBUG] Added case transform '{t_name}': {case_expr[:80]}...\n")
+                            sys.stderr.flush()
+                        else:
+                            sys.stderr.write(f"[WHERE_DEBUG] Failed to build case expression for '{t_name}'\n")
+                            sys.stderr.flush()
         
         except Exception as e:
             logger.error(f"[SQLGlot] Failed to build expr_map: {e}")
@@ -3251,56 +3689,72 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     # Helper: resolve derived columns in WHERE clause
     def _resolve_derived_columns_in_where(where: dict, ds: Any, source_name: str, ds_type: str) -> dict:
         """Resolve derived column names to SQL expressions in WHERE clause"""
-        print(f"[SQLGlot] _resolve_derived_columns_in_where CALLED with where keys: {list(where.keys()) if where else 'None'}")
+        import sys
+        sys.stderr.write(f"[SQLGlot] _resolve_derived_columns_in_where CALLED with where keys: {list(where.keys()) if where else 'None'}\n")
+        sys.stderr.flush()
         
         if not where:
             return where
         
         if not ds:
-            print("[SQLGlot] No datasource provided for resolution")
+            sys.stderr.write("[SQLGlot] No datasource provided for resolution\n")
+            sys.stderr.flush()
             return where
         
         try:
-            # Build expr_map from datasource
+            # Build expr_map from datasource using the local helper function
             expr_map = _build_expr_map(ds, source_name, ds_type)
             
             # Resolve WHERE clause
-            print(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}")
-            print(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}")
+            sys.stderr.write(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}\n")
+            sys.stderr.write(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}\n")
+            sys.stderr.flush()
             
             resolved = {}
             resolved_count = 0
             for key, value in where.items():
+                # Extract base column name (remove operators like __ne, __gte, __in)
+                base_key = key.split("__")[0] if "__" in key else key
+                op_suffix = key.split("__", 1)[1] if "__" in key else None
+                
                 # First check if it's a custom column
-                if key in expr_map:
-                    expr = expr_map[key]
+                if base_key in expr_map:
+                    expr = expr_map[base_key]
                     # Strip table aliases - handle both quoted and unquoted (e.g., s.ClientID or "s"."ClientID" -> ClientID)
                     expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases like "s".
                     expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases like s.
-                    print(f"[SQLGlot] [OK] Resolved custom column '{key}' -> {expr[:80]}...")
-                    resolved[f"({expr})"] = value
+                    # Rebuild key with operator suffix if present
+                    resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
+                    sys.stderr.write(f"[SQLGlot] [OK] Resolved custom column '{key}' -> {resolved_key[:80]}...\n")
+                    sys.stderr.flush()
+                    resolved[resolved_key] = value
                     resolved_count += 1
                 # Check if it's a date part pattern like "OrderDate (Year)"
-                elif " (" in key and ")" in key:
-                    match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", key, flags=re.IGNORECASE)
+                elif " (" in base_key and ")" in base_key:
+                    match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", base_key, flags=re.IGNORECASE)
                     if match:
                         base_col = match.group(1).strip()
                         kind = match.group(2).lower()
                         expr = _build_datepart_expr(base_col, kind, ds_type)
-                        print(f"[SQLGlot] [OK] Resolved date part '{key}' -> {expr[:80]}...")
-                        resolved[f"({expr})"] = value
+                        # Rebuild key with operator suffix if present
+                        resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
+                        sys.stderr.write(f"[SQLGlot] [OK] Resolved date part '{key}' -> {resolved_key[:80]}...\n")
+                        sys.stderr.flush()
+                        resolved[resolved_key] = value
                         resolved_count += 1
                     else:
                         resolved[key] = value
                 else:
                     resolved[key] = value
             
-            print(f"[SQLGlot] Resolution complete: {resolved_count}/{len(where)} columns resolved")
+            sys.stderr.write(f"[SQLGlot] Resolution complete: {resolved_count}/{len(where)} columns resolved\n")
+            sys.stderr.flush()
             return resolved
             
         except Exception as e:
             logger.error(f"[SQLGlot] Failed to resolve derived columns: {e}", exc_info=True)
-            print(f"[SQLGlot] Failed to resolve derived columns: {e}")
+            sys.stderr.write(f"[SQLGlot] Failed to resolve derived columns: {e}\n")
+            sys.stderr.flush()
             return where
     
     def _build_case_expression(case_transform: dict) -> str:
@@ -3448,6 +3902,34 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             'defaults': ds_tr.get('defaults') or {},
         }
 
+    # Resolve WHERE clause early (for both aggregated and non-aggregated paths)
+    # This ensures custom columns are expanded to their SQL expressions
+    where_resolved = None
+    sys.stderr.write(f"[SPEC_DEBUG] About to check WHERE resolution, hasattr={hasattr(payload.spec, 'where')}, where={payload.spec.where if hasattr(payload.spec, 'where') else 'NO ATTR'}\n")
+    sys.stderr.flush()
+    if hasattr(payload.spec, 'where') and payload.spec.where:
+        sys.stderr.write(f"[SPEC_DEBUG] Calling _resolve_derived_columns_in_where with WHERE keys: {list(payload.spec.where.keys())}\n")
+        sys.stderr.flush()
+        try:
+            where_resolved = _resolve_derived_columns_in_where(
+                payload.spec.where,
+                ds,
+                payload.spec.source,
+                ds_type
+            )
+            sys.stderr.write(f"[SPEC_DEBUG] WHERE resolution completed, resolved keys: {list(where_resolved.keys()) if where_resolved else 'None'}\n")
+            sys.stderr.flush()
+        except Exception as e:
+            logger.warning(f"[SQLGlot] Failed to resolve WHERE clause: {e}")
+            sys.stderr.write(f"[SQLGlot] Failed to resolve WHERE clause: {e}\n")
+            sys.stderr.flush()
+            import traceback
+            traceback.print_exc()
+            where_resolved = None
+    else:
+        sys.stderr.write(f"[SPEC_DEBUG] Skipping WHERE resolution (no where clause or empty)\n")
+        sys.stderr.flush()
+
     # If chart semantics are provided, build an aggregated SQL (generic) and delegate to /query
     spec = payload.spec
     legend_orig = spec.legend
@@ -3592,50 +4074,88 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     return val
             return str(val) if val is not None else val
         def _where_lhs(key: str) -> str:
-            """Get SQL expression for WHERE clause. Use quoted column if it exists in transformed base."""
-            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
-            if m and ds_transforms and _actual_cols and key in _actual_cols:
+            """Get SQL expression for WHERE clause. Expand derived date parts or use quoted column."""
+            # If key starts with '(', it's already a resolved expression - but check if subquery has the column
+            if str(key).strip().startswith('('):
+                # When there's a transformed subquery, resolved expressions won't work because they
+                # reference raw columns that aren't exposed. Check if we should use alias instead.
+                if ds_transforms and _actual_cols:
+                    # Try to find if there's a matching alias in the subquery
+                    # e.g., "(EXTRACT(YEAR FROM "OrderDate"))" should use alias "OrderDate (Year)"
+                    for col in _actual_cols:
+                        if " (" in col and ")" in col:
+                            # This is a date part alias - check if it matches
+                            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", col, flags=re.IGNORECASE)
+                            if m:
+                                expr = _build_datepart_expr_helper(m.group(1).strip(), m.group(2).lower(), ds_type)
+                                if f"({expr})" == str(key).strip():
+                                    sys.stderr.write(f"[SPEC_DEBUG] Using alias '{col}' instead of resolved expr\n")
+                                    return _q_ident(col)
+                return str(key)
+            # Check if the column (including date part aliases) is already in the transformed subquery
+            if ds_transforms and _actual_cols and key in _actual_cols:
                 return _q_ident(key)
+            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+            if m:
+                # If the alias is already in _actual_cols, use it directly
+                if ds_transforms and _actual_cols and key in _actual_cols:
+                    return _q_ident(key)
+                # Otherwise expand to SQL expressions like EXTRACT(YEAR FROM "OrderDate")
+                return _derived_lhs(key)
             return _derived_lhs(key)
         where_clauses = []
         params: Dict[str, Any] = {}
-        if payload.spec.where:
-            for k, v in payload.spec.where.items():
+        # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
+        where_to_use = where_resolved if where_resolved else (payload.spec.where if hasattr(payload, 'spec') and hasattr(payload.spec, 'where') else {})
+        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}\n")
+        sys.stderr.flush()
+        if where_to_use:
+            for k, v in where_to_use.items():
                 if k in ("start", "startDate", "end", "endDate"):
                     continue
+                # Parse operator suffix FIRST (e.g., ClientCode__ne -> base=ClientCode, op=ne)
+                base_col = k
+                op_suffix = None
+                if isinstance(k, str) and "__" in k:
+                    base_col, op_suffix = k.split("__", 1)
                 if v is None:
-                    where_clauses.append(f"{_where_lhs(k)} IS NULL")
+                    where_clauses.append(f"{_where_lhs(base_col)} IS NULL")
                 elif isinstance(v, (list, tuple)):
                     if len(v) == 0:
                         continue
                     pnames = []
                     for i, item in enumerate(v):
-                        pname = _pname(k, f"_{i}")
-                        params[pname] = _coerce_filter_value(k, item)
+                        pname = _pname(base_col, f"_{i}")
+                        params[pname] = _coerce_filter_value(base_col, item)
                         pnames.append(f":{pname}")
-                    where_clauses.append(f"{_where_lhs(k)} IN ({', '.join(pnames)})")
-                elif isinstance(k, str) and "__" in k:
-                    base, op = k.split("__", 1)
+                    # Use NOT IN for __ne operator, IN otherwise
+                    in_op = "NOT IN" if op_suffix == "ne" else "IN"
+                    where_clauses.append(f"{_where_lhs(base_col)} {in_op} ({', '.join(pnames)})")
+                elif op_suffix:
                     opname = None
-                    if op == "gte": opname = ">="
-                    elif op == "gt": opname = ">"
-                    elif op == "lte": opname = "<="
-                    elif op == "lt": opname = "<"
-                    elif op == "ne": opname = "!="
+                    if op_suffix == "gte": opname = ">="
+                    elif op_suffix == "gt": opname = ">"
+                    elif op_suffix == "lte": opname = "<="
+                    elif op_suffix == "lt": opname = "<"
+                    elif op_suffix == "ne": opname = "!="
                     if opname:
-                        pname = _pname(base, f"_{op}")
-                        params[pname] = _coerce_filter_value(base, v)
-                        where_clauses.append(f"{_where_lhs(base)} {opname} :{pname}")
+                        pname = _pname(base_col, f"_{op_suffix}")
+                        params[pname] = _coerce_filter_value(base_col, v)
+                        where_clauses.append(f"{_where_lhs(base_col)} {opname} :{pname}")
                     else:
-                        pname = _pname(k)
-                        where_clauses.append(f"{_where_lhs(k)} = :{pname}")
-                        params[pname] = _coerce_filter_value(k, v)
+                        pname = _pname(base_col)
+                        where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
+                        params[pname] = _coerce_filter_value(base_col, v)
                 else:
-                    pname = _pname(k)
-                    where_clauses.append(f"{_where_lhs(k)} = :{pname}")
-                    params[pname] = _coerce_filter_value(k, v)
+                    pname = _pname(base_col)
+                    where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
+                    params[pname] = _coerce_filter_value(base_col, v)
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         sql_inner = f"SELECT * FROM ({base_sql}) AS _base{where_sql}"
+        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: where_clauses = {where_clauses}\n")
+        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: params = {params}\n")
+        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: sql_inner[:200] = {sql_inner[:200]}\n")
+        sys.stderr.flush()
         q = QueryRequest(
             sql=sql_inner,
             datasourceId=(None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId),
@@ -3737,16 +4257,42 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             
             if _validated_x:
                 # Allow derived date parts like "OrderDate (Year)" even if base column not in available_cols
-                is_derived_x = bool(re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(_validated_x), flags=re.IGNORECASE))
-                if is_derived_x:
-                    # Keep the derived field as-is
-                    pass
+                if isinstance(_validated_x, (list, tuple)):
+                    parts: list[str] = []
+                    for item in _validated_x:
+                        if not item:
+                            continue
+                        s = str(item)
+                        is_derived_x = bool(
+                            re.match(
+                                r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$",
+                                s,
+                                flags=re.IGNORECASE,
+                            )
+                        )
+                        if is_derived_x:
+                            parts.append(s)
+                            continue
+                        x_norm = _norm_name(s)
+                        if x_norm and x_norm not in available_cols:
+                            continue
+                        parts.append(canonical_map.get(x_norm, s))
+                    _validated_x = parts or None
                 else:
-                    x_norm = _norm_name(_validated_x)
-                    if x_norm and x_norm not in available_cols:
-                        _validated_x = None
-                    else:
-                        _validated_x = canonical_map.get(x_norm, _validated_x)
+                    s = str(_validated_x)
+                    is_derived_x = bool(
+                        re.match(
+                            r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$",
+                            s,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                    if not is_derived_x:
+                        x_norm = _norm_name(s)
+                        if x_norm and x_norm not in available_cols:
+                            _validated_x = None
+                        else:
+                            _validated_x = canonical_map.get(x_norm, s)
             if _validated_y:
                 y_norm = _norm_name(_validated_y)
                 if y_norm and y_norm not in available_cols:
@@ -3778,11 +4324,17 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     _validated_legend = canonical_map.get(ln, _validated_legend)
             
             # Also validate WHERE clause filters - remove invalid column references
+            # IMPORTANT: Use where_resolved (with resolved expressions) instead of spec.where
             _validated_where = {}
-            if spec.where:
-                for k, v in spec.where.items():
+            _where_source = where_resolved if where_resolved else spec.where
+            if _where_source:
+                for k, v in _where_source.items():
                     # Skip special date range keys
                     if k in ("start", "startDate", "end", "endDate"):
+                        _validated_where[k] = v
+                        continue
+                    # Preserve resolved expressions (start with parenthesis)
+                    if k.startswith("(") and ")" in k:
                         _validated_where[k] = v
                         continue
                     # Extract base column name (remove __ operators like ClientType__in)
@@ -3795,7 +4347,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     if col_norm in available_cols:
                         _validated_where[k] = v
             else:
-                _validated_where = spec.where
+                _validated_where = _where_source
             
             # Override spec fields with validated values for this query
             spec = payload.spec.model_copy(update={
@@ -3804,6 +4356,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 'legend': _validated_legend,
                 'where': _validated_where
             })
+            sys.stderr.write(f"[SPEC_DEBUG] After spec copy: _validated_where keys = {list(_validated_where.keys()) if _validated_where else 'None'}\n")
+            sys.stderr.flush()
         else:
             # Direct table/view reference; quote per dialect (handles schema-qualified)
             base_from_sql = f" FROM {_q_source(spec.source)}"
@@ -3876,10 +4430,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     _validated_legend = canonical_direct.get(_norm_name(str(_validated_legend)), _validated_legend)
             
             # Also validate WHERE clause filters
+            # IMPORTANT: Use where_resolved (with resolved expressions) instead of spec.where
             _validated_where = {}
-            if spec.where:
-                for k, v in spec.where.items():
+            _where_source = where_resolved if where_resolved else spec.where
+            if _where_source:
+                for k, v in _where_source.items():
                     if k in ("start", "startDate", "end", "endDate"):
+                        _validated_where[k] = v
+                        continue
+                    # Preserve resolved expressions (start with parenthesis)
+                    if k.startswith("(") and ")" in k:
                         _validated_where[k] = v
                         continue
                     base_col = k.split("__")[0] if "__" in k else k
@@ -3890,7 +4450,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     if _norm_name(base_col) in available_cols_direct:
                         _validated_where[k] = v
             else:
-                _validated_where = spec.where
+                _validated_where = _where_source
             
             spec = payload.spec.model_copy(update={
                 'x': _validated_x, 
@@ -3898,6 +4458,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 'legend': _validated_legend,
                 'where': _validated_where
             })
+            sys.stderr.write(f"[SPEC_DEBUG] After spec copy (no transforms): _validated_where keys = {list(_validated_where.keys()) if _validated_where else 'None'}\n")
+            sys.stderr.flush()
         # Handle x as either string or array (extract first element if array)
         x_raw = spec.x or (spec.select[0] if spec.select else None)
         if isinstance(x_raw, (list, tuple)) and len(x_raw) > 0:
@@ -3973,63 +4535,92 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 return str(val) if val is not None else val
             
             def _where_lhs(key: str) -> str:
-                """Get SQL expression for WHERE clause. Use quoted column if it exists in transformed base."""
-                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
-                if m and ds_transforms and _actual_cols and key in _actual_cols:
+                """Get SQL expression for WHERE clause. Expand derived date parts or use quoted column."""
+                # If key starts with '(', it's already a resolved expression - but check if subquery has the column
+                if str(key).strip().startswith('('):
+                    # When there's a transformed subquery, resolved expressions won't work because they
+                    # reference raw columns that aren't exposed. Check if we should use alias instead.
+                    if ds_transforms and _actual_cols:
+                        for col in _actual_cols:
+                            if " (" in col and ")" in col:
+                                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", col, flags=re.IGNORECASE)
+                                if m:
+                                    expr = _build_datepart_expr_helper(m.group(1).strip(), m.group(2).lower(), ds_type)
+                                    if f"({expr})" == str(key).strip():
+                                        sys.stderr.write(f"[SPEC_DEBUG] Scalar agg: Using alias '{col}' instead of resolved expr\n")
+                                        return _q_ident(col)
+                    return str(key)
+                # Check if the column is already in the transformed subquery
+                if ds_transforms and _actual_cols and key in _actual_cols:
                     return _q_ident(key)
+                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+                if m:
+                    if ds_transforms and _actual_cols and key in _actual_cols:
+                        return _q_ident(key)
+                    return _derived_lhs(key)
                 return _derived_lhs(key)
             
             where_clauses = []
             params: Dict[str, Any] = {}
-            if spec.where:
-                for k, v in spec.where.items():
+            # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
+            where_to_use = where_resolved if where_resolved else spec.where
+            sys.stderr.write(f"[SPEC_DEBUG] Scalar agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}\n")
+            sys.stderr.flush()
+            if where_to_use:
+                for k, v in where_to_use.items():
                     # Skip global keys that aren't real columns
                     if k in ("start", "startDate", "end", "endDate"):
                         continue
+                    # Parse operator suffix FIRST (e.g., ClientCode__ne -> base=ClientCode, op=ne)
+                    base_col = k
+                    op_suffix = None
+                    if isinstance(k, str) and "__" in k:
+                        base_col, op_suffix = k.split("__", 1)
                     if v is None:
-                        where_clauses.append(f"{_where_lhs(k)} IS NULL")
+                        where_clauses.append(f"{_where_lhs(base_col)} IS NULL")
                     elif isinstance(v, (list, tuple)):
                         if len(v) == 0:
                             # Ignore empty lists: no-op filter (UI chip added but no values selected)
                             continue
                         pnames = []
                         for i, item in enumerate(v):
-                            pname = _pname(k, f"_{i}")
-                            params[pname] = _coerce_filter_value(k, item)
+                            pname = _pname(base_col, f"_{i}")
+                            params[pname] = _coerce_filter_value(base_col, item)
                             pnames.append(f":{pname}")
-                        where_clauses.append(f"{_where_lhs(k)} IN ({', '.join(pnames)})")
-                    elif isinstance(k, str) and "__" in k:
-                        base, op = k.split("__", 1)
+                        # Use NOT IN for __ne operator, IN otherwise
+                        in_op = "NOT IN" if op_suffix == "ne" else "IN"
+                        where_clauses.append(f"{_where_lhs(base_col)} {in_op} ({', '.join(pnames)})")
+                    elif op_suffix:
                         opname = None
-                        if op == "gte": opname = ">="
-                        elif op == "gt": opname = ">"
-                        elif op == "lte": opname = "<="
-                        elif op == "lt": opname = "<"
-                        elif op == "ne": opname = "!="
+                        if op_suffix == "gte": opname = ">="
+                        elif op_suffix == "gt": opname = ">"
+                        elif op_suffix == "lte": opname = "<="
+                        elif op_suffix == "lt": opname = "<"
+                        elif op_suffix == "ne": opname = "!="
                         if opname:
-                            pname = _pname(base, f"_{op}")
-                            params[pname] = _coerce_filter_value(base, v)
-                            where_clauses.append(f"{_where_lhs(base)} {opname} :{pname}")
-                        elif op in {"contains", "notcontains", "startswith", "endswith"}:
-                            if op == "notcontains":
+                            pname = _pname(base_col, f"_{op_suffix}")
+                            params[pname] = _coerce_filter_value(base_col, v)
+                            where_clauses.append(f"{_where_lhs(base_col)} {opname} :{pname}")
+                        elif op_suffix in {"contains", "notcontains", "startswith", "endswith"}:
+                            if op_suffix == "notcontains":
                                 cmp = "NOT LIKE"; patt = f"%{v}%"
-                            elif op == "contains":
+                            elif op_suffix == "contains":
                                 cmp = "LIKE"; patt = f"%{v}%"
-                            elif op == "startswith":
+                            elif op_suffix == "startswith":
                                 cmp = "LIKE"; patt = f"{v}%"
                             else:
                                 cmp = "LIKE"; patt = f"%{v}"
-                            pname = _pname(base, "_like")
+                            pname = _pname(base_col, "_like")
                             params[pname] = patt
-                            where_clauses.append(f"{_where_lhs(base)} {cmp} :{pname}")
+                            where_clauses.append(f"{_where_lhs(base_col)} {cmp} :{pname}")
                         else:
-                            pname = _pname(base, "_eq")
-                            where_clauses.append(f"{_where_lhs(base)} = :{pname}")
-                            params[pname] = _coerce_filter_value(base, v)
+                            pname = _pname(base_col, "_eq")
+                            where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
+                            params[pname] = _coerce_filter_value(base_col, v)
                     else:
-                        pname = _pname(k)
-                        where_clauses.append(f"{_where_lhs(k)} = :{pname}")
-                        params[pname] = _coerce_filter_value(k, v)
+                        pname = _pname(base_col)
+                        where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
+                        params[pname] = _coerce_filter_value(base_col, v)
             where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
             # Apply datasource defaults (order/TopN) when present
             order_seg = " ORDER BY 1"  # only x column exists in this branch
@@ -4130,41 +4721,49 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             
             where_clauses = []
             params: Dict[str, Any] = {}
-            if spec.where:
-                for k, v in spec.where.items():
+            # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
+            where_to_use = where_resolved if where_resolved else spec.where
+            if where_to_use:
+                for k, v in where_to_use.items():
                     if k in ("start", "startDate", "end", "endDate"):
                         continue
+                    # Parse operator suffix FIRST (e.g., ClientCode__ne -> base=ClientCode, op=ne)
+                    base_col = k
+                    op_suffix = None
+                    if isinstance(k, str) and "__" in k:
+                        base_col, op_suffix = k.split("__", 1)
                     if v is None:
-                        where_clauses.append(f"{_derived_lhs(k)} IS NULL")
+                        where_clauses.append(f"{_derived_lhs(base_col)} IS NULL")
                     elif isinstance(v, (list, tuple)):
                         if len(v) == 0:
                             continue
                         pnames = []
                         for i, item in enumerate(v):
-                            pname = _pname(k, f"_{i}")
-                            params[pname] = _coerce_filter_value(k, item)
+                            pname = _pname(base_col, f"_{i}")
+                            params[pname] = _coerce_filter_value(base_col, item)
                             pnames.append(f":{pname}")
-                        where_clauses.append(f"{_derived_lhs(k)} IN ({', '.join(pnames)})")
-                    elif isinstance(k, str) and "__" in k:
-                        base, op = k.split("__", 1)
+                        # Use NOT IN for __ne operator, IN otherwise
+                        in_op = "NOT IN" if op_suffix == "ne" else "IN"
+                        where_clauses.append(f"{_derived_lhs(base_col)} {in_op} ({', '.join(pnames)})")
+                    elif op_suffix:
                         opname = None
-                        if op == "gte": opname = ">="
-                        elif op == "gt": opname = ">"
-                        elif op == "lte": opname = "<="
-                        elif op == "lt": opname = "<"
-                        elif op == "ne": opname = "!="
+                        if op_suffix == "gte": opname = ">="
+                        elif op_suffix == "gt": opname = ">"
+                        elif op_suffix == "lte": opname = "<="
+                        elif op_suffix == "lt": opname = "<"
+                        elif op_suffix == "ne": opname = "!="
                         if opname:
-                            pname = _pname(base, f"_{op}")
-                            params[pname] = _coerce_filter_value(base, v)
-                            where_clauses.append(f"{_derived_lhs(base)} {opname} :{pname}")
+                            pname = _pname(base_col, f"_{op_suffix}")
+                            params[pname] = _coerce_filter_value(base_col, v)
+                            where_clauses.append(f"{_derived_lhs(base_col)} {opname} :{pname}")
                         else:
-                            pname = _pname(k)
-                            where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
-                            params[pname] = _coerce_filter_value(k, v)
+                            pname = _pname(base_col)
+                            where_clauses.append(f"{_derived_lhs(base_col)} = :{pname}")
+                            params[pname] = _coerce_filter_value(base_col, v)
                     else:
-                        pname = _pname(k)
-                        where_clauses.append(f"{_derived_lhs(k)} = :{pname}")
-                        params[pname] = _coerce_filter_value(k, v)
+                        pname = _pname(base_col)
+                        where_clauses.append(f"{_derived_lhs(base_col)} = :{pname}")
+                        params[pname] = _coerce_filter_value(base_col, v)
             # Filter out NULL legend values
             legend_filter_clauses = list(where_clauses) if where_clauses else []
             if legend_expr:
@@ -4200,28 +4799,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             sql_inner = None
             params = None  # Initialize params for both SQLGlot and legacy paths
             
-            if use_sqlglot:
-                # Build expr_map from datasource transforms
-                expr_map = _build_expr_map(ds, spec.source, ds_type) if ds else {}
-                print(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}")
-                
-                # Resolve WHERE clause
-                where_resolved = None
-                if hasattr(spec, 'where') and spec.where:
-                    where_resolved = _resolve_derived_columns_in_where(
-                        spec.where,
-                        ds,
-                        spec.source,
-                        ds_type
-                    )
-                else:
-                    where_resolved = None
-                
+            # Note: where_resolved is already computed at the top of this function
+            
             if use_sqlglot:
                 # NEW PATH: SQLGlot SQL generation
                 try:
                     logger.info(f"[SQLGlot] ENABLED for user={actorId}, dialect={ds_type}")
                     print(f"[SQLGlot] ENABLED for user={actorId}, dialect={ds_type}")
+                    
+                    # Build expr_map for custom column resolution
+                    expr_map = _build_expr_map(ds, spec.source, ds_type)
                     
                     builder = SQLGlotBuilder(dialect=ds_type)
                     
@@ -4235,9 +4822,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     # Handle multi-series
                     series_val = spec.series if hasattr(spec, 'series') and isinstance(spec.series, list) else None
                     
+                    # Debug: Log WHERE before passing to builder
+                    sys.stderr.write(f"[SPEC_DEBUG] Passing WHERE to build_aggregation_query: {where_resolved}\n")
+                    sys.stderr.flush()
+                    
+                    # Pass x_raw (full array for multi-level X) instead of x_col (first element only)
+                    x_field_for_builder = x_raw if x_raw else (spec.x if hasattr(spec, 'x') else None)
+                    print(f"[SQLGlot] x_field_for_builder = {x_field_for_builder}, x_raw = {x_raw}, spec.x = {spec.x if hasattr(spec, 'x') else 'N/A'}")
                     sql_inner = builder.build_aggregation_query(
                         source=spec.source,
-                        x_field=x_col,
+                        x_field=x_field_for_builder,  # Pass full array for multi-level X support
                         y_field=spec.y if hasattr(spec, 'y') else None,
                         legend_field=legend_field_val,
                         agg=agg,
@@ -4247,7 +4841,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         order=spec.order if hasattr(spec, 'order') else 'asc',
                         limit=lim,
                         week_start=spec.weekStart if hasattr(spec, 'weekStart') else 'mon',
-                        date_field=x_col,  # For date range filtering
+                        date_field=x_col,  # For date range filtering (use first x field)
                         expr_map=expr_map,  # Pass custom column mapping
                         ds_type=ds_type,  # Pass dialect for date part resolution
                         series=series_val,  # Multi-series support
@@ -4357,15 +4951,30 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 return str(val) if val is not None else val
             
             def _where_lhs(key: str) -> str:
-                """Get SQL expression for WHERE clause left-hand side.
-                If transforms created a derived column, use it directly instead of extracting."""
+                """Get SQL expression for WHERE clause. Expand derived date parts or use quoted column."""
+                # If key starts with '(', it's already a resolved expression - but check if subquery has the column
+                if str(key).strip().startswith('('):
+                    # When there's a transformed subquery, resolved expressions won't work because they
+                    # reference raw columns that aren't exposed. Check if we should use alias instead.
+                    if ds_transforms and _actual_cols:
+                        for col in _actual_cols:
+                            if " (" in col and ")" in col:
+                                m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", col, flags=re.IGNORECASE)
+                                if m:
+                                    expr = _build_datepart_expr_helper(m.group(1).strip(), m.group(2).lower(), ds_type)
+                                    if f"({expr})" == str(key).strip():
+                                        sys.stderr.write(f"[SPEC_DEBUG] X+legend agg: Using alias '{col}' instead of resolved expr\n")
+                                        return _q_ident(col)
+                    return str(key)
+                # Check if the column is already in the transformed subquery
+                if ds_transforms and _actual_cols and key in _actual_cols:
+                    return _q_ident(key)
                 # Check if this is a derived date part
                 m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
-                if m and ds_transforms:
-                    # Check if the derived column exists in transformed base
-                    if _actual_cols and key in _actual_cols:
+                if m:
+                    if ds_transforms and _actual_cols and key in _actual_cols:
                         return _q_ident(key)
-                # Fall back to extraction or simple quoting
+                    return _derived_lhs(key)
                 return _derived_lhs(key)
             
             def _is_string_filter(key: str) -> bool:
@@ -4374,8 +4983,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             
             where_clauses = []
             params: Dict[str, Any] = {}
-            if spec.where:
-                for k, v in spec.where.items():
+            # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
+            where_to_use = where_resolved if where_resolved else spec.where
+            sys.stderr.write(f"[SPEC_DEBUG] X+legend agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}\n")
+            sys.stderr.flush()
+            if where_to_use:
+                for k, v in where_to_use.items():
                     if k in ("start", "startDate", "end", "endDate"):
                         continue
                     if v is None:
@@ -4462,6 +5075,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
             # Apply either: (a) derived x token like "OrderDate (Month Short)" or
             # (b) groupBy time-bucketing on raw x.
+            # Multi-level X support: when x is an array like ["Day", "Year"], concatenate with delimiter
+            is_multi_level_x = isinstance(x_raw, (list, tuple)) and len(x_raw) > 1
+            multi_level_x_exprs: list = []  # Will hold (expr, order_expr) for each level
+            multi_level_group_by: str = ""  # Will hold comma-separated GROUP BY expressions
             x_expr = _q_ident(x_col)
             x_order_expr = None
             gb = (spec.groupBy or 'none').lower()
@@ -4582,6 +5199,69 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         x_expr = _q_ident(x_col)
                 else:
                     x_expr = _q_ident(x_col)
+
+            # Multi-level X: concatenate all x field expressions with '|' delimiter
+            # This enables hierarchical axis like Excel (e.g., Day grouped by Year)
+            if is_multi_level_x:
+                def _build_x_expr_for_field(field_name: str) -> tuple:
+                    """Build (expr, order_expr) for a single x field, handling derived date parts."""
+                    _m = None
+                    try:
+                        _m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(field_name or ''), flags=re.IGNORECASE)
+                    except Exception:
+                        _m = None
+                    if _m:
+                        base = _m.group(1).strip()
+                        kind = _m.group(2).strip().lower()
+                        col = _q_ident(base)
+                        if "duckdb" in ds_type:
+                            if kind == 'day': return f"CAST(EXTRACT(day FROM {col}) AS INTEGER)", f"EXTRACT(day FROM {col})"
+                            if kind == 'month': return f"CAST(EXTRACT(month FROM {col}) AS INTEGER)", f"EXTRACT(month FROM {col})"
+                            if kind == 'month name': return f"strftime({col}, '%B')", f"EXTRACT(month FROM {col})"
+                            if kind == 'month short': return f"strftime({col}, '%b')", f"EXTRACT(month FROM {col})"
+                            if kind == 'year': return f"strftime({col}, '%Y')", f"CAST(EXTRACT(year FROM {col}) AS INTEGER)"
+                            if kind == 'quarter': return f"CAST(EXTRACT(quarter FROM {col}) AS INTEGER)", f"EXTRACT(quarter FROM {col})"
+                            if kind == 'week': return f"CAST(EXTRACT(week FROM {col}) AS INTEGER)", f"EXTRACT(week FROM {col})"
+                            if kind == 'day name': return f"strftime({col}, '%A')", f"EXTRACT(dow FROM {col})"
+                            if kind == 'day short': return f"strftime({col}, '%a')", f"EXTRACT(dow FROM {col})"
+                        elif ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                            if kind == 'day': return f"DAY({col})", f"DAY({col})"
+                            if kind == 'month': return f"MONTH({col})", f"MONTH({col})"
+                            if kind == 'month name': return f"DATENAME(month, {col})", f"MONTH({col})"
+                            if kind == 'month short': return f"LEFT(DATENAME(month, {col}), 3)", f"MONTH({col})"
+                            if kind == 'year': return f"CAST(YEAR({col}) AS varchar(10))", f"YEAR({col})"
+                            if kind == 'quarter': return f"DATEPART(QUARTER, {col})", f"DATEPART(QUARTER, {col})"
+                            if kind == 'week': return f"DATEPART(WEEK, {col})", f"DATEPART(WEEK, {col})"
+                            if kind == 'day name': return f"DATENAME(weekday, {col})", f"DATEPART(weekday, {col})"
+                            if kind == 'day short': return f"LEFT(DATENAME(weekday, {col}), 3)", f"DATEPART(weekday, {col})"
+                        return _q_ident(field_name), None
+                    return _q_ident(field_name), None
+                
+                # Build expressions for all x levels
+                for x_field in x_raw:
+                    expr, order = _build_x_expr_for_field(x_field)
+                    multi_level_x_exprs.append((expr, order))
+                
+                # For DuckDB: concatenate with '|' delimiter using CONCAT
+                if "duckdb" in ds_type:
+                    concat_parts = " || '|' || ".join([f"CAST({e[0]} AS VARCHAR)" for e in multi_level_x_exprs])
+                    x_expr = concat_parts
+                elif ("mssql" in ds_type) or ("sqlserver" in ds_type):
+                    concat_parts = " + '|' + ".join([f"CAST({e[0]} AS varchar(255))" for e in multi_level_x_exprs])
+                    x_expr = concat_parts
+                else:
+                    # PostgreSQL, MySQL, SQLite: use CONCAT
+                    concat_args = ", '|', ".join([f"CAST({e[0]} AS TEXT)" for e in multi_level_x_exprs])
+                    x_expr = f"CONCAT({concat_args})"
+                
+                # Order by the outer level (last field) first, then inner levels
+                if any(e[1] for e in multi_level_x_exprs):
+                    x_order_expr = ", ".join([e[1] or e[0] for e in reversed(multi_level_x_exprs)])
+                
+                # For GROUP BY, we need all the base expressions (not concatenated)
+                multi_level_group_by = ", ".join([e[0] for e in multi_level_x_exprs])
+                
+                print(f"[BACKEND] Multi-level X: {x_raw} -> x_expr={x_expr[:100]}..., group_by={multi_level_group_by}, order={x_order_expr}")
 
             # Legend: allow derived date-part syntax like "OrderDate (Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)"
             legend_expr_raw = spec.legend
@@ -4765,24 +5445,30 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 else:
                     order_seg_mssql = " ORDER BY 1"
                     order_seg_std = " ORDER BY 1"
+                # For multi-level X, use the individual expressions for GROUP BY
+                group_by_expr = multi_level_group_by if is_multi_level_x else x_expr
                 if x_order_expr:
                     if ("mssql" in ds_type) or ("sqlserver" in ds_type):
                         sql_inner = (
                             f"SELECT x, value FROM ("
                             f"SELECT {x_expr} as x, {value_expr} as value, {x_order_expr} as _xo "
-                            f"{base_from_sql}{where_sql} GROUP BY {x_expr}, {x_order_expr}) _t ORDER BY _xo"
+                            f"{base_from_sql}{where_sql} GROUP BY {group_by_expr}, {x_order_expr}) _t ORDER BY _xo"
                         )
                     else:
+                        # Count how many group by expressions we have for positional references
+                        gb_count = len(multi_level_x_exprs) if is_multi_level_x else 1
+                        gb_positions = ", ".join(str(i) for i in range(1, gb_count + 1))
+                        order_position = gb_count + 2  # +1 for value, +1 for _xo
                         sql_inner = (
                             f"SELECT x, value FROM ("
                             f"SELECT {x_expr} as x, {value_expr} as value, {x_order_expr} as _xo "
-                            f"{base_from_sql}{where_sql} GROUP BY 1,3) _t ORDER BY _xo"
+                            f"{base_from_sql}{where_sql} GROUP BY {gb_positions}, {order_position}) _t ORDER BY _xo"
                         )
                 else:
                     if ("mssql" in ds_type) or ("sqlserver" in ds_type):
                         sql_inner = (
                             f"SELECT {x_expr} as x, {value_expr} as value "
-                            f"{base_from_sql}{where_sql} GROUP BY {x_expr}{order_seg_mssql}"
+                            f"{base_from_sql}{where_sql} GROUP BY {group_by_expr}{order_seg_mssql}"
                         )
                     else:
                         sql_inner = (
@@ -4855,65 +5541,91 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             return str(val) if val is not None else val
         
         def _where_lhs(key: str) -> str:
-            """Get SQL expression for WHERE clause. Use quoted column if it exists in transformed base."""
-            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
-            if m and ds_transforms and _actual_cols and key in _actual_cols:
+            """Get SQL expression for WHERE clause. Expand derived date parts or use quoted column."""
+            # If key starts with '(', it's already a resolved expression - but check if subquery has the column
+            if str(key).strip().startswith('('):
+                # When there's a transformed subquery, resolved expressions won't work because they
+                # reference raw columns that aren't exposed. Check if we should use alias instead.
+                if ds_transforms and _actual_cols:
+                    for col in _actual_cols:
+                        if " (" in col and ")" in col:
+                            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", col, flags=re.IGNORECASE)
+                            if m:
+                                expr = _build_datepart_expr_helper(m.group(1).strip(), m.group(2).lower(), ds_type)
+                                if f"({expr})" == str(key).strip():
+                                    sys.stderr.write(f"[SPEC_DEBUG] Final path: Using alias '{col}' instead of resolved expr\n")
+                                    return _q_ident(col)
+                return str(key)
+            # Check if the column is already in the transformed subquery
+            if ds_transforms and _actual_cols and key in _actual_cols:
                 return _q_ident(key)
+            m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
+            if m:
+                if ds_transforms and _actual_cols and key in _actual_cols:
+                    return _q_ident(key)
+                return _derived_lhs(key)
             return _derived_lhs(key)
         
         where_clauses = []
         params: Dict[str, Any] = {}
-        if spec.where:
-            for k, v in spec.where.items():
+        # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
+        where_to_use = where_resolved if where_resolved else spec.where
+        if where_to_use:
+            for k, v in where_to_use.items():
                 if k in ("start", "startDate", "end", "endDate"):
                     continue
+                # Parse operator suffix FIRST (e.g., ClientCode__ne -> base=ClientCode, op=ne)
+                base_col = k
+                op_suffix = None
+                if isinstance(k, str) and "__" in k:
+                    base_col, op_suffix = k.split("__", 1)
                 if v is None:
-                    where_clauses.append(f"{_where_lhs(k)} IS NULL")
+                    where_clauses.append(f"{_where_lhs(base_col)} IS NULL")
                 elif isinstance(v, (list, tuple)):
                     if len(v) == 0:
                         continue
                     pnames = []
                     for i, item in enumerate(v):
-                        pname = _pname(k, f"_{i}")
-                        params[pname] = _coerce_filter_value(k, item)
+                        pname = _pname(base_col, f"_{i}")
+                        params[pname] = _coerce_filter_value(base_col, item)
                         pnames.append(f":{pname}")
-                    where_clauses.append(f"{_where_lhs(k)} IN ({', '.join(pnames)})")
-                elif isinstance(k, str) and "__" in k:
-                    base, op = k.split("__", 1)
+                    # Use NOT IN for __ne operator, IN otherwise
+                    in_op = "NOT IN" if op_suffix == "ne" else "IN"
+                    where_clauses.append(f"{_where_lhs(base_col)} {in_op} ({', '.join(pnames)})")
+                elif op_suffix:
                     opname = None
-                    if op == "gte": opname = ">="
-                    elif op == "gt": opname = ">"
-                    elif op == "lte": opname = "<="
-                    elif op == "lt": opname = "<"
+                    if op_suffix == "gte": opname = ">="
+                    elif op_suffix == "gt": opname = ">"
+                    elif op_suffix == "lte": opname = "<="
+                    elif op_suffix == "lt": opname = "<"
                     if opname:
-                        pname = _pname(base, f"_{op}")
-                        params[pname] = _coerce_filter_value(base, v)
-                        where_clauses.append(f"{_where_lhs(base)} {opname} :{pname}")
-                    elif op == "ne":
-                        pname = _pname(base, "_ne")
-                        params[pname] = _coerce_filter_value(base, v)
-                        where_clauses.append(f"{_where_lhs(base)} <> :{pname}")
-                    elif op in {"contains", "notcontains", "startswith", "endswith"}:
-                        like = "LIKE"
-                        if op == "notcontains":
+                        pname = _pname(base_col, f"_{op_suffix}")
+                        params[pname] = _coerce_filter_value(base_col, v)
+                        where_clauses.append(f"{_where_lhs(base_col)} {opname} :{pname}")
+                    elif op_suffix == "ne":
+                        pname = _pname(base_col, "_ne")
+                        params[pname] = _coerce_filter_value(base_col, v)
+                        where_clauses.append(f"{_where_lhs(base_col)} <> :{pname}")
+                    elif op_suffix in {"contains", "notcontains", "startswith", "endswith"}:
+                        if op_suffix == "notcontains":
                             cmp = "NOT LIKE"; patt = f"%{v}%"
-                        elif op == "contains":
+                        elif op_suffix == "contains":
                             cmp = "LIKE"; patt = f"%{v}%"
-                        elif op == "startswith":
+                        elif op_suffix == "startswith":
                             cmp = "LIKE"; patt = f"{v}%"
                         else:
                             cmp = "LIKE"; patt = f"%{v}"
-                        pname = _pname(base, "_like")
+                        pname = _pname(base_col, "_like")
                         params[pname] = patt
-                        where_clauses.append(f"{_where_lhs(base)} {cmp} :{pname}")
+                        where_clauses.append(f"{_where_lhs(base_col)} {cmp} :{pname}")
                     else:
-                        pname = _pname(base, "_eq")
-                        where_clauses.append(f"{_where_lhs(base)} = :{pname}")
-                        params[pname] = _coerce_filter_value(base, v)
+                        pname = _pname(base_col, "_eq")
+                        where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
+                        params[pname] = _coerce_filter_value(base_col, v)
                 else:
-                    pname = _pname(k)
-                    where_clauses.append(f"{_where_lhs(k)} = :{pname}")
-                    params[pname] = _coerce_filter_value(k, v)
+                    pname = _pname(base_col)
+                    where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
+                    params[pname] = _coerce_filter_value(base_col, v)
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         sql_inner = f"SELECT {', '.join(cols)}{base_from_sql}{where_sql}"
         q = QueryRequest(
@@ -5112,7 +5824,10 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
             if ds_info and not base_from_sql:
                 ds_obj = db.get(Datasource, ds_info.get("id"))
                 if ds_obj:
-                    expr_map = _build_expr_map(ds_obj, payload.source, ds_type)
+                    # Create a pass-through scope function for _build_expr_map_helper
+                    def _distinct_scope(ds_tr: dict, source_name: str) -> dict:
+                        return ds_tr if isinstance(ds_tr, dict) else {}
+                    expr_map = _build_expr_map_helper(ds_obj, payload.source, ds_type, _distinct_scope, None)
             
             # Resolve WHERE clause (similar to /query/spec)
             # IMPORTANT: Exclude the field we're querying from WHERE to avoid circular filtering
@@ -5127,7 +5842,7 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                     if base_from_sql:
                         where_resolved = None
                     else:
-                        where_resolved = _resolve_derived_columns_in_where(
+                        where_resolved = _resolve_derived_columns_in_where_helper(
                             where_without_field,
                             db.get(Datasource, ds_info.get("id")) if ds_info else None,
                             payload.source,
@@ -5404,14 +6119,32 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             def _apply_scope_pt(transforms_dict: dict, source_name: str) -> dict:
                 if not isinstance(transforms_dict, dict):
                     return {}
-                def _matches(scope: str) -> bool:
-                    if not scope:
-                        return True  # datasource-level
-                    s_norm = scope.strip().strip('[]').strip('"').strip('`').lower()
-                    t_norm = str(source_name or '').strip().strip('[]').strip('"').strip('`').lower()
-                    return s_norm == t_norm
+                
+                def _matches_table(scope_table: str, source_name: str) -> bool:
+                    def norm(s: str) -> str:
+                        s = (s or '').strip().strip('[]').strip('"').strip('`')
+                        parts = s.split('.')
+                        return parts[-1].lower()
+                    return norm(scope_table) == norm(source_name)
+                
                 def _filter_list(items):
-                    return [item for item in (items or []) if _matches(item.get('table', ''))]
+                    out = []
+                    for it in (items or []):
+                        sc = (it or {}).get('scope')
+                        if not sc:
+                            # No scope means datasource-level
+                            out.append(it)
+                            continue
+                        lvl = str(sc.get('level') or '').lower()
+                        if lvl == 'datasource':
+                            out.append(it)
+                        elif lvl == 'table' and sc.get('table') and _matches_table(str(sc.get('table')), source_name):
+                            out.append(it)
+                        elif lvl == 'widget':
+                            # Widget-level transforms not applicable in pivot
+                            pass
+                    return out
+                
                 return {
                     'customColumns': _filter_list(transforms_dict.get('customColumns', [])),
                     'transforms': _filter_list(transforms_dict.get('transforms', [])),

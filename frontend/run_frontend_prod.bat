@@ -32,18 +32,12 @@ if not exist node_modules (
   )
 )
 
-if exist .next (
-  rmdir /S /Q .next
-)
-
-REM Build if .next missing
-if not exist .next (
-  call npm run build
-  if errorlevel 1 (
-    echo npm run build failed
-    popd >nul 2>&1
-    exit /b 1
-  )
+REM Build (incremental - uses cache for speed)
+call npm run build
+if errorlevel 1 (
+  echo npm run build failed
+  popd >nul 2>&1
+  exit /b 1
 )
 
 REM Start Next.js in production

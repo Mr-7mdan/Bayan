@@ -5922,7 +5922,12 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                   const val = e.target.value
                   let nextFmt: any
                   if (val === 'none') nextFmt = undefined
-                  else if (val === 'custom') nextFmt = (local.options as any)?.xDateFormat || 'MM-YYYY'
+                  else if (val === 'custom') {
+                    // Always use a non-preset default so custom input shows
+                    const current = (local.options as any)?.xDateFormat
+                    const presets = new Set(['YYYY','YYYY-MM','YYYY-MM-DD','h:mm a','dddd','MMMM','MMM-YYYY'])
+                    nextFmt = (current && !presets.has(current)) ? current : 'DD-MMM-YYYY'
+                  }
                   else nextFmt = val as any
                   const opts = { ...(local.options || {}), xDateFormat: nextFmt }
                   const next = { ...local, options: opts }

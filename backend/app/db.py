@@ -912,6 +912,57 @@ def _create_table_typed(conn, table_name: str, columns: list[str], sample_rows: 
     
     cols_sql = ", ".join(f"{_quote_duck_ident(c)} {types[c]}" for c in columns)
     conn.exec_driver_sql(f"CREATE TABLE IF NOT EXISTS {qtable} ({cols_sql})")
+    return types
+
+
+# Numeric types that require value sanitization
+_NUMERIC_TYPES = {"DOUBLE", "BIGINT", "DECIMAL(38,10)", "INTEGER", "FLOAT", "REAL"}
+
+
+def _is_valid_numeric(val: str) -> bool:
+    """Check if a string can be safely converted to a numeric type."""
+    if not val or not val.strip():
+        return False
+    s = val.strip()
+    try:
+        float(s)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def _sanitize_row_for_types(row: list, columns: list[str], col_types: dict[str, str]) -> list:
+    """Convert invalid values to None for numeric columns to avoid DuckDB conversion errors.
+    
+    This handles:
+    - Empty strings ('') -> None
+    - Non-numeric strings (e.g., '39(40)') -> None for numeric columns
+    """
+    sanitized = []
+    for idx, val in enumerate(row):
+        col_name = columns[idx] if idx < len(columns) else None
+        col_type = col_types.get(col_name, "TEXT") if col_name else "TEXT"
+        
+        # For numeric types, validate that string values can be converted
+        if col_type in _NUMERIC_TYPES:
+            if val is None:
+                sanitized.append(None)
+            elif isinstance(val, (int, float)):
+                sanitized.append(val)
+            elif isinstance(val, str):
+                if _is_valid_numeric(val):
+                    sanitized.append(val)
+                else:
+                    # Invalid numeric string -> NULL
+                    sanitized.append(None)
+            else:
+                # Other types (Decimal, etc.) - let DuckDB handle
+                sanitized.append(val)
+        else:
+            sanitized.append(val)
+    return sanitized
+
+
 def _table_exists(conn, table_name: str) -> bool:
     try:
         qtable = _quote_duck_ident(table_name)
@@ -1043,17 +1094,33 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                 except Exception:
                     pass
             columns = list(res.keys())
-            # Ensure destination exists
+            # Ensure destination exists and get column types for sanitization
             if not _table_exists(duck, dest_table):
                 # Create typed table using the first fetched batch as sample
-                _create_table_typed(duck, dest_table, columns, [list(r) for r in rows])
+                col_types = _create_table_typed(duck, dest_table, columns, [list(r) for r in rows])
+            else:
+                # Table exists - infer types from current batch for sanitization
+                col_types = {}
+                for idx, col in enumerate(columns):
+                    for r in rows[:50]:  # Sample first 50 rows
+                        try:
+                            v = r[idx] if idx < len(r) else None
+                        except Exception:
+                            v = None
+                        if v is not None:
+                            col_types[col] = _infer_duck_type_value(v)
+                            break
+                    if col not in col_types:
+                        col_types[col] = "TEXT"
             # Upsert: delete existing pk matches, then insert
             if on_phase:
                 try: on_phase('insert')
                 except Exception: pass
             if pk_columns:
                 _delete_by_pk(duck, dest_table, pk_columns, rows, columns)
-            inserted = _insert_rows(duck, dest_table, columns, [list(r) for r in rows])
+            # Sanitize rows: convert empty strings to None for numeric columns
+            sanitized_rows = [_sanitize_row_for_types(list(r), columns, col_types) for r in rows]
+            inserted = _insert_rows(duck, dest_table, columns, sanitized_rows)
             total_rows += inserted
             copied += inserted
             if on_progress:
@@ -1130,7 +1197,7 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                     sample_rows = src.execute(sample_sql, {"lim": 64, "off": 0}).fetchall()
             except Exception:
                 sample_rows = []
-            _create_table_typed(duck, stg, columns, [list(r) for r in (sample_rows or [])])
+            col_types = _create_table_typed(duck, stg, columns, [list(r) for r in (sample_rows or [])])
             staging_created = True
             # Chunked copy
             total_rows_source = None
@@ -1176,7 +1243,9 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                 if on_phase:
                     try: on_phase('insert')
                     except Exception: pass
-                _insert_rows(duck, stg, columns, [list(r) for r in rows])
+                # Sanitize rows: convert empty strings to None for numeric columns
+                sanitized_rows = [_sanitize_row_for_types(list(r), columns, col_types) for r in rows]
+                _insert_rows(duck, stg, columns, sanitized_rows)
                 total_rows += len(rows)
                 if should_abort:
                     try:

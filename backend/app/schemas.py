@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 
 
@@ -318,7 +318,8 @@ class QuerySpec(BaseModel):
     limit: Optional[int] = None
     offset: Optional[int] = None
     # Optional chart semantics for server-side aggregation
-    x: Optional[str] = None
+    # x can be a single field or array for multi-level axis (e.g., ["Day", "Year"])
+    x: Optional[Union[str, List[str]]] = None
     y: Optional[str] = None
     agg: Optional[str] = Field(default=None, description="none|count|distinct|avg|sum|min|max")
     groupBy: Optional[str] = Field(default=None, description="none|day|week|month|quarter|year")

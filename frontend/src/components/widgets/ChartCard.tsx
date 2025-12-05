@@ -152,11 +152,14 @@ function useDistinctStrings(
   customCols?: Array<{ name: string; formula: string }>,
 ) {
   const [cache, setCache] = useState<Record<string, string[]>>({})
+  const [loading, setLoading] = useState<Record<string, boolean>>({})
   // Reset cache whenever the underlying constraints or source change
-  useEffect(() => { setCache({}) }, [source, datasourceId, JSON.stringify(baseWhere || {}), JSON.stringify(customCols || [])])
+  useEffect(() => { setCache({}); setLoading({}) }, [source, datasourceId, JSON.stringify(baseWhere || {}), JSON.stringify(customCols || [])])
   const load = async (field: string) => {
     try {
       if (!source) return
+      // Mark as loading
+      setLoading((prev) => ({ ...prev, [field]: true }))
       const isCustom = !!(customCols || []).find((c) => String(c?.name ?? '').trim().toLowerCase() === String(field ?? '').trim().toLowerCase())
       if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
         try { console.debug('[ChartCard] [DistinctsDebug] start', { field, isCustom, baseWhere, source }) } catch {}
@@ -185,6 +188,7 @@ function useDistinctStrings(
               try { console.debug('[ChartCard] [DistinctsDebug] result-base-api', { field, count: dedup.length, sample: dedup.slice(0, 20) }) } catch {}
             }
             setCache((prev) => ({ ...prev, [field]: dedup }))
+            setLoading((prev) => ({ ...prev, [field]: false }))
             return
           }
         } catch (e: any) {
@@ -227,6 +231,7 @@ function useDistinctStrings(
           try { console.debug('[ChartCard] [DistinctsDebug] result-base', { field, count: arr.length, sample: arr.slice(0, 20), where: omit }) } catch {}
         }
         setCache((prev) => ({ ...prev, [field]: arr }))
+        setLoading((prev) => ({ ...prev, [field]: false }))
         return
       }
       // Custom column path: compute values client-side from base refs
@@ -256,7 +261,7 @@ function useDistinctStrings(
       const selectBase = Array.from(baseRefs.values())
       // Ensure we also fetch any base fields used in serverWhere filters
       Object.keys(serverWhere).forEach((k) => { if (!selectBase.includes(k)) selectBase.push(k) })
-      if (selectBase.length === 0) { setCache((prev) => ({ ...prev, [field]: [] })); return }
+      if (selectBase.length === 0) { setCache((prev) => ({ ...prev, [field]: [] })); setLoading((prev) => ({ ...prev, [field]: false })); return }
       const pageSize = 5000
       let offset = 0
       const cf = compileFormula(c.formula)
@@ -343,14 +348,16 @@ function useDistinctStrings(
         try { console.debug('[ChartCard] [DistinctsDebug] result-custom', { field, count: out.length, sample: out.slice(0, 20), serverWhere }) } catch {}
       }
       setCache((prev) => ({ ...prev, [field]: out }))
+      setLoading((prev) => ({ ...prev, [field]: false }))
     } catch (e: any) {
       if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
         try { console.error('[ChartCard] [DistinctsDebug] error', { field, error: e?.message || String(e) }) } catch {}
       }
       setCache((prev) => ({ ...prev, [field]: [] }))
+      setLoading((prev) => ({ ...prev, [field]: false }))
     }
   }
-  return { cache, load }
+  return { cache, load, loading }
 }
 
 function useDebounced<T>(val: T, delay = 350): T {
@@ -1574,7 +1581,7 @@ export default function ChartCard({
             const merged: QuerySpec = {
               source: querySpec.source,
               where: mergedWhere,
-              x: (Array.isArray(s.x) ? (s.x[0] as any) : (s.x || xField)) as any,
+              x: ((s as any).x ?? (querySpec as any).x) as any,
               y: s.y as any,
               agg,
               legend: (legendVal as any),
@@ -1591,8 +1598,7 @@ export default function ChartCard({
             if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
               try { console.debug('[ChartCard] branch=multi-series/agg REQUEST', { spec: merged, where: mergedWhere, y: s.y, agg, legend: merged.legend, x: merged.x }) } catch {}
             }
-            const mergedSafe = { ...merged, x: (Array.isArray((merged as any).x) ? (merged as any).x[0] : (merged as any).x) } as any
-            return QueryApi.querySpec({ spec: mergedSafe, datasourceId, limit: mergedSafe.limit ?? 1000, offset: mergedSafe.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+            return QueryApi.querySpec({ spec: merged as any, datasourceId, limit: merged.limit ?? 1000, offset: merged.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
           })
           const results = await Promise.all(promises)
           
@@ -1732,7 +1738,8 @@ export default function ChartCard({
             const merged: QuerySpec = {
               source: querySpec.source,
               where: mergedWhere,
-              x: (Array.isArray(s.x) ? (s.x[0] as any) : (s.x || xField)) as any,
+              // Preserve full X spec (string | string[]) to allow multi-level X on backend
+              x: ((s as any).x ?? (querySpec as any).x) as any,
               y: s.y as any,
               agg,
               groupBy: (s.groupBy || (querySpec as any).groupBy) as any,
@@ -1744,8 +1751,8 @@ export default function ChartCard({
               orderBy: ((querySpec as any)?.orderBy as any),
               order: ((querySpec as any)?.order as any),
             }
-            const mergedSafe = { ...merged, x: (Array.isArray((merged as any).x) ? (merged as any).x[0] : (merged as any).x) } as any
-            return QueryApi.querySpec({ spec: mergedSafe, datasourceId, limit: mergedSafe.limit ?? 1000, offset: mergedSafe.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+            // Send merged spec as-is; QueryApi will preserve x as string | string[]
+            return QueryApi.querySpec({ spec: merged as any, datasourceId, limit: merged.limit ?? 1000, offset: merged.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
           })
           const results = await Promise.all(promises)
           const map = new Map<string | number, any>()
@@ -2745,7 +2752,7 @@ export default function ChartCard({
   }, [deltaUI, filterbarMode, filters.startDate, filters.endDate])
   
   // Helper hook for distinct values for string filters
-  const { cache: distinctCache, load: loadDistinct } = useDistinctStrings((querySpec as any)?.source, datasourceId, uiTruthWhere, (customColumns || []) as any)
+  const { cache: distinctCache, load: loadDistinct, loading: distinctLoading } = useDistinctStrings((querySpec as any)?.source, datasourceId, uiTruthWhere, (customColumns || []) as any)
 
   // Shared Filterbar labels/modes for delta UI
   const deltaLabels: Record<string, string> = {
@@ -3449,7 +3456,28 @@ export default function ChartCard({
     if ((((options as any)?.advancedMode) || forceAdvanced) && (type === 'bar' || type === 'column' || type === 'line' || type === 'area')) {
       const xLabels = (displayData as any[]).map((d) => d.x)
       const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
-      const xFieldStr = String(((querySpec as any)?.x || '') as any)
+      const rawXSpec = (querySpec as any)?.x
+      const isMultiLevelX = Array.isArray(rawXSpec) && rawXSpec.length > 1
+      const xFieldStr = String(Array.isArray(rawXSpec) ? rawXSpec[0] : (rawXSpec || ''))
+      // Multi-level X axis helpers (Excel-style hierarchical grouping)
+      const MULTI_LEVEL_SEP = '|'
+      const parseMultiLevelX = (val: any): string[] => {
+        const s = String(val ?? '')
+        return s.includes(MULTI_LEVEL_SEP) ? s.split(MULTI_LEVEL_SEP) : [s]
+      }
+      // Smart formatter: shows outer level (e.g., Year) only when it changes from previous value
+      const formatMultiLevelLabel = (val: any, idx: number, allLabels: any[]): string => {
+        if (!isMultiLevelX) return String(val ?? '')
+        const parts = parseMultiLevelX(val)
+        if (parts.length < 2) return parts[0] || ''
+        const innerLabel = parts[0]  // e.g., Day "1"
+        const outerLabel = parts[1]  // e.g., Year "2024"
+        // Check if outer level changed from previous
+        const prevParts = idx > 0 ? parseMultiLevelX(allLabels[idx - 1]) : []
+        const outerChanged = prevParts.length < 2 || prevParts[1] !== outerLabel
+        // Return multi-line label with outer level only when it changes
+        return outerChanged ? `${innerLabel}\n{groupLabel|${outerLabel}}` : innerLabel
+      }
       const legendRaw = (() => {
         const lg: any = (querySpec as any)?.legend
         if (Array.isArray(lg) && lg.length > 0) return String(lg[0] ?? '')
@@ -4464,9 +4492,12 @@ export default function ChartCard({
         }
       }
       // Pre-format labels to avoid index/value drift inside ECharts axis formatter callbacks
-      const xLabelsFmt = xLabels.map((v:any) => {
-        try { return fmtXLabel(v) } catch { return String(v ?? '') }
-      })
+      // For multi-level X, use smart formatting that shows outer level only when it changes
+      const xLabelsFmt = isMultiLevelX
+        ? xLabels.map((v: any, idx: number) => formatMultiLevelLabel(v, idx, xLabels))
+        : xLabels.map((v:any) => {
+            try { return fmtXLabel(v) } catch { return String(v ?? '') }
+          })
       if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
         try { console.debug('[ChartCard] SeriesList built', { type, seriesCount: seriesList.length, firstSeries: seriesList[0], dataLength: seriesList[0]?.data?.length }) } catch {}
       }
@@ -4570,7 +4601,7 @@ export default function ChartCard({
         animationDurationUpdate: isSnap ? 0 : 300,
         tooltip: advTooltip,
         legend: { show: false },
-        grid: { left: margins.left, right: margins.right, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (dataZoom && type !== 'bar' ? 48 : 0), containLabel: false },
+        grid: { left: margins.left, right: margins.right, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (isMultiLevelX ? 16 : 0) + (dataZoom && type !== 'bar' ? 48 : 0), containLabel: false },
         xAxis: (type === 'bar')
           ? (hasSecondaryXBar
               ? [
@@ -4580,16 +4611,42 @@ export default function ChartCard({
               : { type: 'value', axisLabel: { fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) })
           : ((() => { 
               const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
-              const xFieldStr = String(((querySpec as any)?.x || '') as any)
-              const isDerivedDatePart = /\s+\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/.test(xFieldStr)
+              const rawX = (querySpec as any)?.x
+              const xFieldStrLocal = String(Array.isArray(rawX) ? rawX[0] : (rawX || ''))
+              const isDerivedDatePart = /\s+\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/.test(xFieldStrLocal)
               // Detect 12-month seasonality (legend like "OrderDate (Year)", groupBy=month, x=OrderDate)
               const legendRawAxis = (() => { const lg: any = (querySpec as any)?.legend; if (Array.isArray(lg) && lg.length > 0) return String(lg[0] ?? ''); return (typeof lg === 'string') ? lg : '' })()
-              const seasonalityModeAxis = (() => { try { const m = legendRawAxis.match(/^(.*)\s*\(Year\)$/i); if (m) { const base = m[1].trim(); return (gb === 'month' && base === xFieldStr) } } catch {} return false })()
+              const seasonalityModeAxis = (() => { try { const m = legendRawAxis.match(/^(.*)\s*\(Year\)$/i); if (m) { const base = m[1].trim(); return (gb === 'month' && base === xFieldStrLocal) } } catch {} return false })()
               // Use time-series axis only if groupBy is set, x-field is not a derived part, and NOT in seasonality mode
               const isTimeSeries = (gb && gb !== 'none') && !isDerivedDatePart && !seasonalityModeAxis
-              return isTimeSeries ? { type: 'time', axisLabel: { rotate: xRotate, fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => { try { return fmtXLabel(val) } catch { return String(val ?? '') } } }, ...(buildAxisGrid('x') as any) } : { type: 'category', data: xLabelsFmt, axisLabel: { rotate: xRotate, interval: (xInterval as any), fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor) }, ...(buildAxisGrid('x') as any) } })()),
+              // Multi-level X: add rich text styling for group labels
+              const multiLevelRich = isMultiLevelX ? {
+                groupLabel: { 
+                  fontSize: Math.max(8, ((options as any)?.xAxisFontSize ?? fontSize) - 2), 
+                  color: ((options as any)?.xAxisFontColor || axisTextColor),
+                  fontWeight: 'bold' as const,
+                  padding: [6, 0, 0, 0]
+                }
+              } : undefined
+              const categoryAxisLabel = {
+                rotate: xRotate,
+                interval: (xInterval as any),
+                fontSize: ((options as any)?.xAxisFontSize ?? fontSize),
+                fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' as const : 'normal' as const,
+                margin: isMultiLevelX ? 16 : (Math.abs(xRotate) >= 60 ? 12 : 8),
+                color: ((options as any)?.xAxisFontColor || axisTextColor),
+                ...(multiLevelRich ? { rich: multiLevelRich } : {})
+              }
+              return isTimeSeries 
+                ? { type: 'time', axisLabel: { rotate: xRotate, fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', margin: Math.abs(xRotate) >= 60 ? 12 : 8, color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => { try { return fmtXLabel(val) } catch { return String(val ?? '') } } }, ...(buildAxisGrid('x') as any) } 
+                : { type: 'category', data: xLabelsFmt, axisLabel: categoryAxisLabel, ...(buildAxisGrid('x') as any) } })()),
         yAxis: (type === 'bar')
-          ? { type: 'category', data: xLabelsFmt, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGrid('y') as any) }
+          ? { type: 'category', data: xLabelsFmt, axisLabel: { 
+              fontSize: ((options as any)?.yAxisFontSize ?? fontSize), 
+              fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', 
+              color: ((options as any)?.yAxisFontColor || axisTextColor),
+              ...(isMultiLevelX ? { rich: { groupLabel: { fontSize: Math.max(8, ((options as any)?.yAxisFontSize ?? fontSize) - 2), color: ((options as any)?.yAxisFontColor || axisTextColor), fontWeight: 'bold', padding: [0, 6, 0, 0] } } } : {})
+            }, ...(buildAxisGrid('y') as any) }
           : (hasSecondaryY
               ? [
                   { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGrid('y') as any) },
@@ -7629,6 +7686,7 @@ export default function ChartCard({
                       field={field}
                       where={mergedWhere}
                       distinctCache={distinctCache as any}
+                      loadingCache={distinctLoading as any}
                       loadDistinctAction={loadDistinct as any}
                       onPatchAction={(patch: Record<string, any>) => setUiWhereAndEmit(patch)}
                     />
