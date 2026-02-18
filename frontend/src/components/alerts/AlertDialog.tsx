@@ -279,6 +279,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   const { resolved } = useTheme()
   const tabBase = resolved === 'dark' ? 'sidebar-item-dark' : 'sidebar-item-light'
   const tabActive = resolved === 'dark' ? 'sidebar-item-active-dark' : 'sidebar-item-active-light'
+  const [editAlertId, setEditAlertId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [kind, setKind] = useState<'alert'|'notification'>(defaultKind ?? 'alert')
   const [enabled, setEnabled] = useState(true)
@@ -301,7 +302,9 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   const [uiSection, setUiSection] = useState<'header'|'recipients'|'trigger'|'insert'|'preview'>('header')
   const [chanEmail, setChanEmail] = useState<boolean>(true)
   const [chanSms, setChanSms] = useState<boolean>(false)
-  const [renderMode, setRenderMode] = useState<'kpi'|'table'|'chart'>('kpi')
+  const [renderMode, setRenderMode] = useState<'kpi'|'table'|'chart'|'report'>('kpi')
+  const [attachPdf, setAttachPdf] = useState<boolean>(false)
+  const [pdfLandscape, setPdfLandscape] = useState<boolean>(false)
   const [snapWidth, setSnapWidth] = useState<number>(1000)
   const [snapHeight, setSnapHeight] = useState<number>(280)
   type RecipientToken = { kind: 'contact'|'email'|'phone'|'tag'; label: string; value: string; email?: string; phone?: string; id?: string; name?: string; tag?: string }
@@ -532,9 +535,10 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   }, [JSON.stringify(spec)])
 
   useEffect(() => {
-    if (!open) return
+    if (!open) { setEditAlertId(null); return }
     setTestHtml('')
     if (mode === 'edit' && alert) {
+      setEditAlertId(alert.id)
       setName(alert.name)
       setKind(alert.kind)
       setEnabled(!!alert.enabled)
@@ -561,6 +565,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       setTemplate(String(cfg.template || 'Current KPI value: {{kpi}}'))
       const r = cfg.render || { mode: 'kpi' }
       setRenderMode((r.mode || 'kpi') as any)
+      try { const _ea = acts.find((a: any) => String(a?.type) === 'email') || {}; setAttachPdf(!!_ea.attachPdf); setPdfLandscape(!!_ea.pdfLandscape) } catch {}
       try { setSnapWidth(Number((r as any).width || (String((r as any).mode||'kpi')==='kpi'?1000:1000))) } catch {}
       try { setSnapHeight(Number((r as any).height || (String((r as any).mode||'kpi')==='kpi'?280:360))) } catch {}
       
@@ -699,12 +704,12 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       } catch {}
     } else {
       setName((widget as any)?.title || 'New Alert')
-      setKind('alert')
+      setKind(defaultKind || 'alert')
       setEnabled(true)
       setEmailTo('')
       setSmsTo('')
       setRecipTokens([])
-      setTemplate('Current KPI value: {{kpi}}')
+      setTemplate(defaultTemplate ?? 'Place your spaceholder here: {{kpi}}')
       setTemplateSms('KPI: {{kpi}}')
       setCustomPlaceholders([])
       setRenderMode('kpi')
@@ -737,7 +742,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         setAdvPivot({ values: [], filters: [] })
       }
     }
-  }, [open, mode, alert?.id, (widget as any)?.id])
+  }, [open, mode, alert?.id, (widget as any)?.id, defaultKind, defaultTemplate])
 
   useEffect(() => {
     if (!advOpen) return
@@ -794,14 +799,14 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     if (rendererUseCarried && widget) {
       try {
         const t = String((widget as any)?.type || '').toLowerCase()
-        setRenderMode(t === 'table' ? 'table' : (t === 'chart' ? 'chart' : 'kpi'))
+        setRenderMode(t === 'report' ? 'report' : t === 'table' ? 'table' : (t === 'chart' ? 'chart' : 'kpi'))
       } catch {}
       return
     }
     if (!rendererUseCarried && pickWidgetCfg) {
       try {
         const t = String((pickWidgetCfg as any)?.type || '').toLowerCase()
-        setRenderMode(t === 'table' ? 'table' : (t === 'chart' ? 'chart' : 'kpi'))
+        setRenderMode(t === 'report' ? 'report' : t === 'table' ? 'table' : (t === 'chart' ? 'chart' : 'kpi'))
       } catch {}
     }
   }, [open, kind, rendererUseCarried, (widget as any)?.type, (pickWidgetCfg as any)?.type])
@@ -1324,7 +1329,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     const emails = Array.from(emailSet)
     const phones = Array.from(phoneSet)
     // Persist Email action even when no emails yet; backend/UI can allow editing later
-    if (chanEmail) actions.push({ type: 'email', to: emails, subject: name })
+    if (chanEmail) actions.push({ type: 'email', to: emails, subject: name, ...(attachPdf ? { attachPdf: true, ...(pdfLandscape ? { pdfLandscape: true } : {}) } : {}) })
     // Persist SMS action even when no phones yet; backend/UI can allow editing later
     if (chanSms) actions.push({ type: 'sms', to: phones, message: (templateSms && templateSms.trim()) ? templateSms : (template || name) })
 
@@ -1339,6 +1344,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     const kpiSpec: any = { source: String(kpiSource || ''), agg: kpiAgg, where: kpiWhere }
     if (kpiMeasure) { kpiSpec.y = kpiMeasure; kpiSpec.measure = kpiMeasure }
     let render: any
+    // When editing, preserve the existing render config as a base so querySpec, widgetRef, etc. survive
+    const prevRender = (mode === 'edit' && alert) ? ((alert as any).config?.render || {}) : {}
     if (kind === 'notification') {
       let refSpec: any = null
       let refLabel = (widget as any)?.title || name
@@ -1349,24 +1356,32 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         refSpec = (pickWidgetCfg as any).querySpec
         refLabel = (pickWidgets.find(w => w.id === pickWidgetId)?.title || name)
       }
-      if (renderMode === 'table') {
-        render = { mode: 'table', querySpec: refSpec || spec, width: snapWidth, height: snapHeight }
+      // Fall back to previous render's querySpec when no widget source is available
+      const effectiveSpec = refSpec || (Object.keys(spec || {}).length > 0 ? spec : prevRender.querySpec) || {}
+      if (renderMode === 'report') {
+        render = { mode: 'report', querySpec: effectiveSpec, width: snapWidth, height: snapHeight }
+      } else if (renderMode === 'table') {
+        render = { mode: 'table', querySpec: effectiveSpec, width: snapWidth, height: snapHeight }
       } else if (renderMode === 'chart') {
-        render = { mode: 'chart', querySpec: refSpec || spec, width: snapWidth, height: snapHeight }
+        render = { mode: 'chart', querySpec: effectiveSpec, width: snapWidth, height: snapHeight }
       } else {
-        render = { mode: 'kpi', label: refLabel, querySpec: refSpec || kpiSpec, width: snapWidth, height: snapHeight }
+        render = { mode: 'kpi', label: refLabel, querySpec: refSpec || kpiSpec || prevRender.querySpec || {}, width: snapWidth, height: snapHeight }
       }
       if (rendererUseCarried && widget && (widget as any)?.id) {
         (render as any).widgetRef = { dashboardId: ((widget as any)?.dashboardId || parentDashboardId || ''), widgetId: (widget as any)?.id }
       } else if (!rendererUseCarried && pickDashId && pickWidgetId) {
         (render as any).widgetRef = { dashboardId: pickDashId, widgetId: pickWidgetId }
+      } else if (prevRender.widgetRef) {
+        (render as any).widgetRef = prevRender.widgetRef
       }
     } else {
-      render = { mode: 'kpi', label: (widget as any)?.title || name, querySpec: kpiSpec, width: snapWidth, height: snapHeight }
+      render = { mode: 'kpi', label: (widget as any)?.title || name, querySpec: kpiSpec || prevRender.querySpec || {}, width: snapWidth, height: snapHeight }
       if (rendererUseCarried && widget && (widget as any)?.id) {
         (render as any).widgetRef = { dashboardId: ((widget as any)?.dashboardId || parentDashboardId || ''), widgetId: (widget as any)?.id }
       } else if (!rendererUseCarried && pickDashId && pickWidgetId) {
         (render as any).widgetRef = { dashboardId: pickDashId, widgetId: pickWidgetId }
+      } else if (prevRender.widgetRef) {
+        (render as any).widgetRef = prevRender.widgetRef
       }
     }
     // Back-compat: include top-level fields many backends expect
@@ -1427,7 +1442,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       if (!carried) return (pickDashId || wDid || aDid || pDid || undefined) as any
       return (wDid || pDid || pickDashId || aDid || undefined) as any
     })()
-    const payload: AlertCreate = { name, kind, widgetId: (widget as any)?.id, dashboardId: payloadDashId, enabled, config: cfg as any }
+    const payloadWidgetId = (widget as any)?.id || (!rendererUseCarried && pickWidgetId ? pickWidgetId : undefined) || (alert as any)?.widgetId || undefined
+    const payload: AlertCreate = { name, kind, widgetId: payloadWidgetId, dashboardId: payloadDashId, enabled, config: cfg as any }
     return payload
   }
 
@@ -1462,15 +1478,19 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   const onSave = async () => {
     try {
       const payload = buildPayload()
-      if (mode === 'edit' && alert?.id) {
-        const res = await Api.updateAlert(alert.id, payload)
+      const resolvedId = editAlertId || alert?.id
+      if (mode === 'edit' && resolvedId) {
+        const res = await Api.updateAlert(resolvedId, payload)
         onSavedAction(res)
       } else {
+        if (mode === 'edit') console.warn('[AlertDialog] edit mode but no alert id — creating instead', { editAlertId, alertId: alert?.id })
         const res = await Api.createAlert(payload)
         onSavedAction(res)
       }
       onCloseAction()
-    } catch {}
+    } catch (e) {
+      console.error('[AlertDialog] onSave error', e)
+    }
   }
 
   if (!open || typeof document === 'undefined') return null
@@ -1508,6 +1528,14 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                   <div className="flex items-center gap-4 text-xs">
                     <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={chanEmail} onChange={(e)=> setChanEmail(e.target.checked)} /> Email</label>
                     <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={chanSms} onChange={(e)=> setChanSms(e.target.checked)} /> SMS</label>
+                    {chanEmail && renderMode === 'report' && (
+                      <>
+                        <label className="inline-flex items-center gap-2 ml-2 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> Attach PDF</label>
+                        {attachPdf && (
+                          <label className="inline-flex items-center gap-2 ml-1 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={pdfLandscape} onChange={(e)=> setPdfLandscape(e.target.checked)} /> Landscape</label>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
                 {kind==='notification' && (
@@ -1535,6 +1563,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                           <button type="button" className={`px-2 py-1 ${renderMode==='kpi'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('kpi')}>KPI</button>
                           <button type="button" className={`px-2 py-1 ${renderMode==='table'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('table')}>Table</button>
                           <button type="button" className={`px-2 py-1 ${renderMode==='chart'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('chart')}>Chart</button>
+                          <button type="button" className={`px-2 py-1 ${renderMode==='report'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('report')}>Report</button>
                         </span>
                       </div>
                     )}
@@ -1663,6 +1692,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                       {k:'KPI_IMG', l:'KPI IMG'},
                       {k:'CHART_IMG', l:'CHART IMG'},
                       {k:'TABLE_HTML', l:'TABLE HTML'},
+                      {k:'REPORT_HTML', l:'REPORT HTML'},
                       {k:'source', l:'Source'},
                       {k:'datasourceId', l:'Datasource'}
                     ].map(c => (
@@ -1814,7 +1844,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                       } catch { return {} as Record<string,string> }
                     })()
                     const ctxFull: Record<string, any> = { ...ctx, ...customMap }
-                    const fillOnce = (tpl: string) => tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => String(ctxFull[k] ?? ''))
+                    const fillOnce = (tpl: string) => tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => (ctxFull[k] != null && ctxFull[k] !== '') ? String(ctxFull[k]) : `{{${k}}}` )
                     const fill = (tpl: string) => {
                       let out = String(tpl || '')
                       for (let i=0;i<3;i++) {
@@ -1848,6 +1878,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                         {k:'KPI_IMG', l:'KPI IMG'},
                         {k:'CHART_IMG', l:'CHART IMG'},
                         {k:'TABLE_HTML', l:'TABLE HTML'},
+                        {k:'REPORT_HTML', l:'REPORT HTML'},
                         {k:'source', l:'Source'},
                         {k:'datasourceId', l:'Datasource'}
                       ].concat((customPlaceholders||[]).map(it => ({ k: String(it?.name||'').trim(), l: `Custom: ${String(it?.name||'').trim()}` })).filter(it => /^\w+$/.test(it.k)))

@@ -239,6 +239,583 @@ def _render_kpi_html(value: Any, label: Optional[str] = None) -> str:
     """.strip()
 
 
+# --- Report rendering (server-side mirror of ReportCard.tsx) ---
+
+def _format_date_str(dt: datetime, pattern: str) -> str:
+    """Mirror frontend formatDateStr — pattern tokens: yyyy, yy, MMMM, MMM, MM, dddd, ddd, dd, HH, mm, ss."""
+    months = ['January','February','March','April','May','June','July','August','September','October','November','December']
+    months_short = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+    days_short = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    r = pattern
+    r = r.replace('yyyy', str(dt.year))
+    r = r.replace('yy', str(dt.year)[-2:])
+    r = r.replace('MMMM', months[dt.month - 1])
+    r = r.replace('MMM', months_short[dt.month - 1])
+    r = r.replace('MM', str(dt.month).zfill(2))
+    r = r.replace('dddd', days[dt.weekday()])  # Python weekday: 0=Mon
+    r = r.replace('ddd', days_short[dt.weekday()])
+    r = r.replace('dd', str(dt.day).zfill(2))
+    r = r.replace('HH', str(dt.hour).zfill(2))
+    r = r.replace('mm', str(dt.minute).zfill(2))
+    r = r.replace('ss', str(dt.second).zfill(2))
+    return r
+
+
+def _format_report_value(raw: Any, variable: dict) -> str:
+    """Format a resolved variable value — mirrors frontend formatValue()."""
+    prefix = str(variable.get('prefix') or '')
+    suffix = str(variable.get('suffix') or '')
+    vtype = str(variable.get('type') or 'query')
+
+    if vtype == 'datetime':
+        if raw is not None:
+            try:
+                from dateutil.parser import parse as _dt_parse
+                dt = _dt_parse(str(raw)) if not isinstance(raw, datetime) else raw
+                fmt = variable.get('dateFormat') or 'dd MMM yyyy'
+                return f"{prefix}{_format_date_str(dt, fmt)}{suffix}"
+            except Exception:
+                return str(raw or '')
+        return ''
+
+    try:
+        num = float(raw)
+    except (TypeError, ValueError):
+        return f"{prefix}{str(raw or '\u2014')}{suffix}"
+
+    fmt = str(variable.get('format') or 'none')
+    if fmt == 'short':
+        if num >= 1e9:
+            s = f"{num/1e9:.1f}B"
+        elif num >= 1e6:
+            s = f"{num/1e6:.1f}M"
+        elif num >= 1e3:
+            s = f"{num/1e3:.1f}K"
+        else:
+            s = f"{num:.0f}"
+    elif fmt == 'currency':
+        s = f"${num:,.0f}"
+    elif fmt == 'percent':
+        s = f"{num*100:.1f}%"
+    elif fmt == 'wholeNumber':
+        s = f"{round(num):,}"
+    elif fmt == 'oneDecimal':
+        s = f"{num:,.1f}"
+    elif fmt == 'twoDecimals':
+        s = f"{num:,.2f}"
+    else:
+        s = str(raw)
+    return f"{prefix}{s}{suffix}"
+
+
+def _resolve_report_variables(db: Session, variables: list[dict], global_filters: Optional[dict] = None) -> dict[str, Any]:
+    """Resolve all report variables server-side. Returns {variable_id: resolved_value}."""
+    resolved: dict[str, Any] = {}
+    gf = global_filters or {}
+
+    # Pass 1: query-based and datetime variables
+    for v in variables:
+        vid = str(v.get('id') or '')
+        vtype = str(v.get('type') or 'query')
+        if vtype == 'datetime':
+            now = datetime.utcnow()
+            expr = str(v.get('datetimeExpr') or 'now')
+            if expr == 'today':
+                resolved[vid] = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            else:
+                resolved[vid] = now.isoformat()
+            continue
+        if vtype == 'expression':
+            continue  # handled in pass 2
+        # Query-based
+        source = v.get('source')
+        val_cfg = v.get('value') or {}
+        field = val_cfg.get('field')
+        if not source or not field:
+            resolved[vid] = None
+            continue
+        agg = val_cfg.get('agg')
+        if agg and agg != 'none':
+            where = {**(v.get('where') or {}), **gf}
+            spec: dict = {'source': source, 'agg': agg, 'y': field}
+            if where:
+                spec['where'] = where
+            try:
+                req = QuerySpecRequest(spec=spec, datasourceId=v.get('datasourceId'), limit=1000, offset=0, includeTotal=False)
+                res = run_query_spec(req, db)
+                cols = list(res.columns or [])
+                rows = list(res.rows or [])
+                if rows:
+                    val_idx = cols.index('value') if 'value' in cols else (len(cols) - 1 if len(cols) > 1 else 0)
+                    total = 0.0
+                    for row in rows:
+                        cell = row[val_idx] if isinstance(row, list) and val_idx < len(row) else row
+                        try:
+                            total += float(cell)
+                        except (TypeError, ValueError):
+                            pass
+                    resolved[vid] = total
+                else:
+                    resolved[vid] = None
+            except Exception as e:
+                logger.warning("Failed to resolve report variable %s: %s", vid, e)
+                resolved[vid] = None
+        else:
+            where = {**(v.get('where') or {}), **gf}
+            spec_raw: dict = {'source': source, 'select': [field]}
+            if where:
+                spec_raw['where'] = where
+            try:
+                req = QuerySpecRequest(spec=spec_raw, datasourceId=v.get('datasourceId'), limit=1, offset=0, includeTotal=False)
+                res = run_query_spec(req, db)
+                rows = list(res.rows or [])
+                resolved[vid] = rows[0][0] if rows and isinstance(rows[0], list) and rows[0] else None
+            except Exception as e:
+                logger.warning("Failed to resolve report variable %s: %s", vid, e)
+                resolved[vid] = None
+
+    # Pass 2: expression variables
+    var_by_name: dict[str, dict] = {str(v.get('name') or ''): v for v in variables}
+    for v in variables:
+        vid = str(v.get('id') or '')
+        if str(v.get('type') or '') != 'expression':
+            continue
+        expr = str(v.get('expression') or '')
+        if not expr:
+            resolved[vid] = None
+            continue
+        try:
+            eval_expr = expr
+            for ref in variables:
+                if ref.get('id') == vid:
+                    continue
+                ref_val = resolved.get(str(ref.get('id') or ''))
+                if ref_val is None:
+                    ref_val = 0
+                ref_name = str(ref.get('name') or '')
+                if ref_name:
+                    eval_expr = _re.sub(r'\b' + _re.escape(ref_name) + r'\b', str(float(ref_val)), eval_expr)
+            # Safe eval: only allow numbers and arithmetic
+            allowed = set('0123456789.+-*/() ')
+            if all(c in allowed for c in eval_expr.strip()):
+                resolved[vid] = float(eval(eval_expr))  # nosec
+            else:
+                resolved[vid] = None
+        except Exception as e:
+            logger.warning("Failed to evaluate expression variable %s: %s", vid, e)
+            resolved[vid] = None
+
+    return resolved
+
+
+def _resolve_text(text: str, variables: list[dict], resolved: dict[str, Any]) -> str:
+    """Replace {{VarName}} tokens in text with resolved values."""
+    def _repl(m):
+        name = m.group(1)
+        v = next((v for v in variables if str(v.get('name') or '') == name), None)
+        if not v:
+            return m.group(0)
+        vid = str(v.get('id') or '')
+        val = resolved.get(vid)
+        if val is None:
+            return '\u2014'
+        return _html_escape(_format_report_value(val, v))
+    return _re.sub(r'\{\{(\w+)\}\}', _repl, text)
+
+
+def _fw(w: Optional[str]) -> int:
+    """Convert font weight string to CSS number."""
+    if w == 'bold':
+        return 700
+    if w == 'semibold':
+        return 600
+    return 400
+
+
+def _render_report_element_html(el: dict, variables: list[dict], resolved: dict[str, Any], *, scale: float = 1.0) -> str:
+    """Render a single report element as email-safe HTML."""
+    etype = str(el.get('type') or '')
+
+    def _fs(px: int | float) -> int:
+        """Scale a font-size value, enforcing a readable minimum."""
+        return max(11, round(float(px) * scale))
+
+    def _pad(px: int | float) -> int:
+        return max(2, round(float(px) * scale))
+
+    if etype == 'label':
+        lbl = el.get('label') or {}
+        text = _resolve_text(str(lbl.get('text') or ''), variables, resolved)
+        va = lbl.get('verticalAlign') or 'top'
+        align_items = 'flex-end' if va == 'bottom' else 'center' if va == 'middle' else 'flex-start'
+        border = ''
+        bs = lbl.get('borderStyle')
+        if bs and bs != 'none':
+            bc = lbl.get('borderColor') or '#e5e7eb'
+            border = f"border:1px {bs} {bc};"
+        padding = f"{_pad(lbl.get('padding') or 4)}px"
+        return (
+            f"<div style='width:100%;height:100%;display:flex;align-items:{align_items};{border}"
+            f"background-color:{lbl.get('backgroundColor') or 'transparent'};padding:{padding};box-sizing:border-box;'>"
+            f"<span style='width:100%;text-align:{lbl.get('align') or 'left'};"
+            f"font-size:{_fs(lbl.get('fontSize') or 12)}px;"
+            f"font-weight:{_fw(lbl.get('fontWeight'))};"
+            f"{'font-style:italic;' if lbl.get('fontStyle') == 'italic' else ''}"
+            f"color:{lbl.get('color') or '#111827'};'>{text}</span></div>"
+        )
+
+    if etype == 'image':
+        img = el.get('image') or {}
+        url = img.get('url') or ''
+        if not url:
+            return "<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:11px;'>No image</div>"
+        fit = img.get('objectFit') or 'contain'
+        return f"<div style='width:100%;height:100%;overflow:hidden;'><img src='{_html_escape(url)}' alt='{_html_escape(img.get('alt') or '')}' style='width:100%;height:100%;object-fit:{fit};display:block;'/></div>"
+
+    if etype == 'spaceholder':
+        vid = el.get('variableId')
+        v = next((v for v in variables if str(v.get('id') or '') == vid), None)
+        if not v:
+            return "<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;'>\u2014</div>"
+        val = resolved.get(vid)
+        formatted = _html_escape(_format_report_value(val, v))
+        return f"<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:{_fs(18)}px;font-weight:600;font-family:Inter,Arial,sans-serif;'>{formatted}</div>"
+
+    if etype == 'table':
+        tbl = el.get('table') or {}
+        return _render_report_table_html(tbl, variables, resolved, scale=scale)
+
+    return ''
+
+
+def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[str, Any], *, scale: float = 1.0) -> str:
+    """Render a report table element as email-safe HTML — mirrors ReportCard table rendering."""
+
+    def _fs(px: int | float) -> int:
+        return max(11, round(float(px) * scale))
+
+    def _pad(px: int | float) -> int:
+        return max(2, round(float(px) * scale))
+
+    headers = tbl.get('headers') or []
+    subheaders = tbl.get('subheaders') or []
+    cells = tbl.get('cells') or []
+    b_style = tbl.get('borderStyle') or 'solid'
+    b_color = tbl.get('borderColor') or '#e5e7eb'
+    b_width = '0' if b_style == 'none' else '1px'
+    border = f"border:{b_width} {b_style} {b_color};"
+
+    # Header/subheader styles
+    h_bg = tbl.get('headerBg') or '#f3f4f6'
+    h_color = tbl.get('headerColor') or '#111827'
+    h_fs = _fs(tbl.get('headerFontSize') or 12)
+    h_fw = _fw(tbl.get('headerFontWeight') or 'bold')
+    h_align = tbl.get('headerAlign') or 'left'
+    h_va = tbl.get('headerVerticalAlign') or 'middle'
+    h_height = tbl.get('headerHeight')
+
+    sh_bg = tbl.get('subheaderBg') or h_bg
+    sh_color = tbl.get('subheaderColor') or h_color
+    sh_fs = _fs(tbl.get('subheaderFontSize') or 11)
+    sh_fw = _fw(tbl.get('subheaderFontWeight') or 'normal')
+    sh_align = tbl.get('subheaderAlign') or h_align
+    sh_va = tbl.get('subheaderVerticalAlign') or 'middle'
+
+    # Merge logic — merge header with blank subheaders (rowSpan=2)
+    merge_map: list[bool] = []
+    if subheaders and tbl.get('mergeBlankSubheaders'):
+        sub_idx = 0
+        for h in headers:
+            h_obj = h if isinstance(h, dict) else {'text': str(h), 'colspan': 1}
+            span = int(h_obj.get('colspan') or 1)
+            all_blank = all(not (subheaders[sub_idx + k].strip() if (sub_idx + k) < len(subheaders) else True) for k in range(span))
+            merge_map.append(all_blank)
+            sub_idx += span
+
+    has_sub_row = bool(subheaders) and (not tbl.get('mergeBlankSubheaders') or any(not m for m in merge_map))
+
+    # Column widths
+    col_widths = tbl.get('colWidths') or []
+
+    # Build colgroup
+    colgroup = ''
+    if col_widths and any(w > 0 for w in col_widths):
+        cols_html = ''.join(f"<col style='width:{w}%;'/>" if w > 0 else '<col/>' for w in col_widths)
+        colgroup = f"<colgroup>{cols_html}</colgroup>"
+
+    # Build header row
+    h_height_style = f"height:{round(int(h_height) * scale)}px;" if h_height else ''
+    header_cells = []
+    for i, h in enumerate(headers):
+        h_obj = h if isinstance(h, dict) else {'text': str(h), 'colspan': 1}
+        colspan = int(h_obj.get('colspan') or 1)
+        merged = merge_map[i] if i < len(merge_map) else False
+        rowspan = ' rowspan="2"' if merged and has_sub_row else ''
+        text = _resolve_text(str(h_obj.get('text') or f'Col {i+1}'), variables, resolved)
+        header_cells.append(
+            f"<th{rowspan} colspan='{colspan}' style='{border}background:{h_bg};color:{h_color};"
+            f"font-size:{h_fs}px;font-weight:{h_fw};text-align:{h_align};vertical-align:{h_va};"
+            f"padding:{_pad(4)}px {_pad(8)}px;{h_height_style}'>{text}</th>"
+        )
+    thead = f"<tr>{''.join(header_cells)}</tr>"
+
+    # Build subheader row
+    if has_sub_row:
+        sub_cells = []
+        sub_idx = 0
+        for hi, h in enumerate(headers):
+            h_obj = h if isinstance(h, dict) else {'text': str(h), 'colspan': 1}
+            span = int(h_obj.get('colspan') or 1)
+            if hi < len(merge_map) and merge_map[hi]:
+                sub_idx += span
+                continue
+            for k in range(span):
+                sh_text = _resolve_text(subheaders[sub_idx + k] if (sub_idx + k) < len(subheaders) else '', variables, resolved)
+                w_style = f"width:{col_widths[sub_idx + k]}%;" if (sub_idx + k) < len(col_widths) and col_widths[sub_idx + k] > 0 else ''
+                sub_cells.append(
+                    f"<th style='{border}background:{sh_bg};color:{sh_color};"
+                    f"font-size:{sh_fs}px;font-weight:{sh_fw};text-align:{sh_align};vertical-align:{sh_va};"
+                    f"padding:{_pad(4)}px {_pad(8)}px;{w_style}'>{sh_text}</th>"
+                )
+            sub_idx += span
+        thead += f"<tr>{''.join(sub_cells)}</tr>"
+
+    # Build body rows
+    tbody_rows = []
+    row_styles = tbl.get('rowStyles') or []
+    striped = tbl.get('stripedRows')
+    for ri, row in enumerate(cells):
+        rs = row_styles[ri] if ri < len(row_styles) else {}
+        row_bg = (rs.get('bg') if isinstance(rs, dict) else None) or ('#f9fafb' if striped and ri % 2 == 1 else '#ffffff')
+        row_height = ''
+        rh_list = tbl.get('rowHeights') or []
+        if ri < len(rh_list) and rh_list[ri]:
+            row_height = f"height:{round(int(rh_list[ri]) * scale)}px;"
+
+        tds = []
+        for ci, cell in enumerate(row if isinstance(row, list) else []):
+            cs = cell.get('style') or {} if isinstance(cell, dict) else {}
+            cell_bg = cs.get('backgroundColor') or ''
+            bg_style = f"background:{cell_bg};" if cell_bg else f"background:{row_bg};"
+            fs = _fs(cs.get('fontSize') or (rs.get('fontSize') if isinstance(rs, dict) else None) or 12)
+            fw = _fw(cs.get('fontWeight') or (rs.get('fontWeight') if isinstance(rs, dict) else None) or 'normal')
+            fi = 'font-style:italic;' if cs.get('fontStyle') == 'italic' else ''
+            color = cs.get('color') or (rs.get('color') if isinstance(rs, dict) else None) or '#111827'
+            ta = cs.get('align') or 'left'
+            va = cs.get('verticalAlign') or 'middle'
+
+            # Resolve cell content
+            cell_type = str(cell.get('type') or 'text') if isinstance(cell, dict) else 'text'
+            if cell_type == 'spaceholder':
+                vid = cell.get('variableId') if isinstance(cell, dict) else None
+                v = next((v for v in variables if str(v.get('id') or '') == vid), None)
+                if v:
+                    raw_val = resolved.get(vid)
+                    content = _html_escape(_format_report_value(raw_val, v))
+                else:
+                    content = '\u2014'
+            else:
+                content = _resolve_text(_html_escape(str(cell.get('text') or '') if isinstance(cell, dict) else ''), variables, resolved)
+
+            tds.append(
+                f"<td style='{border}{bg_style}font-size:{fs}px;font-weight:{fw};{fi}"
+                f"color:{color};text-align:{ta};vertical-align:{va};padding:{_pad(4)}px {_pad(8)}px;white-space:nowrap;'>{content}</td>"
+            )
+        tbody_rows.append(f"<tr style='{row_height}'>{''.join(tds)}</tr>")
+
+    radius = tbl.get('borderRadius')
+    radius_style = f"border-radius:{radius}px;overflow:hidden;" if radius else ''
+
+    return (
+        f"<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;{border}{radius_style}'>"
+        f"{colgroup}<thead>{thead}</thead><tbody>{''.join(tbody_rows)}</tbody></table>"
+    )
+
+
+def _render_report_html(widget_cfg: dict, db: Session, global_filters: Optional[dict] = None, *, target_width: int = 600) -> str:
+    """Render a full report widget as **email-safe** HTML using flow layout.
+
+    Instead of CSS absolute positioning (which Outlook strips), elements are
+    grouped into visual rows and laid out using ``<table>`` cells with
+    percentage widths derived from the grid.  This prevents overlap and works
+    reliably across all email clients.
+
+    ``target_width`` is used only for font/padding scaling so the report looks
+    proportional.  The outer container uses ``width:100%`` so it fills whatever
+    space the email template provides.
+    """
+    report = (widget_cfg.get('options') or {}).get('report') or {}
+    elements = report.get('elements') or []
+    variables = report.get('variables') or []
+    grid_cols = int(report.get('gridCols') or 12)
+    cell_size = int(report.get('cellSize') or 30)
+    raw_w = grid_cols * cell_size  # original builder width
+
+    # Scale factor — used for font-size / padding only (layout uses %)
+    scale = target_width / raw_w if raw_w > 0 else 1.0
+
+    # Resolve all variables
+    resolved = _resolve_report_variables(db, variables, global_filters)
+
+    # Sort elements by grid position
+    sorted_els = sorted(elements, key=lambda e: (e.get('gridY', 0), e.get('gridX', 0)))
+
+    # ---- Group elements into visual rows ----
+    # Two elements belong to the same row when their Y ranges overlap.
+    rows: list[list[dict]] = []
+    for el in sorted_els:
+        gy = int(el.get('gridY') or 0)
+        gh = int(el.get('gridH') or 1)
+        el_top = gy
+        el_bottom = gy + gh
+        placed = False
+        for row in rows:
+            # Check if this element's Y range overlaps with the row's Y range
+            row_top = min(int(r.get('gridY') or 0) for r in row)
+            row_bottom = max(int(r.get('gridY') or 0) + int(r.get('gridH') or 1) for r in row)
+            if el_top < row_bottom and el_bottom > row_top:
+                row.append(el)
+                placed = True
+                break
+        if not placed:
+            rows.append([el])
+
+    # ---- Render each visual row ----
+    html_rows: list[str] = []
+    for row in rows:
+        row = sorted(row, key=lambda e: int(e.get('gridX') or 0))
+        row_height = max(int(r.get('gridH') or 1) for r in row)
+        h_px = round(row_height * cell_size * scale)
+
+        if len(row) == 1:
+            el = row[0]
+            gw = int(el.get('gridW') or 1)
+            w_pct = round(gw / grid_cols * 100, 1)
+            is_table = str(el.get('type') or '') == 'table'
+            content = _render_report_element_html(el, variables, resolved, scale=scale)
+            if is_table:
+                # Tables always span full width
+                html_rows.append(
+                    f"<div style='width:100%;box-sizing:border-box;'>{content}</div>"
+                )
+            else:
+                html_rows.append(
+                    f"<div style='width:{w_pct}%;min-height:{h_px}px;box-sizing:border-box;'>{content}</div>"
+                )
+        else:
+            # Multiple elements side by side — use an HTML table for layout
+            cells_html = []
+            for el in row:
+                gw = int(el.get('gridW') or 1)
+                w_pct = round(gw / grid_cols * 100, 1)
+                is_table = str(el.get('type') or '') == 'table'
+                content = _render_report_element_html(el, variables, resolved, scale=scale)
+                va = 'top'
+                cells_html.append(
+                    f"<td style='width:{w_pct}%;vertical-align:{va};padding:0;box-sizing:border-box;'>{content}</td>"
+                )
+            html_rows.append(
+                f"<table style='width:100%;border-collapse:collapse;border:0;' cellpadding='0' cellspacing='0'>"
+                f"<tr style='min-height:{h_px}px;'>{''.join(cells_html)}</tr></table>"
+            )
+
+    return (
+        f"<div style='width:100%;font-family:Inter,Arial,sans-serif;color:#111827;'>"
+        f"{''.join(html_rows)}</div>"
+    )
+
+
+# --- PDF generation (uses Playwright print-to-PDF) ---
+
+def _html_to_pdf(html: str, *, width: str = "210mm", height: str = "297mm", landscape: bool = False) -> Optional[bytes]:
+    """Convert a full HTML string to PDF using Playwright's Chromium print-to-PDF."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        logger.warning("Playwright not available for PDF generation")
+        return None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                page = browser.new_page()
+                page.set_content(html, wait_until="networkidle")
+                pdf_bytes = page.pdf(
+                    format="A4",
+                    landscape=landscape,
+                    print_background=True,
+                    margin={"top": "12mm", "right": "10mm", "bottom": "12mm", "left": "10mm"},
+                )
+                return pdf_bytes
+            finally:
+                browser.close()
+    except Exception as e:
+        logger.warning("PDF generation failed: %s", e)
+        return None
+
+
+def _render_report_pdf(widget_cfg: dict, db: Session, global_filters: Optional[dict] = None, *, landscape: bool = False) -> Optional[bytes]:
+    """Render a report widget as PDF bytes.
+    
+    Generates the report HTML, wraps it in a full HTML document with Inter font, and converts to PDF.
+    The target_width is chosen based on orientation to fill the printable area.
+    """
+    # A4 printable area minus margins (10mm each side):
+    # portrait  = 210mm - 20mm = 190mm ≈ 718px at 96dpi
+    # landscape = 297mm - 20mm = 277mm ≈ 1047px at 96dpi
+    pdf_target_w = 1047 if landscape else 718
+    report_html = _render_report_html(widget_cfg, db, global_filters, target_width=pdf_target_w)
+    if not report_html:
+        return None
+    full_html = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {{ margin: 0; padding: 16px; font-family: Inter, Arial, sans-serif; color: #111827; background: #fff; }}
+    table {{ border-collapse: collapse; }}
+    img {{ max-width: 100%; }}
+  </style>
+</head>
+<body>
+  {report_html}
+</body>
+</html>"""
+    return _html_to_pdf(full_html, landscape=landscape)
+
+
+# --- Widget config lookup ---
+
+def _lookup_widget_config(db: Session, *, dashboard_id: Optional[str], widget_id: Optional[str]) -> Optional[dict]:
+    """Look up a widget's full config dict from the Dashboard model's JSON definition."""
+    if not dashboard_id or not widget_id:
+        return None
+    try:
+        dash = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
+        if not dash:
+            return None
+        raw = getattr(dash, 'definition_json', None) or getattr(dash, 'definition', None)
+        definition = raw if isinstance(raw, dict) else json.loads(raw or '{}')
+        widgets = definition.get('widgets') or {}
+        if isinstance(widgets, dict):
+            # widgets is a dict keyed by widget ID
+            if str(widget_id) in widgets:
+                return widgets[str(widget_id)]
+            # Also check by 'id' field inside each widget value
+            for _k, w in widgets.items():
+                if isinstance(w, dict) and str(w.get('id') or '') == str(widget_id):
+                    return w
+        elif isinstance(widgets, list):
+            for w in widgets:
+                if isinstance(w, dict) and str(w.get('id') or '') == str(widget_id):
+                    return w
+    except Exception as e:
+        logger.warning("_lookup_widget_config failed for dash=%s widget=%s: %s", dashboard_id, widget_id, e)
+    return None
+
+
 # --- Simple SVG placeholders (embedded or attached) ---
 def _build_kpi_svg(value: Any, label: Optional[str] = None, *, width: int = 600, height: int = 300) -> bytes:
     lab = _html_escape(label or "KPI")
@@ -341,7 +918,7 @@ def _fetch_snapshot_png_via_http(*, dashboard_id: Optional[str], public_id: Opti
 
 # --- Email / SMS senders ---
 
-def send_email(db: Session, *, subject: str, to: list[str], html: str, replacements: Optional[dict[str, str]] = None, inline_images: Optional[list[tuple[str, bytes, str, str]]] = None, already_wrapped: bool = False) -> Tuple[bool, Optional[str]]:
+def send_email(db: Session, *, subject: str, to: list[str], html: str, replacements: Optional[dict[str, str]] = None, inline_images: Optional[list[tuple[str, bytes, str, str]]] = None, attachments: Optional[list[tuple[str, bytes, str]]] = None, already_wrapped: bool = False) -> Tuple[bool, Optional[str]]:
     cfg: EmailConfig | None = db.query(EmailConfig).first()
     if not cfg or not cfg.host or not cfg.username or not cfg.password_encrypted:
         return False, "Email is not configured"
@@ -381,7 +958,7 @@ def send_email(db: Session, *, subject: str, to: list[str], html: str, replaceme
                 pass
         # Remove known unreplaced tokens (case-insensitive) to avoid showing {{CHART_IMG}} in emails
         try:
-            for k in ("CHART_IMG", "KPI_IMG", "TABLE_HTML", "chart_img", "kpi_img", "table_html"):
+            for k in ("CHART_IMG", "KPI_IMG", "TABLE_HTML", "REPORT_HTML", "chart_img", "kpi_img", "table_html", "report_html"):
                 try:
                     final_html = final_html.replace("{{" + k + "}}", "")
                 except Exception:
@@ -392,90 +969,34 @@ def send_email(db: Session, *, subject: str, to: list[str], html: str, replaceme
                     pass
         except Exception:
             pass
-        # Inline logo: ensure any referenced logo becomes a data URI
+        # Inline logo: convert any data-URI logo in the HTML to a CID attachment
+        # so email clients (which block data URIs) can still render it.
         inline_images_buf: list[tuple[str, bytes, str, str]] = []
         try:
-            lu = (cfg.logo_url or "").strip()
-            inline_logo: str | None = None
-            if lu.startswith("data:") and ";base64," in lu:
-                inline_logo = lu
-            elif lu.lower().startswith("http://") or lu.lower().startswith("https://"):
+            # Find ANY data URI inside an <img> tag with alt="Logo" (regardless of src order)
+            _logo_pat = _re.compile(
+                r"""<img\b[^>]*?\bsrc\s*=\s*['"]?(data:([^;'"]+);base64,([A-Za-z0-9+/=\s]+))['"]?[^>]*>""",
+                _re.IGNORECASE,
+            )
+            def _cid_replace_logo(m):
+                full_data_uri = m.group(1).strip()
+                mime = (m.group(2) or "image/png").strip()
+                b64 = m.group(3).strip()
                 try:
-                    with urlopen(lu, timeout=15) as resp:  # nosec B310
-                        data = resp.read()
-                        ct = (resp.headers.get("content-type") or "image/png").split(";")[0]
-                    inline_logo = f"data:{ct};base64,{base64.b64encode(data).decode('ascii')}"
-                    final_html = final_html.replace(lu, inline_logo)
+                    _bytes = base64.b64decode(b64)
+                    _cid = f"logo_{uuid4().hex}"
+                    ext = mime.split("/")[-1].split("+")[0] or "png"
+                    inline_images_buf.append((_cid, _bytes, mime, f"logo.{ext}"))
+                    return m.group(0).replace(full_data_uri, f"cid:{_cid}")
                 except Exception:
-                    inline_logo = None
-            # If still not set, try to inline /logo.svg from frontend
-            if inline_logo is None and ("/logo.svg" in final_html or _re.search(r"originalsrc\s*=\s*['\"]/logo\.svg['\"]", final_html or "")):
-                try:
-                    base_f = (settings.frontend_base_url or "http://localhost:3000").rstrip("/")
-                    absu = f"{base_f}/logo.svg"
-                    with urlopen(absu, timeout=15) as resp:  # nosec B310
-                        data = resp.read()
-                        ct = (resp.headers.get("content-type") or "image/svg+xml").split(";")[0]
-                    inline_logo = f"data:{ct};base64,{base64.b64encode(data).decode('ascii')}"
-                except Exception:
-                    inline_logo = None
-            # If still not set, try branding logoLight from metadata
-            if inline_logo is None:
-                try:
-                    data_dir = Path(settings.metadata_db_path).resolve().parent
-                    f = data_dir / "branding.json"
-                    if f.exists():
-                        import json as _json
-                        obj = _json.loads(f.read_text(encoding="utf-8") or "{}")
-                        ll = (obj.get("logoLight") or "").strip()
-                        if ll.startswith("data:") and ";base64," in ll:
-                            inline_logo = ll
-                        elif ll.lower().startswith("http://") or ll.lower().startswith("https://"):
-                            try:
-                                with urlopen(ll, timeout=15) as resp:  # nosec B310
-                                    data = resp.read()
-                                    ct = (resp.headers.get("content-type") or "image/png").split(";")[0]
-                                inline_logo = f"data:{ct};base64,{base64.b64encode(data).decode('ascii')}"
-                            except Exception:
-                                inline_logo = None
-                except Exception:
-                    inline_logo = None
-            # Apply inline logo replacement for any '/logo.svg' or missing 'src' variants
-            if inline_logo:
-                try:
-                    final_html = final_html.replace("src='/logo.svg'", f"src='{inline_logo}'").replace('src="/logo.svg"', f'src="{inline_logo}"')
-                    final_html = _re.sub(r"src\s*=\s*(['\"])\/logo\.svg\1", f"src='{inline_logo}'", final_html, flags=_re.IGNORECASE)
-                    # Remove any originalsrc (Outlook, etc.) and ensure src is present for alt='Logo'
-                    final_html = _re.sub(r"originalsrc\s*=\s*(['\"])\/logo\.svg\1", "", final_html, flags=_re.IGNORECASE)
-                    final_html = _re.sub(r"originalsrc\s*=\s*(['\"][^'\"]+['\"])", "", final_html, flags=_re.IGNORECASE)
-                    def _ensure_logo_src(m):
-                        tag = m.group(0)
-                        try:
-                            if _re.search(r"\bsrc\s*=", tag, flags=_re.IGNORECASE):
-                                return tag
-                            return tag[:-1] + f" src='{inline_logo}'>"
-                        except Exception:
-                            return tag
-                    final_html = _re.sub(r"<img\b[^>]*\balt=([\'\"])Logo\1[^>]*>", _ensure_logo_src, final_html, flags=_re.IGNORECASE)
-                    # Convert inline data URI logo into CID so email clients that block data URIs still render it
-                    if inline_logo.startswith('data:'):
-                        try:
-                            _m = _re.match(r"data:([^;]+);base64,(.+)$", inline_logo, flags=_re.IGNORECASE)
-                            if _m:
-                                _mime = (_m.group(1) or 'image/png').strip()
-                                _b64 = _m.group(2)
-                                _bytes = base64.b64decode(_b64)
-                                _cid = f"logo_{uuid4().hex}"
-                                inline_images_buf.append((_cid, _bytes, _mime, 'logo'))
-                                # Replace any occurrence of the data URI (or alt='Logo' img) with CID reference
-                                final_html = final_html.replace(inline_logo, f"cid:{_cid}")
-                                final_html = _re.sub(r"(<img\b[^>]*\balt=([\'\"])Logo\2[^>]*\bsrc=)([\'\"])data:[^>]+?\3", r"\\1'cid:" + _cid + r"'", final_html, flags=_re.IGNORECASE)
-                                if "/logo.svg" in final_html:
-                                    final_html = final_html.replace("/logo.svg", f"cid:{_cid}")
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                    return m.group(0)
+            # Only convert logo images (alt=Logo) to CID; leave other data URIs alone
+            _logo_img_pat = _re.compile(r"<img\b[^>]*\balt=['\"]Logo['\"][^>]*>", _re.IGNORECASE)
+            for logo_tag_m in _logo_img_pat.finditer(final_html):
+                tag = logo_tag_m.group(0)
+                new_tag = _logo_pat.sub(_cid_replace_logo, tag)
+                if new_tag != tag:
+                    final_html = final_html.replace(tag, new_tag)
         except Exception:
             pass
         msg.add_alternative(final_html, subtype="html")
@@ -500,6 +1021,31 @@ def send_email(db: Session, *, subject: str, to: list[str], html: str, replaceme
                         target.add_related(data, maintype=maintype, subtype=subtype, cid=cid)
         except Exception:
             pass
+        # Post-process: strip filename from inline CID images so Outlook hides them
+        # from the attachment list.  Walk every sub-part; if it has a Content-ID
+        # header it is an inline image – force Content-Disposition to plain "inline"
+        # with no filename parameter.
+        try:
+            for part in msg.walk():
+                if part.get("Content-ID"):
+                    # Replace Content-Disposition entirely with bare "inline"
+                    if part.get("Content-Disposition"):
+                        del part["Content-Disposition"]
+                    part["Content-Disposition"] = "inline"
+                    # Also remove Content-Type "name" param that some clients use
+                    ct = part.get_content_type()
+                    if ct and part.get_param("name"):
+                        part.del_param("name")
+        except Exception:
+            pass
+        # Attach file attachments (PDF, etc.) — list of (filename, data_bytes, mime_type)
+        if attachments:
+            for att_filename, att_data, att_mime in attachments:
+                try:
+                    att_main, att_sub = (att_mime.split("/", 1) + ["octet-stream"])[:2]
+                    msg.add_attachment(att_data, maintype=att_main, subtype=att_sub, filename=att_filename)
+                except Exception as att_err:
+                    logger.warning("Failed to attach %s: %s", att_filename, att_err)
         server = smtplib.SMTP(cfg.host, int(cfg.port or 587), timeout=30)
         try:
             if cfg.use_tls:
@@ -537,7 +1083,7 @@ def _default_base_template(logo_url: Optional[str]) -> str:
   <style>
     body{{margin:0;padding:0;color:#111827;font-family:Inter,Arial,sans-serif;}}
     .wrap{{width:100%;padding:24px 0;}}
-    .container{{max-width:640px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,0.04);overflow:hidden;}}
+    .container{{max-width:960px;width:100%;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,0.04);}}
     .header{{padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:12px;}}
     .brand{{font-size:14px;font-weight:600;color:#111827;}}
     .content{{padding:20px;}}
@@ -575,6 +1121,8 @@ def _default_base_template(logo_url: Optional[str]) -> str:
 
 
 def _apply_base_template(cfg: EmailConfig, subject: str, body_html: str) -> str:
+    # Resolve {{date}} / {{time}} tokens in the subject
+    subject = _resolve_datetime_tokens(subject)
     # Prefer branding logoLight for always-light emails; fall back to email config logoUrl
     branding_logo = None
     try:
@@ -647,6 +1195,24 @@ def _apply_base_template(cfg: EmailConfig, subject: str, body_html: str) -> str:
                     out = _re.sub(r"src\s*=\s*\/logo\.svg(?![\w])", f"src='{inline_val}'", out, flags=_re.IGNORECASE)
                 except Exception:
                     pass
+    except Exception:
+        pass
+    # Fix SVG logo rendering: max-height clips SVGs without intrinsic dimensions;
+    # replace with height + width:auto so the browser scales properly.
+    try:
+        out = out.replace("max-height:40px;display:block", "height:40px;width:auto;display:block")
+        out = out.replace("max-height:40px; display:block", "height:40px;width:auto;display:block")
+    except Exception:
+        pass
+    # Ensure the container doesn't clip wide report tables
+    try:
+        out = out.replace("overflow:hidden;", "overflow:visible;")
+        out = out.replace("overflow: hidden;", "overflow: visible;")
+    except Exception:
+        pass
+    # Widen any hardcoded max-width that would constrain report tables
+    try:
+        out = _re.sub(r"max-width\s*:\s*640px", "max-width:960px;width:100%", out, flags=_re.IGNORECASE)
     except Exception:
         pass
     return out
@@ -926,6 +1492,23 @@ def _fmt_run_at(dt: datetime) -> str:
         return dt.strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
         return dt.isoformat() + "Z"
+
+
+def _resolve_datetime_tokens(s: str) -> str:
+    """Replace ``{{date}}`` and ``{{time}}`` with current date/time strings.
+
+    Formats:
+      {{date}} → dd/mm/yyyy
+      {{time}} → hh:mm AM/PM
+    """
+    if not s or ("{{" not in s):
+        return s
+    now = datetime.now()
+    date_str = now.strftime("%d/%m/%Y")
+    time_str = now.strftime("%I:%M %p")
+    out = _re.sub(r"\{\{\s*date\s*\}\}", date_str, s, flags=_re.IGNORECASE)
+    out = _re.sub(r"\{\{\s*time\s*\}\}", time_str, out, flags=_re.IGNORECASE)
+    return out
 
 
 def _apply_placeholders(s: str, repl: dict[str, str]) -> str:
@@ -1309,6 +1892,35 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progr
                     try: progress_cb({"id": "snapshot", "status": "error", "mode": "table", "error": "render_failed"})
                     except Exception: pass
                 html_parts.append("<div>Failed to render table.</div>")
+        elif render.get("mode") == "report":
+            if progress_cb:
+                try: progress_cb({"id": "snapshot", "status": "start", "mode": "report"})
+                except Exception: pass
+            try:
+                wref = (render or {}).get("widgetRef") or {}
+                wid = (wref or {}).get("widgetId") or getattr(rule, "widget_id", None)
+                did = (wref or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
+                widget_cfg = _lookup_widget_config(db, dashboard_id=did, widget_id=wid)
+                if widget_cfg:
+                    report_html_val = _render_report_html(widget_cfg, db)
+                    replacements_extra["REPORT_HTML"] = report_html_val
+                    replacements_extra["TABLE_HTML"] = report_html_val
+                    if not template_present:
+                        html_parts.append(report_html_val)
+                    if progress_cb:
+                        try: progress_cb({"id": "snapshot", "status": "ok", "mode": "report"})
+                        except Exception: pass
+                else:
+                    html_parts.append("<div>Report widget not found.</div>")
+                    if progress_cb:
+                        try: progress_cb({"id": "snapshot", "status": "error", "mode": "report", "error": "widget_not_found"})
+                        except Exception: pass
+            except Exception as e:
+                logger.warning("Failed to render report: %s", e)
+                html_parts.append("<div>Failed to render report.</div>")
+                if progress_cb:
+                    try: progress_cb({"id": "snapshot", "status": "error", "mode": "report", "error": str(e)})
+                    except Exception: pass
         html = "\n".join(html_parts)
         # Dispatch
         errs: list[str] = []
@@ -1666,11 +2278,28 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progr
                 if not to:
                     # No recipients configured; skip email send
                     continue
-                subj = str(a.get("subject") or rule.name)
+                subj = _resolve_datetime_tokens(str(a.get("subject") or rule.name))
                 if progress_cb:
                     try: progress_cb({"id": "email", "status": "start", "to": len(to)})
                     except Exception: pass
-                ok, err = send_email(db, subject=subj, to=to, html=html, replacements=replacements_all, inline_images=inline_images)
+                # Build PDF attachment if configured for report mode
+                email_attachments: list[tuple[str, bytes, str]] = []
+                if a.get("attachPdf") and render.get("mode") == "report":
+                    try:
+                        wref_pdf = (render or {}).get("widgetRef") or {}
+                        wid_pdf = (wref_pdf or {}).get("widgetId") or getattr(rule, "widget_id", None)
+                        did_pdf = (wref_pdf or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
+                        wcfg_pdf = _lookup_widget_config(db, dashboard_id=did_pdf, widget_id=wid_pdf)
+                        if wcfg_pdf:
+                            pdf_landscape = bool(a.get("pdfLandscape"))
+                            pdf_bytes = _render_report_pdf(wcfg_pdf, db, landscape=pdf_landscape)
+                            if pdf_bytes:
+                                _resolved_name = _resolve_datetime_tokens(str(rule.name or 'report'))
+                                pdf_name = f"{_re.sub(r'[^a-zA-Z0-9_-]', '_', _resolved_name)}.pdf"
+                                email_attachments.append((pdf_name, pdf_bytes, "application/pdf"))
+                    except Exception as pdf_err:
+                        logger.warning("PDF attachment generation failed: %s", pdf_err)
+                ok, err = send_email(db, subject=subj, to=to, html=html, replacements=replacements_all, inline_images=inline_images, attachments=email_attachments or None)
                 if not ok and err:
                     errs.append(f"email: {err}")
                     if progress_cb:
@@ -1775,6 +2404,32 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progr
             parts.append(f"<div style='margin-top:8px'><img alt='KPI' src='{_to_svg_data_uri(svg)}' style='max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:10px'/></div>")
         except Exception:
             pass
+    elif render.get("mode") == "report":
+        if progress_cb:
+            try: progress_cb({"id": "snapshot", "status": "start", "mode": "report"})
+            except Exception: pass
+        try:
+            wref = (render or {}).get("widgetRef") or {}
+            wid_r = (wref or {}).get("widgetId") or getattr(rule, "widget_id", None)
+            did_r = (wref or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
+            widget_cfg = _lookup_widget_config(db, dashboard_id=did_r, widget_id=wid_r)
+            if widget_cfg:
+                report_html_val = _render_report_html(widget_cfg, db)
+                parts = [report_html_val]
+                if progress_cb:
+                    try: progress_cb({"id": "snapshot", "status": "ok", "mode": "report"})
+                    except Exception: pass
+            else:
+                parts = ["<div>Report widget not found.</div>"]
+                if progress_cb:
+                    try: progress_cb({"id": "snapshot", "status": "error", "mode": "report", "error": "widget_not_found"})
+                    except Exception: pass
+        except Exception as e:
+            logger.warning("Failed to render report (v1): %s", e)
+            parts = ["<div>Failed to render report.</div>"]
+            if progress_cb:
+                try: progress_cb({"id": "snapshot", "status": "error", "mode": "report", "error": str(e)})
+                except Exception: pass
     else:
         pass  # No placeholder fallback for charts
     if progress_cb:
@@ -1787,7 +2442,7 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progr
         wid = (wref or {}).get("widgetId")
         did = (wref or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
         mode_ = str(((render or {}).get("mode") or "kpi")).lower()
-        is_chart_like_v1 = (mode_ not in ("table", "kpi"))
+        is_chart_like_v1 = (mode_ not in ("table", "kpi", "report"))
         if wid and is_chart_like_v1:
             snapshot_expected_v1 = True
             w = int((render or {}).get("width") or 1000)
@@ -2161,9 +2816,26 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progr
             if not to:
                 # No recipients configured; skip email send
                 continue
-            raw_subject = str(a.get("subject") or rule.name)
+            raw_subject = _resolve_datetime_tokens(str(a.get("subject") or rule.name))
             subj = _apply_placeholders(raw_subject, placeholders)
-            ok, err = send_email(db, subject=subj, to=to, html=html, replacements=placeholders, inline_images=inline_images)
+            # Build PDF attachment if configured for report mode
+            email_attachments_v1: list[tuple[str, bytes, str]] = []
+            if a.get("attachPdf") and render.get("mode") == "report":
+                try:
+                    wref_pdf = (render or {}).get("widgetRef") or {}
+                    wid_pdf = (wref_pdf or {}).get("widgetId") or getattr(rule, "widget_id", None)
+                    did_pdf = (wref_pdf or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
+                    wcfg_pdf = _lookup_widget_config(db, dashboard_id=did_pdf, widget_id=wid_pdf)
+                    if wcfg_pdf:
+                        pdf_landscape = bool(a.get("pdfLandscape"))
+                        pdf_bytes = _render_report_pdf(wcfg_pdf, db, landscape=pdf_landscape)
+                        if pdf_bytes:
+                            _resolved_name = _resolve_datetime_tokens(str(rule.name or 'report'))
+                            pdf_name = f"{_re.sub(r'[^a-zA-Z0-9_-]', '_', _resolved_name)}.pdf"
+                            email_attachments_v1.append((pdf_name, pdf_bytes, "application/pdf"))
+                except Exception as pdf_err:
+                    logger.warning("PDF attachment generation failed (v1): %s", pdf_err)
+            ok, err = send_email(db, subject=subj, to=to, html=html, replacements=placeholders, inline_images=inline_images, attachments=email_attachments_v1 or None)
             if not ok and err:
                 errs.append(f"email: {err}")
         elif atype == "sms":

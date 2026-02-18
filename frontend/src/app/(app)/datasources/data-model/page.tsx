@@ -5,6 +5,7 @@ import { Api, type DatasourceOut, type IntrospectResponse, type LocalStatsRespon
 import { useAuth } from '@/components/providers/AuthProvider'
 import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
 import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
+import ImportTableDialog from '@/components/builder/ImportTableDialog'
 import type { IntrospectResponse as IR } from '@/lib/api'
 import { Select, SelectItem, Card, TextInput } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -51,6 +52,7 @@ export default function DataModelPage() {
   const [renamingTable, setRenamingTable] = useState<{ dsId: string; oldName: string; newName: string } | null>(null)
   const [users, setUsers] = useState<Array<{ id: string; username?: string; email?: string }>>([])
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
   const [customColumnsByDs, setCustomColumnsByDs] = useState<Record<string, Array<{ name: string; type: string; scope?: string | { level: string; table?: string | null; widgetId?: string | null }; formula?: string }>>>({})
 
   // Keep defaultDsId in sync with localStorage and custom events
@@ -367,8 +369,16 @@ export default function DataModelPage() {
         <div className="text-sm font-medium">
           Tables from: <span className="text-blue-600 dark:text-blue-400">{datasources.find(d => d.id === selectedDuckId)?.name || 'No DuckDB selected'}</span>
         </div>
-        <div className="text-xs text-muted-foreground">
-          {baseRows.length} table{baseRows.length !== 1 ? 's' : ''}
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">{baseRows.length} table{baseRows.length !== 1 ? 's' : ''}</span>
+          {selectedDuckId && (
+            <button
+              className="text-xs px-2.5 py-1 rounded-md border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5 text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 font-medium"
+              onClick={() => setImportOpen(true)}
+            >
+              + Import Table
+            </button>
+          )}
         </div>
       </div>
 
@@ -962,6 +972,41 @@ export default function DataModelPage() {
             </div>
           </Card>
         </div>
+      )}
+
+      {/* Import Table Dialog */}
+      {selectedDuckId && (
+        <ImportTableDialog
+          open={importOpen}
+          dsId={selectedDuckId}
+          onCloseAction={() => setImportOpen(false)}
+          onImported={(tableName, rowCount) => {
+            // Add the new table to the rows list optimistically
+            setRows((prev) => {
+              const already = prev.some((r) => r.datasourceId === selectedDuckId && r.table === tableName)
+              if (already) {
+                return prev.map((r) =>
+                  r.datasourceId === selectedDuckId && r.table === tableName
+                    ? { ...r, rowCount }
+                    : r
+                )
+              }
+              const ds = datasources.find((d) => d.id === selectedDuckId)
+              return [...prev, {
+                table: tableName,
+                rowCount,
+                lastSyncAt: new Date().toISOString(),
+                datasourceId: selectedDuckId,
+                datasourceName: ds?.name || '',
+                datasourceType: ds?.type || 'duckdb',
+                sourceSchema: null,
+                sourceTable: null,
+              }]
+            })
+            setToast({ message: `Table "${tableName}" imported with ${rowCount.toLocaleString()} rows`, type: 'success' })
+            setTimeout(() => setToast(null), 4000)
+          }}
+        />
       )}
 
       {/* Toast notification */}

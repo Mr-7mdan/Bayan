@@ -20,6 +20,7 @@ import { useConfigUpdate } from '@/components/builder/ConfigUpdateContext'
 import { compileFormula, parseReferences } from '@/lib/formula'
 import RichTextEditor from '@/components/ui/RichTextEditor'
 import CompositionBuilderModal from '@/components/builder/CompositionBuilderModal'
+import ReportBuilderModal from '@/components/builder/ReportBuilderModal'
 import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 import { useAuth } from '@/components/providers/AuthProvider'
@@ -54,6 +55,7 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
   const [editingCustom, setEditingCustom] = useState<{ id?: string; name: string; formula: string; type?: 'number'|'string'|'date'|'boolean' } | null>(null)
   const [editNonce, setEditNonce] = useState(0)
   const [compOpen, setCompOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const [advOpen, setAdvOpen] = useState(false)
   // Tremor Table helpers (format mapping editor)
   const [ttFmtCol, setTtFmtCol] = useState<string>('')
@@ -870,7 +872,7 @@ function FilterDetailsTabs({ kind, selField, local, setLocal, updateConfig }: { 
 // Date rule editor for Details panel: presets + custom After/Before/Between
 function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
   type Mode = 'preset'|'custom'
-  type Preset = 'today'|'yesterday'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
+  type Preset = 'today'|'yesterday'|'this_week'|'last_week'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
   type CustomOp = 'after'|'before'|'between'
   const storageKey = `cfg-date:${field}`
   const [mode, setMode] = useState<Mode>('preset')
@@ -893,21 +895,20 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
   // Hydrate UI state on field change (handles remounts or parent re-renders)
   useEffect(() => {
     try {
-      // Prefer hydrating from incoming where if present
+      // Check for symbolic preset first
+      const existingPreset = (where as any)?.[`${field}__date_preset`] as string | undefined
+      if (existingPreset) {
+        const presets: Preset[] = ['today','yesterday','this_week','last_week','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+        if (presets.includes(existingPreset as Preset)) { setMode('preset'); setPreset(existingPreset as Preset) }
+        return
+      }
+      // Fallback: hydrate from legacy __gte/__lt concrete dates
       const gte = (where as any)?.[`${field}__gte`] as string | undefined
       const lt = (where as any)?.[`${field}__lt`] as string | undefined
       if (gte || lt) {
-        const presets: Preset[] = ['today','yesterday','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
-        const match = presets.find((p) => {
-          const r = rangeForPreset(p)
-          return (r.gte || undefined) === (gte || undefined) && (r.lt || undefined) === (lt || undefined)
-        })
-        if (match) { setMode('preset'); setPreset(match) }
-        else {
-          setMode('custom')
-          if (gte) { setA(gte); setPendingA(gte) }
-          if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const formatted = `${y}-${m}-${da}`; setB(formatted); setPendingB(formatted) }
-        }
+        setMode('custom')
+        if (gte) { setA(gte); setPendingA(gte) }
+        if (lt) { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const da = String(d.getDate()).padStart(2, '0'); const formatted = `${y}-${m}-${da}`; setB(formatted); setPendingB(formatted) }
       } else {
         const raw = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null
         if (raw) {
@@ -930,22 +931,23 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
   // Reflect external where->UI to prevent defaulting back to Today
   useEffect(() => {
     try {
+      if (editingRef.current) return
+      // Check for symbolic preset
+      const existingPreset = (where as any)?.[`${field}__date_preset`] as string | undefined
+      if (existingPreset) {
+        const presets: Preset[] = ['today','yesterday','this_week','last_week','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+        if (presets.includes(existingPreset as Preset)) {
+          if (mode !== 'preset') setMode('preset')
+          if (preset !== existingPreset) setPreset(existingPreset as Preset)
+        }
+        return
+      }
+      // Fallback: legacy __gte/__lt concrete dates
       const gte = (where as any)?.[`${field}__gte`] as string | undefined
       const lt = (where as any)?.[`${field}__lt`] as string | undefined
-      if (editingRef.current) return
       // Don't override if user has already interacted and is in custom mode
       if (interactedRef.current && mode === 'custom') return
       if (!gte && !lt) return
-      const presets: Preset[] = ['today','yesterday','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
-      const match = presets.find((p) => {
-        const r = rangeForPreset(p)
-        return (r.gte || undefined) === (gte || undefined) && (r.lt || undefined) === (lt || undefined)
-      })
-      if (match) {
-        if (mode !== 'preset') setMode('preset')
-        if (preset !== match) setPreset(match)
-        return
-      }
       if (mode !== 'custom') setMode('custom')
       const hasG = !!gte
       const hasL = !!lt
@@ -963,7 +965,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
         if (a !== '') { setA(''); setPendingA('') }
       }
     } catch {}
-  }, [field, (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lt`]])
+  }, [field, (where as any)?.[`${field}__date_preset`], (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lt`]])
 
   function rangeForPreset(p: Preset): { gte?: string; lt?: string } {
     const now = new Date()
@@ -991,6 +993,18 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
         const s = new Date(e); s.setDate(s.getDate()-1)
         return { gte: ymd(s), lt: ymd(e) }
       }
+      case 'this_week': {
+        const dow = now.getDay()
+        const s = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow)
+        const e = new Date(s); e.setDate(e.getDate() + 7)
+        return { gte: ymd(s), lt: ymd(e) }
+      }
+      case 'last_week': {
+        const dow = now.getDay()
+        const thisStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow)
+        const s = new Date(thisStart); s.setDate(s.getDate() - 7)
+        return { gte: ymd(s), lt: ymd(thisStart) }
+      }
       case 'this_month': return { gte: ymd(startOfMonth(now)), lt: ymd(endOfMonth(now)) }
       case 'last_month': { const s = startOfMonth(now); s.setMonth(s.getMonth()-1); const e = new Date(s.getFullYear(), s.getMonth()+1, 1); return { gte: ymd(s), lt: ymd(e) } }
       case 'this_quarter': return { gte: ymd(startOfQuarter(now.getFullYear(), quarter)), lt: ymd(endOfQuarter(now.getFullYear(), quarter)) }
@@ -1012,11 +1026,10 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
   useEffect(() => {
     if (!interactedRef.current) return
     
-    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }
+    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined }
     if (mode === 'preset') {
-      const r = rangeForPreset(preset)
-      patch[`${field}__gte`] = r.gte
-      patch[`${field}__lt`] = r.lt
+      // Store symbolic preset name — backend resolves at query execution time
+      patch[`${field}__date_preset`] = preset
       const sig = JSON.stringify(patch)
       if (sig !== lastSigRef.current) { lastSigRef.current = sig; onPatch(patch) }
       return
@@ -1039,7 +1052,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     <div className="rounded-md border bg-card p-2">
       <div className="flex items-center justify-between">
         <div className="text-xs font-medium">Date rule: {field}</div>
-        <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setOp('between'); setA(''); setB(''); setPendingA(''); setPendingB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }) }}>Clear</button>
+        <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setOp('between'); setA(''); setB(''); setPendingA(''); setPendingB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined }) }}>Clear</button>
       </div>
       <div className="mt-2 flex items-center gap-2 text-xs">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={()=>{ interactedRef.current = true; markEditing(); setMode('preset') }} /> Preset</label>
@@ -1050,6 +1063,8 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
           <select className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={preset} onChange={(e)=>{ interactedRef.current = true; markEditing(); setPreset(e.target.value as Preset) }}>
             <option value="today">Today</option>
             <option value="yesterday">Yesterday</option>
+            <option value="this_week">This Week</option>
+            <option value="last_week">Last Week</option>
             <option value="this_month">This Month</option>
             <option value="last_month">Last Month</option>
             <option value="this_quarter">This Quarter</option>
@@ -2721,6 +2736,40 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                 const cfg = { ...local!, options: { ...(local?.options || {}), composition } } as WidgetConfig
                 setLocal(cfg)
                 updateConfig(cfg)
+              }}
+            />
+          )}
+        </Section>
+      )}
+      {local?.type === 'report' && (
+        <Section title="Report Builder" defaultOpen>
+          <div className="space-y-3">
+            <div className="text-[11px] text-muted-foreground">Design your report layout with labels, tables, and data-bound spaceholders.</div>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="rounded border p-2 bg-secondary/40 text-center">
+                <div className="font-medium">{(local?.options?.report?.elements || []).length}</div>
+                <div className="text-muted-foreground">Elements</div>
+              </div>
+              <div className="rounded border p-2 bg-secondary/40 text-center">
+                <div className="font-medium">{(local?.options?.report?.variables || []).length}</div>
+                <div className="text-muted-foreground">Variables</div>
+              </div>
+            </div>
+            <button
+              className="w-full text-xs px-3 py-2 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90"
+              onClick={() => setReportOpen(true)}
+            >
+              Open Report Builder
+            </button>
+          </div>
+          {typeof window !== 'undefined' && (
+            <ReportBuilderModal
+              open={reportOpen}
+              onCloseAction={() => setReportOpen(false)}
+              config={local!}
+              onSaveAction={(next) => {
+                setLocal(next)
+                updateConfig(next)
               }}
             />
           )}
@@ -5147,7 +5196,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           </div>
         </Section>
       )}
-    {local?.type !== 'composition' && (
+    {local?.type !== 'composition' && local?.type !== 'report' && (
       <Section title="Data" defaultOpen>
         <div className="grid grid-cols-1 gap-3">
           <div>
@@ -5386,7 +5435,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
       select={(local?.querySpec?.select as any) || undefined}
       widgetId={(local as any)?.id}
     />
-    {local.queryMode === 'spec' && local?.type !== 'composition' && (
+    {local.queryMode === 'spec' && local?.type !== 'composition' && local?.type !== 'report' && (
       <Section title="Tables & Fields" defaultOpen>
         {/* Data specifics: table / fields / SQL within the Data section */}
           <div className="space-y-3">

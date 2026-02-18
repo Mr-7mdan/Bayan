@@ -156,6 +156,8 @@ class PivotRequest(BaseModel):
     requestId: Optional[str] = None
     groupBy: Optional[str] = Field(default=None, description="none|day|week|month|quarter|year for time bucketing")
     weekStart: Optional[str] = Field(default=None, description="mon|sun for week grouping")
+    dateFormat: Optional[str] = Field(default=None, description="Date format string (e.g., 'DD-MM-YYYY', 'YYYY-MM-DD') for formatting date columns")
+    dateColumns: Optional[List[str]] = Field(default=None, description="List of column names that should be formatted as dates")
 
 
 # --- Dashboards ---

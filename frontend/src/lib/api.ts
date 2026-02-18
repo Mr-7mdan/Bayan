@@ -351,7 +351,8 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
   try {
     const hasBody = !!init?.body
     const headers: Record<string, string> = { ...(init?.headers as any || {}) }
-    if (hasBody) headers['Content-Type'] = headers['Content-Type'] || 'application/json'
+    const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData
+    if (hasBody && !isFormData) headers['Content-Type'] = headers['Content-Type'] || 'application/json'
     const { signal: _ignored, ...restInit } = (init || {}) as any
     // Auto-attach publicId/token for public view queries
     let finalPath = path
@@ -827,6 +828,27 @@ export const Api = {
   // Lightweight schema endpoints (tables only)
   tablesOnly: (id: string, signal?: AbortSignal) => http<TablesOnlyResponse>(`/datasources/${id}/tables`, { signal }, 30000),
   tablesOnlyLocal: (signal?: AbortSignal) => http<TablesOnlyResponse>(`/datasources/_local/tables`, { signal }, 30000),
+  // --- Import Table (SQL / file) ---
+  importSqlPreview: (dsId: string, payload: { sql: string; limit?: number }) =>
+    http<{ columns: string[]; rows: Record<string, unknown>[]; rowCount: number }>(
+      `/datasources/${encodeURIComponent(dsId)}/local/import-sql-preview`,
+      { method: 'POST', body: JSON.stringify(payload) }, 30000),
+  importSqlCommit: (dsId: string, payload: { sql: string; tableName: string; ifExists?: string }) =>
+    http<{ ok: boolean; tableName: string; rowCount: number }>(
+      `/datasources/${encodeURIComponent(dsId)}/local/import-sql-commit`,
+      { method: 'POST', body: JSON.stringify(payload) }, 60000),
+  importFilePreview: (dsId: string, file: File) => {
+    const fd = new FormData(); fd.append('file', file)
+    return http<{ columns: string[]; rows: Record<string, unknown>[]; rowCount: number; fileName: string }>(
+      `/datasources/${encodeURIComponent(dsId)}/local/import-file-preview`,
+      { method: 'POST', body: fd }, 30000)
+  },
+  importFileCommit: (dsId: string, file: File, tableName: string, ifExists = 'replace') => {
+    const fd = new FormData(); fd.append('file', file); fd.append('tableName', tableName); fd.append('ifExists', ifExists)
+    return http<{ ok: boolean; tableName: string; rowCount: number }>(
+      `/datasources/${encodeURIComponent(dsId)}/local/import-file-commit`,
+      { method: 'POST', body: fd }, 60000)
+  },
   // --- Alerts & Notifications ---
   listAlerts: () => http<AlertOut[]>(`/alerts`),
   createAlert: (payload: AlertCreate) => http<AlertOut>(`/alerts`, { method: 'POST', body: JSON.stringify(payload) }),
@@ -1068,6 +1090,8 @@ export type PivotRequest = {
   widgetId?: string
   groupBy?: string
   weekStart?: string
+  dateFormat?: string
+  dateColumns?: string[]
 }
 
 export type PivotSqlResponse = { sql?: string }
@@ -1144,6 +1168,9 @@ export type AlertConfig = {
   actions: Array<Record<string, any>>
   render?: Record<string, any>
   template?: string
+  triggersGroup?: Record<string, any>
+  customPlaceholders?: Record<string, string>
+  [key: string]: any
 }
 
 export type AlertCreate = {

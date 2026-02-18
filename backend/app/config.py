@@ -76,6 +76,12 @@ class Settings(BaseSettings):
         description="Allow fallback to legacy SQL builder when SQLGlot fails (disable for 100% SQLGlot)"
     )
 
+    pivot_join_debug: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("PIVOT_JOIN_DEBUG"),
+        description="Enable detailed pivot join diagnostics (debug only)"
+    )
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [x.strip() for x in str(self.cors_origins).split(",") if x.strip()]

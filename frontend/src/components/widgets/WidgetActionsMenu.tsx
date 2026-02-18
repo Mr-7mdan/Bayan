@@ -196,7 +196,7 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
     let cancelled = false
     async function run() {
       try {
-        if (!open) { setExistingAlert(null); return }
+        if (!open) return
         const all = await Api.listAlerts()
         const found = (Array.isArray(all) ? all : []).find((a) => String(a?.widgetId || '') === String(cfg.id)) || null
         if (!cancelled) setExistingAlert(found)

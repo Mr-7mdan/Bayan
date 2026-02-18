@@ -173,6 +173,7 @@ def _quote_duck_ident(name: str) -> str:
 # Module-level cached engines
 # DuckDB engine is cached separately from external engines
 _DUCK_ENGINE: Engine | None = None
+_DUCK_ENGINE_PATH: str | None = None
 # Cache for external datasource engines, keyed by DSN (normalized)
 _ENGINE_CACHE: dict[str, Engine] = {}
 _ENGINE_REVERSE: dict[int, str] = {}
@@ -299,7 +300,11 @@ def open_duck_native(db_path: str | None = None):
     """
     if _duckdb is None:
         raise RuntimeError("duckdb module not available")
-    target = _normalize_duck_path(db_path or (_DUCK_SHARED_PATH or settings.duckdb_path))
+    try:
+        active_default = get_active_duck_path()
+    except Exception:
+        active_default = settings.duckdb_path
+    target = _normalize_duck_path(db_path or (_DUCK_SHARED_PATH or active_default))
     use_shared = (_DUCK_SHARED_CONN is not None and _normalize_duck_path(_DUCK_SHARED_PATH or '') == target)
     if use_shared:
         con = _get_duck_shared(target)
@@ -469,11 +474,21 @@ def _apply_duck_pragmas(conn) -> None:
 
 def get_duckdb_engine() -> Engine:
     """Return a cached SQLAlchemy engine for the local DuckDB store."""
-    global _DUCK_ENGINE, _DUCK_CONFIGURED
+    global _DUCK_ENGINE, _DUCK_ENGINE_PATH, _DUCK_CONFIGURED
+    try:
+        desired_path = get_active_duck_path()
+    except Exception:
+        desired_path = _normalize_duck_path(settings.duckdb_path)
+    if _DUCK_ENGINE is not None and _DUCK_ENGINE_PATH:
+        try:
+            if _normalize_duck_path(_DUCK_ENGINE_PATH) != _normalize_duck_path(desired_path):
+                dispose_duck_engine()
+        except Exception:
+            pass
     if _DUCK_ENGINE is None:
         # Build an absolute-path DSN so SQLAlchemy/duckdb-engine doesn't treat relative '.data' as '/.data'
         try:
-            path = settings.duckdb_path
+            path = desired_path
             if path and path != ":memory:" and path.startswith("/."):
                 path = os.path.abspath(path[1:])
             elif path and path != ":memory:" and not os.path.isabs(path):
@@ -485,6 +500,10 @@ def get_duckdb_engine() -> Engine:
         except Exception:
             dsn = f"duckdb:///{settings.duckdb_path}"
         _DUCK_ENGINE = create_engine(dsn)
+        try:
+            _DUCK_ENGINE_PATH = desired_path
+        except Exception:
+            _DUCK_ENGINE_PATH = None
         try:
             # Ensure every new DB-API connection applies PRAGMAs
             event.listen(_DUCK_ENGINE, "connect", lambda dbapi_conn, conn_record: _apply_duck_pragmas(dbapi_conn))
@@ -672,7 +691,7 @@ def dispose_all_engines() -> int:
 
 def dispose_duck_engine() -> bool:
     """Dispose DuckDB engine and clear its cache."""
-    global _DUCK_ENGINE, _DUCK_CONFIGURED
+    global _DUCK_ENGINE, _DUCK_ENGINE_PATH, _DUCK_CONFIGURED
     if _DUCK_ENGINE is None:
         return False
     try:
@@ -680,6 +699,7 @@ def dispose_duck_engine() -> bool:
     except Exception:
         pass
     _DUCK_ENGINE = None
+    _DUCK_ENGINE_PATH = None
     _DUCK_CONFIGURED = False
     return True
 
@@ -845,12 +865,6 @@ def _infer_duck_type_value(v) -> str:
             s = v.strip()
             if not s:
                 return "TEXT"
-            # Try numeric first (common for SQL Server DECIMAL/MONEY columns)
-            try:
-                float(s)
-                return "DOUBLE"
-            except ValueError:
-                pass
             # Try datetime
             try:
                 # datetime.fromisoformat handles both date and timestamp when formatted
@@ -868,7 +882,97 @@ def _infer_duck_type_value(v) -> str:
         return "TEXT"
 
 
-def _create_table_typed(conn, table_name: str, columns: list[str], sample_rows: list[list[object]] | None = None) -> None:
+def _mssql_type_to_duck(data_type: str, precision: object = None, scale: object = None) -> str:
+    try:
+        t = str(data_type or "").strip().lower()
+    except Exception:
+        t = ""
+    if t in {"bigint"}:
+        return "BIGINT"
+    if t in {"int", "integer", "smallint", "tinyint"}:
+        return "BIGINT"
+    if t in {"bit", "boolean"}:
+        return "BOOLEAN"
+    if t in {"float", "real"}:
+        return "DOUBLE"
+    if t in {"decimal", "numeric", "money", "smallmoney"}:
+        try:
+            p = int(precision) if precision is not None else None
+        except Exception:
+            p = None
+        try:
+            s = int(scale) if scale is not None else None
+        except Exception:
+            s = None
+        if p is not None and s is not None and p > 0 and s >= 0:
+            try:
+                p = max(1, min(38, int(p)))
+                s = max(0, min(int(p), int(s)))
+                return f"DECIMAL({p},{s})"
+            except Exception:
+                return "DECIMAL(38,10)"
+        return "DECIMAL(38,10)"
+    if t in {"date"}:
+        return "DATE"
+    if t in {"datetime", "datetime2", "smalldatetime", "datetimeoffset", "timestamp"}:
+        return "TIMESTAMP"
+    if t in {"time"}:
+        return "TIME"
+    if t in {"uniqueidentifier"}:
+        return "TEXT"
+    if t in {"char", "nchar", "varchar", "nvarchar", "text", "ntext", "xml", "sysname"}:
+        return "TEXT"
+    if t in {"binary", "varbinary", "image"}:
+        return "BLOB"
+    return "TEXT"
+
+
+def _fetch_mssql_column_types(src_conn, source_schema: str | None, source_table: str) -> dict[str, str]:
+    try:
+        sch = (source_schema or "dbo").strip() or "dbo"
+        tbl = (source_table or "").strip()
+        if not tbl:
+            return {}
+        sql = text(
+            "SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE "
+            "FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = :sch AND TABLE_NAME = :tbl "
+            "ORDER BY ORDINAL_POSITION"
+        )
+        rows = src_conn.execute(sql, {"sch": sch, "tbl": tbl}).fetchall()
+        out: dict[str, str] = {}
+        for r in rows:
+            try:
+                col = str(r[0])
+                dt = r[1]
+                prec = r[2] if len(r) > 2 else None
+                sca = r[3] if len(r) > 3 else None
+                out[col] = _mssql_type_to_duck(dt, prec, sca)
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+def _duck_table_types(conn, table_name: str) -> dict[str, str]:
+    try:
+        t = str(table_name or "").strip()
+        if not t:
+            return {}
+        info = conn.exec_driver_sql(f"PRAGMA table_info('{t}')").fetchall()
+        out: dict[str, str] = {}
+        for row in info:
+            try:
+                out[str(row[1])] = str(row[2] or "").upper()
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+def _create_table_typed(conn, table_name: str, columns: list[str], sample_rows: list[list[object]] | None = None, preferred_types: dict[str, str] | None = None) -> None:
     """Create a DuckDB table with inferred column types from sample rows.
     Falls back to TEXT when inference is not possible.
     """
@@ -876,11 +980,21 @@ def _create_table_typed(conn, table_name: str, columns: list[str], sample_rows: 
     # Default all TEXT; upgrade when sample allows
     types: dict[str, str] = {c: "TEXT" for c in columns}
     try:
+        if preferred_types:
+            for c in columns:
+                pt = preferred_types.get(c)
+                if pt:
+                    types[c] = str(pt)
+    except Exception:
+        pass
+    try:
         if sample_rows:
             # Look at up to first 200 non-null examples per column
             lim = min(200, len(sample_rows))
             # Transpose-like scan
             for idx, col in enumerate(columns):
+                if preferred_types and (col in preferred_types):
+                    continue
                 inferred: str | None = None
                 for r in sample_rows[:lim]:
                     try:
@@ -1097,21 +1211,18 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
             # Ensure destination exists and get column types for sanitization
             if not _table_exists(duck, dest_table):
                 # Create typed table using the first fetched batch as sample
-                col_types = _create_table_typed(duck, dest_table, columns, [list(r) for r in rows])
+                preferred = {}
+                try:
+                    if src_dialect.startswith('mssql'):
+                        preferred = _fetch_mssql_column_types(src, source_schema, source_table)
+                except Exception:
+                    preferred = {}
+                col_types = _create_table_typed(duck, dest_table, columns, [list(r) for r in rows], preferred_types=preferred)
             else:
-                # Table exists - infer types from current batch for sanitization
-                col_types = {}
-                for idx, col in enumerate(columns):
-                    for r in rows[:50]:  # Sample first 50 rows
-                        try:
-                            v = r[idx] if idx < len(r) else None
-                        except Exception:
-                            v = None
-                        if v is not None:
-                            col_types[col] = _infer_duck_type_value(v)
-                            break
-                    if col not in col_types:
-                        col_types[col] = "TEXT"
+                col_types = _duck_table_types(duck, dest_table)
+                for c in columns:
+                    if c not in col_types:
+                        col_types[c] = "TEXT"
             # Upsert: delete existing pk matches, then insert
             if on_phase:
                 try: on_phase('insert')
@@ -1197,7 +1308,13 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                     sample_rows = src.execute(sample_sql, {"lim": 64, "off": 0}).fetchall()
             except Exception:
                 sample_rows = []
-            col_types = _create_table_typed(duck, stg, columns, [list(r) for r in (sample_rows or [])])
+            preferred = {}
+            try:
+                if src_dialect.startswith('mssql'):
+                    preferred = _fetch_mssql_column_types(src, source_schema, source_table)
+            except Exception:
+                preferred = {}
+            col_types = _create_table_typed(duck, stg, columns, [list(r) for r in (sample_rows or [])], preferred_types=preferred)
             staging_created = True
             # Chunked copy
             total_rows_source = None

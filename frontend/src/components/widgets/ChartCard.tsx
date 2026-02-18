@@ -617,6 +617,7 @@ export default function ChartCard({
   const hasLegend = Array.isArray(legendAny) ? ((legendAny as any[]).length > 0) : !!legendAny
   // Local UI-driven filters (Filterbars) merged into where
   const [uiWhere, setUiWhere] = useState<Record<string, any>>({})
+  const uiWhereSigRef = useRef<string>('')
   const setUiWhereLocal = (patch: Record<string, any>, emit = true) => {
     setUiWhere((prev) => {
       const next = { ...prev }
@@ -624,6 +625,9 @@ export default function ChartCard({
         if (v === undefined) delete (next as any)[k]
         else (next as any)[k] = v
       })
+      const sig = JSON.stringify(next)
+      if (sig === uiWhereSigRef.current) return prev
+      uiWhereSigRef.current = sig
       return next
     })
     if (emit && typeof window !== 'undefined' && widgetId) {
@@ -953,7 +957,7 @@ export default function ChartCard({
   const [activeTab, setActiveTab] = useState<string>(defaultTabValue)
   useEffect(() => { if (defaultTabValue) setActiveTab(defaultTabValue) }, [defaultTabValue])
   const q = useQuery({
-    queryKey: ['chart', sql, datasourceId, type, options, queryMode, querySpec, customColumns, filters, debouncedUiKey, adaptiveGb, breakSeq, (querySpec as any)?.series?.[0]?.agg],
+    queryKey: ['chart', sql, datasourceId, type, JSON.stringify(options), queryMode, JSON.stringify(querySpec), JSON.stringify(customColumns), JSON.stringify(filters), debouncedUiKey, adaptiveGb, breakSeq, (querySpec as any)?.series?.[0]?.agg],
     enabled: visible && (queryMode === 'spec' ? (specReadySingle || specReadyMulti || specReadyAggish) : true),
     placeholderData: (prev) => prev as any,
     queryFn: async () => {
@@ -2772,7 +2776,7 @@ export default function ChartCard({
 
   const deltaKey = useMemo(() => JSON.stringify(uiTruthWhere), [uiTruthWhere])
   const deltaQ = useQuery({
-    queryKey: ['delta', title, datasourceId, queryMode, querySpec, activeDeltaMode, deltaDateField, deltaWeekStart, deltaKey],
+    queryKey: ['delta', title, datasourceId, queryMode, JSON.stringify(querySpec), activeDeltaMode, deltaDateField, deltaWeekStart, deltaKey],
     enabled: (() => {
       const isEnabled = !!activeDeltaMode && !!deltaDateField && queryMode === 'spec' && !!(querySpec as any)?.source
       if (typeof window !== 'undefined') {
@@ -4555,6 +4559,12 @@ export default function ChartCard({
 
       // Delegate advanced Area to specialized renderer (refactor step)
       if (type === 'area') {
+        console.log('[ChartCard] Passing options to renderAdvancedAreaChart:', {
+          yAxisFormat: (options as any)?.yAxisFormat,
+          y2AxisFormat: (options as any)?.y2AxisFormat,
+          hasSecondaryY,
+          fullOptions: options
+        })
         return renderAdvancedAreaChart({
           chartInstanceKey,
           seriesList,
@@ -4593,6 +4603,14 @@ export default function ChartCard({
               ])
 
         : undefined
+
+      // Debug: Log axis format options
+      console.log('[ChartCard] Axis format options:', {
+        hasSecondaryY,
+        yAxisFormat: (options as any)?.yAxisFormat,
+        y2AxisFormat: (options as any)?.y2AxisFormat,
+        options: options
+      })
 
       const option = {
         backgroundColor: 'rgba(0,0,0,0)',
@@ -4649,10 +4667,53 @@ export default function ChartCard({
             }, ...(buildAxisGrid('y') as any) }
           : (hasSecondaryY
               ? [
-                  { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGrid('y') as any) },
-                  { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, position: 'right', ...(buildAxisGrid('y') as any) },
+                  { 
+                    type: 'value', 
+                    splitNumber: options?.yTickCount || undefined, 
+                    axisLabel: { 
+                      fontSize: ((options as any)?.yAxisFontSize ?? fontSize), 
+                      fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', 
+                      color: ((options as any)?.yAxisFontColor || axisTextColor), 
+                      formatter: (val: number) => { 
+                        const fmt = (options as any)?.yAxisFormat || 'none'
+                        console.log('[ChartCard] Primary Y-axis formatter called:', { val, fmt, formatted: formatNumber(val, fmt as any) })
+                        return formatNumber(val, fmt as any)
+                      } 
+                    }, 
+                    ...buildAxisGrid('y')
+                  },
+                  { 
+                    type: 'value', 
+                    splitNumber: options?.yTickCount || undefined, 
+                    axisLabel: { 
+                      fontSize: ((options as any)?.yAxisFontSize ?? fontSize), 
+                      fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', 
+                      color: ((options as any)?.yAxisFontColor || axisTextColor), 
+                      formatter: (val: number) => { 
+                        const fmt = (options as any)?.y2AxisFormat || (options as any)?.yAxisFormat || 'none'
+                        console.log('[ChartCard] Secondary Y-axis formatter called:', { val, fmt, formatted: formatNumber(val, fmt as any) })
+                        return formatNumber(val, fmt as any)
+                      } 
+                    }, 
+                    position: 'right', 
+                    ...buildAxisGrid('y')
+                  },
                 ]
-              : { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGrid('y') as any) }),
+              : { 
+                  type: 'value', 
+                  splitNumber: options?.yTickCount || undefined, 
+                  axisLabel: { 
+                    fontSize: ((options as any)?.yAxisFontSize ?? fontSize), 
+                    fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', 
+                    color: ((options as any)?.yAxisFontColor || axisTextColor), 
+                    formatter: (val: number) => { 
+                      const fmt = (options as any)?.yAxisFormat || 'none'
+                      console.log('[ChartCard] Single Y-axis formatter called:', { val, fmt, formatted: formatNumber(val, fmt as any) })
+                      return formatNumber(val, fmt as any)
+                    } 
+                  }, 
+                  ...buildAxisGrid('y')
+                }),
         series: (Array.isArray(seriesList) ? seriesList.map((s: any) => ({
           ...s,
           animation: !isSnap,
@@ -5273,10 +5334,10 @@ export default function ChartCard({
             ),
         yAxis: hasSecondaryY
           ? [
-              { type: 'value', axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) } },
-              { type: 'value', axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, position: 'right' },
+              { type: 'value', axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor), formatter: (val: number) => { const fmt = (options as any)?.yAxisFormat || 'none'; return formatNumber(val, fmt as any) } } },
+              { type: 'value', axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor), formatter: (val: number) => { const fmt = (options as any)?.y2AxisFormat || (options as any)?.yAxisFormat || 'none'; return formatNumber(val, fmt as any) } }, position: 'right' },
             ]
-          : { type: 'value', axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) } },
+          : { type: 'value', axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor), formatter: (val: number) => { const fmt = (options as any)?.yAxisFormat || 'none'; return formatNumber(val, fmt as any) } } },
         series: seriesList,
         ...(dataZoom ? { dataZoom } : {}),
       }
@@ -6084,9 +6145,9 @@ export default function ChartCard({
                 : undefined); if (d && f) { const pad = (n: number) => String(n).padStart(2, '0'); const isoWeek = (date: Date) => { const _d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())); _d.setUTCDate(_d.getUTCDate() + 4 - (_d.getUTCDay() || 7)); const yearStart = new Date(Date.UTC(_d.getUTCFullYear(),0,1)); return Math.ceil((((_d.getTime()-yearStart.getTime())/86400000)+1)/7) }; const quarter = (date: Date) => (Math.floor(date.getMonth()/3)+1); switch (f) { case 'YYYY': return String(d.getFullYear()); case 'YYYY-[Q]q': return `${d.getFullYear()}-Q${quarter(d)}`; case 'YYYY-[W]ww': { const jan1 = new Date(d.getFullYear(), 0, 1); const day0 = Math.floor((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) - jan1.getTime()) / 86400000; const wnSun = Math.floor((day0 + jan1.getDay()) / 7) + 1; const useSun = (((options as any)?.xWeekStart || (querySpec as any)?.weekStart || env.weekStart) === 'sun'); const wn = useSun ? wnSun : isoWeek(d); return `${d.getFullYear()}-W${String(wn).padStart(2,'0')}`; } case 'YYYY-MM': return `${d.getFullYear()}-${pad(d.getMonth()+1)}`; case 'YYYY-MM-DD': return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; case 'h:mm a': { let h = d.getHours(); const m = pad(d.getMinutes()); const am = h < 12; h = h % 12 || 12; return `${h}:${m} ${am ? 'AM' : 'PM'}` } case 'dddd': return d.toLocaleDateString('en-US', { weekday: 'long' }); case 'MMMM': return d.toLocaleDateString('en-US', { month: 'long' }); case 'MMM-YYYY': return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '-'); default: return s; } } const mode = (options as any)?.xLabelCase as 'lowercase'|'capitalize'|'proper'|undefined; if (!mode) return s; switch (mode) { case 'lowercase': return s.toLowerCase(); case 'capitalize': { const lower = s.toLowerCase(); return lower.length ? (lower[0].toUpperCase()+lower.slice(1)) : lower } case 'proper': default: return s.replace(/[_-]+/g,' ').split(/\s+/).map(w=>w? (w[0].toUpperCase()+w.slice(1).toLowerCase()):w).join(' '); } }; return (xLabels || []).map(fmt); })(), axisLabel: { rotate: xRotate, fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor), margin: Math.abs(xRotate) >= 60 ? 12 : 8 } }
 ,
         yAxis: hasSecondary ? [
-          { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) } },
-          { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, position: 'right' },
-        ] : { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) } },
+          { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor), formatter: (val: number) => { const fmt = (options as any)?.yAxisFormat || 'none'; return formatNumber(val, fmt as any) } } },
+          { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor), formatter: (val: number) => { const fmt = (options as any)?.y2AxisFormat || (options as any)?.yAxisFormat || 'none'; return formatNumber(val, fmt as any) } }, position: 'right' },
+        ] : { type: 'value', splitNumber: options?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor), formatter: (val: number) => { const fmt = (options as any)?.yAxisFormat || 'none'; return formatNumber(val, fmt as any) } } },
         series: baseSeriesAug,
         ...(visualMap ? { visualMap } : {}),
         ...(dataZoomCombo ? { dataZoom: dataZoomCombo } : {}),
@@ -7640,7 +7701,6 @@ export default function ChartCard({
                   })()}
                 {fieldsExposed.map((field) => {
                   // Determine type by sampling distincts, fallback to current query rows
-                  if (!distinctCache[field]) { void loadDistinct(field) }
                   let sample: any[] = (distinctCache[field] || []).slice(0, 12)
                   if (sample.length === 0) {
                     try {

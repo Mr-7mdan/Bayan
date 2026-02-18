@@ -12,6 +12,19 @@ const nextConfig = {
   },
   // Note: allowedDevOrigins was removed as it's no longer supported in Next.js 15+
   // Note: eslint config moved to .eslintrc or next lint CLI options
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: "script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none';",
+          },
+        ],
+      },
+    ]
+  },
   async rewrites() {
     const backend = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '')
     if (!backend) return []

@@ -28,3 +28,4 @@ playwright>=1.55.0
 waitress>=2.1.2
 asgiref>=3.7.2
 watchdog>=4.0.0
+python-multipart

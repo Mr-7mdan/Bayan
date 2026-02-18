@@ -6,6 +6,76 @@ import dynamic from 'next/dynamic'
 // Local dynamic import to keep client rendering consistent
 const ReactECharts: any = dynamic(() => import('echarts-for-react').then(m => (m as any).default), { ssr: false }) as ComponentType<any>
 
+type FormatMode =
+  | 'none'
+  | 'short'
+  | 'abbrev'
+  | 'currency'
+  | 'percent'
+  | 'bytes'
+  | 'wholeNumber'
+  | 'number'
+  | 'thousands'
+  | 'millions'
+  | 'billions'
+  | 'oneDecimal'
+  | 'twoDecimals'
+  | 'percentWhole'
+  | 'percentOneDecimal'
+  | 'timeHours'
+  | 'timeMinutes'
+  | 'distance-km'
+  | 'distance-mi'
+
+function formatNumber(n: number, mode: FormatMode): string {
+  if (!isFinite(n)) return '0'
+  switch (mode) {
+    case 'abbrev': {
+      const abs = Math.abs(n)
+      if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })}B`
+      if (abs >= 1_000_000) return `${(n / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })}M`
+      if (abs >= 1_000) return `${(n / 1_000).toLocaleString(undefined, { maximumFractionDigits: 2 })}K`
+      return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    }
+    case 'short': {
+      const abs = Math.abs(n)
+      if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`
+      if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+      if (abs >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+      return String(n)
+    }
+    case 'wholeNumber':
+      return Math.round(n).toLocaleString()
+    case 'number':
+      return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    case 'oneDecimal':
+      return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    case 'twoDecimals':
+      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    case 'thousands': {
+      const v = n / 1_000
+      return `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}K`
+    }
+    case 'millions': {
+      const v = n / 1_000_000
+      return `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}M`
+    }
+    case 'billions': {
+      const v = n / 1_000_000_000
+      return `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}B`
+    }
+    case 'percent':
+      return `${(n * 100).toFixed(2)}%`
+    case 'percentWhole':
+      return `${Math.round(n * 100)}%`
+    case 'percentOneDecimal':
+      return `${(n * 100).toFixed(1)}%`
+    case 'none':
+    default:
+      return String(n)
+  }
+}
+
 export type AreaAdvancedArgs = {
   chartInstanceKey: any
   // Prebuilt ECharts series from ChartCard advanced path
@@ -93,12 +163,63 @@ export function renderAdvancedAreaChart(args: AreaAdvancedArgs) {
     ...(buildAxisGridAction('x') as any),
   }
 
+  // Debug: Log format options
+  console.log('[AreaAdvanced] Format options:', {
+    hasSecondaryY,
+    yAxisFormat: (options as any)?.yAxisFormat,
+    y2AxisFormat: (options as any)?.y2AxisFormat,
+    options: options
+  })
+
   const yAxis: any = hasSecondaryY
     ? [
-        { type: 'value', splitNumber: (options as any)?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGridAction('y') as any) },
-        { type: 'value', splitNumber: (options as any)?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, position: 'right', ...(buildAxisGridAction('y') as any) },
+        { 
+          type: 'value', 
+          splitNumber: (options as any)?.yTickCount || undefined, 
+          axisLabel: { 
+            fontSize: ((options as any)?.yAxisFontSize ?? fontSize), 
+            fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', 
+            color: ((options as any)?.yAxisFontColor || axisTextColor),
+            formatter: (val: number) => {
+              const fmt = (options as any)?.yAxisFormat || 'none'
+              console.log('[AreaAdvanced] Primary Y-axis formatter:', { val, fmt, formatted: formatNumber(val, fmt as any) })
+              return formatNumber(val, fmt as any)
+            }
+          }, 
+          ...(buildAxisGridAction('y') as any) 
+        },
+        { 
+          type: 'value', 
+          splitNumber: (options as any)?.yTickCount || undefined, 
+          axisLabel: { 
+            fontSize: ((options as any)?.yAxisFontSize ?? fontSize), 
+            fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', 
+            color: ((options as any)?.yAxisFontColor || axisTextColor),
+            formatter: (val: number) => {
+              const fmt = (options as any)?.y2AxisFormat || (options as any)?.yAxisFormat || 'none'
+              console.log('[AreaAdvanced] Secondary Y-axis formatter:', { val, fmt, formatted: formatNumber(val, fmt as any) })
+              return formatNumber(val, fmt as any)
+            }
+          }, 
+          position: 'right', 
+          ...(buildAxisGridAction('y') as any) 
+        },
       ]
-    : { type: 'value', splitNumber: (options as any)?.yTickCount || undefined, axisLabel: { fontSize: ((options as any)?.yAxisFontSize ?? fontSize), fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.yAxisFontColor || axisTextColor) }, ...(buildAxisGridAction('y') as any) }
+    : { 
+        type: 'value', 
+        splitNumber: (options as any)?.yTickCount || undefined, 
+        axisLabel: { 
+          fontSize: ((options as any)?.yAxisFontSize ?? fontSize), 
+          fontWeight: (((options as any)?.yAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', 
+          color: ((options as any)?.yAxisFontColor || axisTextColor),
+          formatter: (val: number) => {
+            const fmt = (options as any)?.yAxisFormat || 'none'
+            console.log('[AreaAdvanced] Single Y-axis formatter:', { val, fmt, formatted: formatNumber(val, fmt as any) })
+            return formatNumber(val, fmt as any)
+          }
+        }, 
+        ...(buildAxisGridAction('y') as any) 
+      }
 
   const dataZoom = (() => {
     const enabled = !!((options as any)?.areaZoomPan || (options as any)?.zoomPan || (options as any)?.dataZoom)

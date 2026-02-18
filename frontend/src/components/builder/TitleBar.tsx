@@ -23,7 +23,7 @@ type TitleBarProps = {
   createdAt?: string
   gridSize?: 'sm'|'md'|'lg'|'xl'
   onGridSizeChangeAction?: (v: 'sm'|'md'|'lg'|'xl') => void
-  onAddCardAction?: (kind: 'kpi'|'chart'|'table'|'text'|'spacer'|'composition') => void
+  onAddCardAction?: (kind: 'kpi'|'chart'|'table'|'text'|'spacer'|'composition'|'report') => void
   showNavigator?: boolean
   onShowNavigatorChangeAction?: (v: boolean) => void
   autoMinimizeNav?: boolean
@@ -216,7 +216,7 @@ export default function TitleBar({
             </Button>
             {showAddPicker && (
               <div className="absolute right-0 mt-1 z-50 rounded-md border bg-card shadow-card p-2 grid grid-cols-2 gap-2 w-[260px]">
-                {(['kpi','chart','table','text','spacer','composition'] as const).map((t) => (
+                {(['kpi','chart','table','text','spacer','composition','report'] as const).map((t) => (
                   <button key={t} className="text-xs px-2 py-1 rounded border hover:bg-muted" onClick={() => { onAddCardAction && onAddCardAction(t); setShowAddPicker(false) }}>{t.toUpperCase()}</button>
                 ))}
               </div>

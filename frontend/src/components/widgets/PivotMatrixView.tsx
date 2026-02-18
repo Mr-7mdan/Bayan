@@ -133,10 +133,10 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
     const cols = Array.isArray(_cols) ? _cols : []
     if (!Array.isArray(rows) || rows.length === 0) return [] as Array<Record<string, any>>
     if (cols.length === 0) return rows as Array<Record<string, any>>
-    return (rows as Array<Record<string, any>>).map((r) => {
+    return (rows as any[]).map((r) => {
       const o: Record<string, any> = {}
       cols.forEach((name, idx) => {
-        const v = (r as any)[`c${idx}`]
+        const v = Array.isArray(r) ? r[idx] : (r as any)[`c${idx}`]
         o[name] = (v !== undefined) ? v : (r as any)[name]
       })
       return o
@@ -145,14 +145,17 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
 
   // Prune rows with blank/0 on any dimension; keep only records with measure present
   const baseData = useMemo(() => {
-    return (namedRows || []).filter((r) => {
-      for (const d of [...rowDims, ...colDims]) {
-        const v = r?.[d]
-        if (v == null) return false
+    const dims = [...rowDims, ...colDims]
+    return (namedRows || []).map((r) => {
+      if (!dims.length) return r
+      const o: Record<string, any> = { ...(r || {}) }
+      for (const d of dims) {
+        const v = o?.[d]
+        if (v == null) { o[d] = '(blank)'; continue }
         const s = String(v).trim()
-        if (s === '') return false
+        if (s === '') o[d] = '(blank)'
       }
-      return true
+      return o
     })
   }, [namedRows, rowDims, colDims, measure])
 

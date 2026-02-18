@@ -53,6 +53,7 @@ export default function TableCard({
   const { filters } = useFilters()
   const { user } = useAuth()
   const [uiWhere, setUiWhere] = useState<Record<string, any>>({})
+  const uiWhereSigRef = useRef<string>('')
   const [breakSeq, setBreakSeq] = useState(0)
   const [page, setPage] = useState(0)
   const [size, setSize] = useState(pageSize)
@@ -85,6 +86,9 @@ export default function TableCard({
         if (v === undefined) delete (next as any)[k]
         else (next as any)[k] = v
       })
+      const sig = JSON.stringify(next)
+      if (sig === uiWhereSigRef.current) return prev
+      uiWhereSigRef.current = sig
       return next
     })
     if (typeof window !== 'undefined' && widgetId) {
@@ -543,6 +547,14 @@ export default function TableCard({
           const valueFieldName = aliasToBase[chosen] ? String(aliasToBase[chosen]) : chosen
           meta.push({ label, field: valueFieldName, agg })
           const subKey = `${wid}::pv:${valueFieldName}:${agg}`
+          // Collect date columns from rows and cols dimensions
+          // For now, we'll identify date columns by common naming patterns
+          // A more robust solution would require column metadata from the backend
+          const allDims = [...rowsDims, ...colsDims]
+          const dateColumns = allDims.filter(dim => {
+            const lower = dim.toLowerCase()
+            return lower.includes('date') || lower.includes('time') || lower === 'created' || lower === 'updated'
+          })
           return (sig?: AbortSignal) => Api.pivotForWidget(subKey, {
             source: String((querySpec as any).source),
             datasourceId,
@@ -555,11 +567,19 @@ export default function TableCard({
             groupBy: (querySpec as any)?.groupBy || undefined,
             weekStart: (options as any)?.xWeekStart || (querySpec as any)?.weekStart || undefined,
             ...(maxRowsCfg != null ? { limit: Number(maxRowsCfg) } : {}),
+            ...((options as any)?.xDateFormat ? { dateFormat: (options as any).xDateFormat } : {}),
+            ...(dateColumns.length > 0 ? { dateColumns } : {}),
           }, undefined, sig).promise
         })
         // Emit runtime pivot payloads for SQL preview dialogs
         try {
           if (typeof window !== 'undefined' && widgetId) {
+            // Identify date columns for SQL preview payloads
+            const allDims = [...rowsDims, ...colsDims]
+            const dateColumns = allDims.filter(dim => {
+              const lower = dim.toLowerCase()
+              return lower.includes('date') || lower.includes('time') || lower === 'created' || lower === 'updated'
+            })
             const payloads = meta.map((m) => ({
               source: String((querySpec as any).source),
               datasourceId,
@@ -571,6 +591,8 @@ export default function TableCard({
               widgetId: widgetId,
               groupBy: (querySpec as any)?.groupBy || undefined,
               weekStart: (options as any)?.xWeekStart || (querySpec as any)?.weekStart || undefined,
+              ...((options as any)?.xDateFormat ? { dateFormat: (options as any).xDateFormat } : {}),
+              ...(dateColumns.length > 0 ? { dateColumns } : {}),
               __label: m.label,
             }))
             window.dispatchEvent(new CustomEvent('widget-pivot-payloads', { detail: { widgetId, payloads } } as any))

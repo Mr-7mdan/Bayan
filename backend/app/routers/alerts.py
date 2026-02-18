@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..models import SessionLocal, AlertRule, EmailConfig, SmsConfigHadara, AlertRun, Dashboard
 from ..security import encrypt_text, decrypt_text
 from ..alerts_service import run_rule, send_email, send_sms_hadara, evaluate_threshold, _render_kpi_html  # type: ignore
-from ..alerts_service import _render_table_html, _apply_base_template, _apply_xpick_to_where  # type: ignore
+from ..alerts_service import _render_table_html, _apply_base_template, _apply_xpick_to_where, _render_report_html, _lookup_widget_config  # type: ignore
 from ..alerts_service import _build_kpi_svg, _build_chart_svg_placeholder, _to_svg_data_uri, _fmt_num  # type: ignore
 from ..routers.query import run_query_spec, run_pivot, period_totals  # reuse query execution
 from ..config import settings
@@ -37,6 +37,7 @@ def get_db():
 
 # --- Schemas ---
 class AlertConfig(BaseModel):
+    model_config = {"extra": "allow"}
     datasourceId: Optional[str] = None
     triggers: list[dict] = Field(default_factory=list)
     actions: list[dict] = Field(default_factory=list)
@@ -71,6 +72,7 @@ class AlertOut(BaseModel):
             cfg = json.loads(m.config_json or "{}")
         except Exception:
             cfg = {}
+        validated = AlertConfig.model_validate(cfg or {})
         return AlertOut(
             id=m.id,
             name=m.name,
@@ -78,7 +80,7 @@ class AlertOut(BaseModel):
             widgetId=m.widget_id,
             dashboardId=m.dashboard_id,
             enabled=m.enabled,
-            config=AlertConfig.model_validate(cfg or {}),
+            config=validated,
             lastRunAt=m.last_run_at,
             lastStatus=m.last_status,
         )
@@ -387,7 +389,20 @@ async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Query(d
 
     parts: list[str] = [f"<div style='font-family:Inter,Arial,sans-serif;font-size:13px'>Rule: {payload.name}</div>"]
     mode = str(render.get("mode") or "kpi")
-    if mode == "table":
+    if mode == "report":
+        try:
+            wref = (render.get("widgetRef") or {}) if isinstance(render, dict) else {}
+            _wid_r = (wref.get("widgetId") if isinstance(wref, dict) else None) or None
+            _did_r = (wref.get("dashboardId") if isinstance(wref, dict) else None) or (payload.dashboardId or None)
+            widget_cfg = _lookup_widget_config(db, dashboard_id=_did_r, widget_id=_wid_r)
+            if widget_cfg:
+                report_html_val = _render_report_html(widget_cfg, db)
+                parts.append(report_html_val)
+            else:
+                parts.append("<div>Report widget not found. Ensure widgetRef is set.</div>")
+        except Exception as e:
+            parts.append(f"<div>Failed to render report: {_html.escape(str(e))}</div>")
+    elif mode == "table":
         try:
             spec = render.get("querySpec") or {}
             req = QuerySpecRequest(spec=spec, datasourceId=ds_id, limit=spec.get("limit") or 1000, offset=0, includeTotal=False)
@@ -806,7 +821,21 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
     render_mode_is_kpi = False
     kpi_label = "KPI"
     mode = str(render.get("mode") or "kpi")
-    if mode == "kpi":
+    report_html_ctx: Optional[str] = None
+    if mode == "report":
+        try:
+            wref = (render.get("widgetRef") or {}) if isinstance(render, dict) else {}
+            _wid_r = (wref.get("widgetId") if isinstance(wref, dict) else None) or None
+            _did_r = (wref.get("dashboardId") if isinstance(wref, dict) else None) or (payload.dashboardId or None)
+            widget_cfg = _lookup_widget_config(db, dashboard_id=_did_r, widget_id=_wid_r)
+            if widget_cfg:
+                report_html_ctx = _render_report_html(widget_cfg, db)
+                parts.append(report_html_ctx)
+            else:
+                parts.append("<div>Report widget not found. Ensure widgetRef is set.</div>")
+        except Exception as e:
+            parts.append(f"<div>Failed to render report: {_html.escape(str(e))}</div>")
+    elif mode == "kpi":
         kpi_label = render.get("label") or "KPI"
         render_mode_is_kpi = True
 
@@ -983,6 +1012,10 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Quer
         "dashboardId": did,
         "renderMode": mode,
     }
+    # Populate REPORT_HTML token for report mode
+    if report_html_ctx:
+        context["REPORT_HTML"] = report_html_ctx
+        context["TABLE_HTML"] = report_html_ctx
     # Entry marker to confirm evaluate_alert_v2 path is executing
     try:
         context["dbg_preview_marker"] = "v4-entry"

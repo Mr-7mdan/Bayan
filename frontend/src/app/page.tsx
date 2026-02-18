@@ -16,6 +16,7 @@ import TableCard from '@/components/widgets/TableCard'
 import TextCard from '@/components/widgets/TextCard'
 import SpacerCard from '@/components/widgets/SpacerCard'
 import CompositionCard from '@/components/widgets/CompositionCard'
+import ReportCard from '@/components/widgets/ReportCard'
 import DataNavigator from '@/components/builder/DataNavigator'
 import ConfiguratorPanel from '@/components/builder/ConfiguratorPanel'
 import GlobalFiltersBar from '@/components/builder/GlobalFiltersBar'
@@ -851,12 +852,13 @@ export default function HomePage() {
     else if (kind === 'table') cfg = { ...(base as any), type: 'table', title: 'New Table' }
     else if (kind === 'text') cfg = { ...(base as any), type: 'text', title: 'Text', sql: '', options: { text: { labels: [{ text: 'New Text', style: 'h3', align: 'left' }], imageAlign: 'left' } } as any }
     else if (kind === 'spacer') cfg = { ...(base as any), type: 'spacer', title: 'Spacer', sql: '' }
+    else if (kind === 'report') cfg = { ...(base as any), type: 'report', title: 'New Report', sql: '', options: { report: { gridCols: 12, gridRows: 20, cellSize: 30, elements: [], variables: [], showGridLines: true } } as any }
     else cfg = { ...(base as any), type: 'composition', title: 'Composition', sql: '', options: { composition: { components: [{ kind: 'title', text: 'New Composition', span: 12 }], columns: 12, gap: 2 } } as any }
 
     setConfigs((prev: Record<string, WidgetConfig>) => ({ ...prev, [id]: cfg }))
     // place at the end: compute next y as max y+h
     const maxY = layoutState.reduce((acc: number, it: RGLLayout) => Math.max(acc, it.y + it.h), 0)
-    const size = (kind === 'table' || kind === 'composition') ? { w: 9, h: 6 } : kind === 'chart' ? { w: 6, h: 6 } : { w: 3, h: 2 }
+    const size = (kind === 'table' || kind === 'composition' || kind === 'report') ? { w: 9, h: 6 } : kind === 'chart' ? { w: 6, h: 6 } : { w: 3, h: 2 }
     const extra = (kind === 'spacer') ? { minW: 2 } : {}
     const nextLayoutItem: RGLLayout = { i: id, x: 0, y: maxY, w: size.w, h: size.h, ...(extra as any) }
     setLayoutState((prev: RGLLayout[]) => ([...prev, nextLayoutItem]))
@@ -1557,6 +1559,16 @@ export default function HomePage() {
                               scheduleServerSave({ layout: layoutState, widgets: { ...configs, [cfg.id]: nextCfg } })
                             }}
                             widgetId={cfg.id}
+                          />
+                        </ErrorBoundary>
+                      )}
+                      {cfg.type === 'report' && (
+                        <ErrorBoundary name="ReportCard">
+                          <ReportCard
+                            title={cfg.title}
+                            options={cfg.options}
+                            widgetId={cfg.id}
+                            datasourceId={cfg.datasourceId}
                           />
                         </ErrorBoundary>
                       )}

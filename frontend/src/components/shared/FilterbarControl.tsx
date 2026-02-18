@@ -70,12 +70,14 @@ function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadingC
   const [sel, setSel] = useState<string[]>(initialArr)
   const [q, setQ] = useState<string>('')
   const interactedRef = useRef(false)
+  const lastPatchSigRef = useRef<string>('')
   
   // Load distinct values for manual mode
   useEffect(() => {
     if (mode !== 'manual') return
     const arr = distinctCache?.[field]
-    if ((!arr || arr.length === 0) && typeof loadDistinctAction === 'function') {
+    const isLoading = loadingCache?.[field]
+    if (!isLoading && arr == null && typeof loadDistinctAction === 'function') {
       loadDistinctAction(field)
     }
   }, [mode, field, distinctCache?.[field]])
@@ -151,7 +153,8 @@ function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadingC
       case 'lte': if (hasNum(a)) patch[`${field}__lte`] = a; break
       case 'between': if (hasNum(a)) patch[`${field}__gte`] = a; if (hasNum(b)) patch[`${field}__lte`] = b; break
     }
-    onPatchAction(patch)
+    const sig = JSON.stringify(patch)
+    if (sig !== lastPatchSigRef.current) { lastPatchSigRef.current = sig; onPatchAction(patch) }
   }, [mode, op, a, b])
   
   // Emit patch for manual mode
@@ -159,7 +162,8 @@ function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadingC
     if (mode !== 'manual') return
     const patch: Record<string, any> = { [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [field]: undefined, [`${field}__ne`]: undefined }
     patch[field] = sel.length ? sel : undefined
-    onPatchAction(patch)
+    const sig = JSON.stringify(patch)
+    if (sig !== lastPatchSigRef.current) { lastPatchSigRef.current = sig; onPatchAction(patch) }
   }, [mode, JSON.stringify(sel)])
   
   // Smart sort for numbers
@@ -262,13 +266,15 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadingC
   const [sel, setSel] = useState<string[]>(initialArr)
   const [q, setQ] = useState<string>('')
   const interactedRef = useRef(false)
+  const lastPatchSigRef = useRef<string>('')
   
   // Ensure distinct values are available when needed
   useEffect(() => {
     try {
       if (mode !== 'manual') return
       const arr = distinctCache?.[field]
-      if ((!arr || arr.length === 0) && typeof loadDistinctAction === 'function') {
+      const isLoading = loadingCache?.[field]
+      if (!isLoading && arr == null && typeof loadDistinctAction === 'function') {
         loadDistinctAction(field)
       }
     } catch {}
@@ -320,7 +326,11 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadingC
     if (mode !== 'criteria') return
     const patch: Record<string, any> = { [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }
     const v = String(val || '').trim()
-    if (!v) { onPatchAction(patch); return }
+    if (!v) { 
+      const sig = JSON.stringify(patch)
+      if (sig !== lastPatchSigRef.current) { lastPatchSigRef.current = sig; onPatchAction(patch) }
+      return 
+    }
     // Support comma-separated multi-values with OR logic: "Bank, Retail" -> ["Bank", "Retail"]
     const values = v.split(',').map(s => s.trim()).filter(s => s.length > 0)
     const valuesOrSingle = values.length > 0 ? values : [v]
@@ -346,13 +356,15 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadingC
         patch[`${field}__endswith`] = valuesOrSingle
         break
     }
-    onPatchAction(patch)
+    const sig = JSON.stringify(patch)
+    if (sig !== lastPatchSigRef.current) { lastPatchSigRef.current = sig; onPatchAction(patch) }
   }, [mode, op, val])
   useEffect(() => {
     if (mode !== 'manual') return
     const patch: Record<string, any> = { [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }
     patch[field] = sel.length ? sel : undefined
-    onPatchAction(patch)
+    const sig = JSON.stringify(patch)
+    if (sig !== lastPatchSigRef.current) { lastPatchSigRef.current = sig; onPatchAction(patch) }
   }, [mode, JSON.stringify(sel)])
   const opts = ((distinctCache?.[field] || []) as string[]).map((s) => String(s))
   const filtered = opts.filter((s) => s.toLowerCase().includes(q.toLowerCase()))
@@ -452,7 +464,8 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
   useEffect(() => {
     if (mode !== 'manual') return
     const arr = distinctCache?.[field]
-    if ((!arr || arr.length === 0) && typeof loadDistinctAction === 'function') {
+    const isLoading = loadingCache?.[field]
+    if (!isLoading && arr == null && typeof loadDistinctAction === 'function') {
       loadDistinctAction(field)
     }
   }, [mode, field, distinctCache?.[field]])
@@ -597,7 +610,8 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
     if (mode !== 'manual') return
     const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [field]: undefined }
     patch[field] = sel.length ? sel : undefined
-    onPatchAction(patch)
+    const sig = JSON.stringify(patch)
+    if (sig !== lastSigRef.current) { lastSigRef.current = sig; onPatchAction(patch) }
   }, [mode, JSON.stringify(sel)])
   
   // Smart sort for dates

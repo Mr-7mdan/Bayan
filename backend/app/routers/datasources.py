@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, File, Form
 from typing import Any
 from uuid import uuid4
 import os
@@ -2564,3 +2564,289 @@ def import_datasources(payload: DatasourceImportRequest, actorId: str | None = Q
             # Non-fatal; continue importing core datasources
             pass
     return DatasourceImportResponse(created=created, updated=updated, items=out, idMap=(id_map or None))
+
+
+# ---------------------------------------------------------------------------
+# Import Table — preview and commit (SQL query or file upload)
+# ---------------------------------------------------------------------------
+
+class _ImportSqlPreviewRequest(BaseModel):
+    sql: str
+    limit: int = 100
+
+
+class _ImportSqlCommitRequest(BaseModel):
+    sql: str
+    tableName: str
+    ifExists: str = "replace"   # "replace" | "append" | "fail"
+
+
+def _duck_path_for_ds(ds: Datasource) -> str:
+    """Return the DuckDB file path for a given datasource record."""
+    from ..security import decrypt_text
+    from ..config import get_settings
+    if ds.connection_encrypted:
+        try:
+            dsn = decrypt_text(ds.connection_encrypted) or ""
+            p = dsn.replace("duckdb:///", "").strip()
+            if p:
+                return p
+        except Exception:
+            pass
+    return get_settings().duckdb_path
+
+
+def _q(name: str) -> str:
+    """Quote an identifier for DuckDB."""
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+@router.post("/{ds_id}/local/import-sql-preview")
+def import_sql_preview(
+    ds_id: str,
+    payload: _ImportSqlPreviewRequest,
+    db: Session = Depends(get_db),
+):
+    """Return a preview (up to limit rows) by executing the user-supplied SQL against the DuckDB."""
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if _duckdb is None:
+        raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
+    sql = (payload.sql or "").strip().rstrip(";")
+    if not sql:
+        raise HTTPException(status_code=400, detail="sql is required")
+    limit = max(1, min(int(payload.limit or 100), 1000))
+    duck_path = _duck_path_for_ds(ds)
+    try:
+        with open_duck_native(duck_path) as conn:
+            res = conn.execute(f"SELECT * FROM ({sql}) __q LIMIT {limit}")
+            columns = [str(c[0]) for c in (res.description or [])]
+            raw = res.fetchall()
+        rows = [dict(zip(columns, row)) for row in raw]
+        # Serialise non-JSON-safe types
+        import datetime, decimal
+        def _safe(v):
+            if isinstance(v, (datetime.date, datetime.datetime)):
+                return str(v)
+            if isinstance(v, decimal.Decimal):
+                return float(v)
+            return v
+        rows = [{k: _safe(v) for k, v in r.items()} for r in rows]
+        return {"columns": columns, "rows": rows, "rowCount": len(rows)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"SQL error: {e}")
+
+
+@router.post("/{ds_id}/local/import-sql-commit")
+def import_sql_commit(
+    ds_id: str,
+    payload: _ImportSqlCommitRequest,
+    db: Session = Depends(get_db),
+):
+    """Create (or replace) a DuckDB table from a SQL query."""
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if _duckdb is None:
+        raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
+    sql = (payload.sql or "").strip().rstrip(";")
+    if not sql:
+        raise HTTPException(status_code=400, detail="sql is required")
+    table_name = (payload.tableName or "").strip()
+    if not table_name:
+        raise HTTPException(status_code=400, detail="tableName is required")
+    if_exists = str(payload.ifExists or "replace").lower()
+    duck_path = _duck_path_for_ds(ds)
+    qtbl = _q(table_name)
+    try:
+        with open_duck_native(duck_path) as conn:
+            if if_exists == "replace":
+                conn.execute(f"DROP TABLE IF EXISTS {qtbl}")
+                conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
+            elif if_exists == "append":
+                # Check if table exists; if not, create it
+                exists = conn.execute(
+                    "SELECT count(*) FROM information_schema.tables "
+                    f"WHERE table_schema='main' AND table_name=?",
+                    [table_name],
+                ).fetchone()[0]
+                if exists:
+                    conn.execute(f"INSERT INTO {qtbl} SELECT * FROM ({sql}) __q")
+                else:
+                    conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
+            else:
+                # "fail" — error if exists
+                conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
+            row_count = conn.execute(f"SELECT COUNT(*) FROM {qtbl}").fetchone()[0]
+        return {"ok": True, "tableName": table_name, "rowCount": int(row_count)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Import failed: {e}")
+
+
+@router.post("/{ds_id}/local/import-file-preview")
+async def import_file_preview(
+    ds_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Parse an uploaded CSV or Excel file and return preview rows."""
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if _duckdb is None:
+        raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
+    import tempfile, os as _os
+    fname = (file.filename or "upload").lower()
+    is_excel = fname.endswith(".xlsx") or fname.endswith(".xls")
+    is_csv = fname.endswith(".csv") or fname.endswith(".tsv") or (not is_excel)
+    content = await file.read()
+    suffix = ".xlsx" if is_excel else ".csv"
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        tmp.write(content)
+        tmp.flush()
+        tmp.close()
+        columns: list[str] = []
+        rows: list[dict] = []
+        if is_excel:
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(tmp.name, read_only=True, data_only=True)
+                ws = wb.active
+                raw_rows = list(ws.iter_rows(values_only=True))
+                wb.close()
+                if not raw_rows:
+                    raise HTTPException(status_code=400, detail="Empty Excel file")
+                columns = [str(c) if c is not None else f"col{i}" for i, c in enumerate(raw_rows[0])]
+                import datetime, decimal
+                def _safe(v):
+                    if isinstance(v, (datetime.date, datetime.datetime)):
+                        return str(v)
+                    if isinstance(v, decimal.Decimal):
+                        return float(v)
+                    return v
+                for r in raw_rows[1:101]:
+                    rows.append({columns[i]: _safe(v) for i, v in enumerate(r)})
+            except ImportError:
+                raise HTTPException(status_code=500, detail="openpyxl not installed")
+        else:
+            # Use DuckDB's built-in CSV reader for fast parsing
+            with open_duck_native(":memory:") as conn:
+                res = conn.execute(f"SELECT * FROM read_csv_auto('{tmp.name}') LIMIT 100")
+                columns = [str(c[0]) for c in (res.description or [])]
+                raw = res.fetchall()
+            import datetime, decimal
+            def _safe(v):
+                if isinstance(v, (datetime.date, datetime.datetime)):
+                    return str(v)
+                if isinstance(v, decimal.Decimal):
+                    return float(v)
+                return v
+            rows = [{k: _safe(v) for k, v in zip(columns, row)} for row in raw]
+        return {"columns": columns, "rows": rows, "rowCount": len(rows), "fileName": file.filename}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"File parse error: {e}")
+    finally:
+        try:
+            _os.unlink(tmp.name)
+        except Exception:
+            pass
+
+
+@router.post("/{ds_id}/local/import-file-commit")
+async def import_file_commit(
+    ds_id: str,
+    file: UploadFile = File(...),
+    tableName: str = Form(...),
+    ifExists: str = Form(default="replace"),
+    db: Session = Depends(get_db),
+):
+    """Commit an uploaded CSV/Excel file as a new DuckDB table."""
+    ds = db.get(Datasource, ds_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    if _duckdb is None:
+        raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
+    table_name = (tableName or "").strip()
+    if not table_name:
+        raise HTTPException(status_code=400, detail="tableName is required")
+    if_exists = str(ifExists or "replace").lower()
+    fname = (file.filename or "upload").lower()
+    is_excel = fname.endswith(".xlsx") or fname.endswith(".xls")
+    content = await file.read()
+    import tempfile, os as _os
+    suffix = ".xlsx" if is_excel else ".csv"
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    duck_path = _duck_path_for_ds(ds)
+    qtbl = _q(table_name)
+    try:
+        tmp.write(content)
+        tmp.flush()
+        tmp.close()
+        with open_duck_native(duck_path) as conn:
+            if is_excel:
+                # Parse with openpyxl, write to a temp CSV, then load
+                try:
+                    import openpyxl, csv, io
+                    wb = openpyxl.load_workbook(tmp.name, read_only=True, data_only=True)
+                    ws = wb.active
+                    raw_rows = list(ws.iter_rows(values_only=True))
+                    wb.close()
+                    if not raw_rows:
+                        raise HTTPException(status_code=400, detail="Empty Excel file")
+                    tmp_csv = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w", newline="", encoding="utf-8")
+                    try:
+                        writer = csv.writer(tmp_csv)
+                        for row in raw_rows:
+                            writer.writerow([("" if v is None else str(v)) for v in row])
+                        tmp_csv.close()
+                        if if_exists == "replace":
+                            conn.execute(f"DROP TABLE IF EXISTS {qtbl}")
+                            conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp_csv.name}')")
+                        elif if_exists == "append":
+                            exists = conn.execute(
+                                "SELECT count(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?",
+                                [table_name],
+                            ).fetchone()[0]
+                            if exists:
+                                conn.execute(f"INSERT INTO {qtbl} SELECT * FROM read_csv_auto('{tmp_csv.name}') OFFSET 1")
+                            else:
+                                conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp_csv.name}')")
+                        else:
+                            conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp_csv.name}')")
+                    finally:
+                        try:
+                            _os.unlink(tmp_csv.name)
+                        except Exception:
+                            pass
+                except ImportError:
+                    raise HTTPException(status_code=500, detail="openpyxl not installed")
+            else:
+                if if_exists == "replace":
+                    conn.execute(f"DROP TABLE IF EXISTS {qtbl}")
+                    conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp.name}')")
+                elif if_exists == "append":
+                    exists = conn.execute(
+                        "SELECT count(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?",
+                        [table_name],
+                    ).fetchone()[0]
+                    if exists:
+                        conn.execute(f"INSERT INTO {qtbl} SELECT * FROM read_csv_auto('{tmp.name}')")
+                    else:
+                        conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp.name}')")
+                else:
+                    conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp.name}')")
+            row_count = conn.execute(f"SELECT COUNT(*) FROM {qtbl}").fetchone()[0]
+        return {"ok": True, "tableName": table_name, "rowCount": int(row_count)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Import failed: {e}")
+    finally:
+        try:
+            _os.unlink(tmp.name)
+        except Exception:
+            pass

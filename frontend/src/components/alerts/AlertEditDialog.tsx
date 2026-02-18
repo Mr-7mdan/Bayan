@@ -99,7 +99,8 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
     setSmsToInput(''); setSmsSugOpen(false)
   }
   const [template, setTemplate] = useState('')
-  const [renderMode, setRenderMode] = useState<'kpi'|'table'|'chart'>('kpi')
+  const [renderMode, setRenderMode] = useState<'kpi'|'table'|'chart'|'report'>('kpi')
+  const [attachPdf, setAttachPdf] = useState<boolean>(false)
   const [triggerType, setTriggerType] = useState<'threshold'|'time'>('threshold')
   const [operator, setOperator] = useState('>')
   const [value, setValue] = useState('0')
@@ -142,6 +143,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
     setTemplate(String(cfg.template || ''))
     const r = cfg.render || { mode: 'kpi' }
     setRenderMode((r.mode || 'kpi') as any)
+    try { setAttachPdf(!!((Array.isArray(cfg.actions) ? cfg.actions : []).find((a: any) => String(a?.type) === 'email') || {}).attachPdf) } catch {}
     const t0 = Array.isArray(cfg.triggers) ? cfg.triggers[0] : null
     if (t0 && String(t0.type) === 'time') {
       setTriggerType('time')
@@ -251,10 +253,25 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
       }
     }
     const actions: any[] = []
-    if (emails.length) actions.push({ type: 'email', to: emails, subject: name })
+    if (emails.length) actions.push({ type: 'email', to: emails, subject: name, ...(attachPdf ? { attachPdf: true } : {}) })
     if (phones.length) actions.push({ type: 'sms', to: phones, message: template || name })
-    const render = kind === 'notification' ? (renderMode === 'table' ? { mode: 'table', querySpec: (cfgIn.render||{}).querySpec } : (renderMode === 'chart' ? { mode: 'chart', url: (cfgIn.render||{}).url || '' } : { mode: 'kpi', label: (cfgIn.render||{}).label || name })) : { mode: 'kpi', label: (cfgIn.render||{}).label || name }
+    const prevRender = (cfgIn.render || {}) as Record<string, any>
+    const renderBase: Record<string, any> = {}
+    if (prevRender.widgetRef) renderBase.widgetRef = prevRender.widgetRef
+    if (prevRender.width) renderBase.width = prevRender.width
+    if (prevRender.height) renderBase.height = prevRender.height
+    if (prevRender.theme) renderBase.theme = prevRender.theme
+    const render = kind === 'notification'
+      ? (renderMode === 'report' ? { ...renderBase, mode: 'report', querySpec: prevRender.querySpec }
+        : renderMode === 'table' ? { ...renderBase, mode: 'table', querySpec: prevRender.querySpec }
+        : renderMode === 'chart' ? { ...renderBase, mode: 'chart', url: prevRender.url || '' }
+        : { ...renderBase, mode: 'kpi', label: prevRender.label || name })
+      : { ...renderBase, mode: 'kpi', label: prevRender.label || name }
     const cfg: AlertConfig = { datasourceId: (advOpen ? (advDatasourceId || cfgIn.datasourceId) : cfgIn.datasourceId), triggers, actions, render, template }
+    if (cfgIn.triggersGroup) cfg.triggersGroup = cfgIn.triggersGroup
+    if (cfgIn.customPlaceholders) cfg.customPlaceholders = cfgIn.customPlaceholders as any
+    // Preserve any extra top-level config keys from the original config
+    for (const k of Object.keys(cfgIn)) { if (!(k in cfg)) (cfg as any)[k] = (cfgIn as any)[k] }
     const payload: AlertCreate = { name, kind, widgetId: (alert as any)?.widgetId || undefined, dashboardId: (alert as any)?.dashboardId || undefined, enabled, config: cfg }
     return payload
   }
@@ -448,7 +465,10 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
         <div className="mt-4">
           <div className="text-sm font-medium mb-2">Render</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <label className="text-sm">Mode<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={renderMode} onChange={(e)=>setRenderMode(e.target.value as any)}><option value="kpi">KPI</option><option value="table">Table</option><option value="chart">Chart (link)</option></select></label>
+            <label className="text-sm">Mode<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={renderMode} onChange={(e)=>setRenderMode(e.target.value as any)}><option value="kpi">KPI</option><option value="table">Table</option><option value="chart">Chart (link)</option><option value="report">Report</option></select></label>
+            {renderMode === 'report' && (
+              <label className="text-sm inline-flex items-center gap-2 mt-5"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> Attach PDF</label>
+            )}
           </div>
         </div>
 

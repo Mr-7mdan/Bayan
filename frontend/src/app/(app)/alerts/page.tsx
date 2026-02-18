@@ -500,7 +500,7 @@ export default function AlertsPage() {
                     text = (st==='ok') ? 'Finished Calculated' : 'Calculating …'
                   } else if (id === 'snapshot') {
                     const m = String((ev?.mode || 'chart'))
-                    const prep = (m==='kpi' ? 'Preparing KPI Snapshot …' : (m==='table' ? 'Preparing Table …' : 'Preparing Chart Snapshot …'))
+                    const prep = (m==='kpi' ? 'Preparing KPI Snapshot …' : (m==='table' ? 'Preparing Table …' : 'Preparing Snapshot …'))
                     if (st==='ok') text = (m==='kpi' ? 'Prepared KPI Snapshot Successfully' : (m==='table' ? 'Prepared Table Successfully' : 'Prepared Chart Snapshot Successfully'))
                     else if (st==='error') text = 'Snapshot generation Failed'
                     else text = prep

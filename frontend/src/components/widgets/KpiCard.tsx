@@ -88,10 +88,14 @@ export default function KpiCard({
     return () => { if (typeof window !== 'undefined') window.removeEventListener('global-filters-break-change', handler as EventListener) }
   }, [widgetId])
   const [uiWhere, setUiWhere] = useState<Record<string, any>>({})
+  const uiWhereSigRef = useRef<string>('')
   const setUiWhereAndEmit = (patch: Record<string, any>) => {
     setUiWhere((prev) => {
       const next = { ...prev }
       Object.entries(patch).forEach(([k, v]) => { if (v === undefined) delete (next as any)[k]; else (next as any)[k] = v })
+      const sig = JSON.stringify(next)
+      if (sig === uiWhereSigRef.current) return prev
+      uiWhereSigRef.current = sig
       return next
     })
     if (typeof window !== 'undefined' && widgetId) {
@@ -564,7 +568,7 @@ export default function KpiCard({
   }, [deltaEnabled, queryMode, querySpec, JSON.stringify(effectiveWhere), datasourceId, sql, filters, ignoreGlobal, breakSeq])
 
   // Value-only per-legend totals when delta is OFF (declare before use)
-  const [baseByLegend, setBaseByLegend] = useState<Record<string, number>>({})
+  const [baseByLegend, setBaseByLegend] = useState<Record<string, any>>({})
   // Value-only per-series totals when delta is OFF (declare before use)
   const [baseBySeries, setBaseBySeries] = useState<Record<string, number>>({})
 
@@ -597,7 +601,84 @@ export default function KpiCard({
         const measure = (querySpec as any)?.measure as string | undefined
         const agg = (((querySpec as any)?.agg) || (y ? 'sum' : 'count')) as any
         const legend = Array.isArray(legendRaw) ? (legendRaw[0] as string | undefined) : (legendRaw as string | undefined)
-        if (!source || !legend) { if (!ignore) setBaseByLegend({}); return }
+        const seriesArr = (Array.isArray((querySpec as any)?.series) ? (querySpec as any).series : []) as Array<{ label?: string; y?: string; measure?: string; agg?: string }>
+        if (!source) { if (!ignore) setBaseByLegend({}); return }
+        
+        // If no legend field, fetch total value and set it as a single "Total" entry
+        if (!legend) {
+          const spec: any = { source, where: effectiveWhere, agg }
+          if (y) spec.y = y
+          if (measure) spec.measure = measure
+          const r = await QueryApi.querySpec({ spec, datasourceId, limit: 1000, offset: 0, includeTotal: false })
+          const cols = (r?.columns || []) as string[]
+          const rows = (r?.rows || []) as any[]
+          let totalVal = 0
+          if (Array.isArray(rows) && rows.length > 0) {
+            const first = rows[0]
+            if (Array.isArray(first)) {
+              const len = first.length
+              if (len === 1) {
+                totalVal = Number(first[0] ?? 0)
+              } else {
+                const valueIdx = cols.includes('value') ? Math.max(0, cols.indexOf('value')) : (len === 2 ? 1 : (len - 1))
+                rows.forEach((r) => { const v = Number(r[valueIdx] ?? 0); if (!isNaN(v)) totalVal += v })
+              }
+            } else if (typeof first === 'number') {
+              totalVal = Number(first)
+            }
+          }
+          if (!ignore) setBaseByLegend({ 'Total': totalVal })
+          return
+        }
+
+        // Multi-series + legend (delta OFF): fetch each series grouped by legend (x=legend)
+        if (seriesArr.length > 1) {
+          const seriesResults = await Promise.all(
+            seriesArr.map(async (s) => {
+              const seriesLabel = s.label || s.y || s.measure || 'value'
+              const spec: any = { source, where: effectiveWhere, x: legend }
+              if (s.y) {
+                spec.y = s.y
+                spec.agg = s.agg || 'sum'
+              } else if (s.measure) {
+                spec.measure = s.measure
+              }
+              const r = await QueryApi.querySpec({ spec, datasourceId, limit: 1000, offset: 0, includeTotal: false })
+              const cols = (r?.columns || []) as string[]
+              const rows = (r?.rows || []) as any[]
+              const legIdx = cols.includes(legend) ? cols.indexOf(legend) : (cols.includes('x') ? cols.indexOf('x') : 0)
+              const valIdx = cols.includes('value') ? cols.indexOf('value') : (cols.length > 1 ? cols.length - 1 : 1)
+              const map = new Map<string, number>()
+              rows.forEach((row: any) => {
+                const arr = Array.isArray(row) ? row : []
+                const raw = arr[legIdx]
+                const name = (raw === null || raw === undefined || String(raw).trim() === '') ? 'None' : String(raw)
+                const num = Number(arr[valIdx] ?? 0)
+                const v = isNaN(num) ? 0 : num
+                map.set(name, (map.get(name) || 0) + v)
+              })
+              return { seriesLabel, totalsByLegend: map }
+            })
+          )
+
+          const allLegendKeys = new Set<string>()
+          seriesResults.forEach((sr) => { sr.totalsByLegend.forEach((_v, k) => allLegendKeys.add(k)) })
+
+          const out: Record<string, any> = {}
+          allLegendKeys.forEach((k) => {
+            const bySeries: Record<string, any> = {}
+            let cur = 0
+            seriesResults.forEach((sr) => {
+              const v = Number(sr.totalsByLegend.get(k) || 0)
+              cur += v
+              bySeries[String(sr.seriesLabel)] = { current: v, previous: 0, absoluteDelta: 0, percentChange: 0 }
+            })
+            out[String(k)] = { current: cur, previous: 0, absoluteDelta: 0, percentChange: 0, bySeries }
+          })
+          if (!ignore) setBaseByLegend(out)
+          return
+        }
+
         // Build spec that groups by the legend as X (no time dimension)
         const spec: any = { source, where: effectiveWhere, x: legend, agg }
         if (y) spec.y = y
@@ -1061,7 +1142,10 @@ export default function KpiCard({
               const topN = (typeof options?.kpi?.topN === 'number' ? options.kpi.topN : 3) || 3
               const entriesBase = deltaEnabled
                 ? Object.entries(kpi.data?.byLegend || {})
-                : Object.entries(baseByLegend || {}).map(([k, v]) => [k, { current: Number(v||0), previous: 0, absoluteDelta: 0, percentChange: 0 }] as any)
+                : Object.entries(baseByLegend || {}).map(([k, v]: any) => {
+                    if (v != null && typeof v === 'object') return [k, v]
+                    return [k, { current: Number(v||0), previous: 0, absoluteDelta: 0, percentChange: 0 }]
+                  })
               const entries = entriesBase
                 .sort((a:any,b:any) => Number((b[1] as any)?.current||0) - Number((a[1] as any)?.current||0))
                 .slice(0, topN)

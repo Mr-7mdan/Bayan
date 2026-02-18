@@ -28,7 +28,7 @@ export type Transform = (
 ) & { scope?: Scope }
 
 export type JoinSpec = {
-  joinType: 'left'|'inner'|'right'
+  joinType: 'left'|'inner'|'right'|'lateral'
   targetTable: string
   sourceKey: string
   targetKey: string
@@ -36,6 +36,12 @@ export type JoinSpec = {
   aggregate?: { fn: 'sum'|'avg'|'min'|'max'|'count'|'string_agg'|'array_agg'; column: string; alias: string }
   filter?: Condition
   scope?: Scope
+  lateral?: {
+    correlations: Array<{ sourceCol: string; op: 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'; targetCol: string }>
+    orderBy?: Array<{ column: string; direction: 'ASC'|'DESC' }>
+    limit?: number
+    subqueryAlias?: string
+  }
 }
 
 export type SortSpec = { by: string; direction: 'asc'|'desc'; semantic?: 'numeric'|'alpha'|'date'|'latest_to_oldest'|'oldest_to_latest' }

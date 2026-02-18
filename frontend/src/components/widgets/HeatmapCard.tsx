@@ -292,6 +292,7 @@ export default function HeatmapCard({
   
   // Local UI-driven filters (Filterbars) merged into where
   const [uiWhere, setUiWhere] = useState<Record<string, any>>({})
+  const uiWhereSigRef = useRef<string>('')
   const setUiWhereLocal = (patch: Record<string, any>, emit = true) => {
     setUiWhere((prev) => {
       const next = { ...prev }
@@ -299,6 +300,9 @@ export default function HeatmapCard({
         if (v === undefined) delete (next as any)[k]
         else (next as any)[k] = v
       })
+      const sig = JSON.stringify(next)
+      if (sig === uiWhereSigRef.current) return prev
+      uiWhereSigRef.current = sig
       return next
     })
     if (emit && typeof window !== 'undefined' && widgetId) {

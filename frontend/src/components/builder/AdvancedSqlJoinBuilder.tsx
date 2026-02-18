@@ -5,19 +5,47 @@ import type { IntrospectResponse } from '@/lib/api'
 
 export type JoinColumn = { name: string; alias?: string }
 export type JoinAggregate = { fn: 'sum'|'avg'|'min'|'max'|'count'|'string_agg'|'array_agg'; column: string; alias: string }
+export type LateralCorrelation = { sourceCol: string; op: 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'; targetCol: string }
 
 export type AdvancedSqlJoinBuilderProps = {
   schema?: IntrospectResponse
   baseSource?: string
   baseColumns: string[]
-  onAddAction: (j: { joinType: 'left'|'inner'|'right'; targetTable: string; sourceKey: string; targetKey: string; columns?: JoinColumn[]; aggregate?: JoinAggregate }) => void
+  onAddAction: (j: { 
+    joinType: 'left'|'inner'|'right'|'lateral'; 
+    targetTable: string; 
+    sourceKey: string; 
+    targetKey: string; 
+    columns?: JoinColumn[]; 
+    aggregate?: JoinAggregate;
+    lateral?: {
+      correlations: LateralCorrelation[];
+      orderBy?: { column: string; direction: 'ASC'|'DESC' }[];
+      limit?: number;
+      subqueryAlias?: string;
+    }
+  }) => void
   onCancelAction?: () => void
-  initial?: { joinType?: 'left'|'inner'|'right'; targetTable?: string; sourceKey?: string; targetKey?: string; columns?: JoinColumn[]; aggregate?: JoinAggregate; filter?: { op: any; left: string; right: any } }
+  initial?: { 
+    joinType?: 'left'|'inner'|'right'|'lateral'; 
+    targetTable?: string; 
+    sourceKey?: string; 
+    targetKey?: string; 
+    columns?: JoinColumn[]; 
+    aggregate?: JoinAggregate; 
+    filter?: { op: any; left: string; right: any };
+    lateral?: {
+      correlations?: LateralCorrelation[];
+      orderBy?: { column: string; direction: 'ASC'|'DESC' }[];
+      limit?: number;
+      subqueryAlias?: string;
+    }
+  }
   submitLabel?: string
 }
 
 export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddAction, onCancelAction, initial, submitLabel }: AdvancedSqlJoinBuilderProps) {
-  const [joinType, setJoinType] = useState<'left'|'inner'|'right'>('left')
+  const [joinType, setJoinType] = useState<'left'|'inner'|'right'|'lateral'>('left')
   const [targetTable, setTargetTable] = useState<string>('')
   const [sourceKey, setSourceKey] = useState<string>('')
   const [targetKey, setTargetKey] = useState<string>('')
@@ -31,11 +59,18 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
   const [fltLeft, setFltLeft] = useState<string>('')
   const [fltOp, setFltOp] = useState<'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'in'|'like'>('eq')
   const [fltVal, setFltVal] = useState<string>('')
+  
+  // LATERAL join specific state
+  const [lateralCorrelations, setLateralCorrelations] = useState<LateralCorrelation[]>([])
+  const [lateralOrderBy, setLateralOrderBy] = useState<{ column: string; direction: 'ASC'|'DESC' }[]>([])
+  const [lateralLimit, setLateralLimit] = useState<number | undefined>(undefined)
+  const [lateralAlias, setLateralAlias] = useState<string>('fx')
 
   // Prefill when editing
   useEffect(() => {
     if (!initial) return
     try {
+      console.log('[AdvancedSqlJoinBuilder] Loading initial values:', initial)
       if (initial.joinType) setJoinType(initial.joinType)
       if (initial.targetTable) setTargetTable(initial.targetTable)
       if (initial.sourceKey) setSourceKey(initial.sourceKey)
@@ -69,7 +104,28 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
       } else {
         setFltEnabled(false)
       }
-    } catch {}
+      if (initial.lateral) {
+        console.log('[AdvancedSqlJoinBuilder] Loading LATERAL config:', initial.lateral)
+        if (Array.isArray(initial.lateral.correlations)) {
+          console.log('[AdvancedSqlJoinBuilder] Setting correlations:', initial.lateral.correlations)
+          setLateralCorrelations(initial.lateral.correlations)
+        }
+        if (Array.isArray(initial.lateral.orderBy)) {
+          console.log('[AdvancedSqlJoinBuilder] Setting orderBy:', initial.lateral.orderBy)
+          setLateralOrderBy(initial.lateral.orderBy)
+        }
+        if (typeof initial.lateral.limit === 'number') {
+          console.log('[AdvancedSqlJoinBuilder] Setting limit:', initial.lateral.limit)
+          setLateralLimit(initial.lateral.limit)
+        }
+        if (initial.lateral.subqueryAlias) {
+          console.log('[AdvancedSqlJoinBuilder] Setting alias:', initial.lateral.subqueryAlias)
+          setLateralAlias(initial.lateral.subqueryAlias)
+        }
+      }
+    } catch (e) {
+      console.error('[AdvancedSqlJoinBuilder] Error loading initial values:', e)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial])
 
@@ -130,8 +186,11 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
   const hasAliasConflict = useMemo(() => Object.entries(aliasCounts).some(([a, n]) => n > 1 || baseColumns.includes(a)), [aliasCounts, baseColumns])
 
   const canAdd = useMemo(() => {
+    if (joinType === 'lateral') {
+      return !!targetTable && lateralCorrelations.length > 0 && !hasAliasConflict && !!lateralAlias
+    }
     return !!joinType && !!targetTable && !!sourceKey && !!targetKey && !hasAliasConflict
-  }, [joinType, targetTable, sourceKey, targetKey, hasAliasConflict])
+  }, [joinType, targetTable, sourceKey, targetKey, hasAliasConflict, lateralCorrelations, lateralAlias])
 
   function suggestAlias(raw: string) {
     const tbl = String(targetTable || '').split('.').pop() || ''
@@ -158,9 +217,10 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
         <label className="text-xs text-muted-foreground sm:col-span-1">Join type</label>
         <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={joinType} onChange={(e)=>setJoinType(e.target.value as any)}>
-          <option value="left">left</option>
-          <option value="inner">inner</option>
-          <option value="right">right</option>
+          <option value="left">LEFT JOIN</option>
+          <option value="inner">INNER JOIN</option>
+          <option value="right">RIGHT JOIN</option>
+          <option value="lateral">LEFT JOIN LATERAL</option>
         </select>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
@@ -173,20 +233,162 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
         </div>
       </div>
       {!!fieldErrors.targetTable && <div className="text-[11px] text-red-600 mb-2">{fieldErrors.targetTable}</div>}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
-        <label className="text-xs text-muted-foreground sm:col-span-1">Match keys</label>
-        <div className="sm:col-span-2 grid grid-cols-2 gap-2">
-          <select className="h-8 px-2 rounded-md bg-card text-xs" value={sourceKey} onChange={(e)=>setSourceKey(e.target.value)}>
-            <option value="">source key (base)</option>
-            {baseColumns.map(c => (<option key={c} value={c}>{c}</option>))}
-          </select>
-          <select className="h-8 px-2 rounded-md bg-card text-xs" value={targetKey} onChange={(e)=>setTargetKey(e.target.value)}>
-            <option value="">target key (joined)</option>
-            {targetCols.map(c => (<option key={c} value={c}>{c}</option>))}
-          </select>
+      {/* Hide Match keys section for LATERAL joins */}
+      {joinType !== 'lateral' && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
+            <label className="text-xs text-muted-foreground sm:col-span-1">Match keys</label>
+            <div className="sm:col-span-2 grid grid-cols-2 gap-2">
+              <select className="h-8 px-2 rounded-md bg-card text-xs" value={sourceKey} onChange={(e)=>setSourceKey(e.target.value)}>
+                <option value="">source key (base)</option>
+                {baseColumns.map(c => (<option key={c} value={c}>{c}</option>))}
+              </select>
+              <select className="h-8 px-2 rounded-md bg-card text-xs" value={targetKey} onChange={(e)=>setTargetKey(e.target.value)}>
+                <option value="">target key (joined)</option>
+                {targetCols.map(c => (<option key={c} value={c}>{c}</option>))}
+              </select>
+            </div>
+          </div>
+          {(!sourceKey || !targetKey) && <div className="text-[11px] text-red-600 mb-2">{!sourceKey ? 'Source key' : ''}{(!sourceKey && !targetKey) ? ' and ' : ''}{!targetKey ? 'Target key' : ''} required</div>}
+        </>
+      )}
+      
+      {/* LATERAL join configuration */}
+      {joinType === 'lateral' && (
+        <div className="mb-3 border rounded-md p-2 bg-card/50">
+          <div className="text-xs font-medium text-muted-foreground mb-2">LATERAL Subquery Configuration</div>
+          
+          {/* Subquery alias */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
+            <label className="text-xs text-muted-foreground sm:col-span-1">Subquery alias</label>
+            <input 
+              className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" 
+              placeholder="e.g., fx"
+              value={lateralAlias} 
+              onChange={(e)=>setLateralAlias(e.target.value)} 
+            />
+          </div>
+          
+          {/* Correlation conditions */}
+          <div className="mb-2">
+            <div className="text-xs text-muted-foreground mb-1">Correlation conditions (WHERE clause)</div>
+            <div className="space-y-1">
+              {lateralCorrelations.map((corr, idx) => (
+                <div key={idx} className="grid grid-cols-[1fr,auto,1fr,auto] gap-2 items-center">
+                  <select 
+                    className="h-8 px-2 rounded-md bg-card text-xs" 
+                    value={corr.targetCol} 
+                    onChange={(e) => {
+                      const next = [...lateralCorrelations]
+                      next[idx] = { ...corr, targetCol: e.target.value }
+                      setLateralCorrelations(next)
+                    }}
+                  >
+                    <option value="">(subquery col)</option>
+                    {targetCols.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select 
+                    className="h-8 px-2 rounded-md bg-card text-xs w-20" 
+                    value={corr.op} 
+                    onChange={(e) => {
+                      const next = [...lateralCorrelations]
+                      next[idx] = { ...corr, op: e.target.value as any }
+                      setLateralCorrelations(next)
+                    }}
+                  >
+                    <option value="eq">=</option>
+                    <option value="ne">!=</option>
+                    <option value="lt">&lt;</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="gte">&gt;=</option>
+                  </select>
+                  <select 
+                    className="h-8 px-2 rounded-md bg-card text-xs" 
+                    value={corr.sourceCol} 
+                    onChange={(e) => {
+                      const next = [...lateralCorrelations]
+                      next[idx] = { ...corr, sourceCol: e.target.value }
+                      setLateralCorrelations(next)
+                    }}
+                  >
+                    <option value="">(base col)</option>
+                    {baseColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className="text-[11px] px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+                    onClick={() => setLateralCorrelations(lateralCorrelations.filter((_, i) => i !== idx))}
+                  >×</button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] w-full"
+                onClick={() => setLateralCorrelations([...lateralCorrelations, { sourceCol: '', op: 'eq', targetCol: '' }])}
+              >+ Add correlation</button>
+            </div>
+          </div>
+          
+          {/* ORDER BY */}
+          <div className="mb-2">
+            <div className="text-xs text-muted-foreground mb-1">ORDER BY (optional)</div>
+            <div className="space-y-1">
+              {lateralOrderBy.map((ord, idx) => (
+                <div key={idx} className="grid grid-cols-[1fr,auto,auto] gap-2 items-center">
+                  <select 
+                    className="h-8 px-2 rounded-md bg-card text-xs" 
+                    value={ord.column} 
+                    onChange={(e) => {
+                      const next = [...lateralOrderBy]
+                      next[idx] = { ...ord, column: e.target.value }
+                      setLateralOrderBy(next)
+                    }}
+                  >
+                    <option value="">(column)</option>
+                    {targetCols.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select 
+                    className="h-8 px-2 rounded-md bg-card text-xs w-24" 
+                    value={ord.direction} 
+                    onChange={(e) => {
+                      const next = [...lateralOrderBy]
+                      next[idx] = { ...ord, direction: e.target.value as 'ASC'|'DESC' }
+                      setLateralOrderBy(next)
+                    }}
+                  >
+                    <option value="ASC">ASC</option>
+                    <option value="DESC">DESC</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="text-[11px] px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+                    onClick={() => setLateralOrderBy(lateralOrderBy.filter((_, i) => i !== idx))}
+                  >×</button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] w-full"
+                onClick={() => setLateralOrderBy([...lateralOrderBy, { column: '', direction: 'DESC' }])}
+              >+ Add ORDER BY</button>
+            </div>
+          </div>
+          
+          {/* LIMIT */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center">
+            <label className="text-xs text-muted-foreground sm:col-span-1">LIMIT (optional)</label>
+            <input 
+              type="number" 
+              min="1"
+              className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" 
+              placeholder="e.g., 1"
+              value={lateralLimit ?? ''} 
+              onChange={(e)=>setLateralLimit(e.target.value ? Number(e.target.value) : undefined)} 
+            />
+          </div>
         </div>
-      </div>
-      {(!sourceKey || !targetKey) && <div className="text-[11px] text-red-600 mb-2">{!sourceKey ? 'Source key' : ''}{(!sourceKey && !targetKey) ? ' and ' : ''}{!targetKey ? 'Target key' : ''} required</div>}
+      )}
       <div className="mb-2">
         <div className="text-xs text-muted-foreground mb-1">Columns to bring from joined table</div>
         <div className="flex items-center gap-2 mb-2">
@@ -285,7 +487,18 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
       <div className="mt-3">
         <div className="text-[11px] font-medium mb-1">Preview</div>
         <pre className="text-[11px] font-mono rounded-md border bg-card p-2 whitespace-pre-wrap">{JSON.stringify((() => {
-          const payload: any = { joinType, targetTable, sourceKey, targetKey }
+          const payload: any = { joinType, targetTable }
+          if (joinType === 'lateral') {
+            payload.lateral = {
+              correlations: lateralCorrelations,
+              orderBy: lateralOrderBy.length > 0 ? lateralOrderBy : undefined,
+              limit: lateralLimit,
+              subqueryAlias: lateralAlias
+            }
+          } else {
+            payload.sourceKey = sourceKey
+            payload.targetKey = targetKey
+          }
           if (cols.length) payload.columns = cols
           if (aggEnabled && aggAlias && (aggFn === 'count' || aggCol)) payload.aggregate = { fn: aggFn, column: aggCol, alias: aggAlias }
           if (fltEnabled && fltLeft) {
@@ -299,7 +512,22 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
       <div className="flex items-center justify-end gap-2 mt-2">
         <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCancelAction}>Cancel</button>
         <button className={`text-xs px-2 py-1 rounded-md border ${canAdd? 'bg-[hsl(var(--btn3))] text-black':'opacity-60 cursor-not-allowed'}`} disabled={!canAdd} onClick={()=>{
-          const payload: any = { joinType, targetTable, sourceKey, targetKey }
+          const payload: any = { joinType, targetTable }
+          if (joinType === 'lateral') {
+            payload.lateral = {
+              correlations: lateralCorrelations,
+              orderBy: lateralOrderBy.length > 0 ? lateralOrderBy : undefined,
+              limit: lateralLimit,
+              subqueryAlias: lateralAlias
+            }
+            console.log('[AdvancedSqlJoinBuilder] LATERAL payload being sent:', payload.lateral)
+            // For LATERAL, sourceKey/targetKey are not used (ON TRUE)
+            payload.sourceKey = 'true'
+            payload.targetKey = 'true'
+          } else {
+            payload.sourceKey = sourceKey
+            payload.targetKey = targetKey
+          }
           if (cols.length) payload.columns = cols
           if (aggEnabled && aggAlias && (aggFn === 'count' || aggCol)) payload.aggregate = { fn: aggFn, column: aggCol, alias: aggAlias }
           if (fltEnabled && fltLeft) {
@@ -307,6 +535,7 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
             const right: any = fltOp === 'in' ? fltVal.split(',').map(s=>s.trim()).filter(Boolean) : fltVal
             payload.filter = { op: fltOp, left, right }
           }
+          console.log('[AdvancedSqlJoinBuilder] Full payload being sent to onAddAction:', payload)
           onAddAction(payload)
         }}>{submitLabel || 'Add Join'}</button>
       </div>

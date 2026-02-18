@@ -141,9 +141,105 @@ export type CompositionComponent =
   | { id?: string; kind: 'chart'; span?: number; refId?: string; label?: string; props?: { type?: 'line'|'bar'|'area'|'column'|'donut'|'categoryBar'|'spark'|'combo'|'badges'|'progress'|'tracker'|'scatter'|'tremorTable'|'heatmap'|'barList'|'gantt'|'sankey' } }
   | { id?: string; kind: 'table'; span?: number; refId?: string; label?: string; props?: { tableType?: 'data'|'pivot' } }
 
+export type ReportTableCell = {
+  type: 'text' | 'spaceholder'
+  text?: string
+  variableId?: string
+  style?: {
+    fontSize?: number
+    fontWeight?: 'normal' | 'bold' | 'semibold'
+    fontStyle?: 'normal' | 'italic'
+    color?: string
+    backgroundColor?: string
+    align?: 'left' | 'center' | 'right'
+    verticalAlign?: 'top' | 'middle' | 'bottom'
+    numberFormat?: 'none' | 'short' | 'currency' | 'percent' | 'wholeNumber' | 'oneDecimal' | 'twoDecimals'
+  }
+}
+
+export type ReportElement = {
+  id: string
+  type: 'label' | 'table' | 'spaceholder' | 'image'
+  // Grid position (snap-to-grid coordinates)
+  gridX: number
+  gridY: number
+  gridW: number
+  gridH: number
+  // Image properties
+  image?: {
+    url: string
+    alt?: string
+    objectFit?: 'contain' | 'cover' | 'fill' | 'none'
+  }
+  // Label properties
+  label?: {
+    text: string
+    fontSize?: number
+    fontWeight?: 'normal' | 'bold' | 'semibold'
+    fontStyle?: 'normal' | 'italic'
+    color?: string
+    backgroundColor?: string
+    align?: 'left' | 'center' | 'right'
+    verticalAlign?: 'top' | 'middle' | 'bottom'
+    borderStyle?: 'none' | 'solid' | 'dashed'
+    borderColor?: string
+    padding?: number
+  }
+  // Table properties
+  table?: {
+    rows: number
+    cols: number
+    headers: Array<{ text: string; colspan?: number; fontSize?: number; fontWeight?: 'normal' | 'bold' | 'semibold'; color?: string; italic?: boolean }>
+    subheaders?: string[]
+    cells: ReportTableCell[][]
+    colWidths?: number[] // actual column widths (sum of colspans), in pixels or percentages
+    rowHeights?: number[] // px
+    rowStyles?: Array<{ bg?: string; color?: string; fontWeight?: 'normal' | 'bold' | 'semibold'; fontSize?: number }> // per-row formatting
+    borderStyle?: 'solid' | 'dashed' | 'none'
+    borderColor?: string
+    borderRadius?: number // corner radius in px
+    headerBg?: string
+    headerColor?: string
+    headerFontSize?: number
+    headerFontWeight?: 'normal' | 'bold' | 'semibold'
+    headerAlign?: 'left' | 'center' | 'right'
+    headerVerticalAlign?: 'top' | 'middle' | 'bottom'
+    headerHeight?: number // px
+    subheaderBg?: string
+    subheaderColor?: string
+    subheaderFontSize?: number
+    subheaderFontWeight?: 'normal' | 'bold' | 'semibold'
+    subheaderAlign?: 'left' | 'center' | 'right'
+    subheaderVerticalAlign?: 'top' | 'middle' | 'bottom'
+    stripedRows?: boolean
+    mergeBlankSubheaders?: boolean // auto-merge header with blank subheaders (rowSpan=2)
+  }
+  // Spaceholder: references a variable
+  variableId?: string
+}
+
+export type ReportVariable = {
+  id: string
+  name: string // display name, e.g. "TotalSales"
+  type?: 'query' | 'expression' | 'datetime' // query from datasource, calculated, or date/time
+  datasourceId?: string
+  source?: string // table name
+  value: {
+    field: string
+    agg: 'none' | 'count' | 'distinct' | 'avg' | 'sum' | 'min' | 'max'
+  }
+  expression?: string // e.g. "var2 + var3" or "var2 * 1.15"
+  datetimeExpr?: 'now' | 'today' // date/time function
+  dateFormat?: string // e.g. "dd MMM yyyy", "dd/MM/yyyy", "MMM yyyy"
+  where?: Record<string, unknown> // filters
+  format?: 'none' | 'short' | 'currency' | 'percent' | 'wholeNumber' | 'oneDecimal' | 'twoDecimals'
+  prefix?: string
+  suffix?: string
+}
+
 export type WidgetConfig = {
   id: string
-  type: 'kpi' | 'chart' | 'table' | 'text' | 'spacer' | 'composition'
+  type: 'kpi' | 'chart' | 'table' | 'text' | 'spacer' | 'composition' | 'report'
   title: string
   sql: string
   queryMode?: 'sql' | 'spec'
@@ -427,6 +523,17 @@ export type WidgetConfig = {
     // Spacer card options
     spacer?: {
       minW?: number // minimum grid columns width
+    }
+    // Report card options
+    report?: {
+      gridCols: number // default 12
+      gridRows: number // default 20
+      cellSize: number // px per grid cell, default 30
+      elements: ReportElement[]
+      variables: ReportVariable[]
+      showGridLines?: boolean // show grid lines in edit mode
+      pageWidth?: number // mm, for print layout
+      pageHeight?: number // mm, for print layout
     }
     // Prefer routing this widget's queries to local DuckDB when available
     preferLocalDuck?: boolean

@@ -315,6 +315,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
     setShowUnpivotBuilder(typ==='unpivot')
   }
   function openEditJoin(i: number, j: any) {
+    console.log('[AdvancedSqlDialog] openEditJoin called with index:', i, 'join:', j)
     setTab('joins')
     setEditingJoinIndex(i)
     setInitialJoin(j)
@@ -324,6 +325,32 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
   function shorten(s: string, n = 120) {
     const ex = String(s || '').replace(/\s+/g, ' ')
     return ex.length > n ? ex.slice(0, n) + '…' : ex
+  }
+  function joinSummary(j: any): string {
+    try {
+      const jt = String(j?.joinType || 'left')
+      const tt = String(j?.targetTable || '')
+      const sk = String(j?.sourceKey || '')
+      const tk = String(j?.targetKey || '')
+      const cols = Array.isArray(j?.columns) ? j.columns : []
+      const colBits = cols
+        .map((c: any) => {
+          const nm = String(c?.name || '').trim()
+          const al = String(c?.alias || '').trim()
+          if (!nm) return ''
+          return al && al !== nm ? `${nm}→${al}` : nm
+        })
+        .filter(Boolean)
+      const filt = j?.filter
+      const filtTxt = filt && typeof filt === 'object' ? `${String(filt?.left || '')} ${String(filt?.op || '')} ${String(filt?.right ?? '')}` : ''
+      const extra = [
+        (colBits.length ? `cols: ${colBits.join(', ')}` : ''),
+        (filtTxt ? `filter: ${filtTxt}` : ''),
+      ].filter(Boolean).join(' | ')
+      return `${jt} — ${tt} on ${sk} = ${tk}${extra ? `; ${extra}` : ''}`
+    } catch {
+      return `${String(j?.joinType || 'left')} — ${String(j?.targetTable || '')}`
+    }
   }
   function scopeBadge(sc: any): string {
     if (!sc || !sc.level) return ''
@@ -383,6 +410,13 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
   const listCC = Array.isArray((parsedModel as any)?.customColumns) ? (parsedModel as any).customColumns as any[] : []
   const listTR = Array.isArray((parsedModel as any)?.transforms) ? (parsedModel as any).transforms as any[] : []
   const listJN = Array.isArray((parsedModel as any)?.joins) ? (parsedModel as any).joins as any[] : []
+  
+  // Debug: Log joins list to see if lateral property is present
+  useEffect(() => {
+    if (listJN.length > 0) {
+      console.log('[AdvancedSqlDialog] listJN parsed from editJson:', listJN)
+    }
+  }, [listJN])
 
   const takenNames = useMemo(() => {
     const ccNames = listCC.map((c: any) => String(c?.name || '').trim()).filter(Boolean)
@@ -413,6 +447,40 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
       const pm: any = JSON.parse(editJson || '{}')
       pm.joins = Array.isArray(pm.joins) ? pm.joins : []
       pm.joins.splice(idx, 1)
+      applyNext(pm)
+    } catch {}
+  }
+
+  function duplicateCustomColumn(idx: number) {
+    try {
+      const pm: any = JSON.parse(editJson || '{}')
+      pm.customColumns = Array.isArray(pm.customColumns) ? pm.customColumns : []
+      if (idx < 0 || idx >= pm.customColumns.length) return
+      const orig = pm.customColumns[idx]
+      const copy = { ...(orig || {}) }
+      pm.customColumns.splice(idx + 1, 0, copy)
+      applyNext(pm)
+    } catch {}
+  }
+  function duplicateTransform(idx: number) {
+    try {
+      const pm: any = JSON.parse(editJson || '{}')
+      pm.transforms = Array.isArray(pm.transforms) ? pm.transforms : []
+      if (idx < 0 || idx >= pm.transforms.length) return
+      const orig = pm.transforms[idx]
+      const copy = { ...(orig || {}) }
+      pm.transforms.splice(idx + 1, 0, copy)
+      applyNext(pm)
+    } catch {}
+  }
+  function duplicateJoin(idx: number) {
+    try {
+      const pm: any = JSON.parse(editJson || '{}')
+      pm.joins = Array.isArray(pm.joins) ? pm.joins : []
+      if (idx < 0 || idx >= pm.joins.length) return
+      const orig = pm.joins[idx]
+      const copy = { ...(orig || {}) }
+      pm.joins.splice(idx + 1, 0, copy)
       applyNext(pm)
     } catch {}
   }
@@ -670,11 +738,13 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
               </div>
               {showJoinBuilder && (
                 <AdvancedSqlJoinBuilder
+                  key={editingJoinIndex !== null ? `edit-${editingJoinIndex}` : 'add-new'}
                   schema={schemaLocal || schema}
                   baseColumns={colsAvailable}
                   initial={editingJoinIndex !== null ? initialJoin as any : undefined}
                   submitLabel={editingJoinIndex !== null ? 'Update Join' : 'Add Join'}
                   onAddAction={(j: any) => {
+                    console.log('[AdvancedSqlDialog] Received join from builder:', j)
                     try {
                       const parsed = JSON.parse(editJson || '{}') as any
                       const next = {
@@ -684,12 +754,18 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                         defaults: parsed?.defaults || undefined,
                       }
                       if (editingJoinIndex !== null && editingJoinIndex >= 0 && editingJoinIndex < next.joins.length) {
+                        console.log('[AdvancedSqlDialog] Updating join at index:', editingJoinIndex)
                         next.joins[editingJoinIndex] = j
                       } else {
+                        console.log('[AdvancedSqlDialog] Adding new join')
                         next.joins.push(j)
                       }
-                      setEditJson(JSON.stringify(next, null, 2))
+                      console.log('[AdvancedSqlDialog] Joins array after update:', next.joins)
+                      const jsonString = JSON.stringify(next, null, 2)
+                      console.log('[AdvancedSqlDialog] JSON string being set:', jsonString)
+                      setEditJson(jsonString)
                     } catch (e) {
+                      console.error('[AdvancedSqlDialog] Error saving join:', e)
                       const next = { customColumns: [], transforms: [], joins: [j] }
                       setEditJson(JSON.stringify(next, null, 2))
                     } finally {
@@ -1325,8 +1401,8 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                 <thead className="bg-[hsl(var(--secondary)/0.6)]">
                   <tr>
                     <th className="text-left px-2 py-1 border-b">Type</th>
-                    <th className="text-left px-2 py-1 border-b">Summary</th>
-                    <th className="text-left px-2 py-1 border-b">Scope</th>
+                    <th className="text-left px-2 py-1 border-b w-[45%] max-w-[420px]">Summary</th>
+                    <th className="text-left px-2 py-1 border-b w-[26%] max-w-[260px]">Scope</th>
                     <th className="text-left px-2 py-1 border-b">Actions</th>
                   </tr>
                 </thead>
@@ -1335,22 +1411,25 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                   {listCC.map((c: any, i: number) => (
                     <tr key={`cc-${i}`}>
                       <td className="px-2 py-1 border-b whitespace-pre">custom</td>
-                      <td className="px-2 py-1 border-b whitespace-pre">
-                        <span className="font-medium">{String(c?.name || '(unnamed)')}</span>
-                        {' — '}<span className="text-muted-foreground" title={String(c?.expr||'')}>{shorten(c?.expr || '', 80)}</span>
+                      <td className="px-2 py-1 border-b align-top max-w-[420px]">
+                        <div className="truncate">
+                          <span className="font-medium">{String(c?.name || '(unnamed)')}</span>
+                          {' — '}<span className="text-muted-foreground" title={String(c?.expr||'')}>{shorten(c?.expr || '', 80)}</span>
+                        </div>
                       </td>
-                      <td className="px-2 py-1 border-b whitespace-pre">
-                        <div className="flex items-center gap-1">
+                      <td className="px-2 py-1 border-b">
+                        <div className="flex items-center gap-1 max-w-[260px]">
                           <select className="h-6 px-1 rounded-md bg-card text-[11px]" value={scopeLevelOf(c)} onChange={(e)=>setScopeOnItem('customColumns', i, e.target.value as any)}>
                             <option value="datasource">datasource</option>
                             <option value="table" disabled={!source}>table</option>
                             <option value="widget" disabled={!widgetId}>widget</option>
                           </select>
-                          <span className="text-muted-foreground">{scopeBadge(c?.scope)}</span>
+                          <span className="text-muted-foreground truncate">{scopeBadge(c?.scope)}</span>
                         </div>
                       </td>
                       <td className="px-2 py-1 border-b">
                         <div className="flex items-center gap-2">
+                          <button className="px-2 py-0.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=>duplicateCustomColumn(i)}>Duplicate</button>
                           <button className="px-2 py-0.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=>openEditCustom(i, c)}>Edit</button>
                           <button className="px-2 py-0.5 rounded-md border bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]" onClick={()=>removeCustomColumn(i)}>Delete</button>
                         </div>
@@ -1361,28 +1440,31 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                   {listTR.map((t: any, i: number) => (
                     <tr key={`tr-${i}`}>
                       <td className="px-2 py-1 border-b whitespace-pre">{(() => { const typ=String(t?.type||''); const expr=String((t as any)?.expr||''); const looks=/^\s*case\b/i.test(expr) && typ.toLowerCase()==='computed'; return looks ? 'case' : typ })()}</td>
-                      <td className="px-2 py-1 border-b whitespace-pre">
-                        {(() => { const typ=String(t?.type||''); const expr=String((t as any)?.expr||''); const looks=/^\s*case\b/i.test(expr) && typ.toLowerCase()==='computed';
-                          if (t?.type === 'case' || looks) return (<span>{String((t as any)?.target || (t as any)?.name || '')} — {Array.isArray((t as any)?.cases) ? `${(t as any).cases.length} cases` : (looks ? 'CASE expr' : '0 cases')}</span>)
-                          if (t?.type === 'replace') return (<span>{String(t?.target || '')} — replace</span>)
-                          if (t?.type === 'translate') return (<span>{String(t?.target || '')} — translate</span>)
-                          if (t?.type === 'computed') return (<span>{String(t?.name || '')} — {shorten(t?.expr || '', 80)}</span>)
-                          if (t?.type === 'nullHandling') return (<span>{String(t?.target || '')} — {String(t?.mode || '')}</span>)
-                          if (t?.type === 'unpivot') return (<span>{String(t?.keyColumn || '')}/{String(t?.valueColumn || '')} — {Array.isArray(t?.sourceColumns)? `${t.sourceColumns.length} cols` : ''}, {String(t?.mode || 'auto')}</span>)
-                          return null })()}
+                      <td className="px-2 py-1 border-b align-top max-w-[420px]">
+                        <div className="truncate">
+                          {(() => { const typ=String(t?.type||''); const expr=String((t as any)?.expr||''); const looks=/^\s*case\b/i.test(expr) && typ.toLowerCase()==='computed';
+                            if (t?.type === 'case' || looks) return (<span>{String((t as any)?.target || (t as any)?.name || '')} — {Array.isArray((t as any)?.cases) ? `${(t as any).cases.length} cases` : (looks ? 'CASE expr' : '0 cases')}</span>)
+                            if (t?.type === 'replace') return (<span>{String(t?.target || '')} — replace</span>)
+                            if (t?.type === 'translate') return (<span>{String(t?.target || '')} — translate</span>)
+                            if (t?.type === 'computed') return (<span>{String(t?.name || '')} — {shorten(t?.expr || '', 80)}</span>)
+                            if (t?.type === 'nullHandling') return (<span>{String(t?.target || '')} — {String(t?.mode || '')}</span>)
+                            if (t?.type === 'unpivot') return (<span>{String(t?.keyColumn || '')}/{String(t?.valueColumn || '')} — {Array.isArray(t?.sourceColumns)? `${t.sourceColumns.length} cols` : ''}, {String(t?.mode || 'auto')}</span>)
+                            return null })()}
+                        </div>
                       </td>
-                      <td className="px-2 py-1 border-b whitespace-pre">
-                        <div className="flex items-center gap-1">
+                      <td className="px-2 py-1 border-b">
+                        <div className="flex items-center gap-1 max-w-[260px]">
                           <select className="h-6 px-1 rounded-md bg-card text-[11px]" value={scopeLevelOf(t)} onChange={(e)=>setScopeOnItem('transforms', i, e.target.value as any)}>
                             <option value="datasource">datasource</option>
                             <option value="table" disabled={!source}>table</option>
                             <option value="widget" disabled={!widgetId}>widget</option>
                           </select>
-                          <span className="text-muted-foreground">{scopeBadge(t?.scope)}</span>
+                          <span className="text-muted-foreground truncate">{scopeBadge(t?.scope)}</span>
                         </div>
                       </td>
                       <td className="px-2 py-1 border-b">
                         <div className="flex items-center gap-2">
+                          <button className="px-2 py-0.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=>duplicateTransform(i)}>Duplicate</button>
                           <button className="px-2 py-0.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=>openEditTransform(i, t)}>Edit</button>
                           <button className="px-2 py-0.5 rounded-md border bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]" onClick={()=>removeTransform(i)}>Delete</button>
                         </div>
@@ -1393,19 +1475,22 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                   {listJN.map((j: any, i: number) => (
                     <tr key={`jn-${i}`}>
                       <td className="px-2 py-1 border-b whitespace-pre">join</td>
-                      <td className="px-2 py-1 border-b whitespace-pre">{String(j?.joinType || 'left')} → {String(j?.targetTable || '')} on {String(j?.sourceKey || '')} = {String(j?.targetKey || '')}</td>
-                      <td className="px-2 py-1 border-b whitespace-pre">
-                        <div className="flex items-center gap-1">
+                      <td className="px-2 py-1 border-b align-top max-w-[420px]">
+                        <div className="truncate">{joinSummary(j)}</div>
+                      </td>
+                      <td className="px-2 py-1 border-b">
+                        <div className="flex items-center gap-1 max-w-[260px]">
                           <select className="h-6 px-1 rounded-md bg-card text-[11px]" value={scopeLevelOf(j)} onChange={(e)=>setScopeOnItem('joins', i, e.target.value as any)}>
                             <option value="datasource">datasource</option>
                             <option value="table" disabled={!source}>table</option>
                             <option value="widget" disabled={!widgetId}>widget</option>
                           </select>
-                          <span className="text-muted-foreground">{scopeBadge(j?.scope)}</span>
+                          <span className="text-muted-foreground truncate">{scopeBadge(j?.scope)}</span>
                         </div>
                       </td>
                       <td className="px-2 py-1 border-b">
                         <div className="flex items-center gap-2">
+                          <button className="px-2 py-0.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=>duplicateJoin(i)}>Duplicate</button>
                           <button className="px-2 py-0.5 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={()=>openEditJoin(i, j)}>Edit</button>
                           <button className="px-2 py-0.5 rounded-md border bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]" onClick={()=>removeJoin(i)}>Delete</button>
                         </div>
