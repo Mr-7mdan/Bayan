@@ -32,6 +32,7 @@ export type SyncTaskOut = {
   batchSize?: number | null
   scheduleCron?: string | null
   enabled: boolean
+  customQuery?: string | null
   groupKey: string
   createdAt: string
   lastRunAt?: string | null
@@ -41,6 +42,7 @@ export type SyncTaskOut = {
   progressCurrent?: number | null
   progressTotal?: number | null
   progressPhase?: string | null
+  startedAt?: string | null
 }
 
 export type LocalTableStat = {
@@ -70,6 +72,7 @@ export type SyncTaskCreate = {
   batchSize?: number | null
   scheduleCron?: string | null
   enabled?: boolean
+  customQuery?: string | null
 }
 
 export type SyncRunOut = {

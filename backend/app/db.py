@@ -1124,17 +1124,22 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                       pk_columns: list[str] | None,
                       batch_size: int = 10000,
                       last_sequence_value: int | None = None,
-                      max_batches: int = 10,
+                      max_batches: int = 1_000_000,
                       on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
                       select_columns: Optional[list[str]] = None,
                       should_abort: Optional[Callable[[], bool]] = None,
-                      on_phase: Optional[Callable[[str], None]] = None) -> dict:
+                      on_phase: Optional[Callable[[str], None]] = None,
+                      custom_query: Optional[str] = None) -> dict:
     """Incremental append+upsert by monotonic sequence. Naive row-by-row DML (MVP).
     Returns {row_count, last_sequence_value}.
     """
     pk_columns = pk_columns or []
     src_dialect = _dialect_name(source_engine)
-    q_source = _compose_table_name(source_schema, source_table, src_dialect)
+    # Determine the FROM clause: custom query as derived table, or plain table reference
+    if custom_query and custom_query.strip():
+        q_from = f"({custom_query.strip()}) AS _src"
+    else:
+        q_from = _compose_table_name(source_schema, source_table, src_dialect)
     seq = int(last_sequence_value or 0)
     total_rows = 0
     max_seq_seen = seq
@@ -1159,9 +1164,8 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
         total_rows_to_copy = None
         try:
             # Estimate total rows to copy based on sequence threshold
-            q_source = _compose_table_name(source_schema, source_table, src_dialect)
             seq_col = _quote_ident(sequence_column, src_dialect)
-            cnt = src.execute(text(f"SELECT COUNT(*) FROM {q_source} WHERE {seq_col} > :last"), {"last": seq}).scalar()
+            cnt = src.execute(text(f"SELECT COUNT(*) FROM {q_from} WHERE {seq_col} > :last"), {"last": seq}).scalar()
             if cnt is not None:
                 total_rows_to_copy = int(cnt)
         except Exception:
@@ -1187,9 +1191,9 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
             batches += 1
             seq_col = _quote_ident(sequence_column, src_dialect)
             if src_dialect.startswith('mssql'):
-                sql = f"SELECT {sel_clause} FROM {q_source} WHERE {seq_col} > :last ORDER BY {seq_col} OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY"
+                sql = f"SELECT {sel_clause} FROM {q_from} WHERE {seq_col} > :last ORDER BY {seq_col} OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY"
             else:
-                sql = f"SELECT {sel_clause} FROM {q_source} WHERE {seq_col} > :last ORDER BY {seq_col} LIMIT :lim"
+                sql = f"SELECT {sel_clause} FROM {q_from} WHERE {seq_col} > :last ORDER BY {seq_col} LIMIT :lim"
             if on_phase:
                 try: on_phase('fetch')
                 except Exception: pass
@@ -1268,10 +1272,15 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                       on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
                       select_columns: Optional[list[str]] = None,
                       should_abort: Optional[Callable[[], bool]] = None,
-                      on_phase: Optional[Callable[[str], None]] = None) -> dict:
-    """Full rebuild into a staging table, then swap. Naive chunked copy via OFFSET/LIMIT (MVP)."""
+                      on_phase: Optional[Callable[[str], None]] = None,
+                      custom_query: Optional[str] = None) -> dict:
+    """Full rebuild into a staging table, then swap. Streams full result once via fetchmany to avoid O(N²) OFFSET re-scans."""
     src_dialect = _dialect_name(source_engine)
-    q_source = _compose_table_name(source_schema, source_table, src_dialect)
+    # Determine the FROM clause: custom query as derived table, or plain table reference
+    if custom_query and custom_query.strip():
+        q_source = f"({custom_query.strip()}) AS _src"
+    else:
+        q_source = _compose_table_name(source_schema, source_table, src_dialect)
     stg = f"stg_{dest_table}"
     total_rows = 0
     staging_created = False
@@ -1329,13 +1338,21 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                     on_progress(0, (int(total_rows_source) if total_rows_source is not None else None))
                 except Exception:
                     pass
-            offset = 0
+            # Stream the full result in one shot — avoids O(N²) OFFSET re-scans
+            if src_dialect.startswith('mssql'):
+                full_sql = text(f"SELECT {sel_clause} FROM {q_source} ORDER BY (SELECT 1)")
+            else:
+                full_sql = text(f"SELECT {sel_clause} FROM {q_source}")
+            try:
+                stream_res = src.execution_options(stream_results=True).execute(full_sql)
+            except Exception:
+                stream_res = src.execute(full_sql)
             while True:
                 if should_abort:
                     try:
                         abort_flag = should_abort()
                         if abort_flag:
-                            print(f"[ABORT] Snapshot sync detected abort flag=True, stopping sync. total_rows={total_rows}, offset={offset}", flush=True)
+                            print(f"[ABORT] Snapshot sync detected abort flag=True, stopping sync. total_rows={total_rows}", flush=True)
                             return {"row_count": total_rows, "aborted": True}
                     except Exception as e:
                         print(f"[ABORT] Error checking abort in snapshot sync: {e}", flush=True)
@@ -1343,12 +1360,7 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                 if on_phase:
                     try: on_phase('fetch')
                     except Exception: pass
-                if src_dialect.startswith('mssql'):
-                    sql = f"SELECT {sel_clause} FROM {q_source} ORDER BY (SELECT 1) OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY"
-                else:
-                    sql = f"SELECT {sel_clause} FROM {q_source} LIMIT :lim OFFSET :off"
-                res = src.execute(text(sql), {"lim": int(batch_size), "off": int(offset)})
-                rows = res.fetchall()
+                rows = stream_res.fetchmany(int(batch_size))
                 if not rows:
                     break
                 # Emit progress after fetch, before insert to reflect fetch progress
@@ -1370,9 +1382,6 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                             return {"row_count": total_rows, "aborted": True}
                     except Exception:
                         pass
-                if len(rows) < int(batch_size):
-                    break
-                offset += int(batch_size)
             # Swap
             if _table_exists(duck, dest_table):
                 duck.exec_driver_sql(f"DROP TABLE {_quote_duck_ident(dest_table)}")

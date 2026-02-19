@@ -8,6 +8,7 @@ import * as Popover from '@radix-ui/react-popover'
 import * as Dialog from '@radix-ui/react-dialog'
 import { RiBuildingLine, RiMapPin2Line, RiUserLine, RiMore2Line, RiCheckLine } from '@remixicon/react'
 import DatasourceDialog, { type DatasourceDialogMode } from '@/components/datasources/DatasourceDialog'
+import DataExplorerDialog from '@/components/builder/DataExplorerDialog'
 import { useAuth } from '@/components/providers/AuthProvider'
 
 export const dynamic = 'force-dynamic'
@@ -27,7 +28,7 @@ type DsMeta = { loading?: boolean; error?: string | null; schemas: number; table
 
 function fmt(iso?: string | null) { try { return iso ? new Date(iso).toLocaleString() : '—' } catch { return '—' } }
 
-function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive }: { ds: DatasourceOut; meta: DsMeta; onOpen: (ds: DatasourceOut) => void; onEdit: (ds: DatasourceOut) => void; onDelete: (ds: DatasourceOut) => Promise<void>; onToggleActive: (ds: DatasourceOut, next: boolean) => Promise<void> }) {
+function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplore }: { ds: DatasourceOut; meta: DsMeta; onOpen: (ds: DatasourceOut) => void; onEdit: (ds: DatasourceOut) => void; onDelete: (ds: DatasourceOut) => Promise<void>; onToggleActive: (ds: DatasourceOut, next: boolean) => Promise<void>; onExplore: (ds: DatasourceOut) => void }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [busy, setBusy] = useState<'delete' | null>(null)
@@ -70,6 +71,7 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive }: { ds:
             </Popover.Trigger>
             <Popover.Portal>
             <Popover.Content side="bottom" align="end" className="z-50 w-56 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--popover))] shadow-none p-1">
+              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExplore(ds) }}>Data Explorer</button>
               <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>Edit</button>
               {(user?.role === 'admin') && (
                 <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); openShare() }}>Share with…</button>
@@ -220,6 +222,7 @@ function MyDatasourcesPageInner() {
   const [dlgInitial, setDlgInitial] = useState<DatasourceOut | undefined>(undefined)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const [busyImport, setBusyImport] = useState(false)
+  const [explorerDs, setExplorerDs] = useState<DatasourceOut | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -303,6 +306,7 @@ function MyDatasourcesPageInner() {
     return () => { stop = true }
   }, [tabIndex, JSON.stringify(visibleActive.map((x) => x.id)), JSON.stringify(visibleInactive.map((x) => x.id))])
 
+  const onExplore = (ds: DatasourceOut) => setExplorerDs(ds)
   const onOpen = (ds: DatasourceOut) => { router.push(`/datasources/${ds.id}` as `/datasources/${string}`) }
   const onEdit = (ds: DatasourceOut) => { setDlgInitial(ds); setDlgMode('edit'); setDlgOpen(true) }
   const onDelete = async (ds: DatasourceOut) => { await Api.deleteDatasource(ds.id); setItems((prev) => prev.filter((x) => x.id !== ds.id)); setToast('Deleted'); window.setTimeout(() => setToast(''), 1600) }
@@ -334,7 +338,7 @@ function MyDatasourcesPageInner() {
       {loading && <Text>Loading…</Text>}
       {!loading && list.length === 0 && <Text>No datasources match your search.</Text>}
       {!loading && list.map((ds) => (
-        <SourceRow key={ds.id} ds={ds} meta={metaById[ds.id] || { schemas: 0, tables: 0, views: 0, active: true }} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} />
+        <SourceRow key={ds.id} ds={ds} meta={metaById[ds.id] || { schemas: 0, tables: 0, views: 0, active: true }} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} onExplore={onExplore} />
       ))}
     </div>
   )
@@ -486,6 +490,7 @@ function MyDatasourcesPageInner() {
         </div>
       )}
       <DatasourceDialog open={dlgOpen} onOpenChangeAction={setDlgOpen} mode={dlgMode} initial={dlgInitial} onCreatedAction={onCreated} onSavedAction={onSaved} />
+      {explorerDs && <DataExplorerDialog open={!!explorerDs} onClose={() => setExplorerDs(null)} datasource={explorerDs} />}
     </div>
   )
 }

@@ -375,4 +375,20 @@ foreach ($p in $ports) {
 Write-Heading "Done"
 Write-Host "Backend: http://${BackendHost}:${BackendPort}/api/healthz"
 Write-Host "Frontend (Next.js upstream): http://127.0.0.1:${FrontendPort}"
-Write-Host "Reverse proxy (Caddy): http(s)://bayan.aman.ps  (serving / -> Next.js, /api -> FastAPI)"
+# Read the domain back from the Caddyfile written by the proxy setup script
+$_caddySite = 'localhost'
+try {
+  $caddyfileSummary = 'C:\ProgramData\Caddy\Caddyfile'
+  if (Test-Path $caddyfileSummary) {
+    $caddyLines = Get-Content -LiteralPath $caddyfileSummary -ErrorAction SilentlyContinue
+    foreach ($line in $caddyLines) {
+      $trimmed = $line.Trim()
+      # Skip blank lines, comments, and the global block (starts with "{")
+      if ($trimmed -eq '' -or $trimmed.StartsWith('#') -or $trimmed -eq '{') { continue }
+      # The first site-block header looks like ":80 {" or "example.com {" or "example.com {"
+      $siteLine = $trimmed -replace '\s*\{.*$', '' | ForEach-Object { $_.Trim() }
+      if ($siteLine -and $siteLine -ne '') { $_caddySite = $siteLine; break }
+    }
+  }
+} catch {}
+Write-Host "Reverse proxy (Caddy): http(s)://$_caddySite  (serving / -> Next.js, /api -> FastAPI)"

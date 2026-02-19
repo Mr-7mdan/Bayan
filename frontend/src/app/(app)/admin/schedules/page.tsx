@@ -11,6 +11,7 @@ import { Api, type DatasourceOut, type DatasourceDetailOut, type SyncTaskOut, ty
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
+import CustomQueryEditor from '@/components/builder/CustomQueryEditor'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ function AdminSchedulesInner() {
   const qc = useQueryClient()
   const { startMonitoring, show } = useProgressToast()
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [form, setForm] = useState<SyncTaskCreate>({ mode: 'snapshot', sourceTable: '', destTableName: '', scheduleCron: '0 2 * * *', enabled: true, selectColumns: [] })
+  const [form, setForm] = useState<SyncTaskCreate>({ mode: 'snapshot', sourceTable: '', destTableName: '', scheduleCron: '0 2 * * *', enabled: true, selectColumns: [], customQuery: '' })
   const [destEdited, setDestEdited] = useState(false)
   // Tabs behavior to replicate My Dashboards animation
   const [tabIndex, setTabIndex] = useState(0)
@@ -31,6 +32,9 @@ function AdminSchedulesInner() {
   const [cronMode, setCronMode] = useState<'custom' | 'every_n_hours'>('custom')
   const [cronHoursInterval, setCronHoursInterval] = useState<number>(4)
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  const [pkSearch, setPkSearch] = useState('')
+  const [seqSearch, setSeqSearch] = useState('')
+  const [seqOpen, setSeqOpen] = useState(false)
 
   useEffect(() => {
     if (!isAdmin) router.replace('/home')
@@ -131,24 +135,29 @@ function AdminSchedulesInner() {
     }
   }, [cronMode, cronHoursInterval])
 
-  const availableColumns = useMemo(() => {
+  const availableColumnMeta = useMemo(() => {
     const schName = (form.sourceSchema || '').trim()
     const tblName = (form.sourceTable || '').trim()
     const meta = introspectQ.data
-    if (!meta || !tblName) return [] as string[]
-    let columns: string[] = []
+    if (!meta || !tblName) return [] as Array<{ name: string; type?: string | null }>
+    let cols: Array<{ name: string; type?: string | null }> = []
     for (const sch of meta.schemas || []) {
       if (schName && sch.name !== schName) continue
       for (const t of sch.tables || []) {
         if (t.name === tblName) {
-          columns = (t.columns || []).map((c) => c.name)
+          cols = t.columns || []
           break
         }
       }
-      if (columns.length) break
+      if (cols.length) break
     }
-    return columns.sort((a, b) => a.localeCompare(b))
+    return [...cols].sort((a, b) => a.name.localeCompare(b.name))
   }, [introspectQ.data, form.sourceSchema, form.sourceTable])
+
+  const availableColumns = useMemo(
+    () => availableColumnMeta.map((c) => c.name),
+    [availableColumnMeta],
+  )
 
   const logsQ = useQuery<SyncRunOut[], Error>({
     queryKey: ['sync-logs', selectedId],
@@ -178,7 +187,7 @@ function AdminSchedulesInner() {
       setEditingTaskId(null)
       setDestEdited(false)
       setCronMode('custom')
-      setForm({ mode: 'snapshot', sourceTable: '', destTableName: '', scheduleCron: '0 2 * * *', enabled: true, selectColumns: [] })
+      setForm({ mode: 'snapshot', sourceTable: '', destTableName: '', scheduleCron: '0 2 * * *', enabled: true, selectColumns: [], customQuery: '' })
       await qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
     },
   })
@@ -197,6 +206,7 @@ function AdminSchedulesInner() {
       selectColumns: t.selectColumns || [],
       scheduleCron: t.scheduleCron || undefined,
       enabled: t.enabled,
+      customQuery: t.customQuery || '',
     })
     const m = String(t.scheduleCron || '').match(/^0\s+\*\/(\d+)\s+\*\s+\*\s+\*$/)
     if (m) {
@@ -212,7 +222,7 @@ function AdminSchedulesInner() {
     setEditingTaskId(null)
     setDestEdited(false)
     setCronMode('custom')
-    setForm({ mode: 'snapshot', sourceTable: '', destTableName: '', scheduleCron: '0 2 * * *', enabled: true, selectColumns: [] })
+    setForm({ mode: 'snapshot', sourceTable: '', destTableName: '', scheduleCron: '0 2 * * *', enabled: true, selectColumns: [], customQuery: '' })
   }
 
   const runAll = useMutation({
@@ -478,25 +488,55 @@ function AdminSchedulesInner() {
                     {form.mode === 'sequence' && !isApiDs && (
                       <div>
                         <div className="text-xs text-muted-foreground">Sequence column</div>
-                        <div className="relative rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
-                          [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
-                          [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
-                          <Select
-                            value={(form.sequenceColumn || '') as string}
-                            onValueChange={(v) => setForm((f) => ({ ...f, sequenceColumn: v || undefined }))}
-                            placeholder={!form.sourceTable ? 'Select a table first' : (introspectQ.isFetching ? 'Loading columns…' : 'Select sequence column')}
-                            className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent"
-                            disabled={!form.sourceTable || introspectQ.isFetching || availableColumns.length === 0}
-                          >
-                            {!introspectQ.isFetching && availableColumns.map((c) => (
-                              <SelectItem key={c} value={c}>{c}</SelectItem>
-                            ))}
-                          </Select>
-                          {form.sourceTable && introspectQ.isFetching && (
-                            <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-70">
-                              <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
-                            </div>
-                          )}
+                        <div className="relative rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]">
+                          <Popover.Root open={seqOpen} onOpenChange={(o) => { setSeqOpen(o); if (!o) setSeqSearch('') }}>
+                            <Popover.Trigger asChild>
+                              <button
+                                type="button"
+                                className="w-full h-9 px-3 inline-flex items-center justify-between text-sm text-[hsl(var(--foreground))] disabled:opacity-50"
+                                disabled={!form.sourceTable || introspectQ.isFetching || availableColumns.length === 0}
+                              >
+                                <span className="truncate">
+                                  {introspectQ.isFetching ? 'Loading columns…' : (form.sequenceColumn || (!form.sourceTable ? 'Select a table first' : 'Select sequence column'))}
+                                </span>
+                                {form.sourceTable && introspectQ.isFetching
+                                  ? <svg className="animate-spin h-3 w-3 opacity-70" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+                                  : <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+                              </button>
+                            </Popover.Trigger>
+                            <Popover.Portal>
+                              <Popover.Content side="bottom" align="start" className="z-50 w-64 rounded-lg border bg-card p-2 shadow-card">
+                                <input
+                                  autoFocus
+                                  className="w-full mb-1.5 px-2 py-1 text-xs rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]/40"
+                                  placeholder="Search columns…"
+                                  value={seqSearch}
+                                  onChange={(e) => setSeqSearch(e.target.value)}
+                                />
+                                <div className="max-h-56 overflow-auto text-xs">
+                                  {form.sequenceColumn && (
+                                    <button
+                                      className="w-full text-left px-2 py-1 rounded text-muted-foreground hover:bg-[hsl(var(--muted))] italic"
+                                      onClick={() => { setForm((f) => ({ ...f, sequenceColumn: undefined })); setSeqOpen(false); setSeqSearch('') }}
+                                    >— Clear selection</button>
+                                  )}
+                                  {availableColumns
+                                    .filter((c) => !seqSearch || c.toLowerCase().includes(seqSearch.toLowerCase()))
+                                    .map((c) => (
+                                      <button
+                                        key={c}
+                                        className={`w-full text-left px-2 py-1 rounded font-mono hover:bg-[hsl(var(--muted))] ${form.sequenceColumn === c ? 'bg-[hsl(var(--primary))]/10 font-semibold' : ''}`}
+                                        onClick={() => { setForm((f) => ({ ...f, sequenceColumn: c })); setSeqOpen(false); setSeqSearch('') }}
+                                      >{c}</button>
+                                    ))}
+                                  {availableColumns.filter((c) => !seqSearch || c.toLowerCase().includes(seqSearch.toLowerCase())).length === 0 && (
+                                    <div className="text-muted-foreground px-2 py-1">No matches</div>
+                                  )}
+                                </div>
+                                <Popover.Arrow className="fill-[hsl(var(--card))]" />
+                              </Popover.Content>
+                            </Popover.Portal>
+                          </Popover.Root>
                         </div>
                       </div>
                     )}
@@ -505,7 +545,7 @@ function AdminSchedulesInner() {
                         <div className="text-xs text-muted-foreground">PK columns</div>
                         <div className="flex flex-col gap-1">
                           <div className="relative flex-1 min-w-0 rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]">
-                            <Popover.Root>
+                            <Popover.Root onOpenChange={(o) => { if (!o) setPkSearch('') }}>
                               <Popover.Trigger asChild>
                                 <button
                                   type="button"
@@ -518,25 +558,37 @@ function AdminSchedulesInner() {
                               </Popover.Trigger>
                               <Popover.Portal>
                                 <Popover.Content side="bottom" align="start" className="z-50 w-64 rounded-lg border bg-card p-2 shadow-card">
-                                  <div className="max-h-64 overflow-auto text-xs">
+                                  <input
+                                    autoFocus
+                                    className="w-full mb-1.5 px-2 py-1 text-xs rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]/40"
+                                    placeholder="Search columns…"
+                                    value={pkSearch}
+                                    onChange={(e) => setPkSearch(e.target.value)}
+                                  />
+                                  <div className="max-h-56 overflow-auto text-xs">
                                     {availableColumns.length === 0 && (
-                                      <div className="text-muted-foreground">No columns (select a table)</div>
+                                      <div className="text-muted-foreground px-1 py-0.5">No columns (select a table)</div>
                                     )}
-                                    {availableColumns.map((c) => (
-                                      <label key={c} className="flex items-center gap-2 px-1 py-0.5">
-                                        <input
-                                          type="checkbox"
-                                          checked={!!(form.pkColumns || []).includes(c)}
-                                          onChange={(e) => setForm((f) => {
-                                            const cur = new Set(f.pkColumns || [])
-                                            if (e.target.checked) cur.add(c); else cur.delete(c)
-                                            const ordered = availableColumns.filter((x) => cur.has(x))
-                                            return { ...f, pkColumns: ordered }
-                                          })}
-                                        />
-                                        <span className="font-mono">{c}</span>
-                                      </label>
-                                    ))}
+                                    {availableColumns
+                                      .filter((c) => !pkSearch || c.toLowerCase().includes(pkSearch.toLowerCase()))
+                                      .map((c) => (
+                                        <label key={c} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-[hsl(var(--muted))] cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={!!(form.pkColumns || []).includes(c)}
+                                            onChange={(e) => setForm((f) => {
+                                              const cur = new Set(f.pkColumns || [])
+                                              if (e.target.checked) cur.add(c); else cur.delete(c)
+                                              const ordered = availableColumns.filter((x) => cur.has(x))
+                                              return { ...f, pkColumns: ordered }
+                                            })}
+                                          />
+                                          <span className="font-mono">{c}</span>
+                                        </label>
+                                      ))}
+                                    {availableColumns.length > 0 && availableColumns.filter((c) => !pkSearch || c.toLowerCase().includes(pkSearch.toLowerCase())).length === 0 && (
+                                      <div className="text-muted-foreground px-1 py-0.5">No matches</div>
+                                    )}
                                   </div>
                                   <Popover.Arrow className="fill-[hsl(var(--card))]" />
                                 </Popover.Content>
@@ -562,6 +614,28 @@ function AdminSchedulesInner() {
                         [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
                         <TextInput className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent" value={(form.batchSize as any) || ''} onChange={(e) => setForm((f) => ({ ...f, batchSize: Number(e.target.value) || undefined }))} placeholder="10000" />
                       </div>
+                    </div>
+                    {/* Custom query — full width row */}
+                    <div className="md:col-span-6">
+                      <button
+                        type="button"
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-1"
+                        onClick={() => setForm((f) => ({ ...f, customQuery: f.customQuery === undefined ? '' : (f.customQuery === null ? '' : undefined) }))}
+                      >
+                        <RiArrowDownSLine className={`h-3.5 w-3.5 transition-transform ${form.customQuery !== undefined && form.customQuery !== null ? 'rotate-0' : '-rotate-90'}`} />
+                        Custom base query
+                        {form.customQuery ? <span className="ml-1 text-[10px] px-1 py-0 rounded bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]">active</span> : null}
+                      </button>
+                      {form.customQuery !== undefined && form.customQuery !== null && (
+                        <CustomQueryEditor
+                          value={form.customQuery || ''}
+                          onChange={(v) => setForm((f) => ({ ...f, customQuery: v }))}
+                          columns={availableColumns}
+                          columnMeta={availableColumnMeta}
+                          sourceTable={form.sourceTable || ''}
+                          sourceSchema={form.sourceSchema}
+                        />
+                      )}
                     </div>
                     <div className="md:col-span-2 md:col-start-1 flex flex-col justify-end gap-2">
                       <div>
@@ -671,6 +745,7 @@ function AdminSchedulesInner() {
                           <th className="text-left font-medium px-2 py-1">Seq</th>
                           <th className="text-left font-medium px-2 py-1">Batch</th>
                           <th className="text-left font-medium px-2 py-1">Cron</th>
+                          <th className="text-left font-medium px-2 py-1">Query</th>
                           <th className="text-left font-medium px-2 py-1">Enabled</th>
                           <th className="text-left font-medium px-2 py-1">Last run</th>
                           <th className="text-left font-medium px-2 py-1">Rows</th>
@@ -689,6 +764,11 @@ function AdminSchedulesInner() {
                             <td className="px-2 py-1">{t.sequenceColumn || '—'}</td>
                             <td className="px-2 py-1">{t.batchSize || '—'}</td>
                             <td className="px-2 py-1">{t.scheduleCron || '—'}</td>
+                            <td className="px-2 py-1">
+                              {t.customQuery ? (
+                                <span className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))] font-mono" title={t.customQuery}>custom</span>
+                              ) : '—'}
+                            </td>
                             <td className="px-2 py-1">{t.enabled ? 'Yes' : 'No'}</td>
                             <td className="px-2 py-1">{t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : '—'}</td>
                             <td className="px-2 py-1">{typeof t.lastRowCount === 'number' ? t.lastRowCount.toLocaleString() : '—'}</td>
@@ -726,7 +806,7 @@ function AdminSchedulesInner() {
                           </tr>
                         ))}
                         {tasksData.length === 0 && (
-                          <tr><td colSpan={13} className="px-2 py-2 text-muted-foreground">No tasks yet. Create one above.</td></tr>
+                          <tr><td colSpan={14} className="px-2 py-2 text-muted-foreground">No tasks yet. Create one above.</td></tr>
                         )}
                       </tbody>
                     </table>

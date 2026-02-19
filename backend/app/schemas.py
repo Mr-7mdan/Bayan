@@ -440,6 +440,7 @@ class SyncTaskCreate(BaseModel):
     batchSize: int | None = 10000
     scheduleCron: str | None = None
     enabled: bool = True
+    customQuery: str | None = None
 
 
 class SyncTaskOut(BaseModel):
@@ -455,6 +456,7 @@ class SyncTaskOut(BaseModel):
     batchSize: int | None = 10000
     scheduleCron: str | None = None
     enabled: bool = True
+    customQuery: str | None = None
     groupKey: str
     createdAt: datetime
     # latest state snapshot
@@ -465,6 +467,7 @@ class SyncTaskOut(BaseModel):
     progressCurrent: int | None = None
     progressTotal: int | None = None
     progressPhase: str | None = None
+    startedAt: datetime | None = None
 
 
 class LocalTableStat(BaseModel):

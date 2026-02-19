@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, Fragment } from 'react'
 import { Api, type DatasourceOut, type IntrospectResponse, type LocalStatsResponse, type SyncTaskOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
-import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
+import DataExplorerDialog from '@/components/builder/DataExplorerDialog'
 import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
 import ImportTableDialog from '@/components/builder/ImportTableDialog'
 import type { IntrospectResponse as IR } from '@/lib/api'
@@ -807,9 +807,11 @@ export default function DataModelPage() {
         </div>
       )}
 
-      {preview.open && preview.table && (
-        <TablePreviewDialog open={preview.open} onOpenChangeAction={(o) => setPreview({ open: o })} datasourceId={preview.dsId} table={preview.table} limit={100} />
-      )}
+      {preview.open && preview.dsId && preview.table && (() => {
+        const ds = datasources.find(d => d.id === preview.dsId)
+        if (!ds) return null
+        return <DataExplorerDialog open={preview.open} onClose={() => setPreview({ open: false })} datasource={ds} initialTable={preview.table} singleTable />
+      })()}
 
       {adv.open && adv.dsId && (
         <AdvancedSqlDialog 

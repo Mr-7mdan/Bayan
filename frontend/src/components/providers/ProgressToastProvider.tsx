@@ -102,7 +102,7 @@ export default function ProgressToastProvider({ children }: { children: React.Re
   }, [])
 
   const startMonitoring = useCallback((datasourceId: string, actorId?: string) => {
-    // Immediately show toast
+    // Immediately show toast — start time will be overridden by server startedAt on first poll
     const now = Date.now()
     setState({ visible: true, title: 'Sync in progress', message: 'Starting…', datasourceId, monitoring: true, minimized: false, actorId, startedAtMs: now, elapsedSec: 0 })
     try { persist({ active: true, datasourceId, actorId, minimized: false, startedAtMs: now }) } catch {}
@@ -118,9 +118,18 @@ export default function ProgressToastProvider({ children }: { children: React.Re
       try {
         const tasks = await Api.getSyncStatus(datasourceId, actorId)
         const { percent, current, total, runningTasks, phase } = computeProgress(tasks)
+        // Derive startedAtMs from server's startedAt (earliest running task)
+        let serverStartMs: number | undefined
+        for (const t of tasks) {
+          if (t.inProgress && t.startedAt) {
+            const ms = new Date(t.startedAt).getTime()
+            if (!isNaN(ms) && (serverStartMs === undefined || ms < serverStartMs)) serverStartMs = ms
+          }
+        }
         setState((s: ProgressToastState) => {
-          const next = { ...s, visible: true, title: 'Sync in progress', message: runningTasks ? `Running ${runningTasks} task(s)…` : 'Finishing…', percent, current, total, runningTasks, phase: (phase || s.phase || null), monitoring: runningTasks > 0, datasourceId: s.datasourceId || datasourceId, actorId: s.actorId || actorId }
-          try { persist({ active: runningTasks > 0, datasourceId: next.datasourceId, actorId: next.actorId, minimized: !!next.minimized, startedAtMs: (next.startedAtMs || Date.now()) }) } catch {}
+          const startedAtMs = serverStartMs ?? s.startedAtMs ?? Date.now()
+          const next = { ...s, visible: true, title: 'Sync in progress', message: runningTasks ? `Running ${runningTasks} task(s)…` : 'Finishing…', percent, current, total, runningTasks, phase: (phase || s.phase || null), monitoring: runningTasks > 0, datasourceId: s.datasourceId || datasourceId, actorId: s.actorId || actorId, startedAtMs }
+          try { persist({ active: runningTasks > 0, datasourceId: next.datasourceId, actorId: next.actorId, minimized: !!next.minimized, startedAtMs }) } catch {}
           return next
         })
         if (!tasks.some((t) => t.inProgress)) {

@@ -226,6 +226,8 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE sync_states ADD COLUMN cancel_requested INTEGER DEFAULT 0"))
             if "progress_phase" not in cols_sync:
                 conn.execute(text("ALTER TABLE sync_states ADD COLUMN progress_phase TEXT"))
+            if "started_at" not in cols_sync:
+                conn.execute(text("ALTER TABLE sync_states ADD COLUMN started_at DATETIME"))
             # ensure sync_runs table exists
             conn.execute(text(
                 """
@@ -246,6 +248,8 @@ def init_db() -> None:
             cols_tasks = {row[1] for row in info_tasks}
             if "select_columns_json" not in cols_tasks:
                 conn.execute(text("ALTER TABLE sync_tasks ADD COLUMN select_columns_json TEXT"))
+            if "custom_query" not in cols_tasks:
+                conn.execute(text("ALTER TABLE sync_tasks ADD COLUMN custom_query TEXT"))
             # ensure base_template_html and logo_url exist on email_config
             info_email = conn.execute(text("PRAGMA table_info(email_config)")).fetchall()
             cols_email = {row[1] for row in info_email}
@@ -696,6 +700,8 @@ class SyncTask(Base):
     pk_columns_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # JSON-encoded array of selected columns to copy from source (optional, default: all columns)
     select_columns_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Optional custom SQL query used as the source instead of a plain table reference
+    custom_query: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # For sequence mode
     sequence_column: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     batch_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=10000)
@@ -747,6 +753,8 @@ class SyncState(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Optional phase: 'fetch' | 'insert'
     progress_phase: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # When current in-progress run started (reset each run)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class SyncLock(Base):

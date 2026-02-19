@@ -251,6 +251,7 @@ def _task_to_out(db: Session, t: SyncTask) -> SyncTaskOut:
         batchSize=t.batch_size,
         scheduleCron=t.schedule_cron,
         enabled=t.enabled,
+        customQuery=t.custom_query,
         groupKey=t.group_key,
         createdAt=t.created_at,
         lastRunAt=(st.last_run_at if st else None),
@@ -260,6 +261,7 @@ def _task_to_out(db: Session, t: SyncTask) -> SyncTaskOut:
         progressCurrent=(st.progress_current if st else None),
         progressTotal=(st.progress_total if st else None),
         progressPhase=(st.progress_phase if st else None),
+        startedAt=(st.started_at if st else None),
     )
 
 
@@ -571,6 +573,7 @@ def create_sync_task(ds_id: str, payload: SyncTaskCreate, actorId: str | None = 
         enabled=bool(payload.enabled),
         group_key=group_key,
         batch_size=(payload.batchSize or 10000),
+        custom_query=(payload.customQuery.strip() if payload.customQuery and payload.customQuery.strip() else None),
     )
     t.pk_columns = payload.pkColumns or []
     t.select_columns = payload.selectColumns or []
@@ -872,6 +875,7 @@ def run_sync_now(
         st.progress_current = 0
         st.progress_total = None
         st.progress_phase = 'fetch'  # type: ignore[attr-defined]
+        st.started_at = datetime.utcnow()  # type: ignore[attr-defined]
         db.add(st)
         db.commit()
         print(f"[ABORT] Committed sync start for state_id={st.id}", flush=True)
@@ -939,6 +943,7 @@ def run_sync_now(
                     select_columns=(t.select_columns or None),
                     should_abort=lambda: _check_abort(st.id),
                     on_phase=lambda ph: _set_phase(db, st.id, ph),
+                    custom_query=(t.custom_query or None),
                 )
                 st.last_sequence_value = res.get("last_sequence_value")
                 st.last_row_count = res.get("row_count")
@@ -968,6 +973,7 @@ def run_sync_now(
                     select_columns=(t.select_columns or None),
                     should_abort=lambda: _check_abort(st.id),
                     on_phase=lambda ph: _set_phase(db, st.id, ph),
+                    custom_query=(t.custom_query or None),
                 )
                 st.last_row_count = res.get("row_count")
                 st.last_run_at = datetime.utcnow()
@@ -1049,6 +1055,7 @@ def run_sync_now(
             st.in_progress = False
             try:
                 st.progress_phase = None  # type: ignore[attr-defined]
+                st.started_at = None  # type: ignore[attr-defined]
             except Exception:
                 pass
             db.add(st)
@@ -1308,6 +1315,7 @@ def update_sync_task(ds_id: str, task_id: str, payload: SyncTaskCreate, actorId:
     t.pk_columns = payload.pkColumns if payload.pkColumns is not None else t.pk_columns
     if payload.selectColumns is not None:
         t.select_columns = payload.selectColumns
+    t.custom_query = (payload.customQuery.strip() if payload.customQuery and payload.customQuery.strip() else None)
     db.add(t)
     db.commit()
     db.refresh(t)
