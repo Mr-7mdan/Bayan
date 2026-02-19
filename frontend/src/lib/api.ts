@@ -832,14 +832,14 @@ export const Api = {
   tablesOnly: (id: string, signal?: AbortSignal) => http<TablesOnlyResponse>(`/datasources/${id}/tables`, { signal }, 30000),
   tablesOnlyLocal: (signal?: AbortSignal) => http<TablesOnlyResponse>(`/datasources/_local/tables`, { signal }, 30000),
   // --- Import Table (SQL / file) ---
-  importSqlPreview: (dsId: string, payload: { sql: string; limit?: number }) =>
+  importSqlPreview: (dsId: string, payload: { sql: string; sourceDsId: string; limit?: number }) =>
     http<{ columns: string[]; rows: Record<string, unknown>[]; rowCount: number }>(
       `/datasources/${encodeURIComponent(dsId)}/local/import-sql-preview`,
       { method: 'POST', body: JSON.stringify(payload) }, 30000),
-  importSqlCommit: (dsId: string, payload: { sql: string; tableName: string; ifExists?: string }) =>
+  importSqlCommit: (dsId: string, payload: { sql: string; sourceDsId: string; tableName: string; ifExists?: string }) =>
     http<{ ok: boolean; tableName: string; rowCount: number }>(
       `/datasources/${encodeURIComponent(dsId)}/local/import-sql-commit`,
-      { method: 'POST', body: JSON.stringify(payload) }, 60000),
+      { method: 'POST', body: JSON.stringify(payload) }, 300000),
   importFilePreview: (dsId: string, file: File) => {
     const fd = new FormData(); fd.append('file', file)
     return http<{ columns: string[]; rows: Record<string, unknown>[]; rowCount: number; fileName: string }>(

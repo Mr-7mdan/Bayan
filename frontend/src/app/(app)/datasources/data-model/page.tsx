@@ -981,6 +981,7 @@ export default function DataModelPage() {
         <ImportTableDialog
           open={importOpen}
           dsId={selectedDuckId}
+          datasources={datasources}
           onCloseAction={() => setImportOpen(false)}
           onImported={(tableName, rowCount) => {
             // Add the new table to the rows list optimistically

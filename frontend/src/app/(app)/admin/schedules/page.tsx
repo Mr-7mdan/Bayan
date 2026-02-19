@@ -5,7 +5,7 @@ import type React from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text, TextInput, Badge, TabGroup, TabList, Tab, TabPanels, TabPanel, Select, SelectItem } from '@tremor/react'
 import * as Popover from '@radix-ui/react-popover'
-import { RiFocus2Line, RiArrowDownSLine } from '@remixicon/react'
+import { RiFocus2Line, RiArrowDownSLine, RiClipboardLine } from '@remixicon/react'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { Api, type DatasourceOut, type DatasourceDetailOut, type SyncTaskOut, type SyncTaskCreate, type SyncRunOut, type IntrospectResponse, type TablesOnlyResponse } from '@/lib/api'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -687,9 +687,9 @@ function AdminSchedulesInner() {
                     <div className="md:col-start-6 flex items-end md:justify-start gap-2">
                       <button
                         className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed h-9"
-                        disabled={!selectedId || (!!editingTaskId ? saveTask.isPending : createTask.isPending)}
+                        disabled={!selectedId || (!!editingTaskId ? saveTask.isPending : createTask.isPending) || (!form.sourceTable && !form.customQuery) || !form.destTableName}
                         onClick={() => {
-                          if (!selectedId || !form.sourceTable || !form.destTableName) return
+                          if (!selectedId || (!form.sourceTable && !form.customQuery) || !form.destTableName) return
                           if (editingTaskId) saveTask.mutate()
                           else createTask.mutate(form)
                         }}
@@ -773,9 +773,19 @@ function AdminSchedulesInner() {
                             <td className="px-2 py-1">{t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : '—'}</td>
                             <td className="px-2 py-1">{typeof t.lastRowCount === 'number' ? t.lastRowCount.toLocaleString() : '—'}</td>
                             <td className="px-2 py-1">{typeof durationByTask[t.id] === 'number' ? durationByTask[t.id].toLocaleString() : '—'}</td>
-                            <td className="px-2 py-1">{t.inProgress ? (
+                            <td className="px-2 py-1 whitespace-nowrap">{t.inProgress ? (
                               <span className="text-emerald-700 dark:text-emerald-300">Running {typeof t.progressCurrent === 'number' && typeof t.progressTotal === 'number' ? `(${t.progressCurrent}/${t.progressTotal})` : ''}</span>
-                            ) : (t.error ? <span className="text-red-600">Error</span> : 'Idle')}</td>
+                            ) : (t.error ? (
+                              <span className="inline-flex items-center gap-1">
+                                <span className="text-red-600">Error</span>
+                                <button
+                                  title="Copy error to clipboard"
+                                  className="p-0.5 rounded hover:bg-[hsl(var(--muted))] text-red-500"
+                                  onClick={() => navigator.clipboard.writeText(t.error ?? '')}
+                                ><RiClipboardLine className="w-3.5 h-3.5" /></button>
+                              </span>
+                            ) : 'Idle')}
+                            </td>
                             <td className="px-2 py-1">
                               <div className="flex items-center gap-2">
                                 <button
@@ -874,7 +884,16 @@ function AdminSchedulesInner() {
                               <td className="px-2 py-1 font-mono">{destTableDisplay}</td>
                               <td className="px-2 py-1">{typeof r.rowCount === 'number' ? r.rowCount.toLocaleString() : '—'}</td>
                               <td className="px-2 py-1">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '—'}</td>
-                              <td className="px-2 py-1">{r.error ? <span className="text-red-600">{r.error}</span> : '—'}</td>
+                              <td className="px-2 py-1 whitespace-nowrap">{r.error ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="text-red-600">Error</span>
+                                  <button
+                                    title="Copy error to clipboard"
+                                    className="p-0.5 rounded hover:bg-[hsl(var(--muted))] text-red-500"
+                                    onClick={() => navigator.clipboard.writeText(r.error ?? '')}
+                                  ><RiClipboardLine className="w-3.5 h-3.5" /></button>
+                                </span>
+                              ) : '—'}</td>
                             </tr>
                           )
                         })}

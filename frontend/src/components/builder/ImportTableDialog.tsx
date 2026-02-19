@@ -2,7 +2,7 @@
 
 import React, { useCallback, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Api } from '@/lib/api'
+import { Api, type DatasourceOut } from '@/lib/api'
 import { RiUpload2Line, RiFileLine, RiCloseLine, RiCheckLine, RiErrorWarningLine, RiTableLine } from '@remixicon/react'
 
 type Step = 'input' | 'preview' | 'done'
@@ -19,14 +19,17 @@ interface PreviewResult {
 interface Props {
   open: boolean
   dsId: string
+  datasources?: DatasourceOut[]
   onCloseAction: () => void
   onImported: (tableName: string, rowCount: number) => void
 }
 
-export default function ImportTableDialog({ open, dsId, onCloseAction, onImported }: Props) {
+export default function ImportTableDialog({ open, dsId, datasources = [], onCloseAction, onImported }: Props) {
+  const sourceDatasources = datasources.filter(d => !String(d.type || '').toLowerCase().includes('duckdb'))
   const [step, setStep] = useState<Step>('input')
   const [mode, setMode] = useState<Mode>('file')
   const [sql, setSql] = useState('')
+  const [sourceDsId, setSourceDsId] = useState<string>('')
   const [file, setFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
   const [previewing, setPreviewing] = useState(false)
@@ -43,6 +46,7 @@ export default function ImportTableDialog({ open, dsId, onCloseAction, onImporte
     setStep('input'); setSql(''); setFile(null); setPreview(null)
     setPreviewError(null); setTableName(''); setCommitError(null); setResult(null)
     setIfExists('replace')
+    setSourceDsId(sourceDatasources[0]?.id || '')
   }
 
   const handleClose = () => { reset(); onCloseAction() }
@@ -66,7 +70,9 @@ export default function ImportTableDialog({ open, dsId, onCloseAction, onImporte
     try {
       let res: PreviewResult
       if (mode === 'sql') {
-        res = await Api.importSqlPreview(dsId, { sql, limit: 100 })
+        const sid = sourceDsId || sourceDatasources[0]?.id || ''
+        if (!sid) throw new Error('Select a source datasource first')
+        res = await Api.importSqlPreview(dsId, { sql, sourceDsId: sid, limit: 100 })
       } else {
         if (!file) throw new Error('No file selected')
         res = await Api.importFilePreview(dsId, file)
@@ -88,7 +94,9 @@ export default function ImportTableDialog({ open, dsId, onCloseAction, onImporte
     try {
       let res: { ok: boolean; tableName: string; rowCount: number }
       if (mode === 'sql') {
-        res = await Api.importSqlCommit(dsId, { sql, tableName: tableName.trim(), ifExists })
+        const sid = sourceDsId || sourceDatasources[0]?.id || ''
+        if (!sid) throw new Error('Select a source datasource first')
+        res = await Api.importSqlCommit(dsId, { sql, sourceDsId: sid, tableName: tableName.trim(), ifExists })
       } else {
         if (!file) throw new Error('No file available')
         res = await Api.importFileCommit(dsId, file, tableName.trim(), ifExists)
@@ -154,7 +162,7 @@ export default function ImportTableDialog({ open, dsId, onCloseAction, onImporte
               {mode === 'file' && (
                 <div
                   className={`relative flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 text-center cursor-pointer transition-colors ${dragging ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/5' : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/60 hover:bg-[hsl(var(--muted))]/50'}`}
-                  onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+                  onDragOver={(e: React.DragEvent) => { e.preventDefault(); setDragging(true) }}
                   onDragLeave={() => setDragging(false)}
                   onDrop={handleDrop}
                   onClick={() => fileInputRef.current?.click()}
@@ -186,9 +194,28 @@ export default function ImportTableDialog({ open, dsId, onCloseAction, onImporte
 
               {/* SQL input */}
               {mode === 'sql' && (
-                <div className="space-y-2">
-                  <label className="text-xs text-[hsl(var(--muted-foreground))]">
-                    Write a SELECT query. The result will be imported as a new table.
+                <div className="space-y-3">
+                  {/* Source datasource selector */}
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Source datasource <span className="text-[hsl(var(--danger))]">•</span></label>
+                    {sourceDatasources.length === 0 ? (
+                      <div className="text-xs text-[hsl(var(--muted-foreground))] px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
+                        No external datasources available
+                      </div>
+                    ) : (
+                      <select
+                        className="w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/40"
+                        value={sourceDsId || sourceDatasources[0]?.id || ''}
+                        onChange={e => setSourceDsId(e.target.value)}
+                      >
+                        {sourceDatasources.map(d => (
+                          <option key={d.id} value={d.id}>{d.name} ({d.type})</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <label className="block text-xs text-[hsl(var(--muted-foreground))]">
+                    Write a SELECT query against the source. The result will be imported as a new DuckDB table.
                   </label>
                   <textarea
                     className="w-full h-48 px-3 py-2.5 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] font-mono text-xs resize-y focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/40"

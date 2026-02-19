@@ -431,7 +431,7 @@ class AdminSetPasswordRequest(BaseModel):
 class SyncTaskCreate(BaseModel):
     datasourceId: Optional[str] = None
     sourceSchema: str | None = None
-    sourceTable: str
+    sourceTable: str = ''
     destTableName: str
     mode: str  # 'sequence' | 'snapshot'
     pkColumns: list[str] | None = None

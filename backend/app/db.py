@@ -1137,7 +1137,7 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
     src_dialect = _dialect_name(source_engine)
     # Determine the FROM clause: custom query as derived table, or plain table reference
     if custom_query and custom_query.strip():
-        q_from = f"({custom_query.strip()}) AS _src"
+        q_from = f"({custom_query.strip().rstrip(';').strip()}) AS _src"
     else:
         q_from = _compose_table_name(source_schema, source_table, src_dialect)
     seq = int(last_sequence_value or 0)
@@ -1278,7 +1278,7 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
     src_dialect = _dialect_name(source_engine)
     # Determine the FROM clause: custom query as derived table, or plain table reference
     if custom_query and custom_query.strip():
-        q_source = f"({custom_query.strip()}) AS _src"
+        q_source = f"({custom_query.strip().rstrip(';').strip()}) AS _src"
     else:
         q_source = _compose_table_name(source_schema, source_table, src_dialect)
     stg = f"stg_{dest_table}"

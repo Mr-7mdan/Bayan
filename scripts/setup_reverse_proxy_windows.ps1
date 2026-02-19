@@ -19,15 +19,58 @@ function Ensure-Admin {
 }
 
 function Ensure-Caddy {
-  if (-not (Get-Command caddy -ErrorAction SilentlyContinue)) {
-    Write-Host 'Caddy not found. Installing via winget...'
-    winget install --id=Light-CaddyServer.Caddy -e --source winget -h 2>$null | Out-Null
+  if (Get-Command caddy -ErrorAction SilentlyContinue) { return $true }
+
+  # 1) Try winget
+  Write-Host 'Caddy not found. Attempting install via winget...'
+  try {
+    winget install --id=Caddy.Caddy -e --source winget `
+      --accept-package-agreements --accept-source-agreements -h | Out-Null
+  } catch {}
+
+  # Refresh PATH from registry after winget
+  $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
+              [System.Environment]::GetEnvironmentVariable('Path','User')
+  if (Get-Command caddy -ErrorAction SilentlyContinue) { return $true }
+
+  # 2) winget may install to LocalAppData\Microsoft\WinGet\Packages — search for it
+  $wingetPkgs = Join-Path $env:LocalAppData 'Microsoft\WinGet\Packages'
+  if (Test-Path $wingetPkgs) {
+    $found = Get-ChildItem -Path $wingetPkgs -Filter 'caddy.exe' -Recurse -ErrorAction SilentlyContinue |
+             Select-Object -First 1
+    if ($found) {
+      $env:Path = $found.DirectoryName + ';' + $env:Path
+      Write-Host "Found caddy at $($found.FullName)"
+      if (Get-Command caddy -ErrorAction SilentlyContinue) { return $true }
+    }
   }
-  if (-not (Get-Command caddy -ErrorAction SilentlyContinue)) {
-    Write-Warning 'Caddy not found in PATH. Will still write Caddyfile; install Caddy and run it later.'
-    return $false
+
+  # 3) Direct download from GitHub releases (most reliable fallback)
+  Write-Host 'Downloading Caddy directly from GitHub releases...'
+  try {
+    $rel   = Invoke-RestMethod 'https://api.github.com/repos/caddyserver/caddy/releases/latest' -UseBasicParsing
+    $asset = $rel.assets | Where-Object { $_.name -match 'windows_amd64\.zip$' } | Select-Object -First 1
+    if (-not $asset) { throw 'No Windows amd64 asset found in latest release.' }
+    $zipPath  = Join-Path $env:TEMP 'caddy_install.zip'
+    $caddyBin = Join-Path $env:ProgramFiles 'Caddy'
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+    New-Item -ItemType Directory -Path $caddyBin -Force | Out-Null
+    Expand-Archive -Path $zipPath -DestinationPath $caddyBin -Force
+    Remove-Item $zipPath -ErrorAction SilentlyContinue
+    # Persist to Machine PATH so future sessions find it
+    $machinePath = [System.Environment]::GetEnvironmentVariable('Path','Machine')
+    if ($machinePath -notlike "*$caddyBin*") {
+      [System.Environment]::SetEnvironmentVariable('Path', "$machinePath;$caddyBin", 'Machine')
+    }
+    $env:Path = $caddyBin + ';' + $env:Path
+    Write-Host "Caddy installed to $caddyBin"
+  } catch {
+    Write-Warning ("Failed to download Caddy: {0}" -f $_.Exception.Message)
   }
-  return $true
+
+  if (Get-Command caddy -ErrorAction SilentlyContinue) { return $true }
+  Write-Warning 'Caddy not found in PATH. Will still write Caddyfile; install Caddy and run it later.'
+  return $false
 }
 
 # Ensure Chocolatey is available for package install fallbacks

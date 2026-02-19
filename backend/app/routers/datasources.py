@@ -1662,6 +1662,24 @@ def rename_local_table(ds_id: str, payload: _RenameLocalTableRequest, actorId: s
         raise HTTPException(status_code=400, detail=f"Failed to rename table: {str(e)}")
 
 
+def _to_json_safe(v):
+    """Convert a DB value to something JSON-serialisable."""
+    if v is None:
+        return None
+    if isinstance(v, (bool, int, str)):
+        return v
+    if isinstance(v, float):
+        import math
+        return None if math.isnan(v) or math.isinf(v) else v
+    try:
+        from decimal import Decimal
+        if isinstance(v, Decimal):
+            return float(v)
+    except Exception:
+        pass
+    return str(v)
+
+
 # --- Datasource-level transforms (Advanced SQL Mode) ---
 
 @router.get("/{ds_id}/transforms", response_model=DatasourceTransforms)
@@ -2580,28 +2598,28 @@ def import_datasources(payload: DatasourceImportRequest, actorId: str | None = Q
 
 class _ImportSqlPreviewRequest(BaseModel):
     sql: str
+    sourceDsId: str | None = None  # external source; omit to query local DuckDB
     limit: int = 100
 
 
 class _ImportSqlCommitRequest(BaseModel):
     sql: str
+    sourceDsId: str | None = None  # external source; omit to run SQL on local DuckDB
     tableName: str
     ifExists: str = "replace"   # "replace" | "append" | "fail"
 
 
 def _duck_path_for_ds(ds: Datasource) -> str:
     """Return the DuckDB file path for a given datasource record."""
-    from ..security import decrypt_text
-    from ..config import get_settings
     if ds.connection_encrypted:
         try:
             dsn = decrypt_text(ds.connection_encrypted) or ""
-            p = dsn.replace("duckdb:///", "").strip()
+            p = dsn.replace("duckdb:///", "").replace("duckdb://", "").strip()
             if p:
                 return p
         except Exception:
             pass
-    return get_settings().duckdb_path
+    return get_active_duck_path()
 
 
 def _q(name: str) -> str:
@@ -2615,16 +2633,39 @@ def import_sql_preview(
     payload: _ImportSqlPreviewRequest,
     db: Session = Depends(get_db),
 ):
-    """Return a preview (up to limit rows) by executing the user-supplied SQL against the DuckDB."""
+    """Preview SQL: routes to external datasource when sourceDsId is provided, else queries local DuckDB."""
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if _duckdb is None:
-        raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
     sql = (payload.sql or "").strip().rstrip(";")
     if not sql:
         raise HTTPException(status_code=400, detail="sql is required")
     limit = max(1, min(int(payload.limit or 100), 1000))
+    # --- External datasource path ---
+    if payload.sourceDsId:
+        src_ds = db.get(Datasource, payload.sourceDsId)
+        if not src_ds:
+            raise HTTPException(status_code=404, detail="Source datasource not found")
+        if not src_ds.connection_encrypted:
+            raise HTTPException(status_code=400, detail="Source datasource has no connection URI")
+        dsn = decrypt_text(src_ds.connection_encrypted)
+        if not dsn:
+            raise HTTPException(status_code=400, detail="Invalid source connection secret")
+        try:
+            source_engine = get_engine_from_dsn(dsn)
+            with source_engine.connect() as conn:
+                res = conn.execute(text(sql))
+                columns = list(res.keys())
+                rows_raw = res.fetchmany(limit)
+                rows = [dict(zip(columns, [_to_json_safe(v) for v in row])) for row in rows_raw]
+            return {"columns": columns, "rows": rows, "rowCount": len(rows)}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Query failed: {e}")
+    # --- Local DuckDB path ---
+    if _duckdb is None:
+        raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
     duck_path = _duck_path_for_ds(ds)
     try:
         with open_duck_native(duck_path) as conn:
@@ -2632,15 +2673,7 @@ def import_sql_preview(
             columns = [str(c[0]) for c in (res.description or [])]
             raw = res.fetchall()
         rows = [dict(zip(columns, row)) for row in raw]
-        # Serialise non-JSON-safe types
-        import datetime, decimal
-        def _safe(v):
-            if isinstance(v, (datetime.date, datetime.datetime)):
-                return str(v)
-            if isinstance(v, decimal.Decimal):
-                return float(v)
-            return v
-        rows = [{k: _safe(v) for k, v in r.items()} for r in rows]
+        rows = [{k: _to_json_safe(v) for k, v in r.items()} for r in rows]
         return {"columns": columns, "rows": rows, "rowCount": len(rows)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"SQL error: {e}")
@@ -2652,7 +2685,7 @@ def import_sql_commit(
     payload: _ImportSqlCommitRequest,
     db: Session = Depends(get_db),
 ):
-    """Create (or replace) a DuckDB table from a SQL query."""
+    """Create (or replace) a DuckDB table from SQL; routes to external source when sourceDsId provided."""
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -2661,22 +2694,90 @@ def import_sql_commit(
     sql = (payload.sql or "").strip().rstrip(";")
     if not sql:
         raise HTTPException(status_code=400, detail="sql is required")
-    table_name = (payload.tableName or "").strip()
+    table_name = re.sub(r"[^a-zA-Z0-9_]", "_", (payload.tableName or "").strip())
     if not table_name:
         raise HTTPException(status_code=400, detail="tableName is required")
     if_exists = str(payload.ifExists or "replace").lower()
     duck_path = _duck_path_for_ds(ds)
     qtbl = _q(table_name)
+    # --- External datasource path: stream from source → insert into DuckDB ---
+    if payload.sourceDsId:
+        src_ds = db.get(Datasource, payload.sourceDsId)
+        if not src_ds:
+            raise HTTPException(status_code=404, detail="Source datasource not found")
+        if not src_ds.connection_encrypted:
+            raise HTTPException(status_code=400, detail="Source datasource has no connection URI")
+        dsn = decrypt_text(src_ds.connection_encrypted)
+        if not dsn:
+            raise HTTPException(status_code=400, detail="Invalid source connection secret")
+        try:
+            source_engine = get_engine_from_dsn(dsn)
+            total_rows = 0
+            with source_engine.connect() as src:
+                try:
+                    stream_res = src.execution_options(stream_results=True).execute(text(sql))
+                except Exception:
+                    stream_res = src.execute(text(sql))
+                columns = list(stream_res.keys())
+                with open_duck_native(duck_path) as duck:
+                    tbl_exists = duck.execute(
+                        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?",
+                        [table_name]
+                    ).fetchone()[0] > 0
+                    if tbl_exists:
+                        if if_exists == "fail":
+                            raise HTTPException(status_code=409, detail=f"Table '{table_name}' already exists")
+                        elif if_exists == "replace":
+                            duck.execute(f"DROP TABLE IF EXISTS {qtbl}")
+                            tbl_exists = False
+                    created = False
+                    while True:
+                        batch = stream_res.fetchmany(50000)
+                        if not batch:
+                            break
+                        rows_as_lists = [[_to_json_safe(v) for v in row] for row in batch]
+                        if not created:
+                            sample = rows_as_lists[:64]
+                            types: dict[str, str] = {c: "TEXT" for c in columns}
+                            for idx, col in enumerate(columns):
+                                for r in sample:
+                                    try:
+                                        v = r[idx]
+                                        if v is None:
+                                            continue
+                                        if isinstance(v, bool):
+                                            types[col] = "BOOLEAN"; break
+                                        elif isinstance(v, int):
+                                            types[col] = "BIGINT"; break
+                                        elif isinstance(v, float):
+                                            types[col] = "DOUBLE"; break
+                                    except Exception:
+                                        pass
+                            cols_sql = ", ".join(f'{_q(c)} {types[c]}' for c in columns)
+                            duck.execute(f"CREATE TABLE IF NOT EXISTS {qtbl} ({cols_sql})")
+                            created = True
+                        qmarks = ", ".join(["?" for _ in columns])
+                        qcols = ", ".join([_q(c) for c in columns])
+                        duck.executemany(
+                            f"INSERT INTO {qtbl} ({qcols}) VALUES ({qmarks})",
+                            rows_as_lists
+                        )
+                        total_rows += len(batch)
+            return {"ok": True, "tableName": table_name, "rowCount": total_rows}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+    # --- Local DuckDB path: execute SQL directly on DuckDB ---
     try:
         with open_duck_native(duck_path) as conn:
             if if_exists == "replace":
                 conn.execute(f"DROP TABLE IF EXISTS {qtbl}")
                 conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
             elif if_exists == "append":
-                # Check if table exists; if not, create it
                 exists = conn.execute(
                     "SELECT count(*) FROM information_schema.tables "
-                    f"WHERE table_schema='main' AND table_name=?",
+                    "WHERE table_schema='main' AND table_name=?",
                     [table_name],
                 ).fetchone()[0]
                 if exists:
@@ -2684,7 +2785,6 @@ def import_sql_commit(
                 else:
                     conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
             else:
-                # "fail" — error if exists
                 conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
             row_count = conn.execute(f"SELECT COUNT(*) FROM {qtbl}").fetchone()[0]
         return {"ok": True, "tableName": table_name, "rowCount": int(row_count)}
