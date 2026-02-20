@@ -29,7 +29,7 @@ function AdminSchedulesInner() {
   const prevTabIndex = useRef(0)
   const [slideDir, setSlideDir] = useState<'left' | 'right'>('right')
   const [previewOpen, setPreviewOpen] = useState(false)
-  const [cronMode, setCronMode] = useState<'custom' | 'every_n_hours'>('custom')
+  const [cronMode, setCronMode] = useState<'custom' | 'every_n_hours' | 'manual'>('custom')
   const [cronHoursInterval, setCronHoursInterval] = useState<number>(4)
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
   const [pkSearch, setPkSearch] = useState('')
@@ -132,6 +132,8 @@ function AdminSchedulesInner() {
     if (cronMode === 'every_n_hours') {
       const n = Math.max(1, Math.min(24, Number.isFinite(cronHoursInterval) ? cronHoursInterval : 1))
       setForm((f) => ({ ...f, scheduleCron: `0 */${n} * * *` }))
+    } else if (cronMode === 'manual') {
+      setForm((f) => ({ ...f, scheduleCron: undefined }))
     }
   }, [cronMode, cronHoursInterval])
 
@@ -209,7 +211,9 @@ function AdminSchedulesInner() {
       customQuery: t.customQuery || '',
     })
     const m = String(t.scheduleCron || '').match(/^0\s+\*\/(\d+)\s+\*\s+\*\s+\*$/)
-    if (m) {
+    if (!t.scheduleCron) {
+      setCronMode('manual')
+    } else if (m) {
       const n = Math.max(1, Math.min(24, parseInt(m[1], 10) || 1))
       setCronMode('every_n_hours')
       setCronHoursInterval(n)
@@ -291,7 +295,7 @@ function AdminSchedulesInner() {
   })
 
   const runningCount = useMemo(() => (tasksQ.data || []).filter((t) => t.inProgress).length, [tasksQ.data])
-  const scheduledCount = useMemo(() => (tasksQ.data || []).filter((t) => !!t.scheduleCron).length, [tasksQ.data])
+  const scheduledCount = useMemo(() => (tasksQ.data || []).filter((t) => !!t.scheduleCron && t.enabled).length, [tasksQ.data])
 
   // Scheduler jobs (admin)
   const jobsQ = useQuery<{ id: string; nextRunAt?: string | null; dsId?: string; taskId?: string }[], Error>({
@@ -643,7 +647,8 @@ function AdminSchedulesInner() {
                         <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                           [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
                           [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
-                          <Select value={cronMode} onValueChange={(v) => setCronMode((v as 'custom'|'every_n_hours'))} className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent">
+                          <Select value={cronMode} onValueChange={(v) => setCronMode((v as 'custom'|'every_n_hours'|'manual'))} className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent">
+                            <SelectItem value="manual">Manual only</SelectItem>
                             <SelectItem value="custom">Custom cron</SelectItem>
                             <SelectItem value="every_n_hours">Every N hours</SelectItem>
                           </Select>
@@ -666,19 +671,25 @@ function AdminSchedulesInner() {
                           </div>
                         </div>
                       )}
-                      <div>
-                        <div className="text-xs text-muted-foreground">Cron</div>
-                        <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
-                          [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
-                          <TextInput
-                            className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent"
-                            value={(form.scheduleCron || '') as string}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, scheduleCron: e.target.value }))}
-                            placeholder="0 2 * * *"
-                            disabled={cronMode === 'every_n_hours'}
-                          />
+                      {cronMode === 'manual' ? (
+                        <div className="rounded-md border border-dashed border-[hsl(var(--border))] px-3 py-2 text-xs text-muted-foreground">
+                          No schedule — run manually only
                         </div>
-                      </div>
+                      ) : (
+                        <div>
+                          <div className="text-xs text-muted-foreground">Cron</div>
+                          <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
+                            [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
+                            <TextInput
+                              className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent"
+                              value={(form.scheduleCron || '') as string}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, scheduleCron: e.target.value }))}
+                              placeholder="0 2 * * *"
+                              disabled={cronMode === 'every_n_hours'}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="md:col-span-2 md:col-start-3 flex items-end" />
                     <div className="md:col-start-5 flex items-end md:justify-start">
@@ -763,7 +774,7 @@ function AdminSchedulesInner() {
                             <td className="px-2 py-1">{t.pkColumns?.join(', ')}</td>
                             <td className="px-2 py-1">{t.sequenceColumn || '—'}</td>
                             <td className="px-2 py-1">{t.batchSize || '—'}</td>
-                            <td className="px-2 py-1">{t.scheduleCron || '—'}</td>
+                            <td className="px-2 py-1">{t.scheduleCron || <span className="text-muted-foreground text-[11px]">manual</span>}</td>
                             <td className="px-2 py-1">
                               {t.customQuery ? (
                                 <span className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))] font-mono" title={t.customQuery}>custom</span>

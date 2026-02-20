@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 630" width="1050" height="630">
+
+  <!-- UNITED -->
+  <text
+    x="525"
+    y="218"
+    font-family="Impact, 'Haettenschweiler', 'Franklin Gothic Heavy', 'Arial Black', sans-serif"
+    font-weight="900"
+    font-size="218"
+    letter-spacing="10"
+    fill="#FFFFFF"
+    text-anchor="middle">UNITED</text>
+
+  <!-- Rectangle border around المتحدة -->
+  <rect
+    x="44"
+    y="250"
+    width="962"
+    height="187"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="5"/>
+
+  <!-- المتحدة (Al-Muttahida / United) -->
+  <text
+    x="525"
+    y="376"
+    font-family="'Traditional Arabic', 'Arabic Typesetting', 'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif"
+    font-size="102"
+    fill="#FFFFFF"
+    text-anchor="middle"
+    direction="rtl"
+    unicode-bidi="bidi-override">المتحدة</text>
+
+  <!-- للأوراق المالية (For Securities) -->
+  <text
+    x="525"
+    y="528"
+    font-family="'Traditional Arabic', 'Arabic Typesetting', 'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif"
+    font-size="86"
+    fill="#FFFFFF"
+    text-anchor="middle"
+    direction="rtl"
+    unicode-bidi="bidi-override">للأوراق المالية</text>
+
+</svg>

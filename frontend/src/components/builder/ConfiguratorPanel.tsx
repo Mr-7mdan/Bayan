@@ -730,15 +730,15 @@ function StringRuleDetails({ field, where, onPatch }: { field: string; where?: R
   }
 
   return (
-    <div className="rounded-md border bg-card p-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium">String rule: {field}</div>
-        <div className="flex items-center gap-2">
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted bg-primary text-primary-foreground" onClick={handleApply}>Apply</button>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('contains'); setVal(''); onPatch({ [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
+    <div className="rounded-lg border bg-card p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-foreground">String rule: {field}</div>
+        <div className="flex items-center gap-1.5">
+          <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer" onClick={() => { setOp('contains'); setVal(''); onPatch({ [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
+          <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 transition-colors duration-150 cursor-pointer" onClick={handleApply}>Apply</button>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-2 mt-2 items-center">
+      <div className="grid grid-cols-3 gap-2 items-center">
         <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{interactedRef.current = true; setOp(e.target.value as StrOp)}}>
           <option value="contains">Contains</option>
           <option value="not_contains">Does not contain</option>
@@ -771,9 +771,9 @@ function FilterDetailsTabs({ kind, selField, local, setLocal, updateConfig }: { 
   }
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <button type="button" className={`text-[11px] px-2 py-1 rounded-md border ${tab==='manual'?'bg-[hsl(var(--secondary))]':''}`} onClick={()=>setTabPersist('manual')}>Manual</button>
-        <button type="button" className={`text-[11px] px-2 py-1 rounded-md border ${tab==='rule'?'bg-[hsl(var(--secondary))]':''}`} onClick={()=>setTabPersist('rule')}>Rule</button>
+      <div className="flex items-center gap-1.5">
+        <button type="button" className={`text-xs px-2.5 py-1 rounded-md border transition-colors duration-150 cursor-pointer ${tab==='manual'?'bg-[hsl(var(--secondary))] text-foreground font-semibold':'text-muted-foreground hover:bg-[hsl(var(--secondary)/0.5)]'}`} onClick={()=>setTabPersist('manual')}>Manual</button>
+        <button type="button" className={`text-xs px-2.5 py-1 rounded-md border transition-colors duration-150 cursor-pointer ${tab==='rule'?'bg-[hsl(var(--secondary))] text-foreground font-semibold':'text-muted-foreground hover:bg-[hsl(var(--secondary)/0.5)]'}`} onClick={()=>setTabPersist('rule')}>Rule</button>
       </div>
       {tab==='manual' ? (
         <FilterEditor
@@ -1049,12 +1049,12 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
   }, [mode, preset, op, a, b])
 
   return (
-    <div className="rounded-md border bg-card p-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium">Date rule: {field}</div>
-        <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setOp('between'); setA(''); setB(''); setPendingA(''); setPendingB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined }) }}>Clear</button>
+    <div className="rounded-lg border bg-card p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-foreground">Date rule: {field}</div>
+        <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer" onClick={() => { setMode('preset'); setPreset('today'); setOp('between'); setA(''); setB(''); setPendingA(''); setPendingB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined }) }}>Clear</button>
       </div>
-      <div className="mt-2 flex items-center gap-2 text-xs">
+      <div className="flex items-center gap-2 text-xs">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={()=>{ interactedRef.current = true; markEditing(); setMode('preset') }} /> Preset</label>
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='custom'} onChange={()=>{ interactedRef.current = true; markEditing(); setMode('custom') }} /> Custom</label>
       </div>
@@ -1108,7 +1108,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
             )}
           </div>
           <div className="mt-2 flex justify-end">
-            <button className="text-xs px-3 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleApply}>Apply</button>
+            <button className="text-xs px-2.5 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors duration-150 cursor-pointer" onClick={handleApply}>Apply</button>
           </div>
         </>
       )}
@@ -1210,7 +1210,7 @@ function NewMeasureButton({ columns, onCreate }: { columns: string[]; onCreate: 
   const [text, setText] = useState('')
   return (
     <>
-      <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-foreground" onClick={() => setOpen(true)}>
+      <button className="text-xs px-2.5 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-foreground transition-colors duration-150 cursor-pointer" onClick={() => setOpen(true)}>
         New measure
       </button>
       {open && typeof window !== 'undefined' && createPortal(
@@ -1355,7 +1355,7 @@ function NewCustomColumnButton({
   return (
     <>
       {!hideTriggerButton && (
-        <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-foreground" onClick={() => setOpen(true)}>
+        <button className="text-xs px-2.5 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-foreground transition-colors duration-150 cursor-pointer" onClick={() => setOpen(true)}>
           {mode === 'edit' ? 'Edit custom column' : 'New custom column'}
         </button>
       )}
@@ -1387,7 +1387,7 @@ function NewCustomColumnButton({
                   <div className="text-xs mb-1 text-muted-foreground">Functions</div>
                   {Object.entries(fnGroups).map(([grp, items]) => (
                     <div key={grp} className="mb-2">
-                      <div className="text-[11px] font-medium">{grp}</div>
+                      <div className="text-xs font-medium">{grp}</div>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {items.map((it) => (
                           <button key={it} className="text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--muted))] border" onClick={() => setText((t) => (t ? `${t} ${it}` : it))}>{it}</button>
@@ -1409,19 +1409,19 @@ function NewCustomColumnButton({
                 {/* Live preview */}
                 <div className="rounded border bg-[hsl(var(--secondary)/0.6)] p-2">
                   <div className="flex items-center justify-between mb-1">
-                    <div className="text-[11px] font-medium">Preview</div>
+                    <div className="text-xs font-medium">Preview</div>
                     <button
                       type="button"
-                      className="text-[11px] px-2 py-0.5 rounded border hover:bg-[hsl(var(--secondary)/0.6)]"
+                      className="text-xs px-2 py-0.5 rounded border hover:bg-[hsl(var(--secondary)/0.6)]"
                       onClick={() => onRequestRows?.(text)}
                       title="Fetch fresh sample rows for this formula"
                     >
                       Test
                     </button>
                   </div>
-                  {error && <div className="text-[11px] text-red-600">{error}</div>}
+                  {error && <div className="text-xs text-red-600">{error}</div>}
                   {!error && (
-                    <div className="text-[11px] space-y-0.5">
+                    <div className="text-xs space-y-0.5">
                       {preview.length === 0 ? (
                         <div className="text-muted-foreground">No rows available for preview</div>
                       ) : (
@@ -1439,7 +1439,7 @@ function NewCustomColumnButton({
                         if (!refs.length || !Array.isArray(sampleRows) || sampleRows.length === 0) return null
                         const first = sampleRows[0] || {}
                         return (
-                          <div className="mt-2 text-[11px] opacity-80">
+                          <div className="mt-2 text-xs opacity-80">
                             <div className="font-medium mb-0.5">Inputs (Row 1)</div>
                             {refs.map((r) => (
                               <div key={r} className="flex items-center justify-between">
@@ -1884,18 +1884,18 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
   }
   
   return (
-    <div className="rounded-md border bg-card p-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium">Filter values: {field}</div>
-        <div className="flex items-center gap-2">
+    <div className="rounded-lg border bg-card p-3">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-xs font-semibold text-foreground">Filter values: {field}</div>
+        <div className="flex items-center gap-1.5">
           <button
-            className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
+            className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer"
             onClick={() => { setSelected([]); onChange([]) }}
             title="Clear all selections"
           >
             Clear
           </button>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={handleApply}>Apply</button>
+          <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 transition-colors duration-150 cursor-pointer" onClick={handleApply}>Apply</button>
         </div>
       </div>
       <div className="mt-2 space-y-2">
@@ -1906,7 +1906,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
           onChange={(e) => setFilterQuery(e.target.value)}
           autoComplete="off"
         />
-        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
             {selected.length} of {mergedPool.length} selected
             {loadingSamples && <span className="ml-1 opacity-60">(loading more...)</span>}
@@ -2038,12 +2038,12 @@ function NumberFilterDetails({ field, where, onPatch }: { field: string; where?:
   }
 
   return (
-    <div className="rounded-md border bg-card p-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium">Value filter: {field}</div>
-        <div className="flex items-center gap-2">
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted bg-primary text-primary-foreground" onClick={handleApply}>Apply</button>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
+    <div className="rounded-lg border bg-card p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-foreground">Value filter: {field}</div>
+        <div className="flex items-center gap-1.5">
+          <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer" onClick={() => { setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
+          <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 transition-colors duration-150 cursor-pointer" onClick={handleApply}>Apply</button>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-2 mt-2 items-center">
@@ -2093,21 +2093,21 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
   }
 
   return (
-    <div className="rounded-md border bg-card p-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium">Date range: {field}</div>
-        <div className="flex items-center gap-2">
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted bg-primary text-primary-foreground" onClick={handleApply}>Apply</button>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setStart(''); setEnd(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }) }}>Clear</button>
+    <div className="rounded-lg border bg-card p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-foreground">Date range: {field}</div>
+        <div className="flex items-center gap-1.5">
+          <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer" onClick={() => { setStart(''); setEnd(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }) }}>Clear</button>
+          <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 transition-colors duration-150 cursor-pointer" onClick={handleApply}>Apply</button>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 mt-2 items-center">
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">Start</label>
+          <label className="text-xs text-muted-foreground">Start</label>
           <input type="date" className="h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={start} onChange={(e) => setStart(e.target.value)} />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">End</label>
+          <label className="text-xs text-muted-foreground">End</label>
           <input type="date" className="h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={end} onChange={(e) => setEnd(e.target.value)} />
         </div>
       </div>
@@ -2367,7 +2367,12 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
 
   if (!local) {
     return (
-      <div className="text-sm text-muted-foreground">Select a widget on the canvas to configure it.</div>
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+        <div className="w-10 h-10 rounded-full bg-[hsl(var(--secondary))] flex items-center justify-center">
+          <RiGridLine className="size-5 text-muted-foreground" />
+        </div>
+        <p className="text-sm text-muted-foreground max-w-[200px] leading-relaxed">Select a widget on the canvas to configure it.</p>
+      </div>
     )
   }
 
@@ -2533,29 +2538,29 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       <label className="block text-xs text-muted-foreground mb-1">Gaps (px)</label>
                       <div className="grid grid-cols-4 gap-2">
                         <div>
-                          <label className="block text-[11px] text-muted-foreground">Top</label>
+                          <label className="block text-xs text-muted-foreground">Top</label>
                           <input type="number" min={0} max={48} className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs" value={Number((local.options as any)?.chartTitleGapTop ?? 0)}
                             onChange={(e) => { const v = Math.max(0, Math.min(48, Number(e.target.value||0))); const opts = { ...(local.options || {}), chartTitleGapTop: v }; const next = { ...local!, options: opts } as WidgetConfig; setLocal(next); updateConfig(next) }} />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-muted-foreground">Right</label>
+                          <label className="block text-xs text-muted-foreground">Right</label>
                           <input type="number" min={0} max={48} className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs" value={Number((local.options as any)?.chartTitleGapRight ?? 0)}
                             onChange={(e) => { const v = Math.max(0, Math.min(48, Number(e.target.value||0))); const opts = { ...(local.options || {}), chartTitleGapRight: v }; const next = { ...local!, options: opts } as WidgetConfig; setLocal(next); updateConfig(next) }} />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-muted-foreground">Bottom</label>
+                          <label className="block text-xs text-muted-foreground">Bottom</label>
                           <input type="number" min={0} max={48} className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs" value={Number((local.options as any)?.chartTitleGapBottom ?? 0)}
                             onChange={(e) => { const v = Math.max(0, Math.min(48, Number(e.target.value||0))); const opts = { ...(local.options || {}), chartTitleGapBottom: v }; const next = { ...local!, options: opts } as WidgetConfig; setLocal(next); updateConfig(next) }} />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-muted-foreground">Left</label>
+                          <label className="block text-xs text-muted-foreground">Left</label>
                           <input type="number" min={0} max={48} className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs" value={Number((local.options as any)?.chartTitleGapLeft ?? 0)}
                             onChange={(e) => { const v = Math.max(0, Math.min(48, Number(e.target.value||0))); const opts = { ...(local.options || {}), chartTitleGapLeft: v }; const next = { ...local!, options: opts } as WidgetConfig; setLocal(next); updateConfig(next) }} />
                         </div>
                       </div>
                     </div>
                   </div>
-                  <div className="text-[11px] text-muted-foreground">Above/Below render the label inside the chart body. Color &quot;auto&quot; uses dark gray in light mode and white in dark mode. Background fill optional. Gaps add extra spacing around the title.</div>
+                  <div className="text-xs text-muted-foreground">Above/Below render the label inside the chart body. Color &quot;auto&quot; uses dark gray in light mode and white in dark mode. Background fill optional. Gaps add extra spacing around the title.</div>
                 </div>
               </AccordionContent>
             </AccordionItem>
@@ -2566,7 +2571,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
       {local?.type === 'text' && (
         <Section title="Text Content" defaultOpen>
           <div className="space-y-2">
-            <div className="text-[11px] text-muted-foreground">Use the editor to format your content: bold, italic, underline, links, alignment, font size, weight, and color.</div>
+            <div className="text-xs text-muted-foreground">Use the editor to format your content: bold, italic, underline, links, alignment, font size, weight, and color.</div>
             <RichTextEditor
               value={local?.options?.text?.html || ''}
               onChange={(html) => {
@@ -2665,7 +2670,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               }}
             />
           </div>
-          <div className="text-[11px] text-muted-foreground mt-1">This constrains the card&#39;s minimum width in the grid.</div>
+          <div className="text-xs text-muted-foreground mt-1">This constrains the card&#39;s minimum width in the grid.</div>
         </Section>
       )}
       {local?.type === 'composition' && (
@@ -2717,7 +2722,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           </div>
           <div className="mt-2">
             <button
-              className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
+              className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer"
               onClick={() => setCompOpen(true)}
             >
               Open Card Builder
@@ -2744,8 +2749,8 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
       {local?.type === 'report' && (
         <Section title="Report Builder" defaultOpen>
           <div className="space-y-3">
-            <div className="text-[11px] text-muted-foreground">Design your report layout with labels, tables, and data-bound spaceholders.</div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="text-xs text-muted-foreground">Design your report layout with labels, tables, and data-bound spaceholders.</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="rounded border p-2 bg-secondary/40 text-center">
                 <div className="font-medium">{(local?.options?.report?.elements || []).length}</div>
                 <div className="text-muted-foreground">Elements</div>
@@ -2756,7 +2761,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               </div>
             </div>
             <button
-              className="w-full text-xs px-3 py-2 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90"
+              className="w-full text-xs px-3 py-2 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 transition-colors duration-150 cursor-pointer"
               onClick={() => setReportOpen(true)}
             >
               Open Report Builder
@@ -2785,7 +2790,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               <label className="block text-xs text-muted-foreground mb-1">Chart Type</label>
               <div className="grid grid-cols-3 gap-2 h-[240px] overflow-y-scroll overflow-x-hidden p-1" style={{ scrollbarGutter: 'stable' }}>
                 {(['column', 'bar', 'area', 'line', 'donut', 'categoryBar', 'spark', 'combo', 'progress', 'tracker', 'badges', 'scatter', 'gantt', 'sankey', 'tremorTable', 'heatmap', 'barList'] as const).map((t) => (
-                  <label key={t} className={`w-full flex flex-col items-center gap-1 p-2 rounded-md border cursor-pointer text-xs ${((local.chartType || 'line') === t) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))] ring-offset-2 ring-offset-[hsl(var(--card))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary)/0.6)]'}`}>
+                  <label key={t} className={`w-full flex flex-col items-center gap-1 p-2 rounded-md border cursor-pointer text-xs transition-colors duration-150 ${((local.chartType || 'line') === t) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))] ring-offset-2 ring-offset-[hsl(var(--card))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}>
                     <input
                       type="radio"
                       name="chartType"
@@ -2979,7 +2984,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     <TabsControls local={local} setLocalAction={setLocal} updateConfigAction={updateConfig} allFieldNames={allFieldNames} />
                     {/* Sort / Top N (aggregated) */}
                     <div className="border rounded-md p-2 space-y-2">
-                      <div className="text-[11px] font-medium text-muted-foreground">Per-widget Sort / Top N</div>
+                      <div className="text-xs font-medium text-muted-foreground">Per-widget Sort / Top N</div>
                       {(() => {
                         const optsAny = (local.options || {}) as any
                         const dd = (optsAny.dataDefaults || {}) as any
@@ -3092,7 +3097,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                     <option value="asc">Smallest → Largest</option>
                                   </select>
                                 </div>
-                                <div className="text-[11px] text-muted-foreground">Top N is applied after aggregation by category and always uses the aggregated value. Sort applies after Top N.</div>
+                                <div className="text-xs text-muted-foreground">Top N is applied after aggregation by category and always uses the aggregated value. Sort applies after Top N.</div>
                               </div>
                             )}
                           </>
@@ -3101,7 +3106,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     </div>
                     {local.chartType === 'donut' && (
                       <div className="border rounded-md p-2 space-y-3">
-                        <div className="text-[11px] font-medium text-muted-foreground">Donut/Pie Presets</div>
+                        <div className="text-xs font-medium text-muted-foreground">Donut/Pie Presets</div>
                         {(() => {
                           const variantVal = (((local.options as any)?.donutVariant) || 'donut') as 'donut'|'pie'|'sunburst'|'nightingale'
                           const setVariant = (val: 'donut'|'pie'|'sunburst'|'nightingale') => {
@@ -3154,7 +3159,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     )}
                     {local.chartType === 'gantt' && (
                       <div className="border rounded-md p-2 space-y-3">
-                        <div className="text-[11px] font-medium text-muted-foreground">Gantt Options</div>
+                        <div className="text-xs font-medium text-muted-foreground">Gantt Options</div>
                         <div className="flex items-center gap-3 text-xs">
                           <span className="text-muted-foreground font-medium">Mode:</span>
                           <label className="flex items-center gap-1.5">
@@ -3234,7 +3239,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     )}
                     {local.chartType === 'heatmap' && (
                       <div className="border rounded-md p-2 space-y-3">
-                        <div className="text-[11px] font-medium text-muted-foreground">Calendar HeatMap</div>
+                        <div className="text-xs font-medium text-muted-foreground">Calendar HeatMap</div>
                         {(() => {
                           const presetVal = (((local.options as any)?.heatmap?.preset) || 'calendarMonthly') as 'calendarMonthly'|'weekdayHour'|'calendarAnnual'
                           const setPreset = (val: 'calendarMonthly'|'weekdayHour'|'calendarAnnual') => {
@@ -3285,12 +3290,12 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                             </div>
                           )
                         })()}
-                        <div className="text-[11px] text-muted-foreground">Heatmap uses your Data Series (pivot builder) x/y/agg and series definitions. No extra field mapping is required.</div>
+                        <div className="text-xs text-muted-foreground">Heatmap uses your Data Series (pivot builder) x/y/agg and series definitions. No extra field mapping is required.</div>
                       </div>
                     )}
                     {local.chartType === 'tremorTable' && (
                       <div className="border rounded-md p-2 space-y-3">
-                        <div className="text-[11px] font-medium text-muted-foreground">Tremor Table</div>
+                        <div className="text-xs font-medium text-muted-foreground">Tremor Table</div>
                         <label className="flex items-center gap-2 text-xs">
                           <Switch
                             checked={local.options?.tremorTable?.alternatingRows !== false}
@@ -3357,21 +3362,21 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                 <option key={c} value={c}>{c}</option>
                               ))}
                             </select>
-                            <div className="text-[11px] text-muted-foreground mt-1">Percent is computed relative to the maximum value in each column.</div>
+                            <div className="text-xs text-muted-foreground mt-1">Percent is computed relative to the maximum value in each column.</div>
                           </div>
                         </div>
                         <div className="border-t pt-2 space-y-2">
-                          <div className="text-[11px] font-medium text-muted-foreground">Format by column</div>
+                          <div className="text-xs font-medium text-muted-foreground">Format by column</div>
                           {/* Current mappings */}
                           <div className="space-y-1">
                             {Object.entries((local.options?.tremorTable?.formatByColumn || {}) as Record<string,'none'|'short'|'currency'|'percent'|'bytes'>).length === 0 && (
-                              <div className="text-[11px] text-muted-foreground">No overrides</div>
+                              <div className="text-xs text-muted-foreground">No overrides</div>
                             )}
                             {Object.entries((local.options?.tremorTable?.formatByColumn || {}) as Record<string,'none'|'short'|'currency'|'percent'|'bytes'>).map(([col, mode]) => (
                               <div key={col} className="flex items-center justify-between text-xs">
                                 <span className="truncate mr-2">{col} → {String(mode)}</span>
                                 <button
-                                  className="text-[11px] px-2 py-0.5 rounded-md border hover:bg-muted"
+                                  className="text-xs px-2 py-0.5 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer"
                                   onClick={() => {
                                     const cur = { ...((local.options?.tremorTable?.formatByColumn || {}) as Record<string,'none'|'short'|'currency'|'percent'|'bytes'>) }
                                     delete cur[col]
@@ -3397,7 +3402,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                               {(['none','short','currency','percent','bytes'] as const).map((m) => <option key={m} value={m}>{m}</option>)}
                             </select>
                             <button
-                              className="text-[11px] px-2 py-1 rounded-md border bg-[hsl(var(--btn3))] text-black disabled:opacity-50"
+                              className="text-xs px-2 py-1 rounded-md border bg-[hsl(var(--btn3))] text-black disabled:opacity-50"
                               disabled={!ttFmtCol}
                               onClick={() => {
                                 if (!ttFmtCol) return
@@ -3410,7 +3415,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                           </div>
                         </div>
                         <div className="border-t pt-2 space-y-2">
-                          <div className="text-[11px] font-medium text-muted-foreground">Row action</div>
+                          <div className="text-xs font-medium text-muted-foreground">Row action</div>
                           <label className="flex items-center gap-2 text-xs">
                             <Switch
                               checked={((local.options?.tremorTable?.rowClick?.type || '') === 'emit')}
@@ -3444,7 +3449,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     )}
                     {local.chartType === 'badges' && (
                       <div className="border rounded-md p-2 space-y-2">
-                        <div className="text-[11px] font-medium text-muted-foreground">Badges</div>
+                        <div className="text-xs font-medium text-muted-foreground">Badges</div>
                         {/* KPI Aggregation Mode for Badges */}
                         <div className="grid grid-cols-2 gap-2 items-center">
                           <label className="text-xs text-muted-foreground">Aggregation mode</label>
@@ -3475,7 +3480,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                           const renderChip = (preset: typeof presets[number], p: number) => {
                             if (preset === 'badge1') {
                               return (
-                                <span className={`inline-flex items-center gap-x-1 rounded-md px-2 py-1 text-[11px] font-normal ring-1 ring-inset ring-[hsl(var(--border))] min-w-[88px] justify-center ${tone(p)}`}>
+                                <span className={`inline-flex items-center gap-x-1 rounded-md px-2 py-1 text-xs font-normal ring-1 ring-inset ring-[hsl(var(--border))] min-w-[88px] justify-center ${tone(p)}`}>
                                   <ArrowS p={p} />
                                   <span>{pctText(p)}</span>
                                 </span>
@@ -3579,7 +3584,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     )}
                     {local.chartType !== 'spark' && (
                     <div className="border rounded-md p-2 space-y-2">
-                      <div className="text-[11px] font-medium text-muted-foreground">Data Series</div>
+                      <div className="text-xs font-medium text-muted-foreground">Data Series</div>
                       <label className="flex items-center gap-2 text-xs">
                         <Switch checked={!!local.options?.advancedMode}
                           onChangeAction={(checked) => { const opts = { ...(local.options || {}), advancedMode: checked }; const next = { ...local, options: opts }; setLocal(next); updateConfig(next) }} />
@@ -3678,7 +3683,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     )}
                     {local.chartType === 'spark' && (
                       <div className="border rounded-md p-2 space-y-3">
-                        <div className="text-[11px] font-medium text-muted-foreground">Spark display</div>
+                        <div className="text-xs font-medium text-muted-foreground">Spark display</div>
                         <label className="flex items-center gap-2 text-xs">
                           <input
                             type="checkbox"
@@ -3715,7 +3720,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     )}
                     {!(local.chartType === 'spark' || local.chartType === 'badges' || local.chartType === 'tremorTable') && (
                     <div className="border rounded-md p-2 space-y-2">
-                      <div className="text-[11px] font-medium text-muted-foreground">Legend</div>
+                      <div className="text-xs font-medium text-muted-foreground">Legend</div>
                       <label className="flex items-center gap-2 text-xs">
                         <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={(local.options?.showLegend ?? true)}
                           onChange={(e) => { const opts = { ...(local.options || {}), showLegend: e.target.checked }; const next = { ...local, options: opts }; setLocal(next); updateConfig(next) }} />
@@ -3754,7 +3759,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     </div>
                     )}
                     <div className="border rounded-md p-2 space-y-2">
-                      <div className="text-[11px] font-medium text-muted-foreground">Colors</div>
+                      <div className="text-xs font-medium text-muted-foreground">Colors</div>
                       <div>
                         <label className="block text-xs text-muted-foreground mb-1">Color preset</label>
                         <select className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs" value={local.options?.colorPreset || 'default'}
@@ -3788,7 +3793,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                 <button
                                   key={k}
                                   type="button"
-                                  className={`h-6 rounded border ${((local.options as any)?.colorBaseKey || 'blue')===k ? 'ring-2 ring-[hsl(var(--primary))] ring-offset-2 ring-offset-[hsl(var(--card))]' : ''}`}
+                                  className={`h-6 rounded border cursor-pointer transition-all duration-150 hover:scale-110 ${((local.options as any)?.colorBaseKey || 'blue')===k ? 'ring-2 ring-[hsl(var(--primary))] ring-offset-2 ring-offset-[hsl(var(--card))]' : ''}`}
                                   style={{ backgroundColor: (() => { const m: Record<string,string> = { blue:'#3b82f6', emerald:'#10b981', violet:'#8b5cf6', amber:'#f59e0b', gray:'#6b7280', rose:'#f43f5e', indigo:'#6366f1', cyan:'#06b6d4', pink:'#ec4899', lime:'#84cc16', fuchsia:'#d946ef' }; return m[k] })() }}
                                   onClick={() => { const opts = { ...(local.options || {}), colorBaseKey: k as any }; const next = { ...local, options: opts }; setLocal(next); updateConfig(next) }}
                                   title={k}
@@ -3849,7 +3854,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       Down is good (invert change coloring)
                     </label>
                     <div className="border rounded-md p-2 space-y-2">
-                      <div className="text-[11px] font-medium text-muted-foreground">Deltas</div>
+                      <div className="text-xs font-medium text-muted-foreground">Deltas</div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="block text-xs text-muted-foreground mb-1">UI Mode</label>
@@ -3887,8 +3892,8 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       )}
                       {local.options?.deltaUI === 'preconfigured' && (local.options?.deltaMode && local.options.deltaMode !== 'off') && local.options?.deltaDateField && (
                         <div className="mt-2 rounded-md border bg-[hsl(var(--secondary))] p-2">
-                          <div className="text-[11px] font-medium text-muted-foreground mb-1">Resolved Period Preview</div>
-                          <div className="text-[11px] text-muted-foreground">
+                          <div className="text-xs font-medium text-muted-foreground mb-1">Resolved Period Preview</div>
+                          <div className="text-xs text-muted-foreground">
                             <div>Mode: <span className="font-mono">{String(local.options?.deltaMode)}</span></div>
                             <div>Date field: <span className="font-mono">{String(local.options?.deltaDateField)}</span></div>
                             <div className="mt-1">
@@ -3907,7 +3912,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                             </div>
                             <div className="mt-1">First row in <span className="font-mono">{String(local.options?.deltaDateField)}</span>: <span className="font-mono">{deltaSampleNow ?? '—'}</span></div>
                             <div className="mt-1 flex items-center gap-2">
-                              <button className="text-[11px] px-2 py-0.5 rounded-md border hover:bg-muted" onClick={() => void refreshDeltaPreview()}>Refresh</button>
+                              <button className="text-xs px-2 py-0.5 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer" onClick={() => void refreshDeltaPreview()}>Refresh</button>
                             </div>
                           </div>
                         </div>
@@ -3965,7 +3970,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
 
                       return (
                         <div className="col-span-2 border rounded-md p-2">
-                          <div className="text-[11px] font-medium text-muted-foreground mb-2">Axis limits & formatting</div>
+                          <div className="text-xs font-medium text-muted-foreground mb-2">Axis limits & formatting</div>
 
                           {hasSecondary ? (
                             <div className="flex gap-3">
@@ -3973,12 +3978,12 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                               <div className="flex flex-col w-28">
                                 <button
                                   type="button"
-                                  className={`text-left text-xs px-2 py-1 rounded-md border ${axisSubtab==='main' ? 'bg-[hsl(var(--secondary))]' : ''}`}
+                                  className={`text-left text-xs px-2.5 py-1 rounded-md border transition-colors duration-150 cursor-pointer ${axisSubtab==='main' ? 'bg-[hsl(var(--secondary))] text-foreground font-semibold' : 'text-muted-foreground hover:bg-[hsl(var(--secondary)/0.5)]'}`}
                                   onClick={() => setAxisSubtab('main')}
                                 >Main</button>
                                 <button
                                   type="button"
-                                  className={`mt-1 text-left text-xs px-2 py-1 rounded-md border ${axisSubtab==='secondary' ? 'bg-[hsl(var(--secondary))]' : ''}`}
+                                  className={`mt-1 text-left text-xs px-2.5 py-1 rounded-md border transition-colors duration-150 cursor-pointer ${axisSubtab==='secondary' ? 'bg-[hsl(var(--secondary))] text-foreground font-semibold' : 'text-muted-foreground hover:bg-[hsl(var(--secondary)/0.5)]'}`}
                                   onClick={() => setAxisSubtab('secondary')}
                                 >Secondary</button>
                               </div>
@@ -4130,7 +4135,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
 
                     {/* Per-axis font controls */}
                     <div className="col-span-2 border rounded-md p-2">
-                      <div className="text-[11px] font-medium text-muted-foreground mb-1">X Axis Font</div>
+                      <div className="text-xs font-medium text-muted-foreground mb-1">X Axis Font</div>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
                           <label className="block text-xs text-muted-foreground mb-1">Weight</label>
@@ -4150,7 +4155,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                             onChange={(e) => { const val = e.target.value || undefined; const opts = { ...(local.options || {}), xAxisFontColor: val }; const next = { ...local, options: opts }; setLocal(next); updateConfig(next) }} />
                         </div>
                       </div>
-                      <div className="text-[11px] font-medium text-muted-foreground mt-2 mb-1">Y Axis Font</div>
+                      <div className="text-xs font-medium text-muted-foreground mt-2 mb-1">Y Axis Font</div>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
                           <label className="block text-xs text-muted-foreground mb-1">Weight</label>
@@ -4188,7 +4193,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                             key={t.key}
                             type="button"
                             onClick={() => setGridSubTab(t.key)}
-                            className={`text-left ${gridSubTab===t.key ? 'px-2 py-0.5' : 'px-2 py-1'} rounded-md text-[11px] ${gridSubTab===t.key ? 'bg-card text-foreground border border-[hsl(var(--border))] shadow-sm' : 'text-muted-foreground hover:bg-[hsl(var(--secondary)/0.6)]'}`}
+                            className={`text-left px-2.5 py-1 rounded-md text-xs transition-colors duration-150 cursor-pointer ${gridSubTab===t.key ? 'bg-card text-foreground font-semibold border border-[hsl(var(--border))] shadow-sm' : 'text-muted-foreground hover:bg-[hsl(var(--secondary)/0.6)]'}`}
                           >
                             {t.label}
                           </button>
@@ -4198,7 +4203,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         {gridSubTab === 'hMain' && (
                           <>
                             <div className="border rounded-md p-2 space-y-2">
-                              <div className="text-[11px] font-medium text-muted-foreground">Mode</div>
+                              <div className="text-xs font-medium text-muted-foreground">Mode</div>
                               <div className="grid grid-cols-2 gap-2 items-center">
                                 <label className="text-xs text-muted-foreground">Grid style</label>
                                 <select className="px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={String(((local.options as any)?.chartGrid?.horizontal?.main?.mode || 'default'))}
@@ -4207,7 +4212,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                   <option value="custom">Custom</option>
                                 </select>
                               </div>
-                              <div className="text-[11px] text-muted-foreground">Default uses chart library styling. Choose Custom to configure gridlines.</div>
+                              <div className="text-xs text-muted-foreground">Default uses chart library styling. Choose Custom to configure gridlines.</div>
                             </div>
                             {String(((local.options as any)?.chartGrid?.horizontal?.main?.mode || 'default')) === 'custom' && (
                               <div className="border rounded-md p-2 grid grid-cols-2 gap-2 items-center">
@@ -4236,7 +4241,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         {gridSubTab === 'hSecondary' && (
                           <>
                             <div className="border rounded-md p-2 space-y-2">
-                              <div className="text-[11px] font-medium text-muted-foreground">Mode</div>
+                              <div className="text-xs font-medium text-muted-foreground">Mode</div>
                               <div className="grid grid-cols-2 gap-2 items-center">
                                 <label className="text-xs text-muted-foreground">Grid style</label>
                                 <select className="px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={String(((local.options as any)?.chartGrid?.horizontal?.secondary?.mode || 'default'))}
@@ -4245,7 +4250,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                   <option value="custom">Custom</option>
                                 </select>
                               </div>
-                              <div className="text-[11px] text-muted-foreground">Default uses chart library styling. Choose Custom to configure gridlines.</div>
+                              <div className="text-xs text-muted-foreground">Default uses chart library styling. Choose Custom to configure gridlines.</div>
                             </div>
                             {String(((local.options as any)?.chartGrid?.horizontal?.secondary?.mode || 'default')) === 'custom' && (
                               <div className="border rounded-md p-2 grid grid-cols-2 gap-2 items-center">
@@ -4274,7 +4279,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         {gridSubTab === 'vMain' && (
                           <>
                             <div className="border rounded-md p-2 space-y-2">
-                              <div className="text-[11px] font-medium text-muted-foreground">Mode</div>
+                              <div className="text-xs font-medium text-muted-foreground">Mode</div>
                               <div className="grid grid-cols-2 gap-2 items-center">
                                 <label className="text-xs text-muted-foreground">Grid style</label>
                                 <select className="px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={String(((local.options as any)?.chartGrid?.vertical?.main?.mode || 'default'))}
@@ -4283,7 +4288,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                   <option value="custom">Custom</option>
                                 </select>
                               </div>
-                              <div className="text-[11px] text-muted-foreground">Default uses chart library styling. Choose Custom to configure gridlines.</div>
+                              <div className="text-xs text-muted-foreground">Default uses chart library styling. Choose Custom to configure gridlines.</div>
                             </div>
                             {String(((local.options as any)?.chartGrid?.vertical?.main?.mode || 'default')) === 'custom' && (
                               <div className="border rounded-md p-2 grid grid-cols-2 gap-2 items-center">
@@ -4312,7 +4317,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         {gridSubTab === 'vSecondary' && (
                           <>
                             <div className="border rounded-md p-2 space-y-2">
-                              <div className="text-[11px] font-medium text-muted-foreground">Mode</div>
+                              <div className="text-xs font-medium text-muted-foreground">Mode</div>
                               <div className="grid grid-cols-2 gap-2 items-center">
                                 <label className="text-xs text-muted-foreground">Grid style</label>
                                 <select className="px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={String(((local.options as any)?.chartGrid?.vertical?.secondary?.mode || 'default'))}
@@ -4321,7 +4326,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                                   <option value="custom">Custom</option>
                                 </select>
                               </div>
-                              <div className="text-[11px] text-muted-foreground">Default uses chart library styling. Choose Custom to configure gridlines.</div>
+                              <div className="text-xs text-muted-foreground">Default uses chart library styling. Choose Custom to configure gridlines.</div>
                             </div>
                             {String(((local.options as any)?.chartGrid?.vertical?.secondary?.mode || 'default')) === 'custom' && (
                               <div className="border rounded-md p-2 grid grid-cols-2 gap-2 items-center">
@@ -4435,7 +4440,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               </div>
             </div>
             <div className="border rounded-md p-2 space-y-2">
-              <div className="text-[11px] font-medium text-muted-foreground">Column Auto-fit</div>
+              <div className="text-xs font-medium text-muted-foreground">Column Auto-fit</div>
               <div className="grid grid-cols-2 gap-2 items-center">
                 <label className="text-xs text-muted-foreground">Mode</label>
                 <select
@@ -4471,7 +4476,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
             </div>
 
             <div className="border rounded-md p-2 space-y-2">
-              <div className="text-[11px] font-medium text-muted-foreground">Filtering & Sorting</div>
+              <div className="text-xs font-medium text-muted-foreground">Filtering & Sorting</div>
               <label className="flex items-center gap-2 text-xs">
                 <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={!!local.options?.table?.filtering?.quickFilter}
                   onChange={(e) => { const table = { ...(local.options?.table || {}), filtering: { ...(local.options?.table?.filtering || {}), quickFilter: e.target.checked } }; const next = { ...local, options: { ...(local.options || {}), table } }; setLocal(next); updateConfig(next) }} />
@@ -4480,7 +4485,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
             </div>
 
             <div className="border rounded-md p-2 space-y-2">
-              <div className="text-[11px] font-medium text-muted-foreground">Interactions</div>
+              <div className="text-xs font-medium text-muted-foreground">Interactions</div>
                             <div className="grid grid-cols-2 gap-2">
                               <label className="flex items-center gap-2 text-xs">
                                 <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={local.options?.table?.interactions?.columnMove !== false}
@@ -4512,10 +4517,10 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                 <div className="pt-2 pb-3 overflow-x-auto">
                   <div className="w-full min-w-0 grid grid-cols-[minmax(72px,100px),minmax(0,1fr),minmax(0,1fr)] gap-x-3 gap-y-3 items-center">
                     <div></div>
-                    <div className="text-[11px] font-medium text-muted-foreground">Headers</div>
-                    <div className="text-[11px] font-medium text-muted-foreground">Cells</div>
+                    <div className="text-xs font-medium text-muted-foreground">Headers</div>
+                    <div className="text-xs font-medium text-muted-foreground">Cells</div>
 
-                    <label className="text-[11px] text-muted-foreground text-left">Row height (px)</label>
+                    <label className="text-xs text-muted-foreground text-left">Row height (px)</label>
                     <input type="number" min={16} className="h-8 w-full px-2 rounded-md border bg-[hsl(var(--secondary))] text-xs"
                       value={local.options?.table?.pivotStyle?.headerRowHeight ?? ''}
                       onChange={(e) => {
@@ -4539,7 +4544,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         setLocal(next); updateConfig(next)
                       }} />
 
-                    <label className="text-[11px] text-muted-foreground text-left">Font size (px)</label>
+                    <label className="text-xs text-muted-foreground text-left">Font size (px)</label>
                     <input type="number" min={8} className="h-8 w-full px-2 rounded-md border bg-[hsl(var(--secondary))] text-xs"
                       value={local.options?.table?.pivotStyle?.headerFontSize ?? ''}
                       onChange={(e) => {
@@ -4563,7 +4568,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         setLocal(next); updateConfig(next)
                       }} />
 
-                    <label className="text-[11px] text-muted-foreground text-left">Font weight</label>
+                    <label className="text-xs text-muted-foreground text-left">Font weight</label>
                     <select className="h-8 w-full px-2 rounded-md border bg-[hsl(var(--secondary))] text-xs"
                       value={local.options?.table?.pivotStyle?.headerFontWeight || 'semibold'}
                       onChange={(e) => {
@@ -4587,7 +4592,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       {(['normal','medium','semibold','bold'] as const).map((x) => <option key={x} value={x}>{x}</option>)}
                     </select>
 
-                    <label className="text-[11px] text-muted-foreground text-left">Font style</label>
+                    <label className="text-xs text-muted-foreground text-left">Font style</label>
                     <select className="h-8 px-2 rounded-md border bg-[hsl(var(--secondary))] text-xs"
                       value={local.options?.table?.pivotStyle?.headerFontStyle || 'normal'}
                       onChange={(e) => {
@@ -4611,13 +4616,13 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       {(['normal','italic'] as const).map((x) => <option key={x} value={x}>{x}</option>)}
                     </select>
 
-                    <label className="text-[11px] text-muted-foreground text-left">Horizontal Align</label>
+                    <label className="text-xs text-muted-foreground text-left">Horizontal Align</label>
                     <div className="grid grid-cols-3 gap-1 w-full">
                       {(['left','center','right'] as const).map(a => (
                         <button
                           key={a}
                           type="button"
-                          className={`w-8 h-8 flex items-center justify-center rounded-md border ${(((local.options?.table?.pivotStyle as any)?.headerHAlign || 'left') === a) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary)/0.6)]'}`}
+                          className={`w-8 h-8 flex items-center justify-center rounded-md border cursor-pointer transition-colors duration-150 ${(((local.options?.table?.pivotStyle as any)?.headerHAlign || 'left') === a) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}
                           title={a}
                           onClick={() => {
                             const pivotStyle = { ...(local.options?.table?.pivotStyle || {}) as any, headerHAlign: a }
@@ -4649,13 +4654,13 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       ))}
                     </div>
 
-                    <label className="text-[11px] text-muted-foreground text-left">Vertical Align</label>
+                    <label className="text-xs text-muted-foreground text-left">Vertical Align</label>
                     <div className="grid grid-cols-3 gap-1 w-full">
                       {(['top','center','bottom'] as const).map(v => (
                         <button
                           key={v}
                           type="button"
-                          className={`w-8 h-8 flex items-center justify-center rounded-md border ${(((local.options?.table?.pivotStyle as any)?.headerVAlign || 'top') === v) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary)/0.6)]'}`}
+                          className={`w-8 h-8 flex items-center justify-center rounded-md border cursor-pointer transition-colors duration-150 ${(((local.options?.table?.pivotStyle as any)?.headerVAlign || 'top') === v) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}
                           title={v}
                           onClick={() => {
                             const pivotStyle = { ...(local.options?.table?.pivotStyle || {}) as any, headerVAlign: v }
@@ -4689,7 +4694,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                   </div>
                 </div>
                 <div className="border rounded-md p-2 space-y-2">
-                  <div className="text-[11px] font-medium text-muted-foreground">Pivot Options</div>
+                  <div className="text-xs font-medium text-muted-foreground">Pivot Options</div>
                   <label className="flex items-center gap-2 text-xs">
                     <input
                       type="checkbox"
@@ -4813,7 +4818,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     Show Subtotals (per parent)
                   </label>
                   <div className="grid grid-cols-2 gap-2 items-center">
-                    <label className="text-[11px] text-muted-foreground">Expand icon style</label>
+                    <label className="text-xs text-muted-foreground">Expand icon style</label>
                     <Select
                       value={local.options?.table?.pivotStyle?.expandIconStyle || 'plusMinusLine'}
                       onValueChangeAction={(v) => {
@@ -4874,7 +4879,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     />
                     Collapse table borders
                   </label>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-xs text-muted-foreground">
                     Server-side pivot reduces browser memory/CPU for large datasets. It groups on selected rows/columns and returns aggregated values.
                   </div>
                   {(local.options?.table?.serverPivot === false) && (
@@ -4917,7 +4922,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         setLocal(next); updateConfig(next)
                       }}
                     />
-                    <div className="sm:col-span-3 text-[11px] text-muted-foreground">Client-side pivot fetches chunked pages up to this cap. Larger values may impact performance.</div>
+                    <div className="sm:col-span-3 text-xs text-muted-foreground">Client-side pivot fetches chunked pages up to this cap. Larger values may impact performance.</div>
                   </div>
                   )}
                 </div>
@@ -4944,7 +4949,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       <label className="block text-xs text-muted-foreground mb-1">Preset</label>
                       <div className="grid grid-cols-2 gap-3">
                 {(['basic','badge','withPrevious','spark','donut','progress','categoryBar','multiProgress'] as const).map((p) => (
-                  <label key={p} className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer text-xs ${((local.options?.kpi?.preset || 'basic') === p) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))] ring-offset-2 ring-offset-[hsl(var(--card))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary)/0.6)]'} `}>
+                  <label key={p} className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer text-xs transition-colors duration-150 ${((local.options?.kpi?.preset || 'basic') === p) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))] ring-offset-2 ring-offset-[hsl(var(--card))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}>
                     <input
                       type="radio"
                       name="kpiPreset"
@@ -4957,14 +4962,14 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                       }}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[11px] font-semibold mb-1">
+                      <div className="text-xs font-semibold mb-1">
                         {p === 'basic' ? 'Basic' : p === 'badge' ? 'Badge' : p === 'withPrevious' ? 'With Previous' : p === 'spark' ? 'Spark' : p === 'donut' ? 'Donut' : p === 'progress' ? 'Progress' : p === 'categoryBar' ? 'CategoryBar' : 'MultiProgress'}
                       </div>
                       <div className="rounded-md border bg-[hsl(var(--card))] p-2 w-full min-w-0 h-[84px] flex items-center justify-start overflow-hidden">
                         {p === 'basic' && (
                           <div className="leading-tight min-w-0">
                             <div className="text-[10px] text-muted-foreground mb-0.5 truncate">Unique visitors</div>
-                            <div className="text-[18px] font-semibold whitespace-nowrap">10,450 <span className="text-[11px] text-rose-600 align-middle">-12.5%</span></div>
+                            <div className="text-[18px] font-semibold whitespace-nowrap">10,450 <span className="text-xs text-rose-600 align-middle">-12.5%</span></div>
                           </div>
                         )}
                         {p === 'badge' && (
@@ -5075,7 +5080,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                         </div>
                       )}
                       {(['categoryBar','multiProgress'] as const).includes(((local.options?.kpi?.preset || 'basic') as any)) && !(local?.querySpec as any)?.legend && (
-                        <div className="mt-2 text-[11px] text-muted-foreground rounded-md border p-2 bg-[hsl(var(--secondary))]">
+                        <div className="mt-2 text-xs text-muted-foreground rounded-md border p-2 bg-[hsl(var(--secondary))]">
                           Tip: Category presets work best when a Legend (Columns) field is set in Tables & Fields. Drag a category into Columns (Legend).
                         </div>
                       )}
@@ -5164,8 +5169,8 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     </div>
                     {(local.options?.deltaMode && local.options.deltaMode !== 'off') && local.options?.deltaDateField && (
                       <div className="mt-2 rounded-md border bg-[hsl(var(--secondary))] p-2">
-                        <div className="text-[11px] font-medium text-muted-foreground mb-1">Resolved Period Preview</div>
-                        <div className="text-[11px] text-muted-foreground">
+                        <div className="text-xs font-medium text-muted-foreground mb-1">Resolved Period Preview</div>
+                        <div className="text-xs text-muted-foreground">
                           <div>Mode: <span className="font-mono">{String(local.options?.deltaMode)}</span></div>
                           <div>Date field: <span className="font-mono">{String(local.options?.deltaDateField)}</span></div>
                           <div className="mt-1">
@@ -5184,7 +5189,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                           </div>
                           <div className="mt-1">First row in <span className="font-mono">{String(local.options?.deltaDateField)}</span>: <span className="font-mono">{deltaSampleNow ?? '—'}</span></div>
                           <div className="mt-1 flex items-center gap-2">
-                            <button className="text-[11px] px-2 py-0.5 rounded-md border hover:bg-muted" onClick={() => void refreshDeltaPreview()}>Refresh</button>
+                            <button className="text-xs px-2 py-0.5 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer" onClick={() => void refreshDeltaPreview()}>Refresh</button>
                           </div>
                         </div>
                       </div>
@@ -5203,7 +5208,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
             <label className="block text-xs text-muted-foreground mb-1">Query Mode</label>
             <div className="grid grid-cols-2 gap-2">
               {(['sql', 'spec'] as const).map((m) => (
-                <label key={m} className={`flex items-center justifycenter gap-1 p-2 rounded-md border cursor-pointer text-xs ${((local.queryMode || 'sql') === m) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary)/0.6)]'} `}>
+                <label key={m} className={`flex items-center justify-center gap-1 p-2 rounded-md border cursor-pointer text-xs transition-colors duration-150 ${((local.queryMode || 'sql') === m) ? 'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))] font-semibold' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}>
                   <input
                     type="radio"
                     name="queryMode"
@@ -5292,9 +5297,9 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           )}
           {/* SQL Advanced Mode trigger */}
           <div className="flex items-center justify-between">
-            <div className="text-[11px] text-muted-foreground">Advanced transforms, custom columns, and joins at datasource level</div>
+            <div className="text-xs text-muted-foreground">Advanced transforms, custom columns, and joins at datasource level</div>
             <button
-              className={`text-xs px-2 py-1 rounded-md border bg-card ${dsId ? 'hover:bg-[hsl(var(--secondary)/0.6)]' : 'opacity-60 cursor-not-allowed'} text-foreground`}
+              className={`text-xs px-2.5 py-1 rounded-md border bg-card transition-colors duration-150 ${dsId ? 'hover:bg-[hsl(var(--secondary)/0.6)] cursor-pointer' : 'opacity-60 cursor-not-allowed'} text-foreground`}
               onClick={() => {
                 if (!dsId) {
                   try {
@@ -5476,7 +5481,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                 </div>
                 <div className="flex items-center justify-end mt-2">
                   <button
-                    className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+                    className="text-xs px-2.5 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] transition-colors duration-150 cursor-pointer"
                     onClick={() => {
                       if (typeof window !== 'undefined' && local?.id) {
                         try { dsTransformsQ.refetch() } catch {}
@@ -5670,7 +5675,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="text-[11px] text-muted-foreground mt-1">Applies to KPI tiles that show category totals (e.g., badges/category tiles). Defaults to count.</div>
+                <div className="text-xs text-muted-foreground mt-1">Applies to KPI tiles that show category totals (e.g., badges/category tiles). Defaults to count.</div>
               </Section>
             )}
             <div>
@@ -5800,7 +5805,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
             {selField && <span className="ml-2 px-1.5 py-0.5 rounded border bg-[hsl(var(--secondary))]">{selField}</span>}
           </div>
           <button
-            className="text-[11px] px-2 py-0.5 rounded border hover:bg-muted"
+            className="text-xs px-2 py-0.5 rounded border hover:bg-muted transition-colors duration-150 cursor-pointer"
             onClick={() => { setSelKind(null); setSelField(undefined) }}
             title="Close details"
           >
@@ -6412,7 +6417,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                 />
                 Expose in chart filterbar
               </label>
-              <div className="text-[11px] text-muted-foreground">Overrides Filters UI for this field</div>
+              <div className="text-xs text-muted-foreground">Overrides Filters UI for this field</div>
             </div>
           </>
         ) : (
@@ -6437,7 +6442,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               <option value="off">Off</option>
               <option value="filterbars">Filterbars</option>
             </select>
-            <div className="text-[11px] text-muted-foreground">When enabled, fields added to Filters in the pivot will render as filterbars above the chart (date, number, or string).</div>
+            <div className="text-xs text-muted-foreground">When enabled, fields added to Filters in the pivot will render as filterbars above the chart (date, number, or string).</div>
           </div>
         </Section>
       )}
@@ -6450,7 +6455,9 @@ function Section({ title, children, defaultOpen }: { title: string; children: Re
   return (
     <Accordion type="single" collapsible defaultValue={defaultOpen ? 'item' : undefined}>
       <AccordionItem value="item">
-        <AccordionTrigger>{title}</AccordionTrigger>
+        <AccordionTrigger>
+          <span className="uppercase tracking-widest text-[10px] font-bold text-muted-foreground">{title}</span>
+        </AccordionTrigger>
         <AccordionContent>
           {children}
         </AccordionContent>

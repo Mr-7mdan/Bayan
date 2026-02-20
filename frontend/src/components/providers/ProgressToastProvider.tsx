@@ -178,7 +178,7 @@ export default function ProgressToastProvider({ children }: { children: React.Re
       const p = getPersist()
       if (p && p.active && p.datasourceId) {
         startMonitoring(p.datasourceId as string, p.actorId as string | undefined)
-        setState((s: ProgressToastState) => ({ ...s, visible: true, minimized: !!p.minimized, startedAtMs: (p.startedAtMs || Date.now()) }))
+        setState((s: ProgressToastState) => ({ ...s, visible: true, minimized: !!p.minimized }))
       }
     } catch {}
   }, [getPersist, startMonitoring])

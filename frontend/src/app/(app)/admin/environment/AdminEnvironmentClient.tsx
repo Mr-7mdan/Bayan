@@ -23,6 +23,18 @@ export default function AdminEnvironmentPage() {
   const [effectiveApi, setEffectiveApi] = useState('')
   const [frontendOrigin, setFrontendOrigin] = useState('')
   const [frontendPort, setFrontendPort] = useState('')
+
+  // Local copies of env text fields — prevents global re-render on every keystroke.
+  // setEnv (global) is called only on onBlur to avoid layout shifts / scroll jumps.
+  const [localAiProvider, setLocalAiProvider] = useState<string>('')
+  const [localAiModel, setLocalAiModel] = useState('')
+  const [localAiApiKey, setLocalAiApiKey] = useState('')
+  const [localAiBaseUrl, setLocalAiBaseUrl] = useState('')
+  const [localOrgName, setLocalOrgName] = useState('')
+  const [localFavicon, setLocalFavicon] = useState('')
+  const [localLogoLight, setLocalLogoLight] = useState('')
+  const [localLogoDark, setLocalLogoDark] = useState('')
+  const [localPublicDomain, setLocalPublicDomain] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
@@ -69,6 +81,19 @@ export default function AdminEnvironmentPage() {
       }
     } catch {}
   }, [])
+
+  // Sync local text state from env whenever env changes (e.g. after server load / branding reload)
+  useEffect(() => {
+    setLocalAiProvider(env.aiProvider || 'gemini')
+    setLocalAiModel(env.aiModel || '')
+    setLocalAiApiKey(env.aiApiKey || '')
+    setLocalAiBaseUrl(env.aiBaseUrl || '')
+    setLocalOrgName(env.orgName || '')
+    setLocalFavicon(env.favicon || '')
+    setLocalLogoLight(env.orgLogoLight || '')
+    setLocalLogoDark(env.orgLogoDark || '')
+    setLocalPublicDomain(env.publicDomain || '')
+  }, [env])
 
   const checkUpdates = async () => {
     setCheckingUpd(true)
@@ -160,9 +185,9 @@ export default function AdminEnvironmentPage() {
   const onTestAI = async () => {
     setTestingAI(true); setAiErr(null); setAiMsg(null)
     try {
-      const provider = (env.aiProvider || 'gemini') as any
-      const model = env.aiModel || (provider === 'openai' ? 'gpt-4o-mini' : (provider === 'mistral' ? 'mistral-small' : 'gemini-1.5-flash'))
-      const apiKey = env.aiApiKey || ''
+      const provider = (localAiProvider || 'gemini') as any
+      const model = localAiModel || (provider === 'openai' ? 'gpt-4o-mini' : (provider === 'mistral' ? 'mistral-small' : 'gemini-1.5-flash'))
+      const apiKey = localAiApiKey || ''
       if (!apiKey && !serverHasKey) throw new Error('Enter API key or save one on server')
       await Api.aiDescribe({ provider, model, apiKey, schema: { table: 'test', columns: [{ name: 'id', type: 'string' }] }, samples: [] })
       setAiMsg('AI endpoint OK')
@@ -186,15 +211,17 @@ export default function AdminEnvironmentPage() {
 
   const saveAiToServer = async (clearKey?: boolean) => {
     setSavingAI(true); setAiSaveErr(null); setAiSaveMsg(null)
+    // Flush local state to env before saving
+    setEnv({ aiProvider: localAiProvider as any, aiModel: localAiModel, aiApiKey: localAiApiKey, aiBaseUrl: localAiBaseUrl })
     try {
-      const provider = (env.aiProvider || 'gemini') as any
-      const model = env.aiModel || (provider === 'openai' ? 'gpt-4o-mini' : (provider === 'mistral' ? 'mistral-small' : 'gemini-1.5-flash'))
+      const provider = (localAiProvider || 'gemini') as any
+      const model = localAiModel || (provider === 'openai' ? 'gpt-4o-mini' : (provider === 'mistral' ? 'mistral-small' : 'gemini-1.5-flash'))
       const body: any = { provider, model }
       if (clearKey === true) body.apiKey = ''
-      else if ((env.aiApiKey || '').trim()) body.apiKey = env.aiApiKey
+      else if (localAiApiKey.trim()) body.apiKey = localAiApiKey
       await Api.putAiConfig(body, user?.id)
       if (clearKey === true) setServerHasKey(false)
-      else if ((env.aiApiKey || '').trim()) setServerHasKey(true)
+      else if (localAiApiKey.trim()) setServerHasKey(true)
       setAiSaveMsg('Saved')
       window.setTimeout(() => setAiSaveMsg(null), 1500)
     } catch (e: any) {
@@ -204,12 +231,14 @@ export default function AdminEnvironmentPage() {
 
   const saveBrandingToServer = async () => {
     setSavingBranding(true); setBrandingMsg(null); setBrandingErr(null)
+    // Flush local state to env before saving
+    setEnv({ orgName: localOrgName, orgLogoLight: localLogoLight, orgLogoDark: localLogoDark, favicon: localFavicon })
     try {
       const res = await Api.putAdminBranding({
-        orgName: env.orgName || '',
-        logoLight: env.orgLogoLight || '',
-        logoDark: env.orgLogoDark || '',
-        favicon: env.favicon || '',
+        orgName: localOrgName,
+        logoLight: localLogoLight,
+        logoDark: localLogoDark,
+        favicon: localFavicon,
       }, user?.id)
       setEnv({
         orgName: res.orgName || '',
@@ -342,8 +371,8 @@ export default function AdminEnvironmentPage() {
                   <select
                     name="ai_provider"
                     className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                    value={env.aiProvider || 'gemini'}
-                    onChange={(e)=> setEnv({ aiProvider: e.target.value as any })}
+                    value={localAiProvider || 'gemini'}
+                    onChange={(e)=> { setLocalAiProvider(e.target.value); setEnv({ aiProvider: e.target.value as any }) }}
                   >
                     <option value="gemini">Gemini</option>
                     <option value="openai">OpenAI</option>
@@ -356,9 +385,10 @@ export default function AdminEnvironmentPage() {
                   <input
                     name="ai_model"
                     className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                    placeholder={env.aiProvider === 'gemini' ? 'gemini-1.5-flash' : env.aiProvider === 'openai' ? 'gpt-4o-mini' : 'mistral-small'}
-                    value={env.aiModel || ''}
-                    onChange={(e)=> setEnv({ aiModel: e.target.value })}
+                    placeholder={localAiProvider === 'gemini' ? 'gemini-1.5-flash' : localAiProvider === 'openai' ? 'gpt-4o-mini' : 'mistral-small'}
+                    value={localAiModel}
+                    onChange={(e)=> setLocalAiModel(e.target.value)}
+                    onBlur={(e)=> setEnv({ aiModel: e.target.value })}
                     autoComplete="off"
                   />
                 </label>
@@ -368,8 +398,9 @@ export default function AdminEnvironmentPage() {
                     type="password"
                     className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                     placeholder="Enter API key"
-                    value={env.aiApiKey || ''}
-                    onChange={(e)=> setEnv({ aiApiKey: e.target.value })}
+                    value={localAiApiKey}
+                    onChange={(e)=> setLocalAiApiKey(e.target.value)}
+                    onBlur={(e)=> setEnv({ aiApiKey: e.target.value })}
                     autoComplete="new-password"
                   />
                 </label>
@@ -379,9 +410,10 @@ export default function AdminEnvironmentPage() {
                   <input
                     name="ai_base_url"
                     className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                    placeholder={env.aiProvider === 'openai' ? 'https://api.openai.com/v1' : env.aiProvider === 'mistral' ? 'https://api.mistral.ai/v1' : env.aiProvider === 'anthropic' ? 'https://api.anthropic.com/v1' : env.aiProvider === 'openrouter' ? 'https://openrouter.ai/api/v1' : ''}
-                    value={env.aiBaseUrl || ''}
-                    onChange={(e)=> setEnv({ aiBaseUrl: e.target.value })}
+                    placeholder={localAiProvider === 'openai' ? 'https://api.openai.com/v1' : localAiProvider === 'mistral' ? 'https://api.mistral.ai/v1' : localAiProvider === 'anthropic' ? 'https://api.anthropic.com/v1' : localAiProvider === 'openrouter' ? 'https://openrouter.ai/api/v1' : ''}
+                    value={localAiBaseUrl}
+                    onChange={(e)=> setLocalAiBaseUrl(e.target.value)}
+                    onBlur={(e)=> setEnv({ aiBaseUrl: e.target.value })}
                     autoComplete="url"
                   />
                 </label>
@@ -411,8 +443,9 @@ export default function AdminEnvironmentPage() {
                   name="org_name"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   placeholder="e.g., Bayan Holdings"
-                  value={env.orgName || ''}
-                  onChange={(e)=> setEnv({ orgName: e.target.value })}
+                  value={localOrgName}
+                  onChange={(e)=> setLocalOrgName(e.target.value)}
+                  onBlur={(e)=> setEnv({ orgName: e.target.value })}
                   autoComplete="organization"
                 />
               </label>
@@ -421,8 +454,9 @@ export default function AdminEnvironmentPage() {
                   name="org_favicon"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   placeholder="/favicon.svg"
-                  value={env.favicon || ''}
-                  onChange={(e)=> setEnv({ favicon: e.target.value })}
+                  value={localFavicon}
+                  onChange={(e)=> setLocalFavicon(e.target.value)}
+                  onBlur={(e)=> setEnv({ favicon: e.target.value })}
                   autoComplete="url"
                 />
               </label>
@@ -431,8 +465,9 @@ export default function AdminEnvironmentPage() {
                   name="org_logo_light"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   placeholder="/logo.svg"
-                  value={env.orgLogoLight || ''}
-                  onChange={(e)=> setEnv({ orgLogoLight: e.target.value })}
+                  value={localLogoLight}
+                  onChange={(e)=> setLocalLogoLight(e.target.value)}
+                  onBlur={(e)=> setEnv({ orgLogoLight: e.target.value })}
                   autoComplete="url"
                 />
               </label>
@@ -441,19 +476,20 @@ export default function AdminEnvironmentPage() {
                   name="org_logo_dark"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                   placeholder="/logo-dark.svg"
-                  value={env.orgLogoDark || ''}
-                  onChange={(e)=> setEnv({ orgLogoDark: e.target.value })}
+                  value={localLogoDark}
+                  onChange={(e)=> setLocalLogoDark(e.target.value)}
+                  onBlur={(e)=> setEnv({ orgLogoDark: e.target.value })}
                   autoComplete="url"
                 />
               </label>
             </div>
             <div className="mt-3 flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <img src={(env.orgLogoLight || '/logo.svg') as any} alt="Light logo preview" className="h-10 w-auto rounded border bg-white p-1" />
+                <img src={(localLogoLight || '/logo.svg') as any} alt="Light logo preview" className="h-10 w-auto rounded border bg-white p-1" />
                 <span className="text-xs text-muted-foreground">Light</span>
               </div>
               <div className="flex items-center gap-2">
-                <img src={(env.orgLogoDark || '/logo-dark.svg') as any} alt="Dark logo preview" className="h-10 w-auto rounded border bg-black p-1" />
+                <img src={(localLogoDark || '/logo-dark.svg') as any} alt="Dark logo preview" className="h-10 w-auto rounded border bg-black p-1" />
                 <span className="text-xs text-muted-foreground">Dark</span>
               </div>
             </div>
@@ -489,15 +525,16 @@ export default function AdminEnvironmentPage() {
                   name="public_domain_override"
                   placeholder={defaultPublicDomain || 'https://example.com'}
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  value={env.publicDomain || ''}
-                  onChange={(e)=> setEnv({ publicDomain: e.target.value.replace(/\/$/, '') })}
+                  value={localPublicDomain}
+                  onChange={(e)=> setLocalPublicDomain(e.target.value)}
+                  onBlur={(e)=> setEnv({ publicDomain: e.target.value.replace(/\/$/, '') })}
                   autoComplete="url"
                 />
               </label>
             </div>
             <div className="mt-3 flex items-center gap-2">
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={()=> setEnv({ publicDomain: defaultPublicDomain })}>Use default</button>
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={()=> setEnv({ publicDomain: '' })}>Clear override</button>
+              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={()=> { setLocalPublicDomain(defaultPublicDomain); setEnv({ publicDomain: defaultPublicDomain }) }}>Use default</button>
+              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={()=> { setLocalPublicDomain(''); setEnv({ publicDomain: '' }) }}>Clear override</button>
             </div>
             <p className="text-xs text-muted-foreground mt-2">This domain is used when generating share links (Publish/View). If empty, we use the current origin.</p>
           </section>

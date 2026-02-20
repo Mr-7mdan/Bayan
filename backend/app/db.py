@@ -119,6 +119,7 @@ def _open_duck_write_conn(duck_engine: Engine):
 import os
 from pathlib import Path
 import random
+import socket
 import time
 import calendar
 from datetime import datetime, date
@@ -126,6 +127,33 @@ from decimal import Decimal
 from typing import Optional, Callable
 
 from sqlalchemy import create_engine, text, event
+
+
+def _apply_mysql_keepalive(dbapi_conn, connection_record):
+    """Enable TCP keepalive on every new MySQL connection.
+    This sends periodic OS-level heartbeat packets that prevent firewalls,
+    NAT gateways, and load-balancer proxies from silently killing idle TCP
+    connections while MySQL is computing a long-running query.
+    """
+    try:
+        sock = getattr(dbapi_conn, '_sock', None)
+        if sock is None:
+            inner = getattr(dbapi_conn, 'connection', dbapi_conn)
+            sock = getattr(inner, '_sock', inner)
+        if not hasattr(sock, 'setsockopt'):
+            return
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        # Linux uses TCP_KEEPIDLE; macOS uses TCP_KEEPALIVE for the same purpose
+        _idle_const = getattr(socket, 'TCP_KEEPIDLE', None) or getattr(socket, 'TCP_KEEPALIVE', None)
+        if _idle_const is not None:
+            sock.setsockopt(socket.IPPROTO_TCP, _idle_const, 60)
+        if hasattr(socket, 'TCP_KEEPINTVL'):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+        if hasattr(socket, 'TCP_KEEPCNT'):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 6)
+        print("[SYNC] TCP keepalive enabled on MySQL connection", flush=True)
+    except Exception:
+        pass
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import ArgumentError
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
@@ -585,6 +613,14 @@ def get_engine_from_dsn(dsn: str) -> Engine:
             "max_overflow": 20,
             "pool_recycle": 1800,  # seconds
         })
+        # For MySQL/PyMySQL: set client-side socket timeouts so large result
+        # transfers don't fail silently mid-way.
+        if 'mysql' in low or 'pymysql' in low:
+            ca = dict(kwargs.get('connect_args') or {})
+            ca.setdefault('read_timeout', 7200)
+            ca.setdefault('write_timeout', 7200)
+            ca.setdefault('connect_timeout', 30)
+            kwargs['connect_args'] = ca
         # For SQL Server via pyodbc, set login timeout to mitigate HYT00 (Login timeout expired)
         if "mssql+pyodbc" in low:
             ca = dict(kwargs.get("connect_args") or {})
@@ -620,6 +656,8 @@ def get_engine_from_dsn(dsn: str) -> Engine:
     try:
         if low.startswith("duckdb"):
             event.listen(eng, "connect", lambda dbapi_conn, conn_record: _apply_duck_pragmas(dbapi_conn))
+        elif 'mysql' in low or 'pymysql' in low:
+            event.listen(eng, "connect", _apply_mysql_keepalive)
     except Exception:
         pass
     _ENGINE_CACHE[d] = eng
@@ -1095,9 +1133,20 @@ def _create_table_text(conn, table_name: str, columns: list[str]) -> None:
 def _insert_rows(conn, table_name: str, columns: list[str], rows: list[list[object]]) -> int:
     if not rows:
         return 0
-    qmarks = ", ".join(["?" for _ in range(len(columns))])
     qtable = _quote_duck_ident(table_name)
     qcols = ", ".join(_quote_duck_ident(c) for c in columns)
+    # Fast path: DuckDB Appender API — bypasses SQL parsing, ~10-50x faster than executemany
+    native = getattr(conn, '_con', None)
+    if native is not None and hasattr(native, 'appender'):
+        try:
+            with native.appender(table_name) as app:
+                for row in rows:
+                    app.append_row(*row)
+            return len(rows)
+        except Exception:
+            pass
+    # Fallback: executemany
+    qmarks = ", ".join(["?" for _ in range(len(columns))])
     sql = f"INSERT INTO {qtable} ({qcols}) VALUES ({qmarks})"
     values = [tuple(r[i] for i in range(len(columns))) for r in rows]
     conn.exec_driver_sql(sql, values)
@@ -1109,6 +1158,18 @@ def _delete_by_pk(conn, table_name: str, pk_columns: list[str], rows: list[list[
         return 0
     idx = [columns.index(pk) for pk in pk_columns]
     qtable = _quote_duck_ident(table_name)
+    native = getattr(conn, '_con', None)
+    if native is not None and len(pk_columns) == 1:
+        # Fast path: single bulk DELETE via unnest — one query instead of N queries
+        try:
+            pk_idx = idx[0]
+            pk_vals = [r[pk_idx] for r in rows]
+            qpk = _quote_duck_ident(pk_columns[0])
+            native.execute(f"DELETE FROM {qtable} WHERE {qpk} IN (SELECT unnest(?))", [pk_vals])
+            return len(rows)
+        except Exception:
+            pass
+    # Fallback: per-row executemany (composite PK or no native conn)
     where = " AND ".join([f"{_quote_duck_ident(pk)} = ?" for pk in pk_columns])
     sql = f"DELETE FROM {qtable} WHERE {where}"
     params = [tuple(r[j] for j in idx) for r in rows]
@@ -1144,123 +1205,189 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
     total_rows = 0
     max_seq_seen = seq
     fetched = 0
-    with source_engine.connect() as src, _open_duck_write_conn(duck_engine) as duck:
-        # For first batch, inspect columns
-        # 
-        # Build SELECT column list: ensure pk and sequence columns are included
-        pk_columns = pk_columns or []
-        sel_set = set([c.strip() for c in (select_columns or []) if c and isinstance(c, str)])
-        required = set(pk_columns + [sequence_column])
-        final_cols = list(required | sel_set) if sel_set else list(required)  # if empty, we'll still select required then insert those
-        # If no select specified beyond required, we will expand to '*' for full copy
-        use_star = len(sel_set) == 0
-        if use_star:
-            sel_clause = "*"
+    # Build SELECT column list outside the connection loop
+    pk_columns = pk_columns or []
+    sel_set = set([c.strip() for c in (select_columns or []) if c and isinstance(c, str)])
+    required = set(pk_columns + [sequence_column])
+    use_star = len(sel_set) == 0
+    if use_star:
+        sel_clause = "*"
+    else:
+        final_cols = list(required | sel_set)
+        if src_dialect.startswith('mssql'):
+            sel_clause = ", ".join([_quote_ident(c, src_dialect) for c in final_cols])
         else:
-            if src_dialect.startswith('mssql'):
-                sel_clause = ", ".join([_quote_ident(c, src_dialect) for c in final_cols])
-            else:
-                sel_clause = ", ".join(final_cols)
+            sel_clause = ", ".join(final_cols)
+
+    seq_col_q = _quote_ident(sequence_column, src_dialect)
+
+    # Flush stale pooled connections (broken SSCursor leftovers from previous runs)
+    try:
+        source_engine.dispose()
+        print("[SYNC] Disposed stale connection pool", flush=True)
+    except Exception:
+        pass
+
+    # Quick row-count estimate: information_schema only (instant, no table scan).
+    total_rows_to_copy = None
+    try:
+        with source_engine.connect() as _cnt_conn:
+            if src_dialect.startswith('mysql') and source_table and not custom_query:
+                _schema_expr = f"'{source_schema}'" if source_schema else "DATABASE()"
+                _fast = _cnt_conn.execute(
+                    text(f"SELECT TABLE_ROWS FROM information_schema.TABLES "
+                         f"WHERE TABLE_SCHEMA = {_schema_expr} AND TABLE_NAME = :t"),
+                    {"t": source_table}
+                ).scalar()
+                if _fast is not None:
+                    total_rows_to_copy = int(_fast)
+                    print(f"[SYNC] Estimated rows: {total_rows_to_copy}", flush=True)
+    except Exception as e:
+        print(f"[SYNC] Row-count estimate failed: {e}", flush=True)
         total_rows_to_copy = None
+
+    if on_progress:
         try:
-            # Estimate total rows to copy based on sequence threshold
-            seq_col = _quote_ident(sequence_column, src_dialect)
-            cnt = src.execute(text(f"SELECT COUNT(*) FROM {q_from} WHERE {seq_col} > :last"), {"last": seq}).scalar()
-            if cnt is not None:
-                total_rows_to_copy = int(cnt)
+            on_progress(0, (int(total_rows_to_copy) if total_rows_to_copy is not None else None))
         except Exception:
-            total_rows_to_copy = None
-        # Emit initial progress tick to expose totals early
-        if on_progress:
+            pass
+
+    copied = 0
+    columns: list = []
+    col_types: dict = {}
+
+    # Paginated batches on a SINGLE reused connection.
+    #
+    # Why single connection: opening a fresh socket per batch exhausts macOS ephemeral
+    # ports ([Errno 49] Can't assign requested address) after ~16k batches since sockets
+    # linger in TIME_WAIT for ~60s. With LIMIT 1000 queries running back-to-back there is
+    # zero idle gap between queries so no proxy/firewall can classify the connection as
+    # idle. On disconnect we reconnect once and resume from the last committed seq value.
+    _mysql_batch_cap = 1000
+    _fetch_size = min(int(batch_size), _mysql_batch_cap) if src_dialect.startswith('mysql') else int(batch_size)
+    if src_dialect.startswith('mssql'):
+        batch_sql = f"SELECT {sel_clause} FROM {q_from} WHERE {seq_col_q} > :last ORDER BY {seq_col_q} OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY"
+    else:
+        batch_sql = f"SELECT {sel_clause} FROM {q_from} WHERE {seq_col_q} > :last ORDER BY {seq_col_q} LIMIT :lim"
+
+    print(f"[SYNC] Paginated mode (single conn): fetch_size={_fetch_size}, starting seq={seq}", flush=True)
+
+    def _open_src_conn():
+        conn = source_engine.connect()
+        if src_dialect.startswith('mysql'):
             try:
-                on_progress(0, (int(total_rows_to_copy) if total_rows_to_copy is not None else None))
+                conn.execute(text("SET SESSION net_read_timeout=7200, net_write_timeout=7200, wait_timeout=7200"))
             except Exception:
                 pass
-        copied = 0
-        batches = 0
-        while batches < max_batches:
-            if should_abort:
+        return conn
+
+    batches = 0
+    _MAX_RECONNECTS = 3
+    reconnects = 0
+
+    with _open_duck_write_conn(duck_engine) as duck:
+        src = _open_src_conn()
+        print(f"[SYNC] Source connection opened", flush=True)
+        try:
+            while batches < max_batches:
+                if should_abort:
+                    try:
+                        if should_abort():
+                            print(f"[ABORT] Stopping. batches={batches}, rows={total_rows}", flush=True)
+                            return {"row_count": total_rows, "last_sequence_value": max_seq_seen, "aborted": True}
+                    except Exception:
+                        pass
+                batches += 1
+
+                if on_phase:
+                    try: on_phase('fetch')
+                    except Exception: pass
+
+                t0 = time.time()
                 try:
-                    abort_flag = should_abort()
-                    if abort_flag:
-                        print(f"[ABORT] Sequence sync detected abort flag=True, stopping sync. batches={batches}, total_rows={total_rows}", flush=True)
-                        return {"row_count": total_rows, "last_sequence_value": max_seq_seen, "aborted": True}
+                    res = src.execute(text(batch_sql), {"last": seq, "lim": _fetch_size})
+                    rows = res.fetchall()
+                    if not columns:
+                        columns = list(res.keys())
+                    elapsed = time.time() - t0
+                    print(f"[SYNC] Batch {batches}: {len(rows)} rows in {elapsed:.1f}s (seq>{seq})", flush=True)
                 except Exception as e:
-                    print(f"[ABORT] Error checking abort in sequence sync: {e}", flush=True)
-                    pass
-            batches += 1
-            seq_col = _quote_ident(sequence_column, src_dialect)
-            if src_dialect.startswith('mssql'):
-                sql = f"SELECT {sel_clause} FROM {q_from} WHERE {seq_col} > :last ORDER BY {seq_col} OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY"
-            else:
-                sql = f"SELECT {sel_clause} FROM {q_from} WHERE {seq_col} > :last ORDER BY {seq_col} LIMIT :lim"
-            if on_phase:
-                try: on_phase('fetch')
-                except Exception: pass
-            res = src.execute(text(sql), {"last": seq, "lim": int(batch_size)})
-            rows = res.fetchall()
-            if not rows:
-                break
-            # Report fetch progress before any insert/upsert work
-            try:
-                fetched += len(rows)
-            except Exception:
-                fetched = (len(rows) if 'fetched' in locals() else len(rows))
-            if on_progress:
-                try:
-                    on_progress(int(fetched), (int(total_rows_to_copy) if total_rows_to_copy is not None else None))
-                except Exception:
-                    pass
-            columns = list(res.keys())
-            # Ensure destination exists and get column types for sanitization
-            if not _table_exists(duck, dest_table):
-                # Create typed table using the first fetched batch as sample
-                preferred = {}
-                try:
-                    if src_dialect.startswith('mssql'):
-                        preferred = _fetch_mssql_column_types(src, source_schema, source_table)
-                except Exception:
+                    elapsed = time.time() - t0
+                    print(f"[SYNC] Batch {batches} FAILED after {elapsed:.1f}s: {e}", flush=True)
+                    # Close broken connection and try to reconnect
+                    try: src.close()
+                    except Exception: pass
+                    try: source_engine.dispose()
+                    except Exception: pass
+                    reconnects += 1
+                    if reconnects > _MAX_RECONNECTS:
+                        raise
+                    wait = 2 ** (reconnects - 1)
+                    print(f"[SYNC] Reconnecting in {wait}s (attempt {reconnects}/{_MAX_RECONNECTS})…", flush=True)
+                    time.sleep(wait)
+                    src = _open_src_conn()
+                    print(f"[SYNC] Reconnected. Resuming from seq>{seq}", flush=True)
+                    continue  # retry this batch on new connection
+
+                if not rows:
+                    print(f"[SYNC] No more rows. Done. batches={batches} total={total_rows}", flush=True)
+                    break
+
+                if on_phase:
+                    try: on_phase('insert')
+                    except Exception: pass
+
+                if not _table_exists(duck, dest_table):
                     preferred = {}
-                col_types = _create_table_typed(duck, dest_table, columns, [list(r) for r in rows], preferred_types=preferred)
-            else:
-                col_types = _duck_table_types(duck, dest_table)
-                for c in columns:
-                    if c not in col_types:
-                        col_types[c] = "TEXT"
-            # Upsert: delete existing pk matches, then insert
-            if on_phase:
-                try: on_phase('insert')
-                except Exception: pass
-            if pk_columns:
-                _delete_by_pk(duck, dest_table, pk_columns, rows, columns)
-            # Sanitize rows: convert empty strings to None for numeric columns
-            sanitized_rows = [_sanitize_row_for_types(list(r), columns, col_types) for r in rows]
-            inserted = _insert_rows(duck, dest_table, columns, sanitized_rows)
-            total_rows += inserted
-            copied += inserted
-            if on_progress:
+                    try:
+                        if src_dialect.startswith('mssql'):
+                            with source_engine.connect() as _meta_conn:
+                                preferred = _fetch_mssql_column_types(_meta_conn, source_schema, source_table)
+                    except Exception:
+                        preferred = {}
+                    col_types = _create_table_typed(duck, dest_table, columns, [list(r) for r in rows], preferred_types=preferred)
+                elif not col_types:
+                    col_types = _duck_table_types(duck, dest_table)
+                    for c in columns:
+                        if c not in col_types:
+                            col_types[c] = "TEXT"
+
+                if pk_columns:
+                    _delete_by_pk(duck, dest_table, pk_columns, rows, columns)
+                sanitized_rows = [_sanitize_row_for_types(list(r), columns, col_types) for r in rows]
+                inserted = _insert_rows(duck, dest_table, columns, sanitized_rows)
+                total_rows += inserted
+                copied += inserted
+
+                if on_progress:
+                    try:
+                        on_progress(int(copied), (int(total_rows_to_copy) if total_rows_to_copy is not None else None))
+                    except Exception:
+                        pass
+
                 try:
-                    on_progress(int(copied), (int(total_rows_to_copy) if total_rows_to_copy is not None else None))
+                    seq_idx = columns.index(sequence_column)
+                    seq_vals = [int(r[seq_idx]) for r in rows if r[seq_idx] is not None]
+                    if seq_vals:
+                        max_seq_seen = max(max_seq_seen, max(seq_vals))
+                        seq = max_seq_seen
                 except Exception:
                     pass
-            if should_abort:
-                try:
-                    if should_abort():
-                        return {"row_count": total_rows, "last_sequence_value": max_seq_seen, "aborted": True}
-                except Exception:
-                    pass
-            # Advance sequence
-            try:
-                seq_idx = columns.index(sequence_column)
-                seq_vals = [int(r[seq_idx]) for r in rows if r[seq_idx] is not None]
-                if seq_vals:
-                    max_seq_seen = max(max_seq_seen, max(seq_vals))
-                    seq = max_seq_seen
-            except Exception:
-                # Best effort; leave seq unchanged
-                pass
-            if len(rows) < int(batch_size):
-                break
+
+                if should_abort:
+                    try:
+                        if should_abort():
+                            return {"row_count": total_rows, "last_sequence_value": max_seq_seen, "aborted": True}
+                    except Exception:
+                        pass
+
+                if len(rows) < _fetch_size:
+                    print(f"[SYNC] Last batch ({len(rows)} rows) — done.", flush=True)
+                    break
+        finally:
+            try: src.close()
+            except Exception: pass
+
     return {"row_count": total_rows, "last_sequence_value": max_seq_seen}
 
 

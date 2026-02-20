@@ -19,6 +19,7 @@ import CompositionCard from '@/components/widgets/CompositionCard'
 import ReportCard from '@/components/widgets/ReportCard'
 import DataNavigator from '@/components/builder/DataNavigator'
 import ConfiguratorPanel from '@/components/builder/ConfiguratorPanel'
+import ConfiguratorPanelV2 from '@/components/builder/ConfiguratorPanelV2'
 import GlobalFiltersBar from '@/components/builder/GlobalFiltersBar'
 import { useFilters } from '@/components/providers/FiltersProvider'
 import { ConfigUpdateContext } from '@/components/builder/ConfigUpdateContext'
@@ -281,6 +282,7 @@ export default function HomePage() {
   const [leftCollapsed, setLeftCollapsed] = useState<boolean>(true)
   const [rightCollapsed, setRightCollapsed] = useState(false)
   const [configPinned, setConfigPinned] = useState(false)
+  const [useV2Panel, setUseV2Panel] = useState(false)
   const [loadTimes, setLoadTimes] = useState<Record<string, number>>({})
   // Visual viewport height to keep right configurator sized correctly when DevTools/mobile UI changes the viewport
   const [vvh, setVvh] = useState<number | null>(null)
@@ -1654,6 +1656,13 @@ export default function HomePage() {
                 <h2 className="text-sm font-medium">Configurator</h2>
                 <div className="flex items-center gap-1">
                   <button
+                    onClick={() => setUseV2Panel(v => !v)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors duration-150 cursor-pointer font-semibold ${
+                      useV2Panel ? 'bg-[hsl(var(--primary))] text-primary-foreground border-[hsl(var(--primary))]' : 'hover:bg-muted text-muted-foreground'
+                    }`}
+                    title="Toggle V2 panel"
+                  >{useV2Panel ? 'V2 ✓' : 'V2'}</button>
+                  <button
                     onClick={() => setConfigPinned((prev) => { const next = !prev; if (next) setRightCollapsed(false); return next })}
                     className={`text-xs px-2 py-1 rounded-md border hover:bg-muted ${configPinned ? 'bg-[hsl(var(--secondary))]' : ''}`}
                     title={configPinned ? 'Unpin' : 'Pin'}
@@ -1677,7 +1686,9 @@ export default function HomePage() {
               </div>
               <ConfigUpdateContext.Provider value={onConfigChange}>
                 <div className={`flex-1 min-h-0 overflow-y-auto overflow-x-visible overscroll-contain pt-1 pb-2 px-3 ${rightCollapsed ? 'opacity-0 pointer-events-none' : ''}`}>
-                  <ConfiguratorPanel selected={selectedConfig} allWidgets={configs} quickAddAction={quickAddWidget} />
+                  {useV2Panel
+                    ? <ConfiguratorPanelV2 selected={selectedConfig} allWidgets={configs} quickAddAction={quickAddWidget} />
+                    : <ConfiguratorPanel selected={selectedConfig} allWidgets={configs} quickAddAction={quickAddWidget} />}
                 </div>
               </ConfigUpdateContext.Provider>
               {/* Drag handle */}

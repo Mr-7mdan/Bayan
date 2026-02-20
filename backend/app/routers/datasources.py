@@ -1310,7 +1310,7 @@ def update_sync_task(ds_id: str, task_id: str, payload: SyncTaskCreate, actorId:
     t.mode = mode
     t.sequence_column = payload.sequenceColumn if payload.sequenceColumn is not None else t.sequence_column
     t.batch_size = int(payload.batchSize or t.batch_size or 10000)
-    t.schedule_cron = payload.scheduleCron if payload.scheduleCron is not None else t.schedule_cron
+    t.schedule_cron = payload.scheduleCron or None  # None = manual (no cron schedule)
     t.enabled = bool(payload.enabled) if payload.enabled is not None else t.enabled
     t.pk_columns = payload.pkColumns if payload.pkColumns is not None else t.pk_columns
     if payload.selectColumns is not None:
@@ -1319,6 +1319,12 @@ def update_sync_task(ds_id: str, task_id: str, payload: SyncTaskCreate, actorId:
     db.add(t)
     db.commit()
     db.refresh(t)
+    # Sync scheduler immediately so job is added/removed without requiring manual refresh
+    try:
+        from ..scheduler import schedule_all_jobs
+        schedule_all_jobs()
+    except Exception:
+        pass
     return _task_to_out(db, t)
 
 
