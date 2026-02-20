@@ -1,3 +1,20 @@
+/** Parse a datetime string from the backend as UTC.
+ *  Handles: naive UTC strings (no timezone), space separator, microseconds (6 dp → 3).
+ *  JS Date.parse only supports 3 decimal places; Python emits 6 → must truncate first.
+ */
+export function parseUtcDate(s: string | null | undefined): Date | null {
+  if (!s) return null
+  let str = String(s).trim()
+  // Normalize space separator → T  (Python sometimes emits "2026-02-20 11:52:00")
+  if (/^\d{4}-\d{2}-\d{2} /.test(str)) str = str.replace(' ', 'T')
+  // Truncate microseconds to milliseconds  ("...00.123456" → "...00.123")
+  str = str.replace(/(\.\d{3})\d+/, '$1')
+  // Append Z if no timezone info  (naive UTC from datetime.utcnow / old records)
+  if (!/[Zz]$/.test(str) && !/[+-]\d{2}:\d{2}$/.test(str)) str += 'Z'
+  const d = new Date(str)
+  return isNaN(d.getTime()) ? null : d
+}
+
 export type DatasourceOut = {
   id: string
   name: string

@@ -2,7 +2,7 @@
 
 import { Suspense } from 'react'
 import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Badge, TextInput } from '@tremor/react'
-import { Api, type IntrospectResponse, type DatasourceDetailOut, type SyncTaskOut, type LocalStatsResponse } from '@/lib/api'
+import { Api, parseUtcDate, type IntrospectResponse, type DatasourceDetailOut, type SyncTaskOut, type LocalStatsResponse } from '@/lib/api'
 import SchemaGraph from '@/components/datasources/SchemaGraph'
 import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
 import { useEffect, useMemo, useState } from 'react'
@@ -192,7 +192,7 @@ export default function DatasourceDetailPage() {
       else s.sequence += 1
       if (t.inProgress) s.running += 1
       if (t.lastRunAt) {
-        const ts = new Date(t.lastRunAt).getTime()
+        const ts = parseUtcDate(t.lastRunAt)?.getTime() ?? NaN
         if (isFinite(ts) && (last === null || ts > last)) last = ts
       }
     }
@@ -337,7 +337,7 @@ export default function DatasourceDetailPage() {
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{t.destTableName || 'Unknown'}</div>
                   <div className="text-xs text-muted-foreground">
-                    Mode: {t.mode} • Last run: {t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : '—'}
+                    Mode: {t.mode} • Last run: {t.lastRunAt ? (parseUtcDate(t.lastRunAt)?.toLocaleString() ?? '—') : '—'}
                   </div>
                   {t.progressPhase && (
                     <div className="text-xs text-muted-foreground mt-1">

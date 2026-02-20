@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -152,14 +152,14 @@ def run_alert_rule_job(alert_id: str) -> None:
         db.add(ar); db.commit()
         try:
             ok, msg = run_rule(db, a)
-            a.last_run_at = datetime.utcnow()
+            a.last_run_at = datetime.now(timezone.utc)
             a.last_status = msg or ("ok" if ok else "failed")
-            ar.finished_at = datetime.utcnow()
+            ar.finished_at = datetime.now(timezone.utc)
             ar.status = ("ok" if ok else "failed")
             ar.message = msg or ("ok" if ok else "failed")
             db.add(a); db.add(ar); db.commit()
         except Exception as e:
-            ar.finished_at = datetime.utcnow(); ar.status = "failed"; ar.message = str(e)
+            ar.finished_at = datetime.now(timezone.utc); ar.status = "failed"; ar.message = str(e)
             db.add(ar); db.commit()
     finally:
         try:

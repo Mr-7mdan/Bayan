@@ -174,14 +174,11 @@ async def duckdb_set_active(payload: _SetDuckActivePayload, actorId: str | None 
         if dsn:
             path_set = set_active_duck_path(dsn)
             return { "path": path_set }
-        # Fallback: derive a local DuckDB path from datasource name/id
-        base = (ds.name or ds.id or "duckdb").strip() or "duckdb"
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", base)
-        if not safe.lower().endswith(".duckdb"):
-            safe = safe + ".duckdb"
-        # Relative path under app data dir; set_active_duck_path will normalize
-        derived = f".data/{safe}"
-        path_set = set_active_duck_path(derived)
+        # No connection URI means this datasource IS the default local store.
+        # Just confirm (and re-persist) the current active path — do NOT derive a
+        # new name-based path which would switch to an empty file.
+        current_path = get_active_duck_path()
+        path_set = set_active_duck_path(current_path)
         return { "path": path_set }
     # Or accept a direct path string
     if payload.path and str(payload.path).strip():

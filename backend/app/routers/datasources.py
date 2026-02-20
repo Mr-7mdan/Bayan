@@ -46,7 +46,7 @@ from ..schemas import (
 from ..sqlgen import build_sql
 from ..config import settings
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from ..security import encrypt_text, decrypt_text
 from ..metrics import counter_inc
 import logging
@@ -216,7 +216,7 @@ def _max_concurrent(ds: Datasource) -> int:
         opts = json.loads(ds.options_json or "{}")
     except Exception:
         opts = {}
-    v = (((opts or {}).get("sync") or {}).get("maxQueries"))
+    v = (((opts or {}).get("sync") or {}).get("maxConcurrentQueries"))
     try:
         n = int(v)
         return max(1, n)
@@ -868,6 +868,17 @@ def run_sync_now(
                     st.last_sequence_value = 0
             db.add(st)
             db.commit()
+        # Auto-reset watermark if the DuckDB file has changed since the last run.
+        # When the active path switches, the destination table in the new file is empty,
+        # so continuing from the old watermark would skip all historical rows.
+        if t.mode == "sequence" and st.last_duck_path and curr_duck_path:
+            prev_norm = os.path.normpath(st.last_duck_path).lower()
+            curr_norm = os.path.normpath(curr_duck_path).lower()
+            if prev_norm != curr_norm:
+                print(f"[SEQUENCE] DuckDB path changed: {prev_norm} → {curr_norm}. Resetting watermark for task_id={t.id}", flush=True)
+                st.last_sequence_value = None
+                st.last_row_count = None
+
         # Mark in progress and clear any previous cancel flag
         print(f"[ABORT] Starting sync: state_id={st.id}, task_id={t.id}, setting in_progress=True, cancel_requested=False", flush=True)
         st.in_progress = True
@@ -875,7 +886,7 @@ def run_sync_now(
         st.progress_current = 0
         st.progress_total = None
         st.progress_phase = 'fetch'  # type: ignore[attr-defined]
-        st.started_at = datetime.utcnow()  # type: ignore[attr-defined]
+        st.started_at = datetime.now(timezone.utc)  # type: ignore[attr-defined]
         db.add(st)
         db.commit()
         print(f"[ABORT] Committed sync start for state_id={st.id}", flush=True)
@@ -907,7 +918,7 @@ def run_sync_now(
                     mode=t.mode,
                 )
                 st.last_row_count = res.get("row_count")
-                st.last_run_at = datetime.utcnow()
+                st.last_run_at = datetime.now(timezone.utc)
                 st.error = None
                 st.last_duck_path = curr_duck_path
                 run.row_count = st.last_row_count
@@ -947,7 +958,7 @@ def run_sync_now(
                 )
                 st.last_sequence_value = res.get("last_sequence_value")
                 st.last_row_count = res.get("row_count")
-                st.last_run_at = datetime.utcnow()
+                st.last_run_at = datetime.now(timezone.utc)
                 st.error = ("aborted" if bool(res.get("aborted")) else None)
                 st.last_duck_path = curr_duck_path
                 run.row_count = st.last_row_count
@@ -976,7 +987,7 @@ def run_sync_now(
                     custom_query=(t.custom_query or None),
                 )
                 st.last_row_count = res.get("row_count")
-                st.last_run_at = datetime.utcnow()
+                st.last_run_at = datetime.now(timezone.utc)
                 st.error = ("aborted" if bool(res.get("aborted")) else None)
                 st.last_duck_path = curr_duck_path
                 run.row_count = st.last_row_count
@@ -1188,7 +1199,7 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
             # Determine if stuck based on last_run_at timestamp on SyncState
             if st.last_run_at:
                 last_update = st.last_run_at
-                time_since_update = datetime.utcnow() - last_update
+                time_since_update = datetime.now(timezone.utc).replace(tzinfo=None) - last_update.replace(tzinfo=None)
                 if time_since_update > timedelta(minutes=stuck_threshold_minutes):
                     is_stuck = True
                     print(f"[ABORT] Sync appears STUCK: state_id={st.id}, last_run_at={st.last_run_at}, minutes_since={time_since_update.total_seconds()/60:.1f}", flush=True)
@@ -1925,7 +1936,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                 if _duckdb is None:
                     raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
                 try:
-                    with open_duck_native(settings.duckdb_path) as conn:
+                    with open_duck_native(get_active_duck_path()) as conn:
                         rows = conn.execute(
                             """
                             SELECT table_schema, table_name
@@ -2186,11 +2197,12 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
         if is_remote:
             print(f"[/tables] ERROR: Remote datasource ({ds.type}) has no connection string!")
             raise HTTPException(status_code=400, detail=f"Datasource is configured as {ds.type} but has no connection string. Please update the datasource configuration.")
-        # Treat as DuckDB local
+        # Treat as DuckDB local — always use the actively tracked path, not the raw
+        # settings default which may be stale/relative after a path switch.
         if _duckdb is None:
             raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
         try:
-            with open_duck_native(settings.duckdb_path) as conn:
+            with open_duck_native(get_active_duck_path()) as conn:
                 rows = conn.execute(
                     """
                     SELECT table_schema, table_name FROM information_schema.tables
@@ -2282,7 +2294,38 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
                 print(f"[/tables] Found {len(out)} DuckDB schemas")
                 return TablesOnlyResponse(schemas=out)
         except Exception as e:
-            print(f"[/tables] ERROR: DuckDB native query failed: {e}")
+            print(f"[/tables] WARNING: DuckDB path '{path}' failed ({e}), falling back to active path")
+            # DSN path may be stale (file deleted/moved) — fall back to the currently active store
+            try:
+                fallback = get_active_duck_path()
+                if fallback != path:
+                    with open_duck_native(fallback) as conn2:
+                        rows = conn2.execute(
+                            """
+                            SELECT table_schema, table_name FROM information_schema.tables
+                            WHERE table_schema <> 'information_schema'
+                              AND lower(table_name) NOT LIKE 'duckdb_%'
+                              AND lower(table_name) NOT LIKE 'sqlite_%'
+                              AND lower(table_name) NOT LIKE 'pragma_%'
+                              AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
+                            UNION
+                            SELECT table_schema, table_name FROM information_schema.views
+                            WHERE table_schema <> 'information_schema'
+                              AND lower(table_name) NOT LIKE 'duckdb_%'
+                              AND lower(table_name) NOT LIKE 'sqlite_%'
+                              AND lower(table_name) NOT LIKE 'pragma_%'
+                              AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
+                            ORDER BY table_schema, table_name
+                            """
+                        ).fetchall()
+                        by_schema2: dict[str, set[str]] = {}
+                        for sch, tbl in rows:
+                            by_schema2.setdefault(str(sch), set()).add(str(tbl))
+                        out2 = [_TablesSchema(name=sch, tables=sorted(list(tbls))) for sch, tbls in by_schema2.items()]
+                        print(f"[/tables] Fallback found {len(out2)} schemas")
+                        return TablesOnlyResponse(schemas=out2)
+            except Exception as e2:
+                print(f"[/tables] Fallback also failed: {e2}")
             raise HTTPException(status_code=500, detail=f"DuckDB tables query failed: {e}")
     
     # Non-DuckDB: use SQLAlchemy inspector

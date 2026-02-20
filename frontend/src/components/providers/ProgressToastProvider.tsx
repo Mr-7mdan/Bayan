@@ -2,7 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Api, type SyncTaskOut } from '@/lib/api'
+import { Api, parseUtcDate, type SyncTaskOut } from '@/lib/api'
 
 declare global {
   namespace JSX {
@@ -122,7 +122,7 @@ export default function ProgressToastProvider({ children }: { children: React.Re
         let serverStartMs: number | undefined
         for (const t of tasks) {
           if (t.inProgress && t.startedAt) {
-            const ms = new Date(t.startedAt).getTime()
+            const ms = parseUtcDate(t.startedAt)?.getTime() ?? NaN
             if (!isNaN(ms) && (serverStartMs === undefined || ms < serverStartMs)) serverStartMs = ms
           }
         }

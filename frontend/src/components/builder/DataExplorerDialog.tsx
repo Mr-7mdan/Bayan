@@ -248,8 +248,8 @@ function PreviewPanel({ dsId, sel }: { dsId: string; sel: Sel | null }) {
                   const hl = c === sel.column
                   return (
                     <th key={c + ci} ref={el => { colRefs.current[c] = el }}
-                      className={['text-left font-semibold px-3 py-2 whitespace-nowrap border-b border-[hsl(var(--border))] select-none',
-                        hl ? 'bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]' : 'bg-[hsl(var(--muted))] text-foreground',
+                      className={['text-left font-semibold px-3 py-2 whitespace-nowrap select-none bg-[hsl(var(--muted))]',
+                        hl ? 'text-[hsl(var(--primary))] border-b-2 border-b-[hsl(var(--primary))]' : 'text-foreground border-b border-[hsl(var(--border))]',
                       ].join(' ')}>
                       {hl && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[hsl(var(--primary))] mr-1.5 align-middle" />}
                       {c}

@@ -7,7 +7,7 @@ import { Card, Title, Text, TextInput, Badge, TabGroup, TabList, Tab, TabPanels,
 import * as Popover from '@radix-ui/react-popover'
 import { RiFocus2Line, RiArrowDownSLine, RiClipboardLine } from '@remixicon/react'
 import { useAuth } from '@/components/providers/AuthProvider'
-import { Api, type DatasourceOut, type DatasourceDetailOut, type SyncTaskOut, type SyncTaskCreate, type SyncRunOut, type IntrospectResponse, type TablesOnlyResponse } from '@/lib/api'
+import { Api, parseUtcDate, type DatasourceOut, type DatasourceDetailOut, type SyncTaskOut, type SyncTaskCreate, type SyncRunOut, type IntrospectResponse, type TablesOnlyResponse } from '@/lib/api'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
@@ -331,7 +331,7 @@ function AdminSchedulesInner() {
       // logs are already ordered by startedAt desc
       if (r.taskId && map[r.taskId] === undefined) {
         if (r.startedAt && r.finishedAt) {
-          const sec = Math.max(0, Math.round((new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()) / 1000))
+          const sec = Math.max(0, Math.round(((parseUtcDate(r.finishedAt)?.getTime() ?? 0) - (parseUtcDate(r.startedAt)?.getTime() ?? 0)) / 1000))
           map[r.taskId] = sec
         }
       }
@@ -781,7 +781,7 @@ function AdminSchedulesInner() {
                               ) : '—'}
                             </td>
                             <td className="px-2 py-1">{t.enabled ? 'Yes' : 'No'}</td>
-                            <td className="px-2 py-1">{t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : '—'}</td>
+                            <td className="px-2 py-1">{t.lastRunAt ? (parseUtcDate(t.lastRunAt)?.toLocaleString() ?? '—') : '—'}</td>
                             <td className="px-2 py-1">{typeof t.lastRowCount === 'number' ? t.lastRowCount.toLocaleString() : '—'}</td>
                             <td className="px-2 py-1">{typeof durationByTask[t.id] === 'number' ? durationByTask[t.id].toLocaleString() : '—'}</td>
                             <td className="px-2 py-1 whitespace-nowrap">{t.inProgress ? (
@@ -888,13 +888,13 @@ function AdminSchedulesInner() {
                           const destTableDisplay = task?.destTableName || '—'
                           return (
                             <tr key={r.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
-                              <td className="px-2 py-1">{new Date(r.startedAt).toLocaleString()}</td>
+                              <td className="px-2 py-1">{parseUtcDate(r.startedAt)?.toLocaleString() ?? '—'}</td>
                               <td className="px-2 py-1">{r.mode}</td>
                               <td className="px-2 py-1 font-mono">{r.taskId}</td>
                               <td className="px-2 py-1 font-mono">{sourceTableDisplay}</td>
                               <td className="px-2 py-1 font-mono">{destTableDisplay}</td>
                               <td className="px-2 py-1">{typeof r.rowCount === 'number' ? r.rowCount.toLocaleString() : '—'}</td>
-                              <td className="px-2 py-1">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '—'}</td>
+                              <td className="px-2 py-1">{r.finishedAt ? (parseUtcDate(r.finishedAt)?.toLocaleString() ?? '—') : '—'}</td>
                               <td className="px-2 py-1 whitespace-nowrap">{r.error ? (
                                 <span className="inline-flex items-center gap-1">
                                   <span className="text-red-600">Error</span>
@@ -1001,7 +1001,7 @@ function AdminSchedulesInner() {
                                 <tr key={t.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''} hover:bg-[hsl(var(--muted))]/40`}>
                                   <td className="px-2 py-1 font-mono">{t.destTableName}</td>
                                   <td className="px-2 py-1">{t.scheduleCron}</td>
-                                  <td className="px-2 py-1">{j?.nextRunAt ? new Date(j.nextRunAt).toLocaleString() : '—'}</td>
+                                  <td className="px-2 py-1">{j?.nextRunAt ? (parseUtcDate(j.nextRunAt)?.toLocaleString() ?? '—') : '—'}</td>
                                 </tr>
                               )
                             })}

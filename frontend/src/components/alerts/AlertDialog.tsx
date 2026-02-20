@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { PivotBuilder, type PivotAssignments } from '@/components/builder/PivotBuilder'
 import type { WidgetConfig } from '@/types/widgets'
-import { Api, QueryApi, type AlertOut, type AlertCreate, type AlertConfig, type DatasourceOut, type AlertRunOut, type DashboardOut } from '@/lib/api'
+import { Api, QueryApi, parseUtcDate, type AlertOut, type AlertCreate, type AlertConfig, type DatasourceOut, type AlertRunOut, type DashboardOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useTheme } from '@/components/providers/ThemeProvider'
 
@@ -2447,8 +2447,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                     <tbody>
                       {runs.map((r) => (
                         <tr key={r.id} className="border-t border-[hsl(var(--border))]">
-                          <td className="px-2 py-1">{r.startedAt ? new Date(r.startedAt).toLocaleString() : '—'}</td>
-                          <td className="px-2 py-1">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '—'}</td>
+                          <td className="px-2 py-1">{r.startedAt ? (parseUtcDate(r.startedAt)?.toLocaleString() ?? '—') : '—'}</td>
+                          <td className="px-2 py-1">{r.finishedAt ? (parseUtcDate(r.finishedAt)?.toLocaleString() ?? '—') : '—'}</td>
                           <td className="px-2 py-1">{r.status || '—'}</td>
                           <td className="px-2 py-1 truncate max-w-[360px]" title={r.message || ''}>{r.message || '—'}</td>
                         </tr>

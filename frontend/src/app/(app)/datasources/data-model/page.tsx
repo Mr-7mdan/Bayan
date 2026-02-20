@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, Fragment } from 'react'
-import { Api, type DatasourceOut, type IntrospectResponse, type LocalStatsResponse, type SyncTaskOut } from '@/lib/api'
+import { Api, parseUtcDate, type DatasourceOut, type IntrospectResponse, type LocalStatsResponse, type SyncTaskOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import DataExplorerDialog from '@/components/builder/DataExplorerDialog'
 import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
@@ -511,7 +511,7 @@ export default function DataModelPage() {
                       </div>
                     </td>
                     <td className="px-3 py-2">{typeof r.rowCount === 'number' ? r.rowCount.toLocaleString() : '—'}</td>
-                    <td className="px-3 py-2">{r.lastSyncAt ? new Date(r.lastSyncAt).toLocaleString() : '—'}</td>
+                    <td className="px-3 py-2">{r.lastSyncAt ? (parseUtcDate(r.lastSyncAt)?.toLocaleString() ?? '—') : '—'}</td>
                     <td className="px-3 py-2">{r.datasourceName}</td>
                     <td className="px-3 py-2">{nextSync ? nextSync : '—'}</td>
                     <td className="px-3 py-2">

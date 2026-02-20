@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Api, type AlertOut, type AlertCreate, type AlertConfig, type AlertRunOut } from '@/lib/api'
+import { Api, parseUtcDate, type AlertOut, type AlertCreate, type AlertConfig, type AlertRunOut } from '@/lib/api'
 
 function parseCron(cron?: string) {
   try {
@@ -548,8 +548,8 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
               <tbody>
                 {runs.length ? runs.map((r, idx) => (
                   <tr key={r.id} className={`border-t ${idx % 2 === 1 ? 'bg-[hsl(var(--muted))]/20' : ''}`}>
-                    <td className="px-2 py-1">{r.startedAt ? new Date(r.startedAt).toLocaleString() : '—'}</td>
-                    <td className="px-2 py-1">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '—'}</td>
+                    <td className="px-2 py-1">{r.startedAt ? (parseUtcDate(r.startedAt)?.toLocaleString() ?? '—') : '—'}</td>
+                    <td className="px-2 py-1">{r.finishedAt ? (parseUtcDate(r.finishedAt)?.toLocaleString() ?? '—') : '—'}</td>
                     <td className="px-2 py-1">{r.status || '—'}</td>
                     <td className="px-2 py-1 truncate max-w-[420px]" title={r.message || ''}>{r.message || '—'}</td>
                   </tr>
