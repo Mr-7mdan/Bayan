@@ -6,11 +6,14 @@ import KpiCard from '@/components/widgets/KpiCard'
 import ChartCard from '@/components/widgets/ChartCard'
 import TableCard from '@/components/widgets/TableCard'
 import HeatmapCard from '@/components/widgets/HeatmapCard'
+import ReportCard from '@/components/widgets/ReportCard'
 import { Api } from '@/lib/api'
 import type { DashboardOut, RGLLayout } from '@/lib/api'
 import type { WidgetConfig } from '@/types/widgets'
 import BrandingProvider from '@/components/providers/BrandingProvider'
 import ThemeProvider from '@/components/providers/ThemeProvider'
+import AuthProvider from '@/components/providers/AuthProvider'
+import FiltersProvider from '@/components/providers/FiltersProvider'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,6 +148,15 @@ export default function EmbedWidget() {
     return () => { try { clearInterval(iv) } catch {}; try { clearTimeout(to) } catch {} }
   }, [isSnap, widgetCfg?.id])
 
+  // Report widgets are DOM-only (no canvas) — fire ready after a short settle delay
+  useEffect(() => {
+    if (!isSnap || widgetCfg?.type !== 'report' || loading || !!error) return
+    const t = setTimeout(() => {
+      try { window.dispatchEvent(new CustomEvent('widget-data-ready')) } catch {}
+    }, 1200)
+    return () => clearTimeout(t)
+  }, [isSnap, widgetCfg?.type, widgetCfg?.id, loading, error])
+
   const content = useMemo(() => {
     if (loading) return <div className="text-xs text-muted-foreground">Loading…</div>
     if (error) return <div className="text-xs text-red-600">{error}</div>
@@ -247,6 +259,14 @@ export default function EmbedWidget() {
                 pivot={cfg.pivot as any}
               />
             )}
+            {cfg.type === 'report' && (
+              <ReportCard
+                title={cfg.title}
+                options={opts}
+                widgetId={cfg.id}
+                datasourceId={cfg.datasourceId}
+              />
+            )}
           </div>
           <div className="mt-2 flex items-center justify-center gap-2 text-[10px] text-[hsl(var(--foreground))] opacity-80">
             <img src="/logo.png" alt="Bayan" className="h-3 w-auto inline dark:hidden" />
@@ -262,11 +282,15 @@ export default function EmbedWidget() {
     <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
       <ThemeProvider>
         <BrandingProvider>
-          <div className={themeParam === 'dark' ? 'dark' : ''}>
-            <div className={`min-h-screen ${forceTransparent ? '' : 'bg-background'} p-2 flex items-center justify-center`} style={{ width: w, height: h }}>
-              {content}
-            </div>
-          </div>
+          <AuthProvider>
+            <FiltersProvider>
+              <div className={themeParam === 'dark' ? 'dark' : ''}>
+                <div className={`min-h-screen ${forceTransparent ? '' : 'bg-background'} p-2 flex items-center justify-center`} style={{ width: w, height: h }}>
+                  {content}
+                </div>
+              </div>
+            </FiltersProvider>
+          </AuthProvider>
         </BrandingProvider>
       </ThemeProvider>
     </Suspense>

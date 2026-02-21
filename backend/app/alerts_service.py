@@ -395,7 +395,11 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
                     ref_val = 0
                 ref_name = str(ref.get('name') or '')
                 if ref_name:
-                    eval_expr = _re.sub(r'\b' + _re.escape(ref_name) + r'\b', str(float(ref_val)), eval_expr)
+                    try:
+                        num_val = float(ref_val)
+                    except (TypeError, ValueError):
+                        num_val = 0.0
+                    eval_expr = _re.sub(r'\b' + _re.escape(ref_name) + r'\b', str(num_val), eval_expr)
             # Safe eval: only allow numbers and arithmetic
             allowed = set('0123456789.+-*/() ')
             if all(c in allowed for c in eval_expr.strip()):

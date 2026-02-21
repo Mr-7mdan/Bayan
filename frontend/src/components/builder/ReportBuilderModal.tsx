@@ -19,14 +19,185 @@ type ReportState = {
   showGridLines: boolean
 }
 
+// ─── Expression Builder ───────────────────────────────────────────────
+type ExprToken = { kind: 'var'; name: string } | { kind: 'op'; value: string } | { kind: 'num'; value: string }
+
+function parseExprTokens(expr: string, knownVarNames: string[]): ExprToken[] {
+  if (!expr?.trim()) return []
+  return expr.trim().split(/\s+/).map(p => {
+    if (knownVarNames.includes(p)) return { kind: 'var' as const, name: p }
+    if (['+', '-', '*', '/', '(', ')'].includes(p)) return { kind: 'op' as const, value: p }
+    return { kind: 'num' as const, value: p }
+  })
+}
+
+function serializeTokens(tokens: ExprToken[]): string {
+  return tokens.map(t => t.kind === 'var' ? t.name : t.value).join(' ')
+}
+
+function ExpressionBuilder({ expression, allVarNames, onChange }: {
+  expression: string
+  allVarNames: string[]
+  onChange: (expr: string) => void
+}) {
+  const tokens = parseExprTokens(expression, allVarNames)
+  const [open, setOpen] = useState(false)
+  const [editIdx, setEditIdx] = useState<number | null>(null)
+  const [dropPos, setDropPos] = useState<{ top: number; left: number; maxHeight: number }>({ top: 0, left: 0, maxHeight: 400 })
+  const [numInput, setNumInput] = useState('')
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const dropRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (
+        dropRef.current && !dropRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) { setOpen(false); setEditIdx(null) }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const openAt = (rect: DOMRect, idx: number | null) => {
+    const maxHeight = Math.max(160, window.innerHeight - rect.bottom - 16)
+    setDropPos({ top: rect.bottom + 6, left: rect.left, maxHeight })
+    setEditIdx(idx)
+    setOpen(true)
+  }
+
+  const handleToggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      const maxHeight = Math.max(160, window.innerHeight - r.bottom - 16)
+      setDropPos({ top: r.bottom + 6, left: r.left, maxHeight })
+      setEditIdx(null)
+    }
+    setOpen(v => !v)
+    if (open) setEditIdx(null)
+  }
+
+  const applyToken = (token: ExprToken) => {
+    let next: ExprToken[]
+    if (editIdx !== null) {
+      next = [...tokens]
+      next[editIdx] = token
+    } else {
+      next = [...tokens, token]
+    }
+    onChange(serializeTokens(next))
+    setOpen(false)
+    setEditIdx(null)
+    setNumInput('')
+  }
+
+  const removeToken = (idx: number) => {
+    const next = [...tokens]
+    next.splice(idx, 1)
+    onChange(serializeTokens(next))
+  }
+
+  const OPS = ['+', '-', '*', '/', '(', ')']
+  const isEditing = editIdx !== null
+
+  const dropdown = open ? createPortal(
+    <div
+      ref={dropRef}
+      style={{ position: 'fixed', top: dropPos.top, left: dropPos.left, zIndex: 9999, maxHeight: dropPos.maxHeight, overflowY: 'auto', backgroundColor: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))' }}
+      className="w-52 rounded-md border shadow-xl p-1 text-[11px]"
+    >
+      {isEditing && (
+        <p className="text-[9px] text-primary font-semibold uppercase tracking-wide px-2 pt-1 pb-0.5">Replace with…</p>
+      )}
+      {allVarNames.length > 0 && (
+        <>
+          <p className="text-[9px] text-muted-foreground uppercase tracking-wide px-2 pt-1 pb-0.5">Variables</p>
+          <div>
+            {allVarNames.map(name => (
+              <button key={name} onClick={() => applyToken({ kind: 'var', name })}
+                className="w-full text-left px-2 py-1 rounded hover:bg-primary/10 hover:text-primary transition-colors truncate">
+                {name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <p className="text-[9px] text-muted-foreground uppercase tracking-wide px-2 pt-2 pb-0.5">Operators</p>
+      <div className="flex flex-wrap gap-1 px-2 pb-1">
+        {OPS.map(op => (
+          <button key={op} onClick={() => applyToken({ kind: 'op', value: op })}
+            className="w-7 h-7 rounded border font-mono text-sm hover:bg-primary/10 hover:border-primary hover:text-primary transition-colors flex items-center justify-center">
+            {op}
+          </button>
+        ))}
+      </div>
+      <p className="text-[9px] text-muted-foreground uppercase tracking-wide px-2 pt-1 pb-0.5">Number</p>
+      <div className="flex gap-1 px-2 pb-1.5">
+        <input
+          type="number"
+          value={numInput}
+          onChange={e => setNumInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && numInput.trim()) applyToken({ kind: 'num', value: numInput.trim() }) }}
+          style={{ backgroundColor: 'hsl(var(--background))' }}
+          className="flex-1 h-6 text-xs rounded border px-1.5 outline-none focus:ring-1 focus:ring-primary/40"
+          placeholder="e.g. 1.15"
+        />
+        <button
+          disabled={!numInput.trim()}
+          onClick={() => { if (numInput.trim()) applyToken({ kind: 'num', value: numInput.trim() }) }}
+          className="px-2 h-6 text-xs rounded border hover:bg-primary/10 hover:text-primary disabled:opacity-40 transition-colors"
+        >Add</button>
+      </div>
+    </div>,
+    document.body
+  ) : null
+
+  return (
+    <div>
+      <label className="block text-[10px] font-medium text-muted-foreground mb-1">Expression</label>
+      <div className="min-h-8 flex flex-wrap gap-1 p-1.5 rounded-md border bg-secondary/40 items-center">
+        {/* + button always at the start */}
+        <button
+          ref={btnRef}
+          onClick={handleToggle}
+          className={`h-5 w-5 rounded-full border flex items-center justify-center transition-colors text-xs shrink-0 ${open && editIdx === null ? 'bg-primary text-primary-foreground border-primary' : 'border-dashed text-muted-foreground hover:text-primary hover:border-primary'}`}
+        >+</button>
+        {tokens.length === 0 && <span className="text-[10px] text-muted-foreground/50 select-none">Pick variables and operators…</span>}
+        {tokens.map((tok, i) => (
+          <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium leading-none border ${
+            tok.kind === 'var'
+              ? `bg-primary/15 border-primary/25 text-primary ${open && editIdx === i ? 'ring-1 ring-primary' : 'cursor-pointer hover:bg-primary/25'}`
+              : tok.kind === 'op'
+              ? `bg-secondary text-foreground border-border font-mono text-[13px] ${open && editIdx === i ? 'ring-1 ring-border' : 'cursor-pointer hover:bg-secondary/80'}`
+              : `bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/25 font-mono ${open && editIdx === i ? 'ring-1 ring-amber-500/50' : 'cursor-pointer hover:bg-amber-500/25'}`
+          }`}>
+            <button
+              onClick={(e) => {
+                const r = (e.currentTarget.closest('span') as HTMLElement).getBoundingClientRect()
+                openAt(r, i)
+              }}
+              className={`hover:underline underline-offset-2 ${tok.kind !== 'var' ? 'font-mono' : ''}`}
+            >{tok.kind === 'var' ? tok.name : tok.value}</button>
+            <button onClick={() => removeToken(i)} className="ml-0.5 opacity-50 hover:opacity-100 transition-opacity leading-none text-[12px]">×</button>
+          </span>
+        ))}
+      </div>
+      {dropdown}
+    </div>
+  )
+}
+
 // ─── Variable Editor Panel ───────────────────────────────────────────
 function VariableEditor({
   variable,
+  allVariables,
   onUpdate,
   onDelete,
   onDuplicate,
 }: {
   variable: ReportVariable
+  allVariables: ReportVariable[]
   onUpdate: (v: ReportVariable) => void
   onDelete: () => void
   onDuplicate?: () => void
@@ -144,14 +315,11 @@ function VariableEditor({
         {/* Type-specific fields */}
         {varType === 'expression' && (
           <div>
-            <label className="block text-[10px] font-medium text-muted-foreground mb-1">Expression</label>
-            <input
-              className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 font-mono focus:ring-1 focus:ring-primary/40 outline-none transition-shadow"
-              value={variable.expression || ''}
-              onChange={(e) => handleChange({ expression: e.target.value })}
-              placeholder="e.g., Revenue - Cost or Price * 1.15"
+            <ExpressionBuilder
+              expression={variable.expression || ''}
+              allVarNames={allVariables.filter(v => v.id !== variable.id && !!v.name).map(v => v.name)}
+              onChange={(expr) => handleChange({ expression: expr })}
             />
-            <p className="text-[9px] text-muted-foreground mt-1 opacity-70">Use variable names: var1 + var2, var1 * 1.15</p>
           </div>
         )}
 
@@ -1978,6 +2146,8 @@ export default function ReportBuilderModal({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedVarId, setSelectedVarId] = useState<string | null>(null)
   const [panel, setPanel] = useState<'elements' | 'variables'>('elements')
+  const [confirmDeleteVarId, setConfirmDeleteVarId] = useState<string | null>(null)
+  const [varSearch, setVarSearch] = useState('')
   const varListRef = useRef<HTMLDivElement>(null)
 
   // Scroll selected variable row into view
@@ -2215,7 +2385,7 @@ export default function ReportBuilderModal({
           </div>
 
           {/* Right: Properties Panel */}
-          <div className="w-72 border-l bg-card/40 flex flex-col overflow-auto">
+          <div className="w-96 border-l bg-card/40 flex flex-col overflow-auto">
             <div className="flex gap-1 p-3 pb-2 border-b bg-card/60">
               <button className={`text-[11px] font-medium px-3 py-1.5 rounded-md transition-all duration-150 ${panel === 'elements' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`} onClick={() => setPanel('elements')}>Properties</button>
               <button className={`text-[11px] font-medium px-3 py-1.5 rounded-md transition-all duration-150 flex items-center gap-1.5 ${panel === 'variables' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`} onClick={() => setPanel('variables')}>
@@ -2273,15 +2443,68 @@ export default function ReportBuilderModal({
                   {/* Top half: + Variable button + scrollable list */}
                   <div className="flex flex-col border-b" style={{ height: '50%' }}>
                     {/* Toolbar */}
-                    <div className="flex items-center justify-between px-3 py-1.5 border-b bg-secondary/20 shrink-0">
-                      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Variables</span>
-                      <button
-                        className="flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 hover:bg-primary/10 px-2 py-0.5 rounded transition-colors"
-                        onClick={addVariable}
-                      >
-                        <RiAddLine className="h-3 w-3" /> Variable
-                      </button>
-                    </div>
+                    {(() => {
+                      const selectedVar = state.variables.find(v => v.id === selectedVarId)
+                      const isConfirming = confirmDeleteVarId === selectedVarId && !!selectedVarId
+                      return (
+                        <div className="flex items-center px-3 py-1.5 border-b bg-secondary/20 shrink-0 gap-2">
+                          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide shrink-0">Variables</span>
+                          <div className="flex items-center gap-1 ml-auto">
+                            {selectedVar && !isConfirming && (
+                              <>
+                                <button
+                                  title="Duplicate selected"
+                                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground hover:bg-secondary px-1.5 py-0.5 rounded transition-colors"
+                                  onClick={() => duplicateVariable(selectedVar.id)}
+                                >
+                                  <RiFileCopyLine className="h-3 w-3" />
+                                </button>
+                                <button
+                                  title="Delete selected"
+                                  className="flex items-center gap-1 text-[10px] text-destructive/70 hover:text-destructive hover:bg-destructive/10 px-1.5 py-0.5 rounded transition-colors"
+                                  onClick={() => setConfirmDeleteVarId(selectedVar.id)}
+                                >
+                                  <RiDeleteBinLine className="h-3 w-3" />
+                                </button>
+                                <div className="w-px h-3 bg-border mx-0.5 shrink-0" />
+                              </>
+                            )}
+                            {selectedVar && isConfirming && (
+                              <>
+                                <span className="text-[10px] text-destructive font-medium shrink-0">Delete?</span>
+                                <button
+                                  className="text-[10px] font-medium text-destructive hover:bg-destructive/10 px-2 py-0.5 rounded transition-colors"
+                                  onClick={() => { deleteVariable(selectedVar.id); setConfirmDeleteVarId(null) }}
+                                >Yes</button>
+                                <button
+                                  className="text-[10px] text-muted-foreground hover:text-foreground hover:bg-secondary px-2 py-0.5 rounded transition-colors"
+                                  onClick={() => setConfirmDeleteVarId(null)}
+                                >No</button>
+                                <div className="w-px h-3 bg-border mx-0.5 shrink-0" />
+                              </>
+                            )}
+                            <button
+                              className="flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 hover:bg-primary/10 px-2 py-0.5 rounded transition-colors shrink-0"
+                              onClick={() => { setConfirmDeleteVarId(null); addVariable() }}
+                            >
+                              <RiAddLine className="h-3 w-3" /> Variable
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    {/* Search */}
+                    {state.variables.length > 0 && (
+                      <div className="px-3 py-1.5 border-b bg-secondary/10 shrink-0">
+                        <input
+                          type="text"
+                          value={varSearch}
+                          onChange={e => setVarSearch(e.target.value)}
+                          placeholder="Search variables…"
+                          className="w-full h-6 text-[10px] rounded border bg-secondary/40 px-2 outline-none focus:ring-1 focus:ring-primary/40 transition-shadow"
+                        />
+                      </div>
+                    )}
                     {/* Scrollable table */}
                     <div ref={varListRef} className="overflow-y-auto flex-1">
                       {state.variables.length === 0 ? (
@@ -2295,11 +2518,10 @@ export default function ReportBuilderModal({
                             <tr className="bg-secondary/60 border-b">
                               <th className="text-left px-3 py-1.5 text-[10px] font-semibold text-muted-foreground">Name</th>
                               <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted-foreground">Type</th>
-                              <th className="w-12 px-1 py-1.5" />
                             </tr>
                           </thead>
                           <tbody>
-                            {state.variables.map((v) => (
+                            {state.variables.filter(v => !varSearch.trim() || v.name.toLowerCase().includes(varSearch.toLowerCase())).map((v) => (
                               <tr
                                 key={v.id}
                                 data-var-id={v.id}
@@ -2308,7 +2530,7 @@ export default function ReportBuilderModal({
                               >
                                 <td className="px-3 py-1">
                                   <input
-                                    className="bg-transparent border-b border-dashed border-transparent hover:border-border focus:border-primary outline-none w-full text-[11px] font-medium"
+                                    className="bg-transparent border-b border-dashed border-transparent hover:border-border focus:border-primary outline-none w-full text-[10px] font-medium"
                                     value={v.name}
                                     onChange={(e) => updateVariable(v.id, { ...v, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') })}
                                     onClick={(e) => e.stopPropagation()}
@@ -2319,16 +2541,6 @@ export default function ReportBuilderModal({
                                   <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${v.type === 'expression' ? 'bg-amber-500/10 text-amber-600' : v.type === 'datetime' ? 'bg-blue-500/10 text-blue-500' : 'bg-primary/10 text-primary'}`}>
                                     {v.type || 'query'}
                                   </span>
-                                </td>
-                                <td className="px-1 py-1">
-                                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button title="Duplicate" className="p-0.5 rounded hover:bg-secondary text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); duplicateVariable(v.id) }}>
-                                      <RiFileCopyLine className="h-3 w-3" />
-                                    </button>
-                                    <button title="Delete" className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteVariable(v.id) }}>
-                                      <RiDeleteBinLine className="h-3 w-3" />
-                                    </button>
-                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -2346,6 +2558,7 @@ export default function ReportBuilderModal({
                         <VariableEditor
                           key={selectedVarId}
                           variable={selVar}
+                          allVariables={state.variables}
                           onUpdate={(vr) => updateVariable(selVar.id, vr)}
                           onDelete={() => deleteVariable(selVar.id)}
                           onDuplicate={() => duplicateVariable(selVar.id)}
