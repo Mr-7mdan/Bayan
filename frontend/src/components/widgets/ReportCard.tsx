@@ -392,7 +392,9 @@ export default function ReportCard({
     // Query-based variables
     queryVars.forEach((v, i) => {
       const q = queryResults[i]
-      rv[v.id] = { value: q?.data ?? null, loading: q?.isLoading ?? false }
+      const raw = q?.data ?? null
+      const val = (v.reverseSign && typeof raw === 'number') ? -raw : raw
+      rv[v.id] = { value: val, loading: q?.isLoading ?? false }
     })
 
     // Datetime variables (client-side)
@@ -422,7 +424,7 @@ export default function ReportCard({
         }
         if (allResolved) {
           const result = Function('"use strict"; return (' + expr + ')')() as number
-          rv[v.id] = { value: result, loading: false }
+          rv[v.id] = { value: v.reverseSign && typeof result === 'number' ? -result : result, loading: false }
         } else {
           rv[v.id] = { value: null, loading: true }
         }

@@ -57,15 +57,56 @@ except Exception:
 _UI_META_KEYS = frozenset({
     "filterPreset", "filter_preset", "_preset", "_meta",
     "startDate", "endDate", "start", "end",
+    "__week_start_day",
 })
 
 def _resolve_date_presets(where: dict | None) -> dict | None:
-    """Expand any `field__date_preset` entries into `field__gte` / `field__lt` pairs."""
+    """Expand any `field__date_preset` entries into `field__gte` / `field__lt` pairs.
+
+    Week-start convention (``__week_start_day`` key in *where* or ``WEEK_START_DAY`` env var):
+      0 = Sunday (default), 1 = Monday
+    """
     if not where:
         return where
+    import os
     from datetime import datetime, timedelta
+
+    # Read __week_start_day BEFORE stripping UI meta keys.
+    # Accepts DDD names (SUN/MON/TUE/WED/THU/FRI/SAT) or legacy 0/1 integers.
+    # Internal: 0=Sunday-start, 1=Monday-start.
+    _WSD_MAP = {"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
+    _wsd_raw = str(where.get("__week_start_day", os.environ.get("WEEK_START_DAY", "SUN"))).upper().strip()
+    if _wsd_raw in _WSD_MAP:
+        week_start_dow = _WSD_MAP[_wsd_raw]
+    else:
+        try:
+            week_start_dow = int(_wsd_raw)
+        except (ValueError, TypeError):
+            week_start_dow = 0  # default Sunday
+
     # Strip UI-only meta keys that are not real database columns
     where = {k: v for k, v in where.items() if k not in _UI_META_KEYS}
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _week_start(d: datetime) -> datetime:
+        """Most recent week-start day at or before *d* per week_start_dow."""
+        # Python weekday(): Mon=0 … Sun=6
+        if week_start_dow == 0:          # Sunday-start: offset = (weekday+1) % 7
+            offset = (d.weekday() + 1) % 7
+        else:                             # Monday-start: offset = weekday()
+            offset = d.weekday()
+        return d - timedelta(days=offset)
+
+    def _prev_workday(d: datetime) -> datetime:
+        """Last weekday strictly before *d* (skips Sat/Sun)."""
+        candidate = d - timedelta(days=1)
+        while candidate.weekday() >= 5:  # Sat=5, Sun=6
+            candidate -= timedelta(days=1)
+        return candidate
+
+    # ── preset resolution ────────────────────────────────────────────────────
+
     expanded: dict = {}
     for k, v in where.items():
         if isinstance(k, str) and k.endswith("__date_preset") and isinstance(v, str):
@@ -75,23 +116,29 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
             preset = v.lower().strip()
             gte: datetime | None = None
             lt: datetime | None = None
+
             if preset == "today":
                 gte = today; lt = today + timedelta(days=1)
             elif preset == "yesterday":
                 gte = today - timedelta(days=1); lt = today
+            elif preset == "day_before_yesterday":
+                gte = today - timedelta(days=2); lt = today - timedelta(days=1)
+            elif preset == "last_working_day":
+                lwd = _prev_workday(today)
+                gte = lwd; lt = lwd + timedelta(days=1)
+            elif preset == "day_before_last_working_day":
+                lwd = _prev_workday(today)
+                dlwd = _prev_workday(lwd)
+                gte = dlwd; lt = dlwd + timedelta(days=1)
             elif preset == "this_week":
-                gte = today - timedelta(days=today.weekday() % 7 if today.weekday() != 6 else 0)
-                # Sunday-start: weekday() returns 6 for Sunday
-                dow = now.weekday()  # Mon=0 … Sun=6
-                sun_offset = (dow + 1) % 7  # how many days since last Sunday
-                gte = today - timedelta(days=sun_offset)
-                lt = gte + timedelta(days=7)
+                ws = _week_start(today)
+                gte = ws; lt = ws + timedelta(days=7)
             elif preset == "last_week":
-                dow = now.weekday()
-                sun_offset = (dow + 1) % 7
-                this_week_start = today - timedelta(days=sun_offset)
-                gte = this_week_start - timedelta(days=7)
-                lt = this_week_start
+                ws = _week_start(today)
+                gte = ws - timedelta(days=7); lt = ws
+            elif preset == "week_before_last":
+                ws = _week_start(today)
+                gte = ws - timedelta(days=14); lt = ws - timedelta(days=7)
             elif preset == "this_month":
                 gte = datetime(now.year, now.month, 1)
                 if now.month == 12:
@@ -1160,7 +1207,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
         pass
 
     def _q_ident(name: str) -> str:
-        s = str(name or '').strip()
+        s = str(name or '').strip('\n\r\t')
         # Drop leading alias (s., u., _base., etc.) for outer queries
         try:
             if '.' in s and '(' not in s and ')' not in s:
@@ -3616,7 +3663,7 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
     
     # Helpers duplicated from run_pivot for consistent quoting and derived expressions
     def _q_ident(name: str) -> str:
-        s = str(name or '').strip()
+        s = str(name or '').strip('\n\r\t')
         try:
             if '.' in s and '(' not in s and ')' not in s:
                 parts = s.split('.')
@@ -4629,7 +4676,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
     # Helpers available to all branches
     def _q_ident(name: str) -> str:
-        s = str(name or '').strip()
+        s = str(name or '').strip('\n\r\t')
         if not s:
             return s
         if s.startswith('[') and s.endswith(']'):
@@ -5209,7 +5256,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         # Apply WHERE filters on top of transformed subquery
         # Helpers: quote identifiers for WHERE and sanitize param names
         def _q_ident(name: str) -> str:
-            s = str(name or '').strip()
+            s = str(name or '').strip('\n\r\t')
             if not s:
                 return s
             if s.startswith('[') and s.endswith(']'):
@@ -7917,7 +7964,7 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         except Exception:
             dialect_name = "duckdb" if route_duck else "unknown"
         def _q_ident_local(name: str) -> str:
-            s = str(name or '').strip()
+            s = str(name or '').strip('\n\r\t')
             if not s:
                 return s
             if s.startswith('[') and s.endswith(']'):

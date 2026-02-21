@@ -235,6 +235,7 @@ export type ReportVariable = {
   format?: 'none' | 'short' | 'currency' | 'percent' | 'wholeNumber' | 'oneDecimal' | 'twoDecimals'
   prefix?: string
   suffix?: string
+  reverseSign?: boolean
 }
 
 export type WidgetConfig = {

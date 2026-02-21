@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Api, QueryApi } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
-import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine } from '@remixicon/react'
+import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom } from '@remixicon/react'
 
 const genId = () => Math.random().toString(36).slice(2, 10)
 
@@ -24,10 +24,12 @@ function VariableEditor({
   variable,
   onUpdate,
   onDelete,
+  onDuplicate,
 }: {
   variable: ReportVariable
   onUpdate: (v: ReportVariable) => void
   onDelete: () => void
+  onDuplicate?: () => void
 }) {
   const { user } = useAuth()
   const dsQ = useQuery({ queryKey: ['datasources'], queryFn: () => Api.listDatasources(undefined, user?.id) })
@@ -103,7 +105,7 @@ function VariableEditor({
               return tableName === source || `${schema.name}.${tableName}` === source
             })
             if (tbl?.columns) {
-              return tbl.columns.map((c: any) => c.name || String(c))
+              return tbl.columns.map((c: any) => ({ name: c.name || String(c), type: c.type ?? null }))
             }
           }
         }
@@ -111,11 +113,12 @@ function VariableEditor({
       
       // Fallback: direct tables array
       const tbl = (Array.isArray(raw?.tables) ? raw.tables : []).find((t: any) => (t.name || t) === source)
-      return tbl?.columns?.map((c: any) => c.name || String(c)) || []
+      return tbl?.columns?.map((c: any) => ({ name: c.name || String(c), type: c.type ?? null })) || []
     },
     enabled: !!(dsId && source),
   })
-  const columns = columnsQ.data || []
+  const columnsMeta: Array<{ name: string; type: string | null }> = columnsQ.data || []
+  const columns = columnsMeta.map((c) => c.name)
 
   const AGG_OPTIONS = ['none', 'count', 'distinct', 'avg', 'sum', 'min', 'max'] as const
   const FORMAT_OPTIONS = ['none', 'short', 'currency', 'percent', 'wholeNumber', 'oneDecimal', 'twoDecimals'] as const
@@ -127,28 +130,6 @@ function VariableEditor({
   const varType = variable.type || 'query'
 
   return (
-    <details className="rounded-lg border bg-card shadow-sm overflow-hidden group/var">
-      {/* Card header — acts as toggle */}
-      <summary className="flex items-center justify-between px-3 py-2 bg-secondary/30 border-b cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-secondary/50 transition-colors duration-100">
-        <div className="flex items-center gap-2">
-          <span className="text-[8px] text-muted-foreground transition-transform duration-150 group-open/var:rotate-90">&#9654;</span>
-          <div className="flex items-center justify-center h-5 w-5 rounded bg-primary/10">
-            <RiHashtag className="h-3 w-3 text-primary" />
-          </div>
-          <input
-            className="text-sm font-semibold bg-transparent border-b border-dashed border-transparent hover:border-border focus:border-primary outline-none px-0.5 py-0.5 w-28 transition-colors"
-            value={variable.name}
-            onChange={(e) => handleChange({ name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') })}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="VariableName"
-          />
-          <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary capitalize">{varType}</span>
-        </div>
-        <button className="text-destructive/60 hover:text-destructive hover:bg-destructive/10 rounded-md p-1 transition-colors duration-150" onClick={(e) => { e.stopPropagation(); onDelete() }} title="Delete variable" aria-label="Delete variable">
-          <RiDeleteBinLine className="h-3.5 w-3.5" />
-        </button>
-      </summary>
-
       <div className="p-3 space-y-2.5">
         {/* Type selector */}
         <div>
@@ -221,7 +202,7 @@ function VariableEditor({
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Column</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.field || ''} onChange={(e) => handleChange({ value: { ...variable.value, field: e.target.value } })}>
                   <option value="">Select…</option>
-                  {columns.map((c: string) => <option key={c} value={c}>{c}</option>)}
+                  {columns.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
@@ -264,17 +245,32 @@ function VariableEditor({
         {varType === 'query' && (
           <div className="border-t pt-2.5">
             <label className="block text-[10px] font-medium text-muted-foreground mb-1.5">Filters (WHERE)</label>
-            <FilterEditor columns={columns} where={variable.where || {}} onChange={(w) => handleChange({ where: w })} source={source} datasourceId={dsId} />
+            <FilterEditor columns={columns} columnMeta={columnsMeta} where={variable.where || {}} onChange={(w) => handleChange({ where: w })} source={source} datasourceId={dsId} />
           </div>
         )}
+        {/* Reverse Sign */}
+        {varType !== 'datetime' && (
+          <label className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none">
+            <input type="checkbox" className="rounded border-border accent-primary" checked={!!variable.reverseSign} onChange={(e) => handleChange({ reverseSign: e.target.checked })} />
+            Reverse sign (multiply result by −1)
+          </label>
+        )}
       </div>
-    </details>
   )
 }
 
 // ─── Rich Filter Editor (mirrors ConfiguratorPanel per-chip details) ──
 
-// Detect field kind from sample values
+// Detect field kind from DB type string (BIGINT, TIMESTAMP, VARCHAR, etc.)
+function detectKindFromDbType(dbType?: string | null): 'date' | 'number' | 'string' | null {
+  if (!dbType) return null
+  const t = dbType.toUpperCase()
+  if (/^(TIMESTAMP|DATE|DATETIME|TIME)/.test(t)) return 'date'
+  if (/^(INT|INTEGER|BIGINT|SMALLINT|TINYINT|HUGEINT|UBIGINT|UINTEGER|USMALLINT|UTINYINT|FLOAT|DOUBLE|REAL|DECIMAL|NUMERIC|NUMBER)/.test(t)) return 'number'
+  return 'string'
+}
+
+// Detect field kind from sample values (fallback when DB type is unavailable)
 function detectFieldKind(samples: string[]): 'date' | 'number' | 'string' {
   if (!samples.length) return 'string'
   const dateRe = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?$/
@@ -369,13 +365,20 @@ function ManualFilterValues({ field, source, datasourceId, selected, onApply }: 
 }
 
 // Date rule tab: presets (Today, Yesterday…) + custom (After/Before/Between)
+// Week-start-day: 0=Sunday (default via NEXT_PUBLIC_WEEK_START_DAY), 1=Monday
+const _DEFAULT_WEEK_START = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
+const WEEK_PRESETS = new Set(['this_week', 'last_week', 'week_before_last'])
+
 function DateRuleEditor({ field, where, onPatch }: { field: string; where: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
-  type Preset = 'today'|'yesterday'|'this_week'|'last_week'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
+  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
   type CustomOp = 'after'|'before'|'between'
   const [mode, setMode] = useState<'preset'|'custom'>('preset')
   const [preset, setPreset] = useState<Preset>('today')
+  const [weekStartDay, setWeekStartDay] = useState<string>(() => String(where?.['__week_start_day'] ?? _DEFAULT_WEEK_START).toUpperCase())
   const [op, setOp] = useState<CustomOp>('between')
   const [a, setA] = useState(''); const [b, setB] = useState('')
+
+  const isWeekPreset = WEEK_PRESETS.has(preset)
 
   function rangeForPreset(p: Preset): { gte?: string; lt?: string } {
     const now = new Date()
@@ -385,14 +388,30 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
     const q = Math.floor(now.getMonth()/3)
     const soq = (y: number, qq: number) => new Date(y, qq*3, 1)
     const eoq = (y: number, qq: number) => new Date(y, qq*3+3, 1)
-    // Week helpers (Sunday-start)
-    const startOfWeek = (d: Date) => { const s = new Date(d.getFullYear(), d.getMonth(), d.getDate()); s.setDate(s.getDate() - s.getDay()); return s }
-    const endOfWeek = (d: Date) => { const e = startOfWeek(d); e.setDate(e.getDate() + 7); return e }
+    // Week helpers — respects weekStartDay (DDD: SUN/MON/TUE/WED/THU/FRI/SAT). JS getDay(): 0=Sun…6=Sat
+    const _WSD_MAP: Record<string, number> = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 }
+    const wsdNum = _WSD_MAP[weekStartDay] ?? 0
+    const startOfWeek = (d: Date) => {
+      const s = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+      const dow = s.getDay() // 0=Sun…6=Sat
+      const offset = (dow - wsdNum + 7) % 7
+      s.setDate(s.getDate() - offset)
+      return s
+    }
+    const prevWorkday = (d: Date) => {
+      const c = new Date(d); c.setDate(c.getDate() - 1)
+      while (c.getDay() === 0 || c.getDay() === 6) c.setDate(c.getDate() - 1)
+      return c
+    }
     switch (p) {
       case 'today': { const s = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const e = new Date(s); e.setDate(e.getDate()+1); return { gte: ymd(s), lt: ymd(e) } }
       case 'yesterday': { const e = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const s = new Date(e); s.setDate(s.getDate()-1); return { gte: ymd(s), lt: ymd(e) } }
-      case 'this_week': return { gte: ymd(startOfWeek(now)), lt: ymd(endOfWeek(now)) }
-      case 'last_week': { const s = startOfWeek(now); s.setDate(s.getDate()-7); const e = new Date(s); e.setDate(e.getDate()+7); return { gte: ymd(s), lt: ymd(e) } }
+      case 'day_before_yesterday': { const lt = new Date(now.getFullYear(), now.getMonth(), now.getDate()); lt.setDate(lt.getDate()-1); const s = new Date(lt); s.setDate(s.getDate()-1); return { gte: ymd(s), lt: ymd(lt) } }
+      case 'last_working_day': { const t0 = new Date(now.getFullYear(),now.getMonth(),now.getDate()); const lwd = prevWorkday(t0); const e = new Date(lwd); e.setDate(e.getDate()+1); return { gte: ymd(lwd), lt: ymd(e) } }
+      case 'day_before_last_working_day': { const t0 = new Date(now.getFullYear(),now.getMonth(),now.getDate()); const dlwd = prevWorkday(prevWorkday(t0)); const e = new Date(dlwd); e.setDate(e.getDate()+1); return { gte: ymd(dlwd), lt: ymd(e) } }
+      case 'this_week': { const ws = startOfWeek(now); const e = new Date(ws); e.setDate(e.getDate()+7); return { gte: ymd(ws), lt: ymd(e) } }
+      case 'last_week': { const ws = startOfWeek(now); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
+      case 'week_before_last': { const ws = startOfWeek(now); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
       case 'this_month': return { gte: ymd(som(now)), lt: ymd(eom(now)) }
       case 'last_month': { const s = som(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
       case 'this_quarter': return { gte: ymd(soq(now.getFullYear(), q)), lt: ymd(eoq(now.getFullYear(), q)) }
@@ -402,15 +421,16 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
     }
   }
 
-  const applyPreset = (p: Preset) => {
-    // Store symbolic preset name — backend resolves to concrete dates at query execution time
-    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined }
-    patch[`${field}__date_preset`] = p
+  const applyPreset = (p: Preset, wsd?: string) => {
+    const effectiveWsd = wsd ?? weekStartDay
+    // Store symbolic preset — backend resolves at query execution time
+    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: p, [field]: undefined, __week_start_day: undefined }
+    if (WEEK_PRESETS.has(p)) patch['__week_start_day'] = effectiveWsd
     onPatch(patch)
   }
 
   const applyCustom = () => {
-    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined }
+    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined, __week_start_day: undefined }
     if (op === 'after') { patch[`${field}__gte`] = a || undefined }
     else if (op === 'before' && b) { const d = new Date(`${b}T00:00:00`); d.setDate(d.getDate()+1); patch[`${field}__lt`] = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
     else if (op === 'between') {
@@ -422,14 +442,14 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
 
   // Hydrate from where on mount
   useEffect(() => {
-    // Check for symbolic preset first
     const existingPreset = where?.[`${field}__date_preset`] as string | undefined
     if (existingPreset) {
-      const presets: Preset[] = ['today','yesterday','this_week','last_week','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
-      if (presets.includes(existingPreset as Preset)) { setMode('preset'); setPreset(existingPreset as Preset) }
+      const allPresets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','this_week','last_week','week_before_last','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+      if (allPresets.includes(existingPreset as Preset)) { setMode('preset'); setPreset(existingPreset as Preset) }
+      const savedWsd = where?.['__week_start_day']
+      if (savedWsd != null) setWeekStartDay(String(savedWsd).toUpperCase())
       return
     }
-    // Fallback: hydrate from legacy __gte/__lt concrete dates
     const gte = where?.[`${field}__gte`] as string | undefined
     const lt = where?.[`${field}__lt`] as string | undefined
     if (gte || lt) {
@@ -443,7 +463,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
     <div className="rounded-md border bg-card p-2 space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-[11px] font-medium">Date rule: {field}</div>
-        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setA(''); setB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined }) }}>Clear</button>
+        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setA(''); setB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined, __week_start_day: undefined }) }}>Clear</button>
       </div>
       <div className="flex items-center gap-3 text-[11px]">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={() => setMode('preset')} /> Preset</label>
@@ -452,12 +472,49 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       {mode === 'preset' ? (
         <div className="space-y-1.5">
           <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={preset} onChange={e => { const p = e.target.value as Preset; setPreset(p); applyPreset(p) }}>
-            <option value="today">Today</option><option value="yesterday">Yesterday</option>
-            <option value="this_week">This Week</option><option value="last_week">Last Week</option>
-            <option value="this_month">This Month</option><option value="last_month">Last Month</option>
-            <option value="this_quarter">This Quarter</option><option value="last_quarter">Last Quarter</option>
-            <option value="this_year">This Year</option><option value="last_year">Last Year</option>
+            <optgroup label="Days">
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="day_before_yesterday">Day Before Yesterday</option>
+              <option value="last_working_day">Last Working Day</option>
+              <option value="day_before_last_working_day">Day Before Last Working Day</option>
+            </optgroup>
+            <optgroup label="Weeks">
+              <option value="this_week">This Week</option>
+              <option value="last_week">Last Week</option>
+              <option value="week_before_last">Week Before Last</option>
+            </optgroup>
+            <optgroup label="Months">
+              <option value="this_month">This Month</option>
+              <option value="last_month">Last Month</option>
+            </optgroup>
+            <optgroup label="Quarters">
+              <option value="this_quarter">This Quarter</option>
+              <option value="last_quarter">Last Quarter</option>
+            </optgroup>
+            <optgroup label="Years">
+              <option value="this_year">This Year</option>
+              <option value="last_year">Last Year</option>
+            </optgroup>
           </select>
+          {isWeekPreset && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground shrink-0">Week starts on</span>
+              <select
+                className="flex-1 px-2 py-0.5 rounded bg-secondary/60 text-[11px]"
+                value={weekStartDay}
+                onChange={e => { setWeekStartDay(e.target.value); applyPreset(preset, e.target.value) }}
+              >
+                <option value="SUN">Sunday</option>
+                <option value="MON">Monday</option>
+                <option value="TUE">Tuesday</option>
+                <option value="WED">Wednesday</option>
+                <option value="THU">Thursday</option>
+                <option value="FRI">Friday</option>
+                <option value="SAT">Saturday</option>
+              </select>
+            </div>
+          )}
           <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => applyPreset(preset)}>Apply</button>
         </div>
       ) : (
@@ -596,15 +653,16 @@ function NumberRuleEditor({ field, where, onPatch }: { field: string; where: Rec
 }
 
 // Per-field filter with Manual/Rule tabs (like ConfiguratorPanel chip details)
-function ReportFieldFilter({ field, source, datasourceId, where, onWhereChange, onRemove }: {
-  field: string; source: string; datasourceId?: string; where: Record<string, any>
-  onWhereChange: (w: Record<string, any>) => void; onRemove: () => void
+function ReportFieldFilter({ field, source, datasourceId, dbType, where, onWhereChange, onRemove }: {
+  field: string; source: string; datasourceId?: string; dbType?: string | null
+  where: Record<string, any>; onWhereChange: (w: Record<string, any>) => void; onRemove: () => void
 }) {
   const [tab, setTab] = useState<'manual'|'rule'>('manual')
   const [samples, setSamples] = useState<string[]>([])
 
-  // Fetch a small sample to detect field type
+  // Only fetch samples for type detection when DB type is unavailable
   useEffect(() => {
+    if (dbType) return  // DB type known — skip sample fetch for type detection
     let abort = false
     async function run() {
       if (!source || !field) return
@@ -625,9 +683,9 @@ function ReportFieldFilter({ field, source, datasourceId, where, onWhereChange, 
     }
     run()
     return () => { abort = true }
-  }, [field, source, datasourceId])
+  }, [field, source, datasourceId, dbType])
 
-  const kind = detectFieldKind(samples)
+  const kind = detectKindFromDbType(dbType) ?? detectFieldKind(samples)
 
   // Extract current selected values for manual tab (field key with array value)
   const currentSelected = Array.isArray(where?.[field]) ? (where[field] as any[]) : []
@@ -674,8 +732,8 @@ function ReportFieldFilter({ field, source, datasourceId, where, onWhereChange, 
 }
 
 // Main filter editor: list of per-field filters + field picker
-function FilterEditor({ columns, where, onChange, source, datasourceId }: {
-  columns: string[]; where: Record<string, unknown>; onChange: (w: Record<string, unknown>) => void
+function FilterEditor({ columns, columnMeta, where, onChange, source, datasourceId }: {
+  columns: string[]; columnMeta?: Array<{ name: string; type: string | null }>; where: Record<string, unknown>; onChange: (w: Record<string, unknown>) => void
   source?: string; datasourceId?: string
 }) {
   const [picking, setPicking] = useState(false)
@@ -715,6 +773,7 @@ function FilterEditor({ columns, where, onChange, source, datasourceId }: {
           field={field}
           source={source || ''}
           datasourceId={datasourceId}
+          dbType={columnMeta?.find(c => c.name === field)?.type}
           where={where as Record<string, any>}
           onWhereChange={w => onChange(w)}
           onRemove={() => removeFilter(field)}
@@ -807,15 +866,33 @@ function ElementProps({
             </select>
           </div>
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">Align</label>
-            <select className="w-full h-6 text-[11px] rounded border bg-secondary/60 px-1" value={lbl.align || 'left'} onChange={(e) => patch({ align: e.target.value as any })}>
-              <option value="left">Left</option>
-              <option value="center">Center</option>
-              <option value="right">Right</option>
-            </select>
+            <label className="block text-[11px] text-muted-foreground mb-0.5">H. Align</label>
+            <div className="flex rounded border overflow-hidden h-6">
+              {(['left','center','right'] as const).map((a, i) => (
+                <button key={a} title={a.charAt(0).toUpperCase()+a.slice(1)} onClick={() => patch({ align: a })}
+                  className={`flex-1 flex items-center justify-center transition-colors ${ i > 0 ? 'border-l' : '' } ${ (lbl.align||'left') === a ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary' }`}>
+                  {a === 'left' && <RiAlignLeft className="h-3 w-3" />}
+                  {a === 'center' && <RiAlignCenter className="h-3 w-3" />}
+                  {a === 'right' && <RiAlignRight className="h-3 w-3" />}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <label className="block text-[11px] text-muted-foreground mb-0.5">V. Align</label>
+            <div className="flex rounded border overflow-hidden h-6">
+              {(['top','middle','bottom'] as const).map((a, i) => (
+                <button key={a} title={a.charAt(0).toUpperCase()+a.slice(1)} onClick={() => patch({ verticalAlign: a })}
+                  className={`flex-1 flex items-center justify-center transition-colors ${ i > 0 ? 'border-l' : '' } ${ (lbl.verticalAlign||'middle') === a ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary' }`}>
+                  {a === 'top' && <RiAlignTop className="h-3 w-3" />}
+                  {a === 'middle' && <RiAlignVertically className="h-3 w-3" />}
+                  {a === 'bottom' && <RiAlignBottom className="h-3 w-3" />}
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <label className="block text-[11px] text-muted-foreground mb-0.5">Color</label>
             <input type="color" className="w-full h-6 rounded border cursor-pointer" value={lbl.color || '#000000'} onChange={(e) => patch({ color: e.target.value })} />
@@ -1745,13 +1822,15 @@ function GridCanvas({
               {/* Element preview */}
               <div className="h-full w-full overflow-hidden rounded-sm bg-card/80 border border-border/60">
                 {el.type === 'label' && (
-                  <div className="h-full flex items-center px-1" style={{
+                  <div className="h-full flex px-1" style={{
                     backgroundColor: el.label?.backgroundColor || undefined,
+                    alignItems: el.label?.verticalAlign === 'top' ? 'flex-start' : el.label?.verticalAlign === 'bottom' ? 'flex-end' : 'center',
                   }}>
-                    <span className="truncate" style={{
+                    <span className="truncate w-full" style={{
                       fontSize: el.label?.fontSize ? `${el.label.fontSize}px` : '11px',
                       fontWeight: el.label?.fontWeight === 'bold' ? 700 : el.label?.fontWeight === 'semibold' ? 600 : 400,
                       color: el.label?.color || undefined,
+                      textAlign: (el.label?.align as any) || 'left',
                     }}>{el.label?.text || 'Label'}</span>
                   </div>
                 )}
@@ -1897,7 +1976,16 @@ export default function ReportBuilderModal({
     showGridLines: report?.showGridLines !== false,
   })
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedVarId, setSelectedVarId] = useState<string | null>(null)
   const [panel, setPanel] = useState<'elements' | 'variables'>('elements')
+  const varListRef = useRef<HTMLDivElement>(null)
+
+  // Scroll selected variable row into view
+  useEffect(() => {
+    if (!selectedVarId || !varListRef.current) return
+    const row = varListRef.current.querySelector(`[data-var-id="${selectedVarId}"]`) as HTMLElement | null
+    row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedVarId])
 
   // Sync state if config changes externally
   useEffect(() => {
@@ -1952,10 +2040,20 @@ export default function ReportBuilderModal({
   const addVariable = useCallback(() => {
     const id = genId()
     const name = `Var${state.variables.length + 1}`
-    const v: ReportVariable = { id, name, value: { field: '', agg: 'sum' } }
+    const v: ReportVariable = { id, name, value: { field: '', agg: 'sum' }, format: 'wholeNumber' }
     setState((s) => ({ ...s, variables: [...s.variables, v] }))
     setPanel('variables')
+    setSelectedVarId(id)
   }, [state.variables.length])
+
+  const duplicateVariable = useCallback((id: string) => {
+    setState((s) => {
+      const src = s.variables.find((v) => v.id === id)
+      if (!src) return s
+      const copy: ReportVariable = { ...src, id: genId(), name: src.name + '_copy' }
+      return { ...s, variables: [...s.variables, copy] }
+    })
+  }, [])
 
   const updateVariable = useCallback((id: string, v: ReportVariable) => {
     setState((s) => ({ ...s, variables: s.variables.map((vr) => vr.id === id ? v : vr) }))
@@ -1963,6 +2061,7 @@ export default function ReportBuilderModal({
 
   const deleteVariable = useCallback((id: string) => {
     setState((s) => ({ ...s, variables: s.variables.filter((v) => v.id !== id) }))
+    setSelectedVarId((prev) => (prev === id ? null : prev))
   }, [])
 
   const handleSave = () => {
@@ -1988,7 +2087,7 @@ export default function ReportBuilderModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-background rounded-xl border shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200" style={{ width: '90vw', height: '85vh', maxWidth: '1400px' }}>
+      <div className="bg-background rounded-xl border shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200" style={{ width: '96vw', height: '92vh', maxWidth: '1600px' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b bg-card">
           <div className="flex items-center gap-3">
@@ -2170,26 +2269,95 @@ export default function ReportBuilderModal({
               )}
 
               {panel === 'variables' && (
-                <div className="space-y-3">
-                  {state.variables.map((v) => (
-                    <VariableEditor
-                      key={v.id}
-                      variable={v}
-                      onUpdate={(vr) => updateVariable(v.id, vr)}
-                      onDelete={() => deleteVariable(v.id)}
-                    />
-                  ))}
-                  {state.variables.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-12 text-center">
-                      <div className="flex items-center justify-center h-10 w-10 rounded-full bg-secondary mb-3">
-                        <RiHashtag className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                      <p className="text-xs text-muted-foreground mb-3">No variables yet</p>
-                      <button className="text-[11px] font-medium text-primary hover:text-primary/80 transition-colors flex items-center gap-1" onClick={addVariable}>
-                        <RiAddLine className="h-3.5 w-3.5" /> Create your first variable
+                <div className="flex flex-col -mx-3 -mt-3" style={{ height: 'calc(100% + 12px)' }}>
+                  {/* Top half: + Variable button + scrollable list */}
+                  <div className="flex flex-col border-b" style={{ height: '50%' }}>
+                    {/* Toolbar */}
+                    <div className="flex items-center justify-between px-3 py-1.5 border-b bg-secondary/20 shrink-0">
+                      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Variables</span>
+                      <button
+                        className="flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 hover:bg-primary/10 px-2 py-0.5 rounded transition-colors"
+                        onClick={addVariable}
+                      >
+                        <RiAddLine className="h-3 w-3" /> Variable
                       </button>
                     </div>
-                  )}
+                    {/* Scrollable table */}
+                    <div ref={varListRef} className="overflow-y-auto flex-1">
+                      {state.variables.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-8 text-center px-3">
+                          <RiHashtag className="h-6 w-6 text-muted-foreground mb-2" />
+                          <p className="text-xs text-muted-foreground">No variables yet — click + Variable</p>
+                        </div>
+                      ) : (
+                        <table className="w-full text-[11px]">
+                          <thead className="sticky top-0 z-10">
+                            <tr className="bg-secondary/60 border-b">
+                              <th className="text-left px-3 py-1.5 text-[10px] font-semibold text-muted-foreground">Name</th>
+                              <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted-foreground">Type</th>
+                              <th className="w-12 px-1 py-1.5" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {state.variables.map((v) => (
+                              <tr
+                                key={v.id}
+                                data-var-id={v.id}
+                                className={`group border-b last:border-0 cursor-pointer transition-colors duration-100 ${selectedVarId === v.id ? 'bg-primary/10' : 'hover:bg-secondary/40'}`}
+                                onClick={() => setSelectedVarId(v.id)}
+                              >
+                                <td className="px-3 py-1">
+                                  <input
+                                    className="bg-transparent border-b border-dashed border-transparent hover:border-border focus:border-primary outline-none w-full text-[11px] font-medium"
+                                    value={v.name}
+                                    onChange={(e) => updateVariable(v.id, { ...v, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') })}
+                                    onClick={(e) => e.stopPropagation()}
+                                    placeholder="VarName"
+                                  />
+                                </td>
+                                <td className="px-2 py-1">
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${v.type === 'expression' ? 'bg-amber-500/10 text-amber-600' : v.type === 'datetime' ? 'bg-blue-500/10 text-blue-500' : 'bg-primary/10 text-primary'}`}>
+                                    {v.type || 'query'}
+                                  </span>
+                                </td>
+                                <td className="px-1 py-1">
+                                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button title="Duplicate" className="p-0.5 rounded hover:bg-secondary text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); duplicateVariable(v.id) }}>
+                                      <RiFileCopyLine className="h-3 w-3" />
+                                    </button>
+                                    <button title="Delete" className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteVariable(v.id) }}>
+                                      <RiDeleteBinLine className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                  {/* Bottom half: variable editor */}
+                  <div className="overflow-y-auto" style={{ height: '50%' }}>
+                    {selectedVarId && (() => {
+                      const selVar = state.variables.find((v) => v.id === selectedVarId)
+                      if (!selVar) return null
+                      return (
+                        <VariableEditor
+                          key={selectedVarId}
+                          variable={selVar}
+                          onUpdate={(vr) => updateVariable(selVar.id, vr)}
+                          onDelete={() => deleteVariable(selVar.id)}
+                          onDuplicate={() => duplicateVariable(selVar.id)}
+                        />
+                      )
+                    })()}
+                    {!selectedVarId && (
+                      <div className="flex flex-col items-center justify-center h-full text-center px-3">
+                        <p className="text-xs text-muted-foreground">Select a variable to configure it</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
