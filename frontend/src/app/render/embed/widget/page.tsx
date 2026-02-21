@@ -148,12 +148,13 @@ export default function EmbedWidget() {
     return () => { try { clearInterval(iv) } catch {}; try { clearTimeout(to) } catch {} }
   }, [isSnap, widgetCfg?.id])
 
-  // Report widgets are DOM-only (no canvas) — fire ready after a short settle delay
+  // Report widgets fire widget-data-ready from ReportCard itself (after queries done).
+  // This is a last-resort fallback only — fires after 25s if nothing else fired.
   useEffect(() => {
     if (!isSnap || widgetCfg?.type !== 'report' || loading || !!error) return
     const t = setTimeout(() => {
       try { window.dispatchEvent(new CustomEvent('widget-data-ready')) } catch {}
-    }, 1200)
+    }, 25000)
     return () => clearTimeout(t)
   }, [isSnap, widgetCfg?.type, widgetCfg?.id, loading, error])
 
@@ -265,6 +266,7 @@ export default function EmbedWidget() {
                 options={opts}
                 widgetId={cfg.id}
                 datasourceId={cfg.datasourceId}
+                snap={isSnap}
               />
             )}
           </div>

@@ -102,7 +102,7 @@ def _fetch_snapshot_png_direct(*, dashboard_id: Optional[str], public_id: Option
                     page.goto(url, wait_until="domcontentloaded")
                     try:
                         page.wait_for_function(
-                            "() => { const root = document.getElementById('widget-root'); if (!root) return false; const wd = (window.__READY__ === true); const chartOk = (root.getAttribute('data-chart-ready') === '1'); return wd && chartOk; }",
+                            "() => { const root = document.getElementById('widget-root'); if (!root) return false; const wd = (window.__READY__ === true); const chartOk = (root.getAttribute('data-chart-ready') === '1'); const widgetOk = (root.getAttribute('data-widget-ready') === '1'); return (wd && chartOk) || widgetOk; }",
                             timeout=wait_ms,
                         )
                     except Exception:
@@ -1983,7 +1983,8 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progr
                             except Exception: pass
                         # Do not attempt Playwright without dashboard context
                         raise Exception("snapshot_missing_dashboard_id")
-                    png = _fetch_snapshot_png_direct(dashboard_id=did, public_id=None, token=None, widget_id=str(wid), datasource_id=ds_id, width=w, height=h, theme=th, actor_id=actor_for_snapshot, wait_ms=20000, retries=1)
+                    snap_wait_ms = 30000 if mode_ == 'report' else 20000
+                    png = _fetch_snapshot_png_direct(dashboard_id=did, public_id=None, token=None, widget_id=str(wid), datasource_id=ds_id, width=w, height=h, theme=th, actor_id=actor_for_snapshot, wait_ms=snap_wait_ms, retries=1)
                     if png:
                         snapshot_ok = True
                         if progress_cb:

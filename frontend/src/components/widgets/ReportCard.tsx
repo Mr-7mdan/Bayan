@@ -366,11 +366,13 @@ export default function ReportCard({
   options,
   widgetId,
   datasourceId,
+  snap,
 }: {
   title: string
   options?: WidgetConfig['options']
   widgetId?: string
   datasourceId?: string
+  snap?: boolean
 }) {
   const { user } = useAuth()
   const { filters } = useFilters()
@@ -384,6 +386,16 @@ export default function ReportCard({
   const queryResults = useQueries({
     queries: queryVars.map(v => buildVarQueryOptions(v, filters || {})),
   })
+
+  // In snapshot mode, fire widget-data-ready only after all queries have resolved
+  const allQueriesDone = queryResults.length === 0 || queryResults.every(q => !q.isLoading && !q.isFetching)
+  useEffect(() => {
+    if (!snap || !allQueriesDone) return
+    const t = setTimeout(() => {
+      try { window.dispatchEvent(new CustomEvent('widget-data-ready')) } catch {}
+    }, 400)
+    return () => clearTimeout(t)
+  }, [snap, allQueriesDone])
 
   // Build resolved values map
   const resolvedValues = useMemo(() => {
