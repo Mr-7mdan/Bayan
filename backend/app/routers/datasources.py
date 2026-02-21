@@ -2767,7 +2767,7 @@ def import_sql_commit(
                     stream_res = src.execution_options(stream_results=True).execute(text(sql))
                 except Exception:
                     stream_res = src.execute(text(sql))
-                columns = list(stream_res.keys())
+                columns = [c.strip() for c in stream_res.keys()]
                 with open_duck_native(duck_path) as duck:
                     tbl_exists = duck.execute(
                         "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?",

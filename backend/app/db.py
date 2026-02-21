@@ -1308,7 +1308,7 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                     res = src.execute(text(batch_sql), {"last": seq, "lim": _fetch_size})
                     rows = res.fetchall()
                     if not columns:
-                        columns = list(res.keys())
+                        columns = [c.strip() for c in res.keys()]
                     elapsed = time.time() - t0
                     print(f"[SYNC] Batch {batches}: {len(rows)} rows in {elapsed:.1f}s (seq>{seq})", flush=True)
                 except Exception as e:
@@ -1433,7 +1433,7 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                 probe = src.execute(text(f"SELECT TOP 0 {sel_clause} FROM {q_source}"))
             else:
                 probe = src.execute(text(f"SELECT {sel_clause} FROM {q_source} LIMIT 0"))
-            columns = list(probe.keys())
+            columns = [c.strip() for c in probe.keys()]
             # Sample a small batch to infer types for staging table
             try:
                 if src_dialect.startswith('mssql'):

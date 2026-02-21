@@ -80,7 +80,7 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
         const spec: any = {
           source: variable.source,
           agg,
-          y: field,
+          y: field.trim(),
           where: hasWhere ? where : undefined,
         }
         const r = await QueryApi.querySpec({ spec, datasourceId: variable.datasourceId, limit: 1000, offset: 0, includeTotal: false })
@@ -100,7 +100,7 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
         // No aggregation: fetch raw first row value
         const spec: any = {
           source: variable.source,
-          select: [field],
+          select: [field.trim()],
           where: hasWhere ? where : undefined,
           limit: 1,
           offset: 0,
@@ -414,15 +414,17 @@ export default function ReportCard({
       if (v.type !== 'expression' || !v.expression) continue
       try {
         let expr = v.expression
-        let allResolved = true
+        let anyLoading = false
+        // Only substitute variables that are actually referenced in the expression
         for (const refVar of variables) {
           if (refVar.id === v.id) continue
+          if (!new RegExp(`\\b${refVar.name}\\b`).test(v.expression)) continue
           const ref = rv[refVar.id]
-          if (!ref || ref.loading) { allResolved = false; break }
+          if (!ref || ref.loading) { anyLoading = true; break }
           const val = typeof ref.value === 'number' ? ref.value : parseFloat(String(ref.value || 0))
           expr = expr.replace(new RegExp(`\\b${refVar.name}\\b`, 'g'), String(val))
         }
-        if (allResolved) {
+        if (!anyLoading) {
           const result = Function('"use strict"; return (' + expr + ')')() as number
           rv[v.id] = { value: v.reverseSign && typeof result === 'number' ? -result : result, loading: false }
         } else {
