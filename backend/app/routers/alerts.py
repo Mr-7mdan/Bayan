@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from ..models import SessionLocal, AlertRule, EmailConfig, SmsConfigHadara, AlertRun, Dashboard
 from ..security import encrypt_text, decrypt_text
 from ..alerts_service import run_rule, send_email, send_sms_hadara, evaluate_threshold, _render_kpi_html  # type: ignore
+from ..scheduler import schedule_all_alert_jobs as _sync_alert_jobs
 from ..alerts_service import _render_table_html, _apply_base_template, _apply_xpick_to_where, _render_report_html, _lookup_widget_config  # type: ignore
 from ..alerts_service import _build_kpi_svg, _build_chart_svg_placeholder, _to_svg_data_uri, _fmt_num  # type: ignore
 from ..routers.query import run_query_spec, run_pivot, period_totals  # reuse query execution
@@ -154,6 +155,10 @@ async def create_alert(payload: AlertCreate, db: Session = Depends(get_db)) -> A
     db.add(a)
     db.commit()
     db.refresh(a)
+    try:
+        _sync_alert_jobs()
+    except Exception:
+        pass
     return AlertOut.from_model(a)
 
 
@@ -179,6 +184,10 @@ async def update_alert(alert_id: str, payload: AlertCreate, db: Session = Depend
     db.add(a)
     db.commit()
     db.refresh(a)
+    try:
+        _sync_alert_jobs()
+    except Exception:
+        pass
     return AlertOut.from_model(a)
 
 
@@ -189,6 +198,10 @@ async def delete_alert(alert_id: str, db: Session = Depends(get_db)) -> dict:
         return {"deleted": 0}
     db.delete(a)
     db.commit()
+    try:
+        _sync_alert_jobs()
+    except Exception:
+        pass
     return {"deleted": 1}
 
 

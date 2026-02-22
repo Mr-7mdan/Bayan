@@ -4,16 +4,19 @@ import { useEffect, useMemo, useState } from 'react'
 
 export type AdvancedSqlComputedBuilderProps = {
   columns: string[]
-  onAddAction: (tr: { type: 'computed'; name: string; expr: string; valueType?: 'string'|'number'|'date'|'boolean' }) => void
+  onAddAction: (tr: { type: 'computed'; name: string; expr: string; valueType?: 'string'|'number'|'date'|'boolean'; scope?: any }) => void
   onCancelAction?: () => void
-  initial?: { type: 'computed'; name: string; expr: string; valueType?: 'string'|'number'|'date'|'boolean' }
+  initial?: { type: 'computed'; name: string; expr: string; valueType?: 'string'|'number'|'date'|'boolean'; scope?: any }
   submitLabel?: string
+  dsId?: string
+  tableName?: string | null
 }
 
-export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCancelAction, initial, submitLabel }: AdvancedSqlComputedBuilderProps) {
+export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCancelAction, initial, submitLabel, dsId, tableName }: AdvancedSqlComputedBuilderProps) {
   const [name, setName] = useState<string>('')
   const [expr, setExpr] = useState<string>('')
   const [valueType, setValueType] = useState<'string'|'number'|'date'|'boolean' | ''>('')
+  const [scopeLevel, setScopeLevel] = useState<'datasource' | 'table'>('datasource')
 
   useEffect(() => {
     if (!initial) return
@@ -21,8 +24,21 @@ export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCan
       setName(String(initial.name || ''))
       setExpr(String(initial.expr || ''))
       setValueType(((initial.valueType as any) || '') as any)
+      const initScope = initial.scope
+      if (initScope?.level === 'table') {
+        setScopeLevel('table')
+      } else {
+        setScopeLevel('datasource')
+      }
     } catch {}
   }, [initial])
+
+  // Default to table scope if table is selected
+  useEffect(() => {
+    if (tableName && !initial) {
+      setScopeLevel('table')
+    }
+  }, [tableName, initial])
 
   const canAdd = useMemo(() => name.trim() !== '' && expr.trim() !== '', [name, expr])
 
@@ -36,7 +52,7 @@ export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCan
         <label className="text-xs text-muted-foreground sm:col-span-1">Expression</label>
         <input className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" placeholder="SQL expression, e.g., price * qty" value={expr} onChange={(e)=>setExpr(e.target.value)} />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
         <label className="text-xs text-muted-foreground sm:col-span-1">Value type</label>
         <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={valueType} onChange={(e)=>setValueType(e.target.value as any)}>
           <option value="">(infer)</option>
@@ -46,11 +62,24 @@ export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCan
           <option value="boolean">boolean</option>
         </select>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
+        <label className="text-xs text-muted-foreground sm:col-span-1">Scope</label>
+        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e)=>setScopeLevel(e.target.value as any)}>
+          <option value="datasource">Datasource-wide</option>
+          {tableName && <option value="table">Table: {tableName}</option>}
+        </select>
+      </div>
       <div className="flex items-center justify-end gap-2">
         <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCancelAction}>Cancel</button>
         <button className={`text-xs px-2 py-1 rounded-md border ${canAdd? 'bg-[hsl(var(--btn3))] text-black':'opacity-60 cursor-not-allowed'}`} disabled={!canAdd} onClick={()=>{
           const payload: any = { type: 'computed' as const, name: name.trim(), expr: expr.trim() }
           if (valueType) payload.valueType = valueType
+          // Build scope
+          if (scopeLevel === 'table' && tableName) {
+            payload.scope = { level: 'table', table: tableName }
+          } else {
+            payload.scope = { level: 'datasource' }
+          }
           onAddAction(payload)
         }}>{submitLabel || 'Add Computed'}</button>
       </div>

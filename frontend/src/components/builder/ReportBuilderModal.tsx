@@ -6,7 +6,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Api, QueryApi } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
-import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom } from '@remixicon/react'
+import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line } from '@remixicon/react'
+import DataExplorerDialogV2 from './DataExplorerDialogV2'
 
 const genId = () => Math.random().toString(36).slice(2, 10)
 
@@ -195,12 +196,14 @@ function VariableEditor({
   onUpdate,
   onDelete,
   onDuplicate,
+  widgetId,
 }: {
   variable: ReportVariable
   allVariables: ReportVariable[]
   onUpdate: (v: ReportVariable) => void
   onDelete: () => void
   onDuplicate?: () => void
+  widgetId?: string
 }) {
   const { user } = useAuth()
   const dsQ = useQuery({ queryKey: ['datasources'], queryFn: () => Api.listDatasources(undefined, user?.id) })
@@ -208,6 +211,7 @@ function VariableEditor({
 
   const [dsId, setDsId] = useState(variable.datasourceId || '')
   const [source, setSource] = useState(variable.source || '')
+  const [showExplorer, setShowExplorer] = useState(false)
 
   // Sync local state when variable changes externally
   useEffect(() => {
@@ -289,7 +293,142 @@ function VariableEditor({
     enabled: !!(dsId && source),
   })
   const columnsMeta: Array<{ name: string; type: string | null }> = columnsQ.data || []
-  const columns = columnsMeta.map((c) => c.name)
+
+  // Include join-added columns from datasource transforms
+  const dsTransformsQ = useQuery({
+    queryKey: ['ds-transforms', dsId],
+    queryFn: () => dsId ? Api.getDatasourceTransforms(dsId) : null,
+    enabled: !!dsId,
+    staleTime: 0, // Always fetch fresh to prevent cross-datasource pollution
+    refetchOnMount: true, // Refetch when component mounts
+    placeholderData: undefined, // Don't show previous data while refetching
+  })
+  const transformColumns = useMemo(() => {
+    try {
+      // Safety check: only process transforms if they match the currently selected datasource
+      // This prevents React Query cache timing issues when switching datasources
+      if (!dsId || !dsTransformsQ.data || !source) return []
+      
+      const norm = (s: string) => String(s || '').trim().replace(/^\[|\]|^"|"$/g, '')
+      const tblEq = (a: string, b: string) => {
+        const na = norm(a).split('.').pop() || ''
+        const nb = norm(b).split('.').pop() || ''
+        return na.toLowerCase() === nb.toLowerCase()
+      }
+      
+      // Build set of available base columns from schema
+      const baseColsSet = new Set(columnsMeta.map(c => c.name.toLowerCase()))
+      const hasSchemaData = columnsMeta.length > 0
+      
+      // Helper to extract column references from expression
+      const extractRefs = (expr: string): Set<string> => {
+        const refs = new Set<string>()
+        // Match unquoted identifiers and quoted identifiers
+        const pattern = /\b[a-zA-Z_][a-zA-Z0-9_]*\b|"([^"]+)"|'([^']+)'|\[([^\]]+)\]/g
+        let match
+        while ((match = pattern.exec(expr)) !== null) {
+          const ref = (match[1] || match[3] || match[0]).toLowerCase()
+          if (ref && !['and', 'or', 'not', 'case', 'when', 'then', 'else', 'end', 'null', 'true', 'false', 'cast', 'as', 'left', 'right', 'varchar', 'int', 'double', 'float'].includes(ref)) {
+            refs.add(ref)
+          }
+        }
+        return refs
+      }
+      
+      const out: string[] = []
+      
+      // Custom columns - only include if dependencies exist in base table
+      const customCols = Array.isArray((dsTransformsQ.data as any)?.customColumns) ? ((dsTransformsQ.data as any).customColumns as any[]) : []
+      
+      for (const cc of customCols) {
+        const sc = (cc?.scope || {}) as any
+        const lvl = String(sc?.level || 'datasource').toLowerCase()
+        const scopeMatch = (
+          lvl === 'datasource' ||
+          (lvl === 'table' && sc?.table && source && tblEq(String(sc.table), source)) ||
+          (lvl === 'widget' && widgetId && String(sc?.widgetId || '') === String(widgetId))
+        )
+        if (!scopeMatch || !cc?.name) continue
+        
+        // For datasource-scoped columns, check if dependencies exist in current table
+        // Only filter if we have schema data, otherwise allow through (will be validated at query time)
+        if (lvl === 'datasource' && cc?.expr && hasSchemaData) {
+          const refs = extractRefs(String(cc.expr))
+          // Only skip if we can confirm dependencies are missing
+          if (refs.size > 0) {
+            const allDepsExist = Array.from(refs).every(ref => baseColsSet.has(ref))
+            if (!allDepsExist) continue // Skip if dependencies don't exist
+          }
+        }
+        
+        out.push(String(cc.name).trim())
+      }
+      
+      // Transforms (computed, case, etc.) - check dependencies for datasource-scoped
+      const transforms = Array.isArray((dsTransformsQ.data as any)?.transforms) ? ((dsTransformsQ.data as any).transforms as any[]) : []
+      for (const tr of transforms) {
+        const sc = (tr?.scope || {}) as any
+        const lvl = String(sc?.level || 'datasource').toLowerCase()
+        const scopeMatch = (
+          lvl === 'datasource' ||
+          (lvl === 'table' && sc?.table && source && tblEq(String(sc.table), source)) ||
+          (lvl === 'widget' && widgetId && String(sc?.widgetId || '') === String(widgetId))
+        )
+        if (!scopeMatch) continue
+        
+        const type = String(tr?.type || '').toLowerCase()
+        let name: string | null = null
+        let expr: string | null = null
+        
+        if (type === 'computed' && tr?.name) {
+          name = String(tr.name).trim()
+          expr = tr?.expr ? String(tr.expr) : null
+        } else if ((type === 'case' || type === 'replace' || type === 'translate' || type === 'nullhandling') && tr?.target) {
+          name = String(tr.target).trim()
+          // These transform types modify existing columns, so target column must exist
+          if (lvl === 'datasource' && !baseColsSet.has(name.toLowerCase())) continue
+        }
+        
+        if (!name) continue
+        
+        // For datasource-scoped computed transforms, check dependencies
+        if (lvl === 'datasource' && expr) {
+          const refs = extractRefs(expr)
+          const allDepsExist = Array.from(refs).every(ref => baseColsSet.has(ref))
+          if (!allDepsExist) continue
+        }
+        
+        out.push(name)
+      }
+      
+      // Join columns - check if sourceKey exists in base table for datasource-scoped joins
+      const joins = Array.isArray((dsTransformsQ.data as any)?.joins) ? ((dsTransformsQ.data as any).joins as any[]) : []
+      for (const j of joins) {
+        const sc = (j?.scope || {}) as any
+        const lvl = String(sc?.level || 'datasource').toLowerCase()
+        const scopeMatch = (
+          lvl === 'datasource' ||
+          (lvl === 'table' && sc?.table && source && tblEq(String(sc.table), source)) ||
+          (lvl === 'widget' && widgetId && String(sc?.widgetId || '') === String(widgetId))
+        )
+        if (!scopeMatch) continue
+        
+        // For datasource-scoped joins, check if sourceKey exists in base table
+        if (lvl === 'datasource' && j?.sourceKey) {
+          const sourceKey = String(j.sourceKey).toLowerCase()
+          if (!baseColsSet.has(sourceKey)) continue
+        }
+        
+        const cols = Array.isArray(j?.columns) ? (j.columns as any[]) : []
+        cols.forEach((c: any) => { const nm = String((c?.alias || c?.name || '')).trim(); if (nm) out.push(nm) })
+        const aggAlias = String((j?.aggregate as any)?.alias || '').trim()
+        if (aggAlias) out.push(aggAlias)
+      }
+      
+      return out
+    } catch { return [] }
+  }, [dsId, dsTransformsQ.data, source, widgetId, columnsMeta])
+  const columns = [...new Set([...columnsMeta.map((c) => c.name), ...transformColumns])]
 
   const AGG_OPTIONS = ['none', 'count', 'distinct', 'avg', 'sum', 'min', 'max'] as const
   const FORMAT_OPTIONS = ['none', 'short', 'currency', 'percent', 'wholeNumber', 'oneDecimal', 'twoDecimals'] as const
@@ -329,21 +468,59 @@ function VariableEditor({
               <div>
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Value</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.datetimeExpr || 'now'} onChange={(e) => handleChange({ datetimeExpr: e.target.value as any })}>
-                  <option value="now">now()</option>
-                  <option value="today">today()</option>
+                  <optgroup label="Now">
+                    <option value="now">now()</option>
+                    <option value="today">today()</option>
+                  </optgroup>
+                  <optgroup label="Days">
+                    <option value="yesterday">YTDY – Yesterday</option>
+                    <option value="last_working_day">LWDay – Last Working Day</option>
+                    <option value="day_before_last_working_day">DBLWDay – Day Before Last Working Day</option>
+                  </optgroup>
+                  <optgroup label="Weeks">
+                    <option value="this_week">TW – This Week</option>
+                    <option value="last_week">LW – Last Week</option>
+                    <option value="last_working_week">LWWeek – Last Working Week</option>
+                    <option value="week_before_last_working_week">WBLWWeek – Week Before Last Working Week</option>
+                  </optgroup>
+                  <optgroup label="Months">
+                    <option value="this_month">TMonth – This Month</option>
+                    <option value="last_month">LMonth – Last Month</option>
+                  </optgroup>
+                  <optgroup label="Years">
+                    <option value="this_year">TYear – This Year</option>
+                    <option value="last_year">LYear – Last Year</option>
+                  </optgroup>
+                  <optgroup label="Cumulative">
+                    <option value="ytd">YTD – Year to Date</option>
+                    <option value="mtd">MTD – Month to Date</option>
+                  </optgroup>
                 </select>
               </div>
+              {['now','today','yesterday','last_working_day','day_before_last_working_day'].includes(variable.datetimeExpr || 'now') && (
               <div>
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Format</label>
-                <input
-                  className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 font-mono focus:ring-1 focus:ring-primary/40 outline-none transition-shadow"
+                <select
+                  className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer"
                   value={variable.dateFormat || 'dd MMM yyyy'}
                   onChange={(e) => handleChange({ dateFormat: e.target.value })}
-                  placeholder="dd MMM yyyy"
-                />
+                >
+                  <option value="dd MMM yyyy">22 Feb 2025</option>
+                  <option value="dd/MM/yyyy">22/02/2025</option>
+                  <option value="dd-MM-yyyy">22-02-2025</option>
+                  <option value="MM/dd/yyyy">02/22/2025</option>
+                  <option value="yyyy-MM-dd">2025-02-22</option>
+                  <option value="dd MMMM yyyy">22 February 2025</option>
+                  <option value="ddd, dd MMM yyyy">Sat, 22 Feb 2025</option>
+                  <option value="dddd, dd MMMM yyyy">Saturday, 22 February 2025</option>
+                  <option value="MMM yyyy">Feb 2025</option>
+                  <option value="MMMM yyyy">February 2025</option>
+                  <option value="dd MMM yyyy HH:mm">22 Feb 2025 14:30</option>
+                  <option value="HH:mm">14:30</option>
+                </select>
               </div>
+              )}
             </div>
-            <p className="text-[9px] text-muted-foreground opacity-70">dd/MM/yyyy · MMM yyyy · HH:mm · dddd dd MMMM yyyy</p>
           </div>
         )}
 
@@ -352,10 +529,21 @@ function VariableEditor({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Datasource</label>
-                <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={dsId} onChange={(e) => { setDsId(e.target.value); handleChange({ datasourceId: e.target.value, source: '' }) }}>
-                  <option value="">Select…</option>
-                  {datasources.map((ds: any) => <option key={ds.id} value={ds.id}>{ds.name || ds.id}</option>)}
-                </select>
+                <div className="flex gap-1">
+                  <select className="flex-1 h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={dsId} onChange={(e) => { setDsId(e.target.value); handleChange({ datasourceId: e.target.value, source: '' }) }}>
+                    <option value="">Select…</option>
+                    {datasources.map((ds: any) => <option key={ds.id} value={ds.id}>{ds.name || ds.id}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className="h-7 w-7 flex items-center justify-center rounded-md border bg-secondary/40 hover:bg-secondary/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => setShowExplorer(true)}
+                    disabled={!dsId || dsQ.isLoading || !datasources.find((ds: any) => ds.id === dsId)}
+                    title="Open Data Explorer"
+                  >
+                    <RiDatabase2Line size={14} />
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Table</label>
@@ -409,11 +597,25 @@ function VariableEditor({
           </details>
         )}
 
+        {/* Data Explorer Dialog */}
+        {showExplorer && dsId && (() => {
+          const ds = datasources.find((ds: any) => ds.id === dsId)
+          if (!ds) return null
+          return (
+            <DataExplorerDialogV2
+              open={true}
+              onClose={() => setShowExplorer(false)}
+              datasource={ds}
+              initialTable={source || undefined}
+            />
+          )
+        })()}
+
         {/* Filters */}
         {varType === 'query' && (
           <div className="border-t pt-2.5">
             <label className="block text-[10px] font-medium text-muted-foreground mb-1.5">Filters (WHERE)</label>
-            <FilterEditor columns={columns} columnMeta={columnsMeta} where={variable.where || {}} onChange={(w) => handleChange({ where: w })} source={source} datasourceId={dsId} />
+            <FilterEditor columns={columns} columnMeta={columnsMeta} where={variable.where || {}} onChange={(w) => handleChange({ where: w })} source={source} datasourceId={dsId} widgetId={widgetId} />
           </div>
         )}
         {/* Reverse Sign */}
@@ -450,8 +652,8 @@ function detectFieldKind(samples: string[]): 'date' | 'number' | 'string' {
 }
 
 // Manual values tab: fetches distinct values, checkboxes, search, select/deselect all
-function ManualFilterValues({ field, source, datasourceId, selected, onApply }: {
-  field: string; source: string; datasourceId?: string; selected: any[]; onApply: (vals: any[]) => void
+function ManualFilterValues({ field, source, datasourceId, widgetId, selected, onApply }: {
+  field: string; source: string; datasourceId?: string; widgetId?: string; selected: any[]; onApply: (vals: any[]) => void
 }) {
   const [sel, setSel] = useState<any[]>(selected || [])
   const [search, setSearch] = useState('')
@@ -470,7 +672,7 @@ function ManualFilterValues({ field, source, datasourceId, selected, onApply }: 
         // Try DISTINCT endpoint first
         if (typeof (Api as any).distinct === 'function') {
           try {
-            const res = await (Api as any).distinct({ source: String(source), field: String(field), where: undefined, datasourceId })
+            const res = await (Api as any).distinct({ source: String(source), field: String(field), where: undefined, datasourceId, widgetId })
             const vals = ((res?.values || []) as any[]).map(v => v != null ? String(v) : null).filter(Boolean) as string[]
             if (!abort) { setSamples(Array.from(new Set(vals)).sort()); setLoading(false) }
             return
@@ -488,7 +690,7 @@ function ManualFilterValues({ field, source, datasourceId, selected, onApply }: 
     }
     run()
     return () => { abort = true }
-  }, [field, source, datasourceId])
+  }, [field, source, datasourceId, widgetId])
 
   const filtered = samples.filter(v => String(v).toLowerCase().includes(search.toLowerCase()))
   const toggle = (v: any) => setSel(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])
@@ -535,18 +737,24 @@ function ManualFilterValues({ field, source, datasourceId, selected, onApply }: 
 // Date rule tab: presets (Today, Yesterday…) + custom (After/Before/Between)
 // Week-start-day: 0=Sunday (default via NEXT_PUBLIC_WEEK_START_DAY), 1=Monday
 const _DEFAULT_WEEK_START = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
+const _DEFAULT_WEEKENDS = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN'
 const WEEK_PRESETS = new Set(['this_week', 'last_week', 'week_before_last'])
+const WORKING_DAY_PRESETS = new Set(['last_working_day', 'day_before_last_working_day', 'last_working_week', 'week_before_last_working_week'])
+const WORKING_WEEK_PRESETS = new Set(['last_working_week', 'week_before_last_working_week'])
 
 function DateRuleEditor({ field, where, onPatch }: { field: string; where: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
-  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
+  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
   type CustomOp = 'after'|'before'|'between'
   const [mode, setMode] = useState<'preset'|'custom'>('preset')
   const [preset, setPreset] = useState<Preset>('today')
   const [weekStartDay, setWeekStartDay] = useState<string>(() => String(where?.['__week_start_day'] ?? _DEFAULT_WEEK_START).toUpperCase())
+  const [weekends, setWeekends] = useState<string>(() => String(where?.['__weekends'] ?? _DEFAULT_WEEKENDS).toUpperCase())
   const [op, setOp] = useState<CustomOp>('between')
   const [a, setA] = useState(''); const [b, setB] = useState('')
 
   const isWeekPreset = WEEK_PRESETS.has(preset)
+  const isWorkingDayPreset = WORKING_DAY_PRESETS.has(preset)
+  const isWorkingWeekPreset = WORKING_WEEK_PRESETS.has(preset)
 
   function rangeForPreset(p: Preset): { gte?: string; lt?: string } {
     const now = new Date()
@@ -566,10 +774,19 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       s.setDate(s.getDate() - offset)
       return s
     }
+    // JS getDay(): 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
+    const weekendDaysJs = weekends === 'FRI_SAT' ? [5, 6] : [0, 6]
     const prevWorkday = (d: Date) => {
       const c = new Date(d); c.setDate(c.getDate() - 1)
-      while (c.getDay() === 0 || c.getDay() === 6) c.setDate(c.getDate() - 1)
+      while (weekendDaysJs.includes(c.getDay())) c.setDate(c.getDate() - 1)
       return c
+    }
+    // Working week starts on Monday (SAT_SUN weekends) or Sunday (FRI_SAT weekends)
+    const workingWeekStartDay = weekends === 'FRI_SAT' ? 0 : 1 // JS getDay(): 0=Sun, 1=Mon
+    const startOfWorkingWeek = (d: Date) => {
+      const s = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+      while (s.getDay() !== workingWeekStartDay) s.setDate(s.getDate() - 1)
+      return s
     }
     switch (p) {
       case 'today': { const s = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const e = new Date(s); e.setDate(e.getDate()+1); return { gte: ymd(s), lt: ymd(e) } }
@@ -577,6 +794,8 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       case 'day_before_yesterday': { const lt = new Date(now.getFullYear(), now.getMonth(), now.getDate()); lt.setDate(lt.getDate()-1); const s = new Date(lt); s.setDate(s.getDate()-1); return { gte: ymd(s), lt: ymd(lt) } }
       case 'last_working_day': { const t0 = new Date(now.getFullYear(),now.getMonth(),now.getDate()); const lwd = prevWorkday(t0); const e = new Date(lwd); e.setDate(e.getDate()+1); return { gte: ymd(lwd), lt: ymd(e) } }
       case 'day_before_last_working_day': { const t0 = new Date(now.getFullYear(),now.getMonth(),now.getDate()); const dlwd = prevWorkday(prevWorkday(t0)); const e = new Date(dlwd); e.setDate(e.getDate()+1); return { gte: ymd(dlwd), lt: ymd(e) } }
+      case 'last_working_week': { const ws = startOfWorkingWeek(now); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
+      case 'week_before_last_working_week': { const ws = startOfWorkingWeek(now); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
       case 'this_week': { const ws = startOfWeek(now); const e = new Date(ws); e.setDate(e.getDate()+7); return { gte: ymd(ws), lt: ymd(e) } }
       case 'last_week': { const ws = startOfWeek(now); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
       case 'week_before_last': { const ws = startOfWeek(now); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
@@ -589,11 +808,13 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
     }
   }
 
-  const applyPreset = (p: Preset, wsd?: string) => {
+  const applyPreset = (p: Preset, wsd?: string, wkends?: string) => {
     const effectiveWsd = wsd ?? weekStartDay
-    // Store symbolic preset — backend resolves at query execution time
-    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: p, [field]: undefined, __week_start_day: undefined }
+    const effectiveWkends = wkends ?? weekends
+    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: p, [field]: undefined, __week_start_day: undefined, __weekends: undefined }
     if (WEEK_PRESETS.has(p)) patch['__week_start_day'] = effectiveWsd
+    if (WORKING_DAY_PRESETS.has(p)) patch['__weekends'] = effectiveWkends
+    if (WORKING_WEEK_PRESETS.has(p)) patch['__week_start_day'] = effectiveWsd
     onPatch(patch)
   }
 
@@ -612,10 +833,12 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
   useEffect(() => {
     const existingPreset = where?.[`${field}__date_preset`] as string | undefined
     if (existingPreset) {
-      const allPresets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','this_week','last_week','week_before_last','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+      const allPresets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
       if (allPresets.includes(existingPreset as Preset)) { setMode('preset'); setPreset(existingPreset as Preset) }
       const savedWsd = where?.['__week_start_day']
       if (savedWsd != null) setWeekStartDay(String(savedWsd).toUpperCase())
+      const savedWkends = where?.['__weekends']
+      if (savedWkends != null) setWeekends(String(savedWkends).toUpperCase())
       return
     }
     const gte = where?.[`${field}__gte`] as string | undefined
@@ -631,7 +854,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
     <div className="rounded-md border bg-card p-2 space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-[11px] font-medium">Date rule: {field}</div>
-        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setA(''); setB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined, __week_start_day: undefined }) }}>Clear</button>
+        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setA(''); setB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined, __week_start_day: undefined, __weekends: undefined }) }}>Clear</button>
       </div>
       <div className="flex items-center gap-3 text-[11px]">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={() => setMode('preset')} /> Preset</label>
@@ -646,6 +869,10 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
               <option value="day_before_yesterday">Day Before Yesterday</option>
               <option value="last_working_day">Last Working Day</option>
               <option value="day_before_last_working_day">Day Before Last Working Day</option>
+            </optgroup>
+            <optgroup label="Working Weeks">
+              <option value="last_working_week">Last Working Week</option>
+              <option value="week_before_last_working_week">Week Before Last Working Week</option>
             </optgroup>
             <optgroup label="Weeks">
               <option value="this_week">This Week</option>
@@ -665,7 +892,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
               <option value="last_year">Last Year</option>
             </optgroup>
           </select>
-          {isWeekPreset && (
+          {(isWeekPreset || isWorkingWeekPreset) && (
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground shrink-0">Week starts on</span>
               <select
@@ -680,6 +907,19 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
                 <option value="THU">Thursday</option>
                 <option value="FRI">Friday</option>
                 <option value="SAT">Saturday</option>
+              </select>
+            </div>
+          )}
+          {isWorkingDayPreset && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground shrink-0">Weekends</span>
+              <select
+                className="flex-1 px-2 py-0.5 rounded bg-secondary/60 text-[11px]"
+                value={weekends}
+                onChange={e => { setWeekends(e.target.value); applyPreset(preset, undefined, e.target.value) }}
+              >
+                <option value="SAT_SUN">Sat – Sun</option>
+                <option value="FRI_SAT">Fri – Sat</option>
               </select>
             </div>
           )}
@@ -821,8 +1061,8 @@ function NumberRuleEditor({ field, where, onPatch }: { field: string; where: Rec
 }
 
 // Per-field filter with Manual/Rule tabs (like ConfiguratorPanel chip details)
-function ReportFieldFilter({ field, source, datasourceId, dbType, where, onWhereChange, onRemove }: {
-  field: string; source: string; datasourceId?: string; dbType?: string | null
+function ReportFieldFilter({ field, source, datasourceId, widgetId, dbType, where, onWhereChange, onRemove }: {
+  field: string; source: string; datasourceId?: string; widgetId?: string; dbType?: string | null
   where: Record<string, any>; onWhereChange: (w: Record<string, any>) => void; onRemove: () => void
 }) {
   const [tab, setTab] = useState<'manual'|'rule'>('manual')
@@ -887,7 +1127,7 @@ function ReportFieldFilter({ field, source, datasourceId, dbType, where, onWhere
         <button className={`text-[10px] px-2 py-0.5 rounded border ${tab==='rule' ? 'bg-secondary' : ''}`} onClick={() => setTab('rule')}>Rule</button>
       </div>
       {tab === 'manual' ? (
-        <ManualFilterValues field={field} source={source} datasourceId={datasourceId} selected={currentSelected} onApply={handleManualApply} />
+        <ManualFilterValues field={field} source={source} datasourceId={datasourceId} widgetId={widgetId} selected={currentSelected} onApply={handleManualApply} />
       ) : kind === 'date' ? (
         <DateRuleEditor field={field} where={where} onPatch={handleRulePatch} />
       ) : kind === 'number' ? (
@@ -900,9 +1140,9 @@ function ReportFieldFilter({ field, source, datasourceId, dbType, where, onWhere
 }
 
 // Main filter editor: list of per-field filters + field picker
-function FilterEditor({ columns, columnMeta, where, onChange, source, datasourceId }: {
+function FilterEditor({ columns, columnMeta, where, onChange, source, datasourceId, widgetId }: {
   columns: string[]; columnMeta?: Array<{ name: string; type: string | null }>; where: Record<string, unknown>; onChange: (w: Record<string, unknown>) => void
-  source?: string; datasourceId?: string
+  source?: string; datasourceId?: string; widgetId?: string
 }) {
   const [picking, setPicking] = useState(false)
   const [pickSearch, setPickSearch] = useState('')
@@ -941,6 +1181,7 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
           field={field}
           source={source || ''}
           datasourceId={datasourceId}
+          widgetId={widgetId}
           dbType={columnMeta?.find(c => c.name === field)?.type}
           where={where as Record<string, any>}
           onWhereChange={w => onChange(w)}
@@ -1538,6 +1779,26 @@ function ElementProps({
   return null
 }
 
+// ─── Period presets shared by cell type and variable editor ──────────
+const PERIOD_PRESETS: { value: string; label: string; group: string }[] = [
+  { value: 'today',                         label: 'Today',                           group: 'Days' },
+  { value: 'yesterday',                     label: 'Yesterday (YTDY)',                group: 'Days' },
+  { value: 'last_working_day',              label: 'Last Working Day (LWDay)',        group: 'Days' },
+  { value: 'day_before_last_working_day',   label: 'Day Before LWDay (DBLWDay)',      group: 'Days' },
+  { value: 'this_week',                     label: 'This Week (TW)',                  group: 'Weeks' },
+  { value: 'last_week',                     label: 'Last Week (LW)',                  group: 'Weeks' },
+  { value: 'last_working_week',             label: 'Last Working Week (LWWeek)',      group: 'Weeks' },
+  { value: 'week_before_last_working_week', label: 'Week Before LWWeek (WBLWWeek)',   group: 'Weeks' },
+  { value: 'this_month',                    label: 'This Month (TMonth)',             group: 'Months' },
+  { value: 'last_month',                    label: 'Last Month (LMonth)',             group: 'Months' },
+  { value: 'this_year',                     label: 'This Year (TYear)',               group: 'Years' },
+  { value: 'last_year',                     label: 'Last Year (LYear)',               group: 'Years' },
+  { value: 'ytd',                           label: 'Year to Date (YTD)',              group: 'Cumulative' },
+  { value: 'mtd',                           label: 'Month to Date (MTD)',             group: 'Cumulative' },
+]
+const PERIOD_LABEL: Record<string, string> = Object.fromEntries(PERIOD_PRESETS.map(p => [p.value, p.label]))
+const PERIOD_GROUPS = [...new Set(PERIOD_PRESETS.map(p => p.group))]
+
 // ─── Inline Table Editor ─────────────────────────────────────────────
 function InlineTableEditor({
   table,
@@ -1551,6 +1812,7 @@ function InlineTableEditor({
   if (!table) return null
 
   const [cellMenuOpen, setCellMenuOpen] = useState<{ row: number; col: number } | null>(null)
+  const [deleteConfirmRow, setDeleteConfirmRow] = useState<number | null>(null)
   const [normalized, setNormalized] = useState(false)
 
   // Close cell menu on outside click
@@ -1611,6 +1873,27 @@ function InlineTableEditor({
   const updateCell = (ri: number, ci: number, patch: Partial<ReportTableCell>) => {
     const cells = table.cells.map((row, r) => row.map((cell, c) => (r === ri && c === ci) ? { ...cell, ...patch } : cell))
     onChange({ ...table, cells })
+  }
+
+  const deleteRow = (ri: number) => {
+    if (table.rows <= 1) return
+    const newCells = table.cells.filter((_, i) => i !== ri)
+    const newRowStyles = table.rowStyles ? table.rowStyles.filter((_, i) => i !== ri) : undefined
+    onChange({ ...table, rows: table.rows - 1, cells: newCells, ...(newRowStyles ? { rowStyles: newRowStyles } : {}) })
+    setCellMenuOpen(null)
+    setDeleteConfirmRow(null)
+  }
+
+  const insertRowAbove = (ri: number) => {
+    const actualCols = table.headers.reduce((sum, h) => {
+      const header = typeof h === 'string' ? { text: h, colspan: 1 } : h
+      return sum + (header.colspan || 1)
+    }, 0)
+    const newRow: ReportTableCell[] = Array.from({ length: actualCols }, () => ({ type: 'text' as const, text: '' }))
+    const newCells = [...table.cells.slice(0, ri), newRow, ...table.cells.slice(ri)]
+    const newRowStyles = table.rowStyles ? [...table.rowStyles.slice(0, ri), {}, ...table.rowStyles.slice(ri)] : undefined
+    onChange({ ...table, rows: table.rows + 1, cells: newCells, ...(newRowStyles ? { rowStyles: newRowStyles } : {}) })
+    setCellMenuOpen(null)
   }
 
   return (
@@ -1730,6 +2013,10 @@ function InlineTableEditor({
                       placeholder="..."
                       onClick={(e) => e.stopPropagation()}
                     />
+                  ) : cell.type === 'period' ? (
+                    <span className="flex-1 text-[9px] font-mono text-primary/80 truncate select-none" title={PERIOD_LABEL[cell.datetimeExpr || ''] || cell.datetimeExpr || 'Period'}>
+                      {PERIOD_LABEL[cell.datetimeExpr || ''] || cell.datetimeExpr || <span className="text-muted-foreground italic">No period</span>}
+                    </span>
                   ) : (
                     <select
                       className="flex-1 bg-transparent border-none outline-none text-[9px] font-mono min-w-0"
@@ -1754,14 +2041,38 @@ function InlineTableEditor({
                       {/* Type toggle */}
                       <div className="flex gap-1">
                         <button className={`flex-1 text-[10px] py-1 rounded-md transition-colors ${cell.type === 'text' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
-                          onClick={() => { updateCell(ri, ci, { type: 'text', text: cell.type === 'spaceholder' ? '' : cell.text, variableId: undefined }); }}>
+                          onClick={() => { updateCell(ri, ci, { type: 'text', text: cell.type === 'spaceholder' ? '' : cell.text, variableId: undefined, datetimeExpr: undefined }); }}>
                           Text
                         </button>
                         <button className={`flex-1 text-[10px] py-1 rounded-md transition-colors ${cell.type === 'spaceholder' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
-                          onClick={() => { updateCell(ri, ci, { type: 'spaceholder', text: undefined, variableId: cell.variableId || '' }); }}>
+                          onClick={() => { updateCell(ri, ci, { type: 'spaceholder', text: undefined, variableId: cell.variableId || '', datetimeExpr: undefined }); }}>
                           Variable
                         </button>
+                        <button className={`flex-1 text-[10px] py-1 rounded-md transition-colors ${cell.type === 'period' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
+                          onClick={() => { updateCell(ri, ci, { type: 'period', text: undefined, variableId: undefined, datetimeExpr: cell.datetimeExpr || 'last_week' }); }}>
+                          Period
+                        </button>
                       </div>
+
+                      {/* Period selector — shown when type is period */}
+                      {cell.type === 'period' && (
+                        <div>
+                          <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Period</label>
+                          <select
+                            className="w-full h-6 text-[10px] rounded border bg-secondary/40 px-1 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
+                            value={cell.datetimeExpr || 'last_week'}
+                            onChange={(e) => updateCell(ri, ci, { datetimeExpr: e.target.value })}
+                          >
+                            {PERIOD_GROUPS.map(group => (
+                              <optgroup key={group} label={group}>
+                                {PERIOD_PRESETS.filter(p => p.group === group).map(p => (
+                                  <option key={p.value} value={p.value}>{p.label}</option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
                       <div className="border-t pt-2">
                         <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Formatting</div>
@@ -1865,6 +2176,32 @@ function InlineTableEditor({
                           Reset formatting
                         </button>
                       )}
+
+                      {/* Row actions */}
+                      <div className="border-t pt-2 mt-1 space-y-1">
+                        <button className="w-full text-[9px] text-left px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1.5"
+                          onClick={() => { insertRowAbove(ri); setDeleteConfirmRow(null) }}>
+                          <RiAddLine className="h-3 w-3 shrink-0" />Insert row above
+                        </button>
+                        {deleteConfirmRow === ri ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] text-destructive flex-1">Delete this row?</span>
+                            <button className="text-[9px] px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+                              onClick={() => deleteRow(ri)}>Yes</button>
+                            <button className="text-[9px] px-1.5 py-0.5 rounded border hover:bg-muted transition-colors"
+                              onClick={() => setDeleteConfirmRow(null)}>No</button>
+                          </div>
+                        ) : (
+                          <button
+                            className={`w-full text-[9px] text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                              table.rows <= 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-destructive/10 text-destructive'
+                            }`}
+                            disabled={table.rows <= 1}
+                            onClick={() => setDeleteConfirmRow(ri)}>
+                            <RiDeleteBinLine className="h-3 w-3 shrink-0" />Delete row
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1884,6 +2221,7 @@ function GridCanvas({
   selectedId,
   onSelectElement,
   onMoveElement,
+  onMoveElements,
   onResizeElement,
   onUpdateElement,
 }: {
@@ -1891,6 +2229,7 @@ function GridCanvas({
   selectedId: string | null
   onSelectElement: (id: string | null) => void
   onMoveElement: (id: string, gridX: number, gridY: number) => void
+  onMoveElements: (moves: { id: string; gridX: number; gridY: number }[]) => void
   onResizeElement: (id: string, gridW: number, gridH: number) => void
   onUpdateElement: (id: string, el: ReportElement) => void
 }) {
@@ -1898,8 +2237,18 @@ function GridCanvas({
   const canvasRef = useRef<HTMLDivElement>(null)
   const [dragState, setDragState] = useState<{ id: string; startX: number; startY: number; origGX: number; origGY: number } | null>(null)
   const [resizeState, setResizeState] = useState<{ id: string; startX: number; startY: number; origW: number; origH: number } | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => selectedId ? new Set([selectedId]) : new Set())
 
   const snap = (px: number) => Math.round(px / cellSize)
+
+  // Sync selectedIds when selectedId prop changes externally (e.g., panel list click)
+  useEffect(() => {
+    if (selectedId && !selectedIds.has(selectedId)) {
+      setSelectedIds(new Set([selectedId]))
+    } else if (!selectedId && selectedIds.size > 0) {
+      setSelectedIds(new Set())
+    }
+  }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drag handling
   useEffect(() => {
@@ -1933,11 +2282,9 @@ function GridCanvas({
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
   }, [resizeState, cellSize, onResizeElement])
 
-  // Keyboard arrow keys to move selected element
+  // Keyboard arrow keys to move selected element(s)
   useEffect(() => {
-    if (!selectedId) return
-    const el = elements.find(e => e.id === selectedId)
-    if (!el) return
+    if (selectedIds.size === 0) return
     const onKeyDown = (e: KeyboardEvent) => {
       // Skip if user is typing in an input
       if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'SELECT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return
@@ -1948,13 +2295,18 @@ function GridCanvas({
       else if (e.key === 'ArrowDown') dy = 1
       else return
       e.preventDefault()
-      const gx = Math.max(0, Math.min(gridCols - el.gridW, el.gridX + dx))
-      const gy = Math.max(0, Math.min(gridRows - el.gridH, el.gridY + dy))
-      onMoveElement(el.id, gx, gy)
+      const moves = elements
+        .filter(el => selectedIds.has(el.id))
+        .map(el => ({
+          id: el.id,
+          gridX: Math.max(0, Math.min(gridCols - el.gridW, el.gridX + dx)),
+          gridY: Math.max(0, Math.min(gridRows - el.gridH, el.gridY + dy)),
+        }))
+      onMoveElements(moves)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedId, elements, gridCols, gridRows, onMoveElement])
+  }, [selectedIds, elements, gridCols, gridRows, onMoveElements])
 
   return (
     <div className="overflow-auto flex-1 bg-[hsl(var(--secondary)/0.2)] rounded-lg p-3 border border-border/40">
@@ -1970,14 +2322,19 @@ function GridCanvas({
             ? `linear-gradient(to right, hsl(var(--border)/0.3) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--border)/0.3) 1px, transparent 1px)`
             : undefined,
         }}
-        onClick={(e) => { if (e.target === canvasRef.current) onSelectElement(null) }}
+        onClick={(e) => { if (e.target === canvasRef.current) { onSelectElement(null); setSelectedIds(new Set()) } }}
       >
         {elements.map((el) => {
-          const isSelected = selectedId === el.id
+          const isSelected = selectedIds.has(el.id)
+          const isMultiSelected = isSelected && selectedIds.size > 1
           return (
             <div
               key={el.id}
-              className={`absolute group cursor-pointer ${isSelected ? 'ring-2 ring-primary ring-offset-1' : 'hover:ring-1 hover:ring-primary/40'}`}
+              className={`absolute group cursor-pointer ${
+                isMultiSelected ? 'ring-2 ring-primary/60 ring-offset-1 ring-dashed'
+                : isSelected ? 'ring-2 ring-primary ring-offset-1'
+                : 'hover:ring-1 hover:ring-primary/40'
+              }`}
               style={{
                 left: `${el.gridX * cellSize}px`,
                 top: `${el.gridY * cellSize}px`,
@@ -1985,7 +2342,15 @@ function GridCanvas({
                 height: `${el.gridH * cellSize}px`,
                 zIndex: isSelected ? 10 : 1,
               }}
-              onClick={(e) => { e.stopPropagation(); onSelectElement(el.id) }}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (e.metaKey || e.ctrlKey) {
+                  setSelectedIds(prev => { const next = new Set(prev); next.has(el.id) ? next.delete(el.id) : next.add(el.id); return next })
+                } else {
+                  setSelectedIds(new Set([el.id]))
+                }
+                onSelectElement(el.id)
+              }}
             >
               {/* Element preview */}
               <div className="h-full w-full overflow-hidden rounded-sm bg-card/80 border border-border/60">
@@ -2379,6 +2744,7 @@ export default function ReportBuilderModal({
               selectedId={selectedId}
               onSelectElement={setSelectedId}
               onMoveElement={(id, gx, gy) => updateElement(id, { gridX: gx, gridY: gy })}
+              onMoveElements={(moves) => setState((s) => ({ ...s, elements: s.elements.map((el) => { const m = moves.find(m => m.id === el.id); return m ? { ...el, gridX: m.gridX, gridY: m.gridY } : el }) }))}
               onResizeElement={(id, gw, gh) => updateElement(id, { gridW: gw, gridH: gh })}
               onUpdateElement={(id, el) => setState((s) => ({ ...s, elements: s.elements.map((e) => e.id === id ? el : e) }))}
             />
@@ -2562,6 +2928,7 @@ export default function ReportBuilderModal({
                           onUpdate={(vr) => updateVariable(selVar.id, vr)}
                           onDelete={() => deleteVariable(selVar.id)}
                           onDuplicate={() => duplicateVariable(selVar.id)}
+                          widgetId={config.id}
                         />
                       )
                     })()}

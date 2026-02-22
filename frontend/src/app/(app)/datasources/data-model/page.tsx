@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, Fragment } from 'react'
 import { Api, parseUtcDate, type DatasourceOut, type IntrospectResponse, type LocalStatsResponse, type SyncTaskOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
-import DataExplorerDialog from '@/components/builder/DataExplorerDialog'
+import DataExplorerDialog from '@/components/builder/DataExplorerDialogV2'
 import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
 import ImportTableDialog from '@/components/builder/ImportTableDialog'
 import type { IntrospectResponse as IR } from '@/lib/api'

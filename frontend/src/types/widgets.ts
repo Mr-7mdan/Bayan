@@ -142,9 +142,10 @@ export type CompositionComponent =
   | { id?: string; kind: 'table'; span?: number; refId?: string; label?: string; props?: { tableType?: 'data'|'pivot' } }
 
 export type ReportTableCell = {
-  type: 'text' | 'spaceholder'
+  type: 'text' | 'spaceholder' | 'period'
   text?: string
   variableId?: string
+  datetimeExpr?: string // for period type — resolved at render time without creating a variable
   style?: {
     fontSize?: number
     fontWeight?: 'normal' | 'bold' | 'semibold'
@@ -229,7 +230,7 @@ export type ReportVariable = {
     agg: 'none' | 'count' | 'distinct' | 'avg' | 'sum' | 'min' | 'max'
   }
   expression?: string // e.g. "var2 + var3" or "var2 * 1.15"
-  datetimeExpr?: 'now' | 'today' // date/time function
+  datetimeExpr?: 'now' | 'today' | 'yesterday' | 'last_working_day' | 'day_before_last_working_day' | 'this_week' | 'last_week' | 'last_working_week' | 'week_before_last_working_week' | 'this_month' | 'last_month' | 'this_year' | 'last_year' | 'ytd' | 'mtd' // date/time function
   dateFormat?: string // e.g. "dd MMM yyyy", "dd/MM/yyyy", "MMM yyyy"
   where?: Record<string, unknown> // filters
   format?: 'none' | 'short' | 'currency' | 'percent' | 'wholeNumber' | 'oneDecimal' | 'twoDecimals'

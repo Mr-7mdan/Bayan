@@ -100,6 +100,15 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
     if (effectiveDsId && schemaQ.data) SchemaCache.set(effectiveDsId, schemaQ.data as IntrospectResponse)
   }, [effectiveDsId, schemaQ.data])
 
+  const dsTransformsQ = useQuery({
+    queryKey: ['ds-transforms', effectiveDsId ?? '_local'],
+    queryFn: () => effectiveDsId ? Api.getDatasourceTransforms(effectiveDsId) : null,
+    enabled: !!effectiveDsId,
+    retry: 0,
+    refetchOnWindowFocus: false,
+    staleTime: 60 * 1000,
+  })
+
   // ── Extract columns for the currently selected table/view ───────────────────
   const schemaColumns = useMemo(() => {
     const src = local?.querySpec?.source
@@ -147,8 +156,35 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
     const baseNames = schemaColumns.map(c => c.name)
     const reserved = new Set(['value', '__metric__'])
     const res = resultColumns.filter(n => !reserved.has(String(n || '').toLowerCase()))
-    return Array.from(new Set([...baseNames, ...res]))
-  }, [schemaColumns, resultColumns])
+    // Join-added columns (same logic as ConfiguratorPanel.tsx)
+    const joinAdds: string[] = []
+    try {
+      const srcNow = String(local?.querySpec?.source || '')
+      const widNow = String((local as any)?.id || '')
+      const norm = (s: string) => String(s || '').trim().replace(/^\[|\]|^"|"$/g, '')
+      const tblEq = (a: string, b: string) => {
+        const na = norm(a).split('.').pop() || ''
+        const nb = norm(b).split('.').pop() || ''
+        return na.toLowerCase() === nb.toLowerCase()
+      }
+      const joins = Array.isArray((dsTransformsQ.data as any)?.joins) ? ((dsTransformsQ.data as any).joins as any[]) : []
+      for (const j of joins) {
+        const sc = (j?.scope || {}) as any
+        const lvl = String(sc?.level || 'datasource').toLowerCase()
+        const match = (
+          lvl === 'datasource' ||
+          (lvl === 'table' && sc?.table && srcNow && tblEq(String(sc.table), srcNow)) ||
+          (lvl === 'widget' && sc?.widgetId && widNow && String(sc.widgetId) === widNow)
+        )
+        if (!match) continue
+        const cols = Array.isArray(j?.columns) ? (j.columns as any[]) : []
+        cols.forEach((c: any) => { const nm = String((c?.alias || c?.name || '')).trim(); if (nm) joinAdds.push(nm) })
+        const aggAlias = String((j?.aggregate as any)?.alias || '').trim()
+        if (aggAlias) joinAdds.push(aggAlias)
+      }
+    } catch {}
+    return Array.from(new Set([...baseNames, ...res, ...joinAdds]))
+  }, [schemaColumns, resultColumns, dsTransformsQ.data, local?.querySpec?.source, (local as any)?.id])
 
   const numericFields = useMemo(() => {
     const isNum = (t?: string | null) => {

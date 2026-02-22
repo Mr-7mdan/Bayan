@@ -13,6 +13,8 @@ export type AdvancedSqlUnpivotBuilderProps = {
   onCancelAction?: () => void
   initial?: { type: 'unpivot'; sourceColumns: string[]; keyColumn: string; valueColumn: string; mode?: 'auto'|'unpivot'|'union'; omitZeroNull?: boolean; scope?: { level: 'widget'|'table'|'datasource'; widgetId?: string; table?: string } }
   submitLabel?: string
+  dsId?: string
+  tableName?: string | null
 }
 
 function supportsUnpivot(dsType?: string | null): boolean {

@@ -57,7 +57,7 @@ except Exception:
 _UI_META_KEYS = frozenset({
     "filterPreset", "filter_preset", "_preset", "_meta",
     "startDate", "endDate", "start", "end",
-    "__week_start_day",
+    "__week_start_day", "__weekends",
 })
 
 def _resolve_date_presets(where: dict | None) -> dict | None:
@@ -84,6 +84,15 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
         except (ValueError, TypeError):
             week_start_dow = 0  # default Sunday
 
+    # Read __weekends BEFORE stripping UI meta keys.
+    # SAT_SUN (default): weekend days are Sat(5) and Sun(6) in Python weekday (Mon=0).
+    # FRI_SAT: weekend days are Fri(4) and Sat(5).
+    _weekends_raw = str(where.get("__weekends", os.environ.get("WEEKENDS", "SAT_SUN"))).upper().strip()
+    _WEEKENDS_MAP = {"SAT_SUN": (5, 6), "FRI_SAT": (4, 5)}
+    weekend_days: tuple[int, int] = _WEEKENDS_MAP.get(_weekends_raw, (5, 6))
+    # Working week starts on the first non-weekend day (Mon for SAT_SUN, Sun for FRI_SAT)
+    _working_week_start_dow = 6 if _weekends_raw == "FRI_SAT" else 0  # Python: Mon=0…Sun=6
+
     # Strip UI-only meta keys that are not real database columns
     where = {k: v for k, v in where.items() if k not in _UI_META_KEYS}
 
@@ -99,9 +108,16 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
         return d - timedelta(days=offset)
 
     def _prev_workday(d: datetime) -> datetime:
-        """Last weekday strictly before *d* (skips Sat/Sun)."""
+        """Last working day strictly before *d* (skips weekend_days)."""
         candidate = d - timedelta(days=1)
-        while candidate.weekday() >= 5:  # Sat=5, Sun=6
+        while candidate.weekday() in weekend_days:
+            candidate -= timedelta(days=1)
+        return candidate
+
+    def _working_week_start(d: datetime) -> datetime:
+        """Most recent working-week start at or before *d*."""
+        candidate = datetime(d.year, d.month, d.day)
+        while candidate.weekday() != _working_week_start_dow:
             candidate -= timedelta(days=1)
         return candidate
 
@@ -130,6 +146,12 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
                 lwd = _prev_workday(today)
                 dlwd = _prev_workday(lwd)
                 gte = dlwd; lt = dlwd + timedelta(days=1)
+            elif preset == "last_working_week":
+                ws = _working_week_start(today)
+                gte = ws - timedelta(days=7); lt = ws
+            elif preset == "week_before_last_working_week":
+                ws = _working_week_start(today)
+                gte = ws - timedelta(days=14); lt = ws - timedelta(days=7)
             elif preset == "this_week":
                 ws = _week_start(today)
                 gte = ws; lt = ws + timedelta(days=7)
@@ -926,7 +948,43 @@ def _resolve_duckdb_path_from_engine(engine: Engine) -> str:
 
 
 def _norm_name(s: str) -> str:
+    """Strip quotes/brackets from identifier, take rightmost segment after dots, and lowercase."""
     return (s or '').strip().strip('[]').strip('"').strip('`').split('.')[-1].lower()
+
+
+def _auto_correct_column_case(expr: str, schema_cols: set[str]) -> str:
+    """Auto-correct column references in expression to match actual schema case.
+    For case-insensitive databases like MySQL, ensures expressions use the correct case.
+    
+    Args:
+        expr: SQL expression that may contain column references
+        schema_cols: Set of actual column names from schema (with correct case)
+    
+    Returns:
+        Expression with column references corrected to match schema case
+    """
+    if not expr or not schema_cols:
+        return expr
+    
+    import re as _re
+    # Build case-insensitive lookup: lowercase -> actual case
+    lookup = {c.lower(): c for c in schema_cols}
+    result = expr
+    
+    # Pattern 1: Bare identifiers (unquoted column names)
+    # Match word boundaries, avoid matching inside strings or other quoted contexts
+    def replace_bare(match):
+        col = match.group(0)
+        col_lower = col.lower()
+        if col_lower in lookup and lookup[col_lower] != col:
+            return lookup[col_lower]
+        return col
+    
+    # Only replace unquoted identifiers that look like column names (start with letter/underscore)
+    # Avoid replacing inside string literals (basic heuristic)
+    result = _re.sub(r'\b([A-Za-z_][A-Za-z0-9_]*)\b', replace_bare, result)
+    
+    return result
 
 
 def _referenced_cols_in_expr(expr: str) -> set[str]:
@@ -1005,6 +1063,9 @@ def _referenced_cols_in_expr(expr: str) -> set[str]:
             'null','is','in','like','between','exists','true','false',
             'sum','avg','min','max','count','coalesce','cast','try_cast',
             'regexp_replace','month','year','day','week','quarter','date_trunc','extract',
+            'varchar','integer','int','bigint','smallint','tinyint','decimal','numeric',
+            'float','double','real','boolean','bool','date','time','timestamp','datetime',
+            'text','char','binary','varbinary','blob','clob',
         }
         try:
             for m in _re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", expr_no_strings):
@@ -1075,15 +1136,21 @@ def _filter_by_basecols(ds_tr: dict, base_cols: set[str]) -> dict:
     def _can_accept_cc(cc: dict) -> tuple[bool, str | None]:
         name = _norm_name(str((cc or {}).get('name') or ''))
         expr = str((cc or {}).get('expr') or '')
-        refs = _referenced_cols_in_expr(expr)
+        # Auto-correct column case before extracting refs
+        expr_corrected = _auto_correct_column_case(expr, base_cols)
+        refs = _referenced_cols_in_expr(expr_corrected)
         return ((not refs) or refs.issubset(allowed), name)
 
     def _can_accept_tr(tr: dict) -> tuple[bool, str | None]:
         t = str((tr or {}).get('type') or '').lower()
         if t == 'computed':
             name = _norm_name(str((tr or {}).get('name') or ''))
-            refs = _referenced_cols_in_expr(str(tr.get('expr') or ''))
-            return ((not refs) or refs.issubset(allowed), name)
+            expr = str(tr.get('expr') or '')
+            expr_corrected = _auto_correct_column_case(expr, base_cols)
+            refs = _referenced_cols_in_expr(expr_corrected)
+            can_accept = (not refs) or refs.issubset(allowed)
+            print(f"[_filter_by_basecols] Checking computed '{name}': expr='{expr[:50]}', refs={refs}, allowed_sample={list(allowed)[:10]}, can_accept={can_accept}", flush=True)
+            return (can_accept, name)
         if t == 'case':
             tgt_name = _norm_name(str((tr or {}).get('target') or ''))
             try:
@@ -5094,11 +5161,15 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             for it in (arr or []):
                 sc = (it or {}).get('scope')
                 if not sc:
-                    out.append(it); continue
-                lvl = str(sc.get('level') or '').lower()
+                    # Treat null scope as datasource-level (legacy transforms)
+                    # This prevents table-specific transforms without scope from appearing everywhere
+                    lvl = 'datasource'
+                else:
+                    lvl = str(sc.get('level') or '').lower()
+                
                 if lvl == 'datasource':
                     out.append(it)
-                elif lvl == 'table' and sc.get('table') and _matches_table(str(sc.get('table')), source_name):
+                elif lvl == 'table' and sc and sc.get('table') and _matches_table(str(sc.get('table')), source_name):
                     out.append(it)
                 elif lvl == 'widget':
                     try:
@@ -7330,7 +7401,9 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                     elif lvl == 'widget':
                         try:
                             wid = str((sc or {}).get('widgetId') or '').strip()
-                            # distinct endpoint has no widgetId context; include only non-widget or matching ones (none here)
+                            # Include widget-scoped items if widgetId matches
+                            if payload.widgetId and wid == str(payload.widgetId):
+                                out.append(it)
                         except Exception:
                             pass
                 return out

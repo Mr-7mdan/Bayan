@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     snapshot_actor_id: str = Field(default="dev_user")
     # Backend base URL for internal API calls (e.g., snapshot service)
     backend_base_url: str = Field(default="http://localhost:8000/api")
+    # Playwright browser cache path (required on Windows when running as SYSTEM service)
+    playwright_browsers_path: Optional[str] = Field(default=None, validation_alias=AliasChoices("PLAYWRIGHT_BROWSERS_PATH"))
 
     # App version and Updates
     app_version: str = Field(default="0.0.0", validation_alias=AliasChoices("APP_VERSION"))
@@ -80,6 +82,14 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("PIVOT_JOIN_DEBUG"),
         description="Enable detailed pivot join diagnostics (debug only)"
+    )
+
+    # Timezone for the alert/sync scheduler and time-trigger matching.
+    # Must be a valid IANA timezone name (e.g. Asia/Riyadh, Africa/Cairo).
+    # Defaults to UTC. Set to match users' local timezone so "07:00" fires at 07:00 local.
+    scheduler_timezone: str = Field(
+        default="UTC",
+        validation_alias=AliasChoices("SCHEDULER_TIMEZONE"),
     )
 
     @property

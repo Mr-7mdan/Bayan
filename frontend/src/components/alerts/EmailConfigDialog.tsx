@@ -11,6 +11,7 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState('')
+  const [presetIncludeLogo, setPresetIncludeLogo] = useState(true)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -47,7 +48,8 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
     } catch (e: any) { setError(e?.message || 'Failed to save') } finally { setBusy(false) }
   }
 
-  const defaultTemplate = () => {
+  const defaultTemplate = (withLogo = true) => {
+    const logoBlock = withLogo ? `<div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:40px;display:block'/></div>` : ''
     return `<!doctype html>
 <html>
 <head>
@@ -71,7 +73,7 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
   <div class='wrap'>
     <div class='container'>
       <div class='header'>
-        <div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:40px;display:block'/></div>
+        ${logoBlock}
         
       </div>
       <div class='header'>{{subject}}</div>
@@ -87,7 +89,8 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
 </html>`
   }
  
-  const compactTemplate = () => {
+  const compactTemplate = (withLogo = true) => {
+    const logoBlock = withLogo ? `<div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:32px;display:block'/></div>` : ''
     return `<!doctype html>
 <html>
 <head>
@@ -111,7 +114,7 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
 <body>
   <div class='container'>
     <div class='header'>
-      <div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:32px;display:block'/></div>
+      ${logoBlock}
       <div class='brand'>{{subject}}</div>
     </div>
     <div class='content'>
@@ -123,7 +126,8 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
 </html>`
   }
 
-  const kpiHeroTemplate = () => {
+  const kpiHeroTemplate = (withLogo = true) => {
+    const logoBlock = withLogo ? `<div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:40px;display:inline-block'/></div>` : ''
     return `<!doctype html>
 <html>
 <head>
@@ -150,7 +154,7 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
 <body>
   <div class='container'>
     <div class='hero'>
-      <div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:40px;display:inline-block'/></div>
+      ${logoBlock}
       <div class='title'>{{subject}}</div>
     </div>
     <div class='card'>
@@ -162,7 +166,8 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
 </html>`
   }
 
-  const tableFocusedTemplate = () => {
+  const tableFocusedTemplate = (withLogo = true) => {
+    const logoBlock = withLogo ? `<div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:36px;display:block'/></div>` : ''
     return `<!doctype html>
 <html>
 <head>
@@ -185,7 +190,7 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
 <body>
   <div class='container'>
     <div class='header'>
-      <div class='logo'><img src='{{logoUrl}}' alt='Logo' style='max-height:36px;display:block'/></div>
+      ${logoBlock}
       <div class='brand'>{{subject}}</div>
     </div>
     <div class='content'>
@@ -293,10 +298,14 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
             </div>
             <div className="w-full flex flex-wrap items-center gap-2 text-xs mt-2">
               <span>Presets:</span>
-              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: defaultTemplate() }))}>Default</button>
-              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: compactTemplate() }))}>Compact</button>
-              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: kpiHeroTemplate() }))}>KPI Hero</button>
-              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: tableFocusedTemplate() }))}>Table Focused</button>
+              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: defaultTemplate(presetIncludeLogo) }))}>Default</button>
+              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: compactTemplate(presetIncludeLogo) }))}>Compact</button>
+              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: kpiHeroTemplate(presetIncludeLogo) }))}>KPI Hero</button>
+              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: tableFocusedTemplate(presetIncludeLogo) }))}>Table Focused</button>
+              <label className="inline-flex items-center gap-1 ml-2 cursor-pointer select-none">
+                <input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" checked={presetIncludeLogo} onChange={(e) => setPresetIncludeLogo(e.target.checked)} />
+                <span>Include logo</span>
+              </label>
             </div>
           </div>
           <div className="space-y-2">

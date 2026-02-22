@@ -8,7 +8,7 @@ import * as Popover from '@radix-ui/react-popover'
 import * as Dialog from '@radix-ui/react-dialog'
 import { RiBuildingLine, RiMapPin2Line, RiUserLine, RiMore2Line, RiCheckLine } from '@remixicon/react'
 import DatasourceDialog, { type DatasourceDialogMode } from '@/components/datasources/DatasourceDialog'
-import DataExplorerDialog from '@/components/builder/DataExplorerDialog'
+import DataExplorerDialog from '@/components/builder/DataExplorerDialogV2'
 import { useAuth } from '@/components/providers/AuthProvider'
 
 function StatusPill({ active }: { active: boolean }) {

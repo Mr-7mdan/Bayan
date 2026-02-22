@@ -4,18 +4,21 @@ import { useEffect, useMemo, useState } from 'react'
 
 export type AdvancedSqlReplaceBuilderProps = {
   columns: string[]
-  onAddAction: (tr: { type: 'replace'|'translate'; target: string; search: string | string[]; replace: string | string[] }) => void
+  onAddAction: (tr: { type: 'replace'|'translate'; target: string; search: string | string[]; replace: string | string[]; scope?: any }) => void
   onCancelAction?: () => void
-  initial?: { type: 'replace'|'translate'; target: string; search: string | string[]; replace: string | string[] }
+  initial?: { type: 'replace'|'translate'; target: string; search: string | string[]; replace: string | string[]; scope?: any }
   submitLabel?: string
+  dsId?: string
+  tableName?: string | null
 }
 
-export default function AdvancedSqlReplaceBuilder({ columns, onAddAction, onCancelAction, initial, submitLabel }: AdvancedSqlReplaceBuilderProps) {
+export default function AdvancedSqlReplaceBuilder({ columns, onAddAction, onCancelAction, initial, submitLabel, dsId, tableName }: AdvancedSqlReplaceBuilderProps) {
   const [target, setTarget] = useState<string>(columns[0] || '')
   const [mode, setMode] = useState<'replace'|'translate'>('replace')
   const [search, setSearch] = useState<string>('')
   const [replace, setReplace] = useState<string>('')
   const [multi, setMulti] = useState<boolean>(false)
+  const [scopeLevel, setScopeLevel] = useState<'datasource' | 'table'>('datasource')
 
   // Prefill for edit mode
   useEffect(() => {
@@ -27,8 +30,21 @@ export default function AdvancedSqlReplaceBuilder({ columns, onAddAction, onCanc
       const r = (initial.replace as any)
       if (Array.isArray(s)) { setMulti(true); setSearch(s.join(',')) } else { setMulti(false); setSearch(String(s ?? '')) }
       if (Array.isArray(r)) { setReplace(r.join(',')) } else { setReplace(String(r ?? '')) }
+      const initScope = (initial as any).scope
+      if (initScope?.level === 'table') {
+        setScopeLevel('table')
+      } else {
+        setScopeLevel('datasource')
+      }
     } catch {}
   }, [initial, columns])
+
+  // Default to table scope if table is selected
+  useEffect(() => {
+    if (tableName && !initial) {
+      setScopeLevel('table')
+    }
+  }, [tableName, initial])
 
   const canAdd = useMemo(() => !!target && (search !== ''), [target, search])
 
@@ -63,19 +79,33 @@ export default function AdvancedSqlReplaceBuilder({ columns, onAddAction, onCanc
         <label className="text-xs text-muted-foreground sm:col-span-1">Search</label>
         <input className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={search} onChange={(e)=>setSearch(e.target.value)} placeholder={mode==='replace' && multi ? 'comma-separated' : ''} />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
         <label className="text-xs text-muted-foreground sm:col-span-1">Replace</label>
         <input className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={replace} onChange={(e)=>setReplace(e.target.value)} placeholder={mode==='replace' && multi ? 'comma-separated' : ''} />
       </div>
       {mode==='replace' && (
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-2">
           <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={multi} onChange={(e)=>setMulti(e.target.checked)} /> multi (comma-separated)</label>
         </div>
       )}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
+        <label className="text-xs text-muted-foreground sm:col-span-1">Scope</label>
+        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e)=>setScopeLevel(e.target.value as any)}>
+          <option value="datasource">Datasource-wide</option>
+          {tableName && <option value="table">Table: {tableName}</option>}
+        </select>
+      </div>
       <div className="flex items-center justify-end gap-2">
         <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCancelAction}>Cancel</button>
         <button className={`text-xs px-2 py-1 rounded-md border ${canAdd? 'bg-[hsl(var(--btn3))] text-black':'opacity-60 cursor-not-allowed'}`} disabled={!canAdd} onClick={()=>{
-          onAddAction(buildPayload())
+          const payload = buildPayload()
+          // Add scope
+          if (scopeLevel === 'table' && tableName) {
+            (payload as any).scope = { level: 'table', table: tableName }
+          } else {
+            (payload as any).scope = { level: 'datasource' }
+          }
+          onAddAction(payload)
         }}>{submitLabel || `Add ${mode} transform`}</button>
       </div>
     </div>

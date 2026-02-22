@@ -136,6 +136,7 @@ class DistinctRequest(BaseModel):
     field: str
     where: Optional[Dict[str, Any]] = None
     datasourceId: Optional[str] = None
+    widgetId: Optional[str] = None
 
 
 class DistinctResponse(BaseModel):

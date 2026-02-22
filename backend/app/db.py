@@ -1069,6 +1069,7 @@ def _create_table_typed(conn, table_name: str, columns: list[str], sample_rows: 
 
 # Numeric types that require value sanitization
 _NUMERIC_TYPES = {"DOUBLE", "BIGINT", "DECIMAL(38,10)", "INTEGER", "FLOAT", "REAL"}
+_DATE_TYPES = {"DATE", "TIMESTAMP", "TIME"}
 
 
 def _is_valid_numeric(val: str) -> bool:
@@ -1083,32 +1084,50 @@ def _is_valid_numeric(val: str) -> bool:
         return False
 
 
+def _is_valid_date_str(val: str, col_type: str) -> bool:
+    """Check if a string is a valid date/timestamp value for DuckDB."""
+    s = val.strip()
+    if not s:
+        return False
+    try:
+        from datetime import datetime as _dt
+        if col_type == "TIME":
+            return True  # Let DuckDB validate TIME strings
+        _dt.fromisoformat(s)
+        return True
+    except Exception:
+        return False
+
+
 def _sanitize_row_for_types(row: list, columns: list[str], col_types: dict[str, str]) -> list:
-    """Convert invalid values to None for numeric columns to avoid DuckDB conversion errors.
+    """Convert invalid values to None for typed columns to avoid DuckDB conversion errors.
     
     This handles:
-    - Empty strings ('') -> None
+    - Empty strings ('') -> None for numeric, date, and timestamp columns
     - Non-numeric strings (e.g., '39(40)') -> None for numeric columns
+    - Invalid date strings (e.g., '') -> None for DATE/TIMESTAMP columns
     """
     sanitized = []
     for idx, val in enumerate(row):
         col_name = columns[idx] if idx < len(columns) else None
         col_type = col_types.get(col_name, "TEXT") if col_name else "TEXT"
-        
-        # For numeric types, validate that string values can be converted
+
         if col_type in _NUMERIC_TYPES:
             if val is None:
                 sanitized.append(None)
             elif isinstance(val, (int, float)):
                 sanitized.append(val)
             elif isinstance(val, str):
-                if _is_valid_numeric(val):
-                    sanitized.append(val)
-                else:
-                    # Invalid numeric string -> NULL
-                    sanitized.append(None)
+                sanitized.append(val if _is_valid_numeric(val) else None)
             else:
-                # Other types (Decimal, etc.) - let DuckDB handle
+                sanitized.append(val)
+        elif col_type in _DATE_TYPES:
+            if val is None:
+                sanitized.append(None)
+            elif isinstance(val, str):
+                sanitized.append(val if _is_valid_date_str(val, col_type) else None)
+            else:
+                # datetime/date objects — pass through as-is
                 sanitized.append(val)
         else:
             sanitized.append(val)

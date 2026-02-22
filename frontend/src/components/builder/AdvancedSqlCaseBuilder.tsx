@@ -5,16 +5,18 @@ import type { Condition } from '@/lib/dsl'
 
 export type AdvancedSqlCaseBuilderProps = {
   columns: string[]
-  onAddAction: (tr: { type: 'case'; target: string; cases: { when: Condition; then: any }[]; else?: any } | { type: 'computed'; name: string; expr: string }) => void
+  onAddAction: (tr: { type: 'case'; target: string; cases: { when: Condition; then: any }[]; else?: any; scope?: any } | { type: 'computed'; name: string; expr: string; scope?: any }) => void
   onCancelAction?: () => void
   initial?: (
-    { type: 'case'; target: string; cases: { when: Condition; then: any }[]; else?: any } |
-    { type: 'computed'; name: string; expr: string }
+    { type: 'case'; target: string; cases: { when: Condition; then: any }[]; else?: any; scope?: any } |
+    { type: 'computed'; name: string; expr: string; scope?: any }
   )
   submitLabel?: string
+  dsId?: string
+  tableName?: string | null
 }
 
-export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelAction, initial, submitLabel }: AdvancedSqlCaseBuilderProps) {
+export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelAction, initial, submitLabel, dsId, tableName }: AdvancedSqlCaseBuilderProps) {
   const [target, setTarget] = useState<string>('')
   type Row = { op: Condition['op']; value: string; then: string }
   const [rows, setRows] = useState<Row[]>([{ op: 'eq', value: '', then: '' }])
@@ -25,6 +27,7 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
   type Group = { preds: Pred[]; then: string }
   const [useAdvanced, setUseAdvanced] = useState<boolean>(false)
   const [groups, setGroups] = useState<Group[]>([])
+  const [scopeLevel, setScopeLevel] = useState<'datasource' | 'table'>('datasource')
 
   // Prefill from initial when editing
   useEffect(() => {
@@ -32,6 +35,12 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
     console.log('[AdvancedSqlCaseBuilder] Prefilling from initial:', initial)
     try {
       const initType = String((initial as any)?.type || '').toLowerCase()
+      const initScope = (initial as any).scope
+      if (initScope?.level === 'table') {
+        setScopeLevel('table')
+      } else {
+        setScopeLevel('datasource')
+      }
       if (initType === 'case') {
         const init = initial as any
         setTarget(String(init.target || ''))
@@ -129,12 +138,19 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
         if (elseM) setElseVal(elseM[1].replace(/''/g, "'"))
         console.log('[AdvancedSqlCaseBuilder] Parsed groups:', groupsParsed)
         setGroups(groupsParsed)
-        setUseAdvanced(true)
+        setGroups([])
       }
     } catch (e) {
-      console.error('[AdvancedSqlCaseBuilder] Parse error:', e)
+      console.error('[AdvancedSqlCaseBuilder] Error prefilling:', e)
     }
   }, [initial, columns])
+
+  // Default to table scope if table is selected
+  useEffect(() => {
+    if (tableName && !initial) {
+      setScopeLevel('table')
+    }
+  }, [tableName, initial])
 
   const canAdd = useMemo(() => {
     if (!target) return false
@@ -311,9 +327,16 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
           </div>
         )}
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
         <label className="text-xs text-muted-foreground sm:col-span-1">ELSE</label>
         <input className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" placeholder="Else value (optional)" value={elseVal} onChange={(e)=>setElseVal(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
+        <label className="text-xs text-muted-foreground sm:col-span-1">Scope</label>
+        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e)=>setScopeLevel(e.target.value as any)}>
+          <option value="datasource">Datasource-wide</option>
+          {tableName && <option value="table">Table: {tableName}</option>}
+        </select>
       </div>
       <div className="flex items-center justify-end gap-2">
         <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCancelAction}>Cancel</button>
@@ -341,7 +364,13 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
             if (elseVal) parts.push(` ELSE '${esc(elseVal)}'`)
             parts.push(' END')
             const expr = parts.join('')
-            const tr = { type: 'computed' as const, name: target, expr }
+            const tr: any = { type: 'computed' as const, name: target, expr }
+            // Add scope
+            if (scopeLevel === 'table' && tableName) {
+              tr.scope = { level: 'table', table: tableName }
+            } else {
+              tr.scope = { level: 'datasource' }
+            }
             onAddAction(tr)
           } else {
             const cases = rows.map(r => {
@@ -349,7 +378,13 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
               const when: Condition = { op: r.op, left: `s.${baseCol}`, right }
               return { when, then: r.then }
             })
-            const tr = { type: 'case' as const, target, cases, else: elseVal ? elseVal : undefined }
+            const tr: any = { type: 'case' as const, target, cases, else: elseVal ? elseVal : undefined }
+            // Add scope
+            if (scopeLevel === 'table' && tableName) {
+              tr.scope = { level: 'table', table: tableName }
+            } else {
+              tr.scope = { level: 'datasource' }
+            }
             onAddAction(tr)
           }
         }}>{submitLabel || 'Add CASE transform'}</button>

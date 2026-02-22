@@ -178,7 +178,7 @@ function PreviewPanel({ dsId, sel }: { dsId: string; sel: Sel | null }) {
       let done = false
       for (const form of forms) {
         try {
-          const res = await Api.query({ sql: `SELECT * FROM ${form}`, datasourceId: dsId, limit: LIMIT, offset, includeTotal: true, preferLocalDuck: true, preferLocalTable: table } as any)
+          const res = await Api.query({ sql: `SELECT * FROM ${form}`, datasourceId: dsId, limit: LIMIT, offset, includeTotal: true } as any)
           if (cancelled) return
           if ((res.columns?.length || 0) > 0 || (res.rows?.length || 0) > 0) {
             setCols(res.columns as string[])

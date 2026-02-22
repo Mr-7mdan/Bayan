@@ -5,6 +5,11 @@ from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from .config import settings
+
+# Timezone used for all cron triggers and scheduler clock.
+# Configured via SCHEDULER_TIMEZONE env var (see config.py). Defaults to UTC.
+_SCHEDULER_TZ: str = (settings.scheduler_timezone or 'UTC').strip() or 'UTC'
 
 from .models import SessionLocal, SyncTask, Datasource, AlertRule, AlertRun
 from fastapi import Response
@@ -17,7 +22,7 @@ _scheduler: Optional[BackgroundScheduler] = None
 def ensure_scheduler_started() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is None:
-        _scheduler = BackgroundScheduler()
+        _scheduler = BackgroundScheduler(timezone=_SCHEDULER_TZ)
         _scheduler.start()
     return _scheduler
 
@@ -75,7 +80,7 @@ def schedule_all_jobs() -> dict:
     # Upsert desired jobs
     for jid, t in desired.items():
         try:
-            trig = CronTrigger.from_crontab(t.schedule_cron)
+            trig = CronTrigger.from_crontab(t.schedule_cron, timezone=_SCHEDULER_TZ)
         except Exception:
             # Skip malformed cron
             continue
@@ -89,7 +94,7 @@ def schedule_all_jobs() -> dict:
                 kwargs={"ds_id": t.datasource_id, "task_id": t.id},
                 max_instances=1,
                 coalesce=True,
-                misfire_grace_time=60,
+                misfire_grace_time=300,
             )
             if jid in existing:
                 updated += 1
@@ -151,7 +156,7 @@ def run_alert_rule_job(alert_id: str) -> None:
         ar = AlertRun(id=__import__('uuid').uuid4().hex, alert_id=a.id)
         db.add(ar); db.commit()
         try:
-            ok, msg = run_rule(db, a)
+            ok, msg = run_rule(db, a, skip_time_window=True)
             a.last_run_at = datetime.now(timezone.utc)
             a.last_status = msg or ("ok" if ok else "failed")
             ar.finished_at = datetime.now(timezone.utc)
@@ -208,7 +213,7 @@ def schedule_all_alert_jobs(default_cron: str = "*/15 * * * *") -> dict:
         # Upsert
         for jid, cr in desired.items():
             try:
-                trig = CronTrigger.from_crontab(cr)
+                trig = CronTrigger.from_crontab(cr, timezone=_SCHEDULER_TZ)
             except Exception:
                 # Skip bad cron
                 continue
@@ -221,7 +226,7 @@ def schedule_all_alert_jobs(default_cron: str = "*/15 * * * *") -> dict:
                     kwargs={"alert_id": jid.split(':',1)[1]},
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=60,
+                    misfire_grace_time=300,
                 )
                 if jid in existing:
                     updated += 1

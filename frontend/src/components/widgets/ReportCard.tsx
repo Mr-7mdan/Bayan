@@ -31,16 +31,55 @@ function formatDateStr(date: Date, pattern: string): string {
   return result
 }
 
+// Resolve a datetime expression (period cell type) to a display string — no variable needed
+function resolveDatetimeExprToString(expr: string): string {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const _weekendsEnv = (typeof process !== 'undefined' && (process.env?.NEXT_PUBLIC_WEEKENDS || '')) || 'SAT_SUN'
+  const weekendDaysJs = _weekendsEnv.toUpperCase() === 'FRI_SAT' ? [5, 6] : [0, 6]
+  const prevWorkday = (d: Date) => { const c = new Date(d); c.setDate(c.getDate()-1); while (weekendDaysJs.includes(c.getDay())) c.setDate(c.getDate()-1); return c }
+  const _WSD_MAP: Record<string,number> = { SUN:0, MON:1, TUE:2, WED:3, THU:4, FRI:5, SAT:6 }
+  const wsdNum = _WSD_MAP[((typeof process !== 'undefined' && (process.env?.NEXT_PUBLIC_WEEK_START_DAY||''))||'SUN').toUpperCase()] ?? 0
+  const startOfWeek = (d: Date) => { const s = new Date(d.getFullYear(),d.getMonth(),d.getDate()); s.setDate(s.getDate()-((s.getDay()-wsdNum+7)%7)); return s }
+  const workingWeekStartJs = _weekendsEnv.toUpperCase() === 'FRI_SAT' ? 0 : 1
+  const startOfWorkingWeek = (d: Date) => { const s = new Date(d.getFullYear(),d.getMonth(),d.getDate()); while (s.getDay()!==workingWeekStartJs) s.setDate(s.getDate()-1); return s }
+  const isoWeek = (d: Date) => { const dt=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const dn=dt.getUTCDay()||7; dt.setUTCDate(dt.getUTCDate()+4-dn); const y1=new Date(Date.UTC(dt.getUTCFullYear(),0,1)); return Math.ceil((((dt as any)-(y1 as any))/86400000+1)/7) }
+  const _ms=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const dmm = (d: Date) => `${String(d.getDate()).padStart(2,'0')} ${_ms[d.getMonth()]}`
+  const weekRangeStr = (s: Date) => { const e=new Date(s); e.setDate(e.getDate()+6); return `W${isoWeek(s)} (${dmm(s)} - ${dmm(e)})` }
+  switch (expr) {
+    case 'today': return formatDateStr(today, 'dd MMM yy')
+    case 'yesterday': { const d=new Date(today); d.setDate(d.getDate()-1); return formatDateStr(d,'dd MMM yy') }
+    case 'last_working_day': return formatDateStr(prevWorkday(today),'dd MMM yy')
+    case 'day_before_last_working_day': return formatDateStr(prevWorkday(prevWorkday(today)),'dd MMM yy')
+    case 'this_week': return weekRangeStr(startOfWeek(today))
+    case 'last_week': { const s=startOfWeek(today); s.setDate(s.getDate()-7); return weekRangeStr(s) }
+    case 'last_working_week': { const ws=startOfWorkingWeek(today); const s=new Date(ws); s.setDate(s.getDate()-7); return weekRangeStr(s) }
+    case 'week_before_last_working_week': { const ws=startOfWorkingWeek(today); const s=new Date(ws); s.setDate(s.getDate()-14); return weekRangeStr(s) }
+    case 'this_month': return `${_ms[today.getMonth()]}-${today.getFullYear()}`
+    case 'last_month': { const d=new Date(today.getFullYear(),today.getMonth()-1,1); return `${_ms[d.getMonth()]}-${d.getFullYear()}` }
+    case 'this_year': return String(today.getFullYear())
+    case 'last_year': return String(today.getFullYear()-1)
+    case 'ytd': return `${dmm(new Date(today.getFullYear(),0,1))} - ${dmm(today)}`
+    case 'mtd': return `${dmm(new Date(today.getFullYear(),today.getMonth(),1))} - ${dmm(today)}`
+    default: return expr
+  }
+}
+
 // Format a resolved numeric value according to the variable's format setting
 function formatValue(raw: unknown, variable: ReportVariable): string {
   // Handle datetime variables
   if (variable.type === 'datetime') {
+    const prefix = variable.prefix || ''
+    const suffix = variable.suffix || ''
     if (typeof raw === 'string' || raw instanceof Date) {
       const date = raw instanceof Date ? raw : new Date(raw)
       if (!isNaN(date.getTime())) {
         const fmt = variable.dateFormat || 'dd MMM yyyy'
-        return `${variable.prefix || ''}${formatDateStr(date, fmt)}${variable.suffix || ''}`
+        return `${prefix}${formatDateStr(date, fmt)}${suffix}`
       }
+      // Non-date strings (week ranges, month labels, year labels) — pass through with prefix/suffix
+      return `${prefix}${String(raw)}${suffix}`
     }
     return String(raw ?? '')
   }
@@ -336,7 +375,9 @@ function ReportElementView({ element, variables, resolvedValues }: {
                         borderColor: bColor,
                       }}
                     >
-                      {cell.type === 'spaceholder'
+                      {cell.type === 'period'
+                        ? resolveDatetimeExprToString(cell.datetimeExpr || '')
+                        : cell.type === 'spaceholder'
                         ? (() => {
                             const v = variables.find(v => v.id === cell.variableId)
                             if (!v) return <span className="text-muted-foreground">—</span>
@@ -413,12 +454,64 @@ export default function ReportCard({
     for (const v of variables) {
       if (v.type !== 'datetime') continue
       const now = new Date()
-      if (v.datetimeExpr === 'today') {
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        rv[v.id] = { value: today.toISOString(), loading: false }
-      } else {
-        rv[v.id] = { value: now.toISOString(), loading: false }
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      const expr = v.datetimeExpr || 'now'
+
+      // Weekends config from env (SAT_SUN or FRI_SAT)
+      const _weekendsEnv = (typeof process !== 'undefined' && (process.env?.NEXT_PUBLIC_WEEKENDS || '')) || 'SAT_SUN'
+      const weekendDaysJs = _weekendsEnv.toUpperCase() === 'FRI_SAT' ? [5, 6] : [0, 6]
+      const prevWorkday = (d: Date) => {
+        const c = new Date(d); c.setDate(c.getDate() - 1)
+        while (weekendDaysJs.includes(c.getDay())) c.setDate(c.getDate() - 1)
+        return c
       }
+
+      // Week start config from env
+      const _WSD_MAP: Record<string, number> = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 }
+      const _wsdEnv = ((typeof process !== 'undefined' && (process.env?.NEXT_PUBLIC_WEEK_START_DAY || '')) || 'SUN').toUpperCase()
+      const wsdNum = _WSD_MAP[_wsdEnv] ?? 0
+      const startOfWeek = (d: Date) => {
+        const s = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+        const offset = (s.getDay() - wsdNum + 7) % 7
+        s.setDate(s.getDate() - offset); return s
+      }
+      const workingWeekStartJs = _weekendsEnv.toUpperCase() === 'FRI_SAT' ? 0 : 1
+      const startOfWorkingWeek = (d: Date) => {
+        const s = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+        while (s.getDay() !== workingWeekStartJs) s.setDate(s.getDate() - 1); return s
+      }
+
+      // ISO week number
+      const isoWeek = (d: Date) => {
+        const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+        const dn = dt.getUTCDay() || 7
+        dt.setUTCDate(dt.getUTCDate() + 4 - dn)
+        const y1 = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1))
+        return Math.ceil((((dt as any) - (y1 as any)) / 86400000 + 1) / 7)
+      }
+      const _ms = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      const dmm = (d: Date) => `${String(d.getDate()).padStart(2,'0')} ${_ms[d.getMonth()]}`
+      const weekRangeStr = (start: Date) => { const end = new Date(start); end.setDate(end.getDate()+6); return `W${isoWeek(start)} (${dmm(start)} - ${dmm(end)})` }
+
+      let val: string
+      switch (expr) {
+        case 'today': val = today.toISOString(); break
+        case 'yesterday': { const d = new Date(today); d.setDate(d.getDate()-1); val = d.toISOString(); break }
+        case 'last_working_day': val = prevWorkday(today).toISOString(); break
+        case 'day_before_last_working_day': val = prevWorkday(prevWorkday(today)).toISOString(); break
+        case 'this_week': val = weekRangeStr(startOfWeek(today)); break
+        case 'last_week': { const s = startOfWeek(today); s.setDate(s.getDate()-7); val = weekRangeStr(s); break }
+        case 'last_working_week': { const ws = startOfWorkingWeek(today); const s = new Date(ws); s.setDate(s.getDate()-7); val = weekRangeStr(s); break }
+        case 'week_before_last_working_week': { const ws = startOfWorkingWeek(today); const s = new Date(ws); s.setDate(s.getDate()-14); val = weekRangeStr(s); break }
+        case 'this_month': val = `${_ms[today.getMonth()]}-${today.getFullYear()}`; break
+        case 'last_month': { const d = new Date(today.getFullYear(), today.getMonth()-1, 1); val = `${_ms[d.getMonth()]}-${d.getFullYear()}`; break }
+        case 'this_year': val = String(today.getFullYear()); break
+        case 'last_year': val = String(today.getFullYear()-1); break
+        case 'ytd': { const s = new Date(today.getFullYear(),0,1); val = `${dmm(s)} - ${dmm(today)}`; break }
+        case 'mtd': { const s = new Date(today.getFullYear(),today.getMonth(),1); val = `${dmm(s)} - ${dmm(today)}`; break }
+        default: val = now.toISOString(); break
+      }
+      rv[v.id] = { value: val, loading: false }
     }
 
     // Expression-based variables

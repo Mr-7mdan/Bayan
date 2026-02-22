@@ -361,6 +361,16 @@ def build_sql(
             tgt = str(tr.get("name") or tr.get("target") or "").strip()
             if tgt:
                 alias_names.append(tgt)
+    # Also include join-derived column names so they are NOT re-selected with s. prefix
+    # (the JOIN clause already projects them into the result)
+    for j in (joins or []):
+        for col in (j.get("columns") or []):
+            nm = str((col or {}).get("alias") or (col or {}).get("name") or "").strip()
+            if nm:
+                alias_names.append(nm)
+        agg_alias = str((j.get("aggregate") or {}).get("alias") or "").strip()
+        if agg_alias:
+            alias_names.append(agg_alias)
     alias_set = {s.lower() for s in alias_names}
     print(f"[build_sql] alias_names collected: {alias_names[:10]}")
 

@@ -147,6 +147,89 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
     if (d.includes('mysql') || d.includes('mariadb')) return `\`${nm.replace(/`/g, '``')}\``
     return `"${nm.replace(/"/g, '""')}"`
   }
+
+  function autoCorrectColumnCase(payload: DatasourceTransforms): { corrected: DatasourceTransforms; changes: string[] } {
+    // Build case-insensitive lookup from schema
+    const schemaColumns = new Set<string>()
+    const lookup = new Map<string, string>() // lowercase -> actual case
+    
+    try {
+      const s = schemaLocal || schema
+      if (s && Array.isArray(s.schemas)) {
+        for (const sch of s.schemas) {
+          if (Array.isArray(sch.tables)) {
+            for (const tbl of sch.tables) {
+              if (Array.isArray(tbl.columns)) {
+                for (const col of tbl.columns) {
+                  const colName = typeof col === 'string' ? col : col?.name
+                  if (colName) {
+                    schemaColumns.add(colName)
+                    lookup.set(colName.toLowerCase(), colName)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+
+    if (lookup.size === 0) return { corrected: payload, changes: [] }
+
+    const changes: string[] = []
+    const result = JSON.parse(JSON.stringify(payload)) // deep clone
+
+    // Helper to correct column references in an expression
+    const correctExpr = (expr: string, context: string): string => {
+      if (!expr) return expr
+      let corrected = expr
+      // Match bare identifiers (word boundaries, letters/underscores/numbers)
+      const regex = /\b([A-Za-z_][A-Za-z0-9_]*)\b/g
+      corrected = expr.replace(regex, (match) => {
+        const lower = match.toLowerCase()
+        if (lookup.has(lower) && lookup.get(lower) !== match) {
+          const correctedCol = lookup.get(lower)!
+          changes.push(`${context}: "${match}" → "${correctedCol}"`)
+          return correctedCol
+        }
+        return match
+      })
+      return corrected
+    }
+
+    // Correct custom columns
+    if (Array.isArray(result.customColumns)) {
+      result.customColumns = result.customColumns.map((cc: any, idx: number) => {
+        if (cc?.expr) {
+          return { ...cc, expr: correctExpr(cc.expr, `CustomColumn[${idx}] "${cc.name || 'unnamed'}"`) }
+        }
+        return cc
+      })
+    }
+
+    // Correct transforms
+    if (Array.isArray(result.transforms)) {
+      result.transforms = result.transforms.map((tr: any, idx: number) => {
+        const type = String(tr?.type || '').toLowerCase()
+        if (type === 'computed' && tr?.expr) {
+          return { ...tr, expr: correctExpr(tr.expr, `Transform[${idx}] "${tr.name || 'computed'}"`) }
+        }
+        if (type === 'case' && Array.isArray(tr?.cases)) {
+          const correctedCases = tr.cases.map((c: any) => {
+            if (c?.when?.left) {
+              const correctedLeft = correctExpr(c.when.left, `Transform[${idx}] "${tr.target || 'case'}" WHEN`)
+              return { ...c, when: { ...c.when, left: correctedLeft } }
+            }
+            return c
+          })
+          return { ...tr, cases: correctedCases }
+        }
+        return tr
+      })
+    }
+
+    return { corrected: result, changes }
+  }
   function numWrap(ident: string): string {
     const d = String(dsType || '').toLowerCase()
     if (d.includes('duckdb')) return `COALESCE(try_cast(regexp_replace(CAST(${ident} AS VARCHAR), '[^0-9\\.-]', '') AS DOUBLE), try_cast(${ident} AS DOUBLE), 0.0)`
@@ -1363,12 +1446,24 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
               setSaving(true); setError(undefined)
               try {
                 const parsed = JSON.parse(editJson || '{}') as any
-                const payload: DatasourceTransforms = {
+                let payload: DatasourceTransforms = {
                   customColumns: Array.isArray(parsed?.customColumns) ? parsed.customColumns : [],
                   transforms: Array.isArray(parsed?.transforms) ? parsed.transforms : [],
                   joins: Array.isArray(parsed?.joins) ? parsed.joins : [],
                   ...(parsed?.defaults ? { defaults: parsed.defaults } : {}),
                 }
+                
+                // Auto-correct column case to match schema
+                const { corrected, changes } = autoCorrectColumnCase(payload)
+                if (changes.length > 0) {
+                  console.log('[AdvancedSqlDialog] Auto-corrected column case:', changes)
+                  setToast({ message: `Auto-corrected ${changes.length} column reference(s) to match schema case`, type: 'success' })
+                  setTimeout(() => setToast(null), 4000)
+                  payload = corrected
+                  // Update the editJson to reflect corrections
+                  setEditJson(JSON.stringify(corrected, null, 2))
+                }
+                
                 await Api.saveDatasourceTransforms(effectiveDsId, payload)
                 setModel(payload)
                 setBaselineJson(JSON.stringify(payload, null, 2))

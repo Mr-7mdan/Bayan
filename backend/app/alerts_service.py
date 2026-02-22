@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 def _fetch_snapshot_png_direct(*, dashboard_id: Optional[str], public_id: Optional[str], token: Optional[str], widget_id: str, datasource_id: Optional[str], width: int, height: int, theme: str, actor_id: Optional[str], wait_ms: int = 4000, retries: int = 0, backoff_sec: float = 0.5) -> Optional[bytes]:
+    import os as _os
+    _pbp = getattr(settings, 'playwright_browsers_path', None)
+    if _pbp and not _os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
+        _os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(_pbp)
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
     except Exception:
@@ -276,7 +280,8 @@ def _format_report_value(raw: Any, variable: dict) -> str:
                 fmt = variable.get('dateFormat') or 'dd MMM yyyy'
                 return f"{prefix}{_format_date_str(dt, fmt)}{suffix}"
             except Exception:
-                return str(raw or '')
+                # Non-date strings (week ranges, month labels, year labels) — pass through with prefix/suffix
+                return f"{prefix}{str(raw or '')}{suffix}"
         return ''
 
     try:
@@ -319,11 +324,89 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
         vid = str(v.get('id') or '')
         vtype = str(v.get('type') or 'query')
         if vtype == 'datetime':
+            import os as _os
             now = datetime.utcnow()
+            today = datetime(now.year, now.month, now.day)
             expr = str(v.get('datetimeExpr') or 'now')
+
+            # Weekends config (SAT_SUN default: Sat=5, Sun=6 in Python weekday Mon=0)
+            _weekends_env = _os.environ.get('WEEKENDS', 'SAT_SUN').upper().strip()
+            _weekend_days = (4, 5) if _weekends_env == 'FRI_SAT' else (5, 6)
+
+            def _prev_wd(d: datetime) -> datetime:
+                c = d - timedelta(days=1)
+                while c.weekday() in _weekend_days:
+                    c -= timedelta(days=1)
+                return c
+
+            # Week start config
+            _WSD_MAP_BE = {'SUN': 0, 'MON': 1, 'TUE': 2, 'WED': 3, 'THU': 4, 'FRI': 5, 'SAT': 6}
+            _wsd_env = _os.environ.get('WEEK_START_DAY', 'SUN').upper().strip()
+            _wsd_num = _WSD_MAP_BE.get(_wsd_env, 0)  # Python weekday: Mon=0..Sun=6
+
+            def _start_of_week(d: datetime) -> datetime:
+                if _wsd_num == 0:  # Sunday-start
+                    offset = (d.weekday() + 1) % 7
+                else:
+                    offset = (d.weekday() - _wsd_num + 7) % 7
+                return d - timedelta(days=offset)
+
+            _working_week_start_dow = 6 if _weekends_env == 'FRI_SAT' else 0  # Python: Sun=6, Mon=0
+
+            def _start_of_working_week(d: datetime) -> datetime:
+                c = datetime(d.year, d.month, d.day)
+                while c.weekday() != _working_week_start_dow:
+                    c -= timedelta(days=1)
+                return c
+
+            def _iso_week(d: datetime) -> int:
+                return d.isocalendar()[1]
+
+            _months_short = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+            def _dmm(d: datetime) -> str:
+                return f"{str(d.day).zfill(2)} {_months_short[d.month-1]}"
+
+            def _week_range_str(start: datetime) -> str:
+                end = start + timedelta(days=6)
+                return f"W{_iso_week(start)} ({_dmm(start)} - {_dmm(end)})"
+
             if expr == 'today':
-                resolved[vid] = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-            else:
+                resolved[vid] = today.isoformat()
+            elif expr == 'yesterday':
+                resolved[vid] = (today - timedelta(days=1)).isoformat()
+            elif expr == 'last_working_day':
+                resolved[vid] = _prev_wd(today).isoformat()
+            elif expr == 'day_before_last_working_day':
+                resolved[vid] = _prev_wd(_prev_wd(today)).isoformat()
+            elif expr == 'this_week':
+                resolved[vid] = _week_range_str(_start_of_week(today))
+            elif expr == 'last_week':
+                ws = _start_of_week(today)
+                resolved[vid] = _week_range_str(ws - timedelta(days=7))
+            elif expr == 'last_working_week':
+                ws = _start_of_working_week(today)
+                resolved[vid] = _week_range_str(ws - timedelta(days=7))
+            elif expr == 'week_before_last_working_week':
+                ws = _start_of_working_week(today)
+                resolved[vid] = _week_range_str(ws - timedelta(days=14))
+            elif expr == 'this_month':
+                resolved[vid] = f"{_months_short[today.month-1]}-{today.year}"
+            elif expr == 'last_month':
+                lm = datetime(today.year if today.month > 1 else today.year - 1,
+                              today.month - 1 if today.month > 1 else 12, 1)
+                resolved[vid] = f"{_months_short[lm.month-1]}-{lm.year}"
+            elif expr == 'this_year':
+                resolved[vid] = str(today.year)
+            elif expr == 'last_year':
+                resolved[vid] = str(today.year - 1)
+            elif expr == 'ytd':
+                s = datetime(today.year, 1, 1)
+                resolved[vid] = f"{_dmm(s)} - {_dmm(today)}"
+            elif expr == 'mtd':
+                s = datetime(today.year, today.month, 1)
+                resolved[vid] = f"{_dmm(s)} - {_dmm(today)}"
+            else:  # 'now' or unknown
                 resolved[vid] = now.isoformat()
             continue
         if vtype == 'expression':
@@ -437,7 +520,7 @@ def _fw(w: Optional[str]) -> int:
     return 400
 
 
-def _render_report_element_html(el: dict, variables: list[dict], resolved: dict[str, Any], *, scale: float = 1.0) -> str:
+def _render_report_element_html(el: dict, variables: list[dict], resolved: dict[str, Any], *, scale: float = 1.0, cell_w_px: int = 0, cell_h_px: int = 0) -> str:
     """Render a single report element as email-safe HTML."""
     etype = str(el.get('type') or '')
 
@@ -475,7 +558,18 @@ def _render_report_element_html(el: dict, variables: list[dict], resolved: dict[
         if not url:
             return "<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:11px;'>No image</div>"
         fit = img.get('objectFit') or 'contain'
-        return f"<div style='width:100%;height:100%;overflow:hidden;'><img src='{_html_escape(url)}' alt='{_html_escape(img.get('alt') or '')}' style='width:100%;height:100%;object-fit:{fit};display:block;'/></div>"
+        # Outlook ignores CSS width/height on images; use HTML attributes to constrain.
+        # Web clients get object-fit for proper scaling; Outlook gets explicit pixel box.
+        w_attr = f" width='{cell_w_px}'" if cell_w_px else ""
+        h_attr = f" height='{cell_h_px}'" if cell_h_px else ""
+        w_css = f"{cell_w_px}px" if cell_w_px else "100%"
+        h_css = f"{cell_h_px}px" if cell_h_px else "100%"
+        return (
+            f"<div style='width:100%;height:100%;overflow:hidden;'>"
+            f"<img src='{_html_escape(url)}' alt='{_html_escape(img.get('alt') or '')}'"
+            f"{w_attr}{h_attr} style='width:{w_css};height:{h_css};"
+            f"max-width:100%;max-height:100%;object-fit:{fit};display:block;'/></div>"
+        )
 
     if etype == 'spaceholder':
         vid = el.get('variableId')
@@ -619,6 +713,49 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
                     content = _html_escape(_format_report_value(raw_val, v))
                 else:
                     content = '\u2014'
+            elif cell_type == 'period':
+                import os as _os2
+                _expr = str(cell.get('datetimeExpr') or '') if isinstance(cell, dict) else ''
+                _today2 = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                _we2 = _os2.environ.get('WEEKENDS', 'SAT_SUN').upper().strip()
+                _wdays2 = (4, 5) if _we2 == 'FRI_SAT' else (5, 6)
+                def _pwd2(d: datetime) -> datetime:
+                    c = d - timedelta(days=1)
+                    while c.weekday() in _wdays2: c -= timedelta(days=1)
+                    return c
+                _WSD2 = {'SUN': 0, 'MON': 1, 'TUE': 2, 'WED': 3, 'THU': 4, 'FRI': 5, 'SAT': 6}
+                _wsd2 = _WSD2.get(_os2.environ.get('WEEK_START_DAY', 'SUN').upper().strip(), 0)
+                def _sow2(d: datetime) -> datetime:
+                    offset = (d.weekday() + 1) % 7 if _wsd2 == 0 else (d.weekday() - _wsd2 + 7) % 7
+                    return d - timedelta(days=offset)
+                _wwsd2 = 6 if _we2 == 'FRI_SAT' else 0
+                def _soww2(d: datetime) -> datetime:
+                    c = datetime(d.year, d.month, d.day)
+                    while c.weekday() != _wwsd2: c -= timedelta(days=1)
+                    return c
+                def _dmm2(d: datetime) -> str: return f"{str(d.day).zfill(2)} {_ms2[d.month-1]}"
+                def _wrs2(s: datetime) -> str:
+                    e = s + timedelta(days=6)
+                    return f"W{s.isocalendar()[1]} ({_dmm2(s)} - {_dmm2(e)})"
+                _ms2 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                if _expr == 'today': _pval = _format_date_str(_today2, 'dd MMM yy')
+                elif _expr == 'yesterday': _pval = _format_date_str(_today2 - timedelta(days=1), 'dd MMM yy')
+                elif _expr == 'last_working_day': _pval = _format_date_str(_pwd2(_today2), 'dd MMM yy')
+                elif _expr == 'day_before_last_working_day': _pval = _format_date_str(_pwd2(_pwd2(_today2)), 'dd MMM yy')
+                elif _expr == 'this_week': _pval = _wrs2(_sow2(_today2))
+                elif _expr == 'last_week': _ws2 = _sow2(_today2); _pval = _wrs2(_ws2 - timedelta(days=7))
+                elif _expr == 'last_working_week': _ws2 = _soww2(_today2); _pval = _wrs2(_ws2 - timedelta(days=7))
+                elif _expr == 'week_before_last_working_week': _ws2 = _soww2(_today2); _pval = _wrs2(_ws2 - timedelta(days=14))
+                elif _expr == 'this_month': _pval = f"{_ms2[_today2.month-1]}-{_today2.year}"
+                elif _expr == 'last_month':
+                    _lm2 = datetime(_today2.year if _today2.month > 1 else _today2.year-1, _today2.month-1 if _today2.month > 1 else 12, 1)
+                    _pval = f"{_ms2[_lm2.month-1]}-{_lm2.year}"
+                elif _expr == 'this_year': _pval = str(_today2.year)
+                elif _expr == 'last_year': _pval = str(_today2.year - 1)
+                elif _expr == 'ytd': _pval = f"{_dmm2(datetime(_today2.year,1,1))} - {_dmm2(_today2)}"
+                elif _expr == 'mtd': _pval = f"{_dmm2(datetime(_today2.year,_today2.month,1))} - {_dmm2(_today2)}"
+                else: _pval = _expr
+                content = _html_escape(_pval)
             else:
                 content = _resolve_text(_html_escape(str(cell.get('text') or '') if isinstance(cell, dict) else ''), variables, resolved)
 
@@ -638,96 +775,119 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
 
 
 def _render_report_html(widget_cfg: dict, db: Session, global_filters: Optional[dict] = None, *, target_width: int = 600) -> str:
-    """Render a full report widget as **email-safe** HTML using flow layout.
+    """Render a full report widget as email/PDF-safe HTML.
 
-    Instead of CSS absolute positioning (which Outlook strips), elements are
-    grouped into visual rows and laid out using ``<table>`` cells with
-    percentage widths derived from the grid.  This prevents overlap and works
-    reliably across all email clients.
-
-    ``target_width`` is used only for font/padding scaling so the report looks
-    proportional.  The outer container uses ``width:100%`` so it fills whatever
-    space the email template provides.
+    Uses an HTML table with colspan/rowspan to mirror the exact grid layout.
+    This correctly handles elements of different heights placed side-by-side
+    (e.g. a tall logo image next to several stacked label rows) without
+    incorrectly collapsing them into a single flat row.
     """
     report = (widget_cfg.get('options') or {}).get('report') or {}
     elements = report.get('elements') or []
     variables = report.get('variables') or []
     grid_cols = int(report.get('gridCols') or 12)
+    grid_rows = int(report.get('gridRows') or 20)
     cell_size = int(report.get('cellSize') or 30)
-    raw_w = grid_cols * cell_size  # original builder width
+    raw_w = grid_cols * cell_size
 
-    # Scale factor — used for font-size / padding only (layout uses %)
+    # Scale factor — applied to font sizes and padding only
     scale = target_width / raw_w if raw_w > 0 else 1.0
+    col_w_px = round(target_width / grid_cols)
+    row_h_px = round(cell_size * scale)
 
     # Resolve all variables
     resolved = _resolve_report_variables(db, variables, global_filters)
 
-    # Sort elements by grid position
-    sorted_els = sorted(elements, key=lambda e: (e.get('gridY', 0), e.get('gridX', 0)))
+    # ---- Build 2D occupancy map ----
+    # occupancy[r][c] = element dict for the element that owns that cell,
+    # or None for empty cells.  When elements overlap the last one wins (best-effort).
+    occupancy: list[list[dict | None]] = [[None] * grid_cols for _ in range(grid_rows)]
+    for el in elements:
+        gx = max(0, int(el.get('gridX') or 0))
+        gy = max(0, int(el.get('gridY') or 0))
+        gw = max(1, int(el.get('gridW') or 1))
+        gh = max(1, int(el.get('gridH') or 1))
+        for r in range(gy, min(gy + gh, grid_rows)):
+            for c in range(gx, min(gx + gw, grid_cols)):
+                occupancy[r][c] = el
 
-    # ---- Group elements into visual rows ----
-    # Two elements belong to the same row when their Y ranges overlap.
-    rows: list[list[dict]] = []
-    for el in sorted_els:
-        gy = int(el.get('gridY') or 0)
-        gh = int(el.get('gridH') or 1)
-        el_top = gy
-        el_bottom = gy + gh
-        placed = False
-        for row in rows:
-            # Check if this element's Y range overlaps with the row's Y range
-            row_top = min(int(r.get('gridY') or 0) for r in row)
-            row_bottom = max(int(r.get('gridY') or 0) + int(r.get('gridH') or 1) for r in row)
-            if el_top < row_bottom and el_bottom > row_top:
-                row.append(el)
-                placed = True
-                break
-        if not placed:
-            rows.append([el])
+    # ---- Render grid as HTML table with colspan/rowspan ----
+    # covered: cells that have already been emitted via a colspan/rowspan from an earlier cell
+    covered: set[tuple[int, int]] = set()
+    rendered_el_ids: set[int] = set()  # id(el) already emitted
 
-    # ---- Render each visual row ----
-    html_rows: list[str] = []
-    for row in rows:
-        row = sorted(row, key=lambda e: int(e.get('gridX') or 0))
-        row_height = max(int(r.get('gridH') or 1) for r in row)
-        h_px = round(row_height * cell_size * scale)
+    # Determine the last row that has any content so we don't emit trailing empty rows
+    last_content_row = 0
+    for r in range(grid_rows):
+        for c in range(grid_cols):
+            if occupancy[r][c] is not None:
+                el = occupancy[r][c]
+                gh = max(1, int(el.get('gridH') or 1))
+                gy = max(0, int(el.get('gridY') or 0))
+                last_content_row = max(last_content_row, gy + gh - 1)
 
-        if len(row) == 1:
-            el = row[0]
-            gw = int(el.get('gridW') or 1)
-            w_pct = round(gw / grid_cols * 100, 1)
-            is_table = str(el.get('type') or '') == 'table'
-            content = _render_report_element_html(el, variables, resolved, scale=scale)
-            if is_table:
-                # Tables always span full width
-                html_rows.append(
-                    f"<div style='width:100%;box-sizing:border-box;'>{content}</div>"
+    # Column width declarations
+    col_tags = ''.join(f"<col style='width:{col_w_px}px;'>" for _ in range(grid_cols))
+
+    tr_list: list[str] = []
+    for r in range(last_content_row + 1):
+        td_list: list[str] = []
+        c = 0
+        while c < grid_cols:
+            if (r, c) in covered:
+                c += 1
+                continue
+
+            el = occupancy[r][c]
+            if el is None:
+                # Empty grid cell — emit a spacer td (border:none overrides template global th,td CSS)
+                td_list.append(
+                    f"<td width='{col_w_px}' height='{row_h_px}' style='width:{col_w_px}px;height:{row_h_px}px;padding:0;border:none;'></td>"
                 )
-            else:
-                html_rows.append(
-                    f"<div style='width:{w_pct}%;min-height:{h_px}px;box-sizing:border-box;'>{content}</div>"
-                )
-        else:
-            # Multiple elements side by side — use an HTML table for layout
-            cells_html = []
-            for el in row:
-                gw = int(el.get('gridW') or 1)
-                w_pct = round(gw / grid_cols * 100, 1)
-                is_table = str(el.get('type') or '') == 'table'
-                content = _render_report_element_html(el, variables, resolved, scale=scale)
-                va = 'top'
-                cells_html.append(
-                    f"<td style='width:{w_pct}%;vertical-align:{va};padding:0;box-sizing:border-box;'>{content}</td>"
-                )
-            html_rows.append(
-                f"<table style='width:100%;border-collapse:collapse;border:0;' cellpadding='0' cellspacing='0'>"
-                f"<tr style='min-height:{h_px}px;'>{''.join(cells_html)}</tr></table>"
+                c += 1
+                continue
+
+            el_id = id(el)
+            if el_id in rendered_el_ids:
+                # Element already emitted from a different starting cell (overlap edge-case)
+                c += 1
+                continue
+
+            gx = max(0, int(el.get('gridX') or 0))
+            gy = max(0, int(el.get('gridY') or 0))
+            gw = max(1, min(int(el.get('gridW') or 1), grid_cols - gx))
+            gh = max(1, int(el.get('gridH') or 1))
+            w_px = gw * col_w_px
+            h_px = gh * row_h_px
+
+            content = _render_report_element_html(el, variables, resolved, scale=scale, cell_w_px=w_px, cell_h_px=h_px)
+            td_list.append(
+                f"<td colspan='{gw}' rowspan='{gh}' width='{w_px}' height='{h_px}' "
+                f"style='width:{w_px}px;height:{h_px}px;padding:0;border:none;"
+                f"vertical-align:top;overflow:hidden;box-sizing:border-box;'>"
+                f"{content}</td>"
             )
+            rendered_el_ids.add(el_id)
 
-    return (
-        f"<div style='width:100%;font-family:Inter,Arial,sans-serif;color:#111827;'>"
-        f"{''.join(html_rows)}</div>"
+            # Mark all cells of this element (except the origin) as covered
+            for rr in range(gy, min(gy + gh, grid_rows)):
+                for cc in range(gx, min(gx + gw, grid_cols)):
+                    if (rr, cc) != (r, c):
+                        covered.add((rr, cc))
+
+            c += gw
+
+        tr_list.append(f"<tr>{''.join(td_list)}</tr>")
+
+    table_html = (
+        f"<table style='width:{target_width}px;border-collapse:collapse;border:none;"
+        f"table-layout:fixed;font-family:Inter,Arial,sans-serif;color:#111827;' "
+        f"cellpadding='0' cellspacing='0'>"
+        f"<colgroup>{col_tags}</colgroup>"
+        f"{''.join(tr_list)}"
+        f"</table>"
     )
+    return table_html
 
 
 # --- PDF generation (uses Playwright print-to-PDF) ---
@@ -1168,11 +1328,14 @@ def _apply_base_template(cfg: EmailConfig, subject: str, body_html: str) -> str:
         repl = {"content": body_html, "subject": subject or "", "logoUrl": logo_src, "year": str(datetime.utcnow().year)}
         out = _apply_placeholders(tpl, repl)
     except Exception:
-        # Fallback to direct replace if regex helper fails
-        out = tpl.replace("{{content}}", body_html)
-        out = out.replace("{{subject}}", subject or "")
-        out = out.replace("{{logoUrl}}", logo_src)
-        out = out.replace("{{year}}", str(datetime.utcnow().year))
+        out = tpl
+    # Also handle single-brace variants {subject} / {content} / {year} / {logoUrl}
+    try:
+        _year = str(datetime.utcnow().year)
+        for _k, _v in [("subject", subject or ""), ("content", body_html), ("logoUrl", logo_src), ("year", _year)]:
+            out = out.replace("{" + _k + "}", _v)
+    except Exception:
+        pass
     # If base template hardcodes a relative logo path, replace it with computed/inlined logo_src or default /logo.svg inlined from frontend
     try:
         if isinstance(out, str):
@@ -1206,6 +1369,16 @@ def _apply_base_template(cfg: EmailConfig, subject: str, body_html: str) -> str:
     try:
         out = out.replace("max-height:40px;display:block", "height:40px;width:auto;display:block")
         out = out.replace("max-height:40px; display:block", "height:40px;width:auto;display:block")
+    except Exception:
+        pass
+    # Outlook (Word renderer) ignores CSS height on images — add HTML height attribute
+    # to any <img> that has height:40px in its style but no height= HTML attribute.
+    try:
+        out = _re.sub(
+            r'(<img\b(?![^>]*\sheight=)[^>]*style=["\'][^"\']*height:\s*40px[^"\']*["\'][^>]*>)',
+            lambda m: m.group(0).replace('<img ', '<img height="40" ', 1),
+            out, flags=_re.IGNORECASE
+        )
     except Exception:
         pass
     # Ensure the container doesn't clip wide report tables
@@ -1533,17 +1706,26 @@ def _apply_placeholders(s: str, repl: dict[str, str]) -> str:
 
 def _now_matches_time(cond: dict) -> bool:
     try:
-        now = datetime.utcnow()
+        import os as _os
+        _tz_name = (_os.environ.get('SCHEDULER_TIMEZONE') or 'UTC').strip() or 'UTC'
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo as _ZI  # type: ignore
+        now = datetime.now(_ZI(_tz_name))
         hhmm = str(cond.get("time") or "00:00")
         hh, mm = (int(hhmm.split(":")[0] or 0), int(hhmm.split(":")[1] or 0))
-        # time window tolerance: same hour:minute
+        # time window tolerance: same hour:minute in the configured timezone
         if now.hour != hh or now.minute != mm:
             return False
         sched = cond.get("schedule") or {"kind": "daily"}
         kind = str(sched.get("kind") or "daily").lower()
         if kind == "weekly":
             dows = sched.get("dows") or []
-            return now.weekday() in set(int(x) for x in dows)
+            # Frontend uses JS getDay() convention: Sun=0, Mon=1 … Sat=6
+            # isoweekday(): Mon=1..Sun=7  →  % 7 gives Sun=0, Mon=1 … Sat=6
+            dow_js = now.isoweekday() % 7
+            return dow_js in set(int(x) for x in dows)
         if kind == "monthly":
             doms = sched.get("doms") or []
             return now.day in set(int(x) for x in doms)
@@ -1554,7 +1736,7 @@ def _now_matches_time(cond: dict) -> bool:
 
 from typing import Callable
 
-def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progress_cb: Optional[Callable[[dict], None]] = None) -> Tuple[bool, str]:
+def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_time_window: bool = False, progress_cb: Optional[Callable[[dict], None]] = None) -> Tuple[bool, str]:
     try:
         cfg = json.loads(rule.config_json or "{}")
     except Exception:
@@ -1577,7 +1759,8 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, progr
         # Time condition
         tcond = tg.get("time") or {}
         if tcond and tcond.get("enabled"):
-            time_ok = _now_matches_time(tcond)
+            # skip_time_window=True when called from APScheduler (cron already ensures correct timing)
+            time_ok = True if (skip_time_window or force_time_ok) else _now_matches_time(tcond)
         else:
             time_ok = True  # if not enabled, ignore
         # Manual run: bypass time window and threshold if forced

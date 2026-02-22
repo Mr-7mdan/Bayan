@@ -21,6 +21,25 @@ python -m venv backend\venv
 backend\venv\Scripts\pip install -r backend\requirements.txt
 ```
 
+### Install Playwright browsers (required for snapshots/PDF)
+
+The snapshot service uses Playwright Chromium. When the backend runs as a Windows Service (SYSTEM account), browsers must be installed in a shared location — **not** the SYSTEM user's AppData.
+
+```powershell
+# 1. Choose a shared browser cache directory
+$env:PLAYWRIGHT_BROWSERS_PATH = "C:\Bayan\playwright-browsers"
+
+# 2. Install Chromium (run once after each requirements.txt update)
+backend\venv\Scripts\python -m playwright install chromium
+
+# 3. Add the same path to backend\.env so the service picks it up
+Add-Content backend\.env "`nPLAYWRIGHT_BROWSERS_PATH=C:\Bayan\playwright-browsers"
+```
+
+> **Important:** If you skip this step the service will log  
+> `BrowserType.launch: Executable doesn't exist at C:\WINDOWS\system32\config\systemprofile\...`  
+> and all widget snapshots will fail.
+
 ## 2) Configure environment
 
 Create `backend\.env`:
