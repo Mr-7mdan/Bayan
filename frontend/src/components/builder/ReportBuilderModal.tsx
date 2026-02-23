@@ -46,6 +46,7 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
   const [editIdx, setEditIdx] = useState<number | null>(null)
   const [dropPos, setDropPos] = useState<{ top: number; left: number; maxHeight: number }>({ top: 0, left: 0, maxHeight: 400 })
   const [numInput, setNumInput] = useState('')
+  const [varSearch, setVarSearch] = useState('')
   const btnRef = useRef<HTMLButtonElement>(null)
   const dropRef = useRef<HTMLDivElement>(null)
 
@@ -76,7 +77,7 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
       setEditIdx(null)
     }
     setOpen(v => !v)
-    if (open) setEditIdx(null)
+    if (open) { setEditIdx(null); setVarSearch('') }
   }
 
   const applyToken = (token: ExprToken) => {
@@ -114,13 +115,27 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
       {allVarNames.length > 0 && (
         <>
           <p className="text-[9px] text-muted-foreground uppercase tracking-wide px-2 pt-1 pb-0.5">Variables</p>
-          <div>
-            {allVarNames.map(name => (
-              <button key={name} onClick={() => applyToken({ kind: 'var', name })}
+          <div className="px-1 pb-1">
+            <input
+              autoFocus
+              type="text"
+              value={varSearch}
+              onChange={e => setVarSearch(e.target.value)}
+              placeholder="Search…"
+              style={{ backgroundColor: 'hsl(var(--background))' }}
+              className="w-full h-6 text-[11px] rounded border px-2 outline-none focus:ring-1 focus:ring-primary/40"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {allVarNames.filter(n => n.toLowerCase().includes(varSearch.toLowerCase())).map(name => (
+              <button key={name} onClick={() => { applyToken({ kind: 'var', name }); setVarSearch('') }}
                 className="w-full text-left px-2 py-1 rounded hover:bg-primary/10 hover:text-primary transition-colors truncate">
                 {name}
               </button>
             ))}
+            {allVarNames.filter(n => n.toLowerCase().includes(varSearch.toLowerCase())).length === 0 && (
+              <p className="text-[10px] text-muted-foreground px-2 py-1">No matches</p>
+            )}
           </div>
         </>
       )}
@@ -220,7 +235,7 @@ function VariableEditor({
   }, [variable.datasourceId, variable.source])
 
   const tablesQ = useQuery({
-    queryKey: ['report-tables', dsId],
+    queryKey: ['report-tables', dsId, variable.id],
     queryFn: async () => {
       if (!dsId) return null
       try {
@@ -232,7 +247,7 @@ function VariableEditor({
     },
     enabled: !!dsId,
     staleTime: 0,
-    refetchOnMount: true,
+    refetchOnMount: 'always',
   })
   const tables = useMemo(() => {
     const raw = tablesQ.data as any
@@ -264,7 +279,7 @@ function VariableEditor({
     return []
   }, [tablesQ.data])
   const columnsQ = useQuery({
-    queryKey: ['columns', dsId, source],
+    queryKey: ['columns', dsId, source, variable.id],
     queryFn: async () => {
       if (!dsId || !source) return []
       const r = await Api.introspect(dsId)
@@ -326,9 +341,16 @@ function VariableEditor({
         // Match unquoted identifiers and quoted identifiers
         const pattern = /\b[a-zA-Z_][a-zA-Z0-9_]*\b|"([^"]+)"|'([^']+)'|\[([^\]]+)\]/g
         let match
+        const SQL_KEYWORDS = new Set(['and', 'or', 'not', 'case', 'when', 'then', 'else', 'end', 'null', 'true', 'false',
+          'cast', 'as', 'left', 'right', 'varchar', 'int', 'double', 'float', 'char', 'nvarchar', 'varchar2',
+          'bigint', 'smallint', 'tinyint', 'decimal', 'numeric', 'bit', 'date', 'datetime', 'timestamp',
+          'text', 'ntext', 'string', 'boolean', 'bool', 'unsigned', 'signed', 'binary', 'varbinary',
+          'coalesce', 'isnull', 'ifnull', 'nullif', 'if', 'substr', 'substring', 'len', 'length',
+          'trim', 'ltrim', 'rtrim', 'upper', 'lower', 'replace', 'concat', 'like', 'in', 'between',
+          'is', 'over', 'partition', 'by', 'from', 'select', 'where', 'having', 'group', 'order'])
         while ((match = pattern.exec(expr)) !== null) {
           const ref = (match[1] || match[3] || match[0]).toLowerCase()
-          if (ref && !['and', 'or', 'not', 'case', 'when', 'then', 'else', 'end', 'null', 'true', 'false', 'cast', 'as', 'left', 'right', 'varchar', 'int', 'double', 'float'].includes(ref)) {
+          if (ref && !SQL_KEYWORDS.has(ref)) {
             refs.add(ref)
           }
         }
@@ -430,7 +452,6 @@ function VariableEditor({
   }, [dsId, dsTransformsQ.data, source, widgetId, columnsMeta])
   const columns = [...new Set([...columnsMeta.map((c) => c.name), ...transformColumns])]
 
-  const AGG_OPTIONS = ['none', 'count', 'distinct', 'avg', 'sum', 'min', 'max'] as const
   const FORMAT_OPTIONS = ['none', 'short', 'currency', 'percent', 'wholeNumber', 'oneDecimal', 'twoDecimals'] as const
 
   const handleChange = (patch: Partial<ReportVariable>) => {
@@ -527,7 +548,7 @@ function VariableEditor({
         {varType === 'query' && (
           <>
             <div className="grid grid-cols-2 gap-2">
-              <div>
+              <div className="relative z-10">
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Datasource</label>
                 <div className="flex gap-1">
                   <select className="flex-1 h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={dsId} onChange={(e) => { setDsId(e.target.value); handleChange({ datasourceId: e.target.value, source: '' }) }}>
@@ -536,7 +557,7 @@ function VariableEditor({
                   </select>
                   <button
                     type="button"
-                    className="h-7 w-7 flex items-center justify-center rounded-md border bg-secondary/40 hover:bg-secondary/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="h-7 w-7 flex items-center justify-center rounded-md border bg-secondary/40 hover:bg-secondary/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative z-10"
                     onClick={() => setShowExplorer(true)}
                     disabled={!dsId || dsQ.isLoading || !datasources.find((ds: any) => ds.id === dsId)}
                     title="Open Data Explorer"
@@ -545,7 +566,7 @@ function VariableEditor({
                   </button>
                 </div>
               </div>
-              <div>
+              <div className="relative">
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Table</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={source} onChange={(e) => { setSource(e.target.value); handleChange({ source: e.target.value }) }}>
                   <option value="">Select…</option>
@@ -563,11 +584,41 @@ function VariableEditor({
               </div>
               <div>
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Aggregation</label>
-                <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.agg || 'none'} onChange={(e) => handleChange({ value: { ...variable.value, agg: e.target.value as any } })}>
-                  {AGG_OPTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+                <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.agg || 'none'} onChange={(e) => handleChange({ value: { ...variable.value, agg: e.target.value as any, avgDateField: undefined } })}>
+                  <optgroup label="Standard">
+                    {(['none','count','distinct','avg','sum','min','max'] as const).map((a) => <option key={a} value={a}>{a}</option>)}
+                  </optgroup>
+                  <optgroup label="Period Average">
+                    <option value="avg_daily">Avg / Day</option>
+                    <option value="avg_wday">Avg / WDay (working days)</option>
+                    <option value="avg_weekly">Avg / Week</option>
+                    <option value="avg_monthly">Avg / Month</option>
+                  </optgroup>
                 </select>
               </div>
             </div>
+            {['avg_daily','avg_wday','avg_weekly','avg_monthly'].includes(variable.value?.agg || '') && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-medium text-muted-foreground mb-1">Numerator</label>
+                    <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.avgNumerator || 'sum'} onChange={(e) => handleChange({ value: { ...variable.value, avgNumerator: e.target.value as any } })}>
+                      <option value="sum">SUM(column)</option>
+                      <option value="count">COUNT(column)</option>
+                      <option value="distinct">COUNT DISTINCT(column)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-muted-foreground mb-1">Date column <span className="text-primary">*</span></label>
+                    <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.avgDateField || ''} onChange={(e) => handleChange({ value: { ...variable.value, avgDateField: e.target.value } })}>
+                      <option value="">Select…</option>
+                      {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <p className="text-[9px] text-muted-foreground">{variable.value?.avgNumerator === 'distinct' ? 'COUNT(DISTINCT column)' : variable.value?.avgNumerator === 'count' ? 'COUNT(column)' : 'SUM(column)'} ÷ COUNT(DISTINCT {variable.value?.agg === 'avg_daily' ? 'day' : variable.value?.agg === 'avg_wday' ? 'working day' : variable.value?.agg === 'avg_weekly' ? 'week' : 'month'}){variable.value?.agg === 'avg_wday' ? ' — weekends excluded per app config' : ''}</p>
+              </div>
+            )}
           </>
         )}
 
@@ -592,6 +643,71 @@ function VariableEditor({
               <div>
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Suffix</label>
                 <input className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={variable.suffix || ''} onChange={(e) => handleChange({ suffix: e.target.value })} placeholder="%" />
+              </div>
+            </div>
+          </details>
+        )}
+
+        {/* Calculations - collapsible */}
+        {varType !== 'datetime' && (
+          <details className="group/calc">
+            <summary className="text-[10px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1 py-1 hover:text-foreground transition-colors">
+              <span className="transition-transform duration-150 group-open/calc:rotate-90 text-[8px]">&#9654;</span>
+              Calculations
+            </summary>
+            <div className="space-y-2 pt-1.5">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Multiply by</label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow"
+                    value={variable.multiplyBy ?? ''}
+                    onChange={(e) => handleChange({ multiplyBy: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    placeholder="1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Divide by</label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow"
+                    value={variable.divideBy ?? ''}
+                    onChange={(e) => handleChange({ divideBy: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    placeholder="1"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Rounding</label>
+                  <select
+                    className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer"
+                    value={variable.roundMode || 'none'}
+                    onChange={(e) => handleChange({ roundMode: e.target.value as any })}
+                  >
+                    <option value="none">None</option>
+                    <option value="round">Round</option>
+                    <option value="roundup">Round Up</option>
+                    <option value="rounddown">Round Down</option>
+                  </select>
+                </div>
+                {variable.roundMode && variable.roundMode !== 'none' && (
+                  <div>
+                    <label className="block text-[10px] font-medium text-muted-foreground mb-1">Decimal places</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow"
+                      value={variable.roundDecimals ?? 0}
+                      onChange={(e) => handleChange({ roundDecimals: e.target.value ? parseInt(e.target.value) : 0 })}
+                      placeholder="0"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </details>
@@ -744,12 +860,12 @@ const WORKING_WEEK_PRESETS = new Set(['last_working_week', 'week_before_last_wor
 
 function DateRuleEditor({ field, where, onPatch }: { field: string; where: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
   type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
-  type CustomOp = 'after'|'before'|'between'
+  type DateOp = 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'between'
   const [mode, setMode] = useState<'preset'|'custom'>('preset')
   const [preset, setPreset] = useState<Preset>('today')
   const [weekStartDay, setWeekStartDay] = useState<string>(() => String(where?.['__week_start_day'] ?? _DEFAULT_WEEK_START).toUpperCase())
   const [weekends, setWeekends] = useState<string>(() => String(where?.['__weekends'] ?? _DEFAULT_WEEKENDS).toUpperCase())
-  const [op, setOp] = useState<CustomOp>('between')
+  const [op, setOp] = useState<DateOp>('eq')
   const [a, setA] = useState(''); const [b, setB] = useState('')
 
   const isWeekPreset = WEEK_PRESETS.has(preset)
@@ -808,30 +924,145 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
     }
   }
 
-  const applyPreset = (p: Preset, wsd?: string, wkends?: string) => {
+  const applyPreset = (p: Preset, wsd?: string, wkends?: string, operator?: DateOp) => {
     const effectiveWsd = wsd ?? weekStartDay
     const effectiveWkends = wkends ?? weekends
-    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: p, [field]: undefined, __week_start_day: undefined, __weekends: undefined }
-    if (WEEK_PRESETS.has(p)) patch['__week_start_day'] = effectiveWsd
-    if (WORKING_DAY_PRESETS.has(p)) patch['__weekends'] = effectiveWkends
-    if (WORKING_WEEK_PRESETS.has(p)) patch['__week_start_day'] = effectiveWsd
+    const effectiveOp = operator ?? op
+    const range = rangeForPreset(p)
+    
+    // Clear all date-related keys first
+    const patch: Record<string, any> = {
+      [`${field}__gte`]: undefined,
+      [`${field}__gt`]: undefined,
+      [`${field}__lt`]: undefined,
+      [`${field}__lte`]: undefined,
+      [`${field}__ne`]: undefined,
+      [field]: undefined,
+      [`${field}__date_preset`]: p,
+      __week_start_day: effectiveWsd,
+      __weekends: effectiveWkends,
+      [`${field}__op`]: effectiveOp,
+    }
+    
+    // Apply based on operator
+    if (range.gte && range.lt) {
+      switch (effectiveOp) {
+        case 'eq':
+          // Equals: date is in the preset range (use between logic)
+          patch[`${field}__gte`] = range.gte
+          patch[`${field}__lt`] = range.lt
+          break
+        case 'ne':
+          // Not equals: date is NOT in the preset range
+          patch[`${field}__ne`] = range.gte // Store the start date as reference
+          break
+        case 'gt':
+          // Greater than: after the preset range end
+          patch[`${field}__gt`] = range.lt
+          break
+        case 'gte':
+          // Greater or equal: on or after the preset range start
+          patch[`${field}__gte`] = range.gte
+          break
+        case 'lt':
+          // Less than: before the preset range start
+          patch[`${field}__lt`] = range.gte
+          break
+        case 'lte':
+          // Less or equal: on or before the preset range end
+          patch[`${field}__lte`] = range.lt
+          break
+        case 'between':
+          // Between: the full preset range
+          patch[`${field}__gte`] = range.gte
+          patch[`${field}__lt`] = range.lt
+          break
+      }
+    }
+    
     onPatch(patch)
   }
 
   const applyCustom = () => {
-    const patch: Record<string, any> = { [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined, __week_start_day: undefined }
-    if (op === 'after') { patch[`${field}__gte`] = a || undefined }
-    else if (op === 'before' && b) { const d = new Date(`${b}T00:00:00`); d.setDate(d.getDate()+1); patch[`${field}__lt`] = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
-    else if (op === 'between') {
-      patch[`${field}__gte`] = a || undefined
-      if (b) { const d = new Date(`${b}T00:00:00`); d.setDate(d.getDate()+1); patch[`${field}__lt`] = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+    const patch: Record<string, any> = {
+      [`${field}__gte`]: undefined,
+      [`${field}__gt`]: undefined,
+      [`${field}__lt`]: undefined,
+      [`${field}__lte`]: undefined,
+      [`${field}__ne`]: undefined,
+      [field]: undefined,
+      [`${field}__date_preset`]: undefined,
+      __week_start_day: undefined,
+      __weekends: undefined,
+      [`${field}__op`]: op,
     }
+    
+    const has = (x: string) => x && x.trim() !== ''
+    
+    switch (op) {
+      case 'eq':
+        if (has(a)) {
+          // Equals: on this specific date
+          patch[`${field}__gte`] = a
+          const nextDay = new Date(`${a}T00:00:00`)
+          nextDay.setDate(nextDay.getDate() + 1)
+          patch[`${field}__lt`] = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`
+        }
+        break
+      case 'ne':
+        if (has(a)) {
+          // Not equals: not on this specific date
+          patch[field] = a // Store for reference, backend will handle as NOT equals
+        }
+        break
+      case 'gt':
+        if (has(a)) {
+          // Greater than: after this date
+          const nextDay = new Date(`${a}T00:00:00`)
+          nextDay.setDate(nextDay.getDate() + 1)
+          patch[`${field}__gt`] = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`
+        }
+        break
+      case 'gte':
+        if (has(a)) {
+          // Greater or equal: on or after this date
+          patch[`${field}__gte`] = a
+        }
+        break
+      case 'lt':
+        if (has(a)) {
+          // Less than: before this date
+          patch[`${field}__lt`] = a
+        }
+        break
+      case 'lte':
+        if (has(a)) {
+          // Less or equal: on or before this date
+          const nextDay = new Date(`${a}T00:00:00`)
+          nextDay.setDate(nextDay.getDate() + 1)
+          patch[`${field}__lt`] = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`
+        }
+        break
+      case 'between':
+        if (has(a)) patch[`${field}__gte`] = a
+        if (has(b)) {
+          const nextDay = new Date(`${b}T00:00:00`)
+          nextDay.setDate(nextDay.getDate() + 1)
+          patch[`${field}__lt`] = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`
+        }
+        break
+    }
+    
     onPatch(patch)
   }
 
   // Hydrate from where on mount
   useEffect(() => {
     const existingPreset = where?.[`${field}__date_preset`] as string | undefined
+    const savedOp = where?.[`${field}__op`] as DateOp | undefined
+    if (savedOp && ['eq','ne','gt','gte','lt','lte','between'].includes(savedOp)) {
+      setOp(savedOp)
+    }
     if (existingPreset) {
       const allPresets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
       if (allPresets.includes(existingPreset as Preset)) { setMode('preset'); setPreset(existingPreset as Preset) }
@@ -842,11 +1073,22 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       return
     }
     const gte = where?.[`${field}__gte`] as string | undefined
+    const gt = where?.[`${field}__gt`] as string | undefined
     const lt = where?.[`${field}__lt`] as string | undefined
-    if (gte || lt) {
+    const lte = where?.[`${field}__lte`] as string | undefined
+    const ne = where?.[`${field}__ne`] as string | undefined
+    const eq = where?.[field]
+    
+    if (gte || gt || lt || lte || ne || eq) {
       setMode('custom')
-      if (gte) setA(gte)
-      if (lt) { try { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); setB(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`) } catch {} }
+      // Detect operator from where
+      if (gte && lt) { setOp('between'); setA(gte); try { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); setB(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`) } catch {} }
+      else if (gte && !lt) { setOp('gte'); setA(gte) }
+      else if (gt) { setOp('gt'); setA(gt) }
+      else if (lt && !gte) { setOp('lt'); setA(lt) }
+      else if (lte) { setOp('lte'); setA(lte) }
+      else if (ne) { setOp('ne'); setA(String(ne)) }
+      else if (eq) { setOp('eq'); setA(String(eq)) }
     }
   }, [field])
 
@@ -854,12 +1096,24 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
     <div className="rounded-md border bg-card p-2 space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-[11px] font-medium">Date rule: {field}</div>
-        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setA(''); setB(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__date_preset`]: undefined, [field]: undefined, __week_start_day: undefined, __weekends: undefined }) }}>Clear</button>
+        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setOp('between'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gte`]: undefined, [`${field}__gt`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined, [`${field}__date_preset`]: undefined, [`${field}__op`]: undefined, __week_start_day: undefined, __weekends: undefined }) }}>Clear</button>
       </div>
       <div className="flex items-center gap-3 text-[11px]">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={() => setMode('preset')} /> Preset</label>
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='custom'} onChange={() => setMode('custom')} /> Custom</label>
       </div>
+      
+      {/* Operator selector - shown for both modes */}
+      <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={op} onChange={e => { const newOp = e.target.value as DateOp; setOp(newOp); if (mode === 'preset') applyPreset(preset, undefined, undefined, newOp) }}>
+        <option value="eq">Equals</option>
+        <option value="ne">Not equals</option>
+        <option value="gt">Greater than (after)</option>
+        <option value="gte">Greater or equal (on or after)</option>
+        <option value="lt">Less than (before)</option>
+        <option value="lte">Less or equal (on or before)</option>
+        {mode === 'custom' && <option value="between">Between</option>}
+      </select>
+      
       {mode === 'preset' ? (
         <div className="space-y-1.5">
           <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={preset} onChange={e => { const p = e.target.value as Preset; setPreset(p); applyPreset(p) }}>
@@ -927,17 +1181,15 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="grid grid-cols-3 gap-1.5 items-center">
-            <select className="col-span-1 px-1 py-1 rounded bg-secondary/60 text-[11px]" value={op} onChange={e => setOp(e.target.value as CustomOp)}>
-              <option value="after">After</option><option value="before">Before</option><option value="between">Between</option>
-            </select>
-            {op === 'between' ? (
-              <><input type="date" className="col-span-1 h-7 px-1 rounded border text-[11px] bg-secondary/60" value={a} onChange={e => setA(e.target.value)} />
-              <input type="date" className="col-span-1 h-7 px-1 rounded border text-[11px] bg-secondary/60" value={b} onChange={e => setB(e.target.value)} /></>
-            ) : (
-              <input type="date" className="col-span-2 h-7 px-1 rounded border text-[11px] bg-secondary/60" value={op==='after'?a:b} onChange={e => op==='after' ? setA(e.target.value) : setB(e.target.value)} />
-            )}
-          </div>
+          {op === 'between' ? (
+            <div className="flex gap-2 items-center">
+              <input type="date" className="flex-1 h-7 px-1 rounded border text-[11px] bg-secondary/60" placeholder="Start date" value={a} onChange={e => setA(e.target.value)} />
+              <span className="text-[10px] text-muted-foreground">to</span>
+              <input type="date" className="flex-1 h-7 px-1 rounded border text-[11px] bg-secondary/60" placeholder="End date" value={b} onChange={e => setB(e.target.value)} />
+            </div>
+          ) : (
+            <input type="date" className="w-full h-7 px-1 rounded border text-[11px] bg-secondary/60" value={a} onChange={e => setA(e.target.value)} />
+          )}
           <div className="flex justify-end">
             <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={applyCustom}>Apply</button>
           </div>
@@ -1146,20 +1398,47 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
 }) {
   const [picking, setPicking] = useState(false)
   const [pickSearch, setPickSearch] = useState('')
+  const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 220 })
+  const addBtnRef = useRef<HTMLButtonElement>(null)
+  const dropRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!picking) return
+    const handler = (e: MouseEvent) => {
+      if (
+        dropRef.current && !dropRef.current.contains(e.target as Node) &&
+        addBtnRef.current && !addBtnRef.current.contains(e.target as Node)
+      ) { setPicking(false); setPickSearch('') }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [picking])
 
   // Collect active filter fields (base field names, dedup operator suffixes)
+  // Exclude meta keys that start with __ (like __weekends, __week_start_day)
   const activeFields = useMemo(() => {
     const set = new Set<string>()
     Object.keys(where).forEach(k => {
       if (where[k] === undefined) return
+      if (k.startsWith('__')) return // Skip meta keys
       const base = k.split('__')[0]
-      set.add(base)
+      if (base) set.add(base) // Only add non-empty base names
     })
     return Array.from(set)
   }, [where])
 
   const availableFields = columns.filter(c => !activeFields.includes(c))
   const filteredPick = availableFields.filter(c => c.toLowerCase().includes(pickSearch.toLowerCase()))
+
+  const openPicker = () => {
+    if (addBtnRef.current) {
+      const r = addBtnRef.current.getBoundingClientRect()
+      setDropPos({ top: r.bottom + 4, left: r.left, width: Math.max(220, r.width) })
+    }
+    setPickSearch('')
+    setPicking(true)
+  }
 
   const pickField = (field: string) => {
     onChange({ ...where, [field]: [] })
@@ -1172,6 +1451,38 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
     Object.keys(next).forEach(k => { if (k === field || k.startsWith(`${field}__`)) delete next[k] })
     onChange(next)
   }
+
+  const dropdown = picking ? createPortal(
+    <div
+      ref={dropRef}
+      style={{ position: 'fixed', top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999, backgroundColor: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))' }}
+      className="rounded-md border shadow-xl p-1.5 text-[11px]"
+    >
+      <input
+        autoFocus
+        type="text"
+        value={pickSearch}
+        onChange={e => setPickSearch(e.target.value)}
+        placeholder="Search columns…"
+        style={{ backgroundColor: 'hsl(var(--background))' }}
+        className="w-full h-6 text-[11px] rounded border px-2 mb-1 outline-none focus:ring-1 focus:ring-primary/40"
+      />
+      <div className="max-h-52 overflow-y-auto">
+        {filteredPick.map(c => (
+          <button key={c} onClick={() => pickField(c)}
+            className="w-full text-left px-2 py-1 rounded hover:bg-primary/10 hover:text-primary transition-colors truncate">
+            {c}
+          </button>
+        ))}
+        {filteredPick.length === 0 && (
+          <p className="text-[10px] text-muted-foreground px-2 py-1">
+            {availableFields.length === 0 ? 'All fields already added' : 'No matching fields'}
+          </p>
+        )}
+      </div>
+    </div>,
+    document.body
+  ) : null
 
   return (
     <div className="space-y-2">
@@ -1188,44 +1499,10 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
           onRemove={() => removeFilter(field)}
         />
       ))}
-      {picking ? (
-        <div className="rounded-md border bg-card p-2 space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium">Select field to filter</span>
-            <button className="text-muted-foreground hover:text-foreground" onClick={() => { setPicking(false); setPickSearch('') }}>
-              <RiCloseLine className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <input
-            className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]"
-            placeholder="Search columns…"
-            value={pickSearch}
-            onChange={e => setPickSearch(e.target.value)}
-            autoFocus
-          />
-          <div className="max-h-36 overflow-auto">
-            <ul className="space-y-0.5">
-              {filteredPick.map(c => (
-                <li key={c}>
-                  <button
-                    className="w-full text-left text-[11px] px-2 py-1 rounded hover:bg-secondary/80 truncate"
-                    onClick={() => pickField(c)}
-                  >{c}</button>
-                </li>
-              ))}
-              {filteredPick.length === 0 && (
-                <li className="text-[10px] text-muted-foreground px-2 py-1">
-                  {availableFields.length === 0 ? 'All fields already added' : 'No matching fields'}
-                </li>
-              )}
-            </ul>
-          </div>
-        </div>
-      ) : (
-        <button className="text-[11px] text-primary hover:underline flex items-center gap-1" onClick={() => setPicking(true)}>
-          <RiAddLine className="h-3 w-3" /> Add filter
-        </button>
-      )}
+      <button ref={addBtnRef} className="text-[11px] text-primary hover:underline flex items-center gap-1" onClick={openPicker}>
+        <RiAddLine className="h-3 w-3" /> Add filter
+      </button>
+      {dropdown}
     </div>
   )
 }

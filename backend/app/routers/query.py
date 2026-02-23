@@ -60,6 +60,12 @@ _UI_META_KEYS = frozenset({
     "__week_start_day", "__weekends",
 })
 
+def _strip_ui_op_keys(where: dict | None) -> dict | None:
+    """Strip frontend-only operator hint keys (field__op) that are not real SQL operators."""
+    if not where:
+        return where
+    return {k: v for k, v in where.items() if not (isinstance(k, str) and k.endswith("__op"))}
+
 def _resolve_date_presets(where: dict | None) -> dict | None:
     """Expand any `field__date_preset` entries into `field__gte` / `field__lt` pairs.
 
@@ -93,8 +99,17 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
     # Working week starts on the first non-weekend day (Mon for SAT_SUN, Sun for FRI_SAT)
     _working_week_start_dow = 6 if _weekends_raw == "FRI_SAT" else 0  # Python: Mon=0…Sun=6
 
+    # Read operator hints (field__op) BEFORE stripping, so preset expansion can respect them.
+    # e.g. {"Time__op": "lt"} means "Time < preset_date" → only emit the lt bound.
+    _op_hints: dict[str, str] = {}
+    for _ok, _ov in where.items():
+        if isinstance(_ok, str) and _ok.endswith("__op") and isinstance(_ov, str):
+            _op_hints[_ok[:-4]] = _ov.lower().strip()  # base_field → operator
+
     # Strip UI-only meta keys that are not real database columns
     where = {k: v for k, v in where.items() if k not in _UI_META_KEYS}
+    # Strip frontend-only operator hint keys (field__op) that are not real SQL operators
+    where = _strip_ui_op_keys(where) or {}
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -201,12 +216,31 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
                 # Unknown preset – pass through as-is
                 expanded[k] = v
                 continue
-            if gte:
-                expanded[f"{base}__gte"] = gte.strftime("%Y-%m-%d")
-            if lt:
-                expanded[f"{base}__lt"] = lt.strftime("%Y-%m-%d")
+            _bound_op = _op_hints.get(base, '')
+            if gte and _bound_op not in ('lt', 'lte'):
+                _new_gte = gte.strftime("%Y-%m-%d")
+                _exist_gte = expanded.get(f"{base}__gte")
+                if _bound_op in ('gte', 'gt') and _exist_gte:
+                    # Single-bound preset: take the more restrictive (larger) gte
+                    expanded[f"{base}__gte"] = max(_exist_gte, _new_gte)
+                else:
+                    # Range preset: override completely
+                    expanded[f"{base}__gte"] = _new_gte
+            if lt and _bound_op not in ('gte', 'gt'):
+                _new_lt = lt.strftime("%Y-%m-%d")
+                _exist_lt = expanded.get(f"{base}__lt")
+                if _bound_op in ('lt', 'lte') and _exist_lt:
+                    # Single-bound preset: take the more restrictive (smaller) lt
+                    expanded[f"{base}__lt"] = min(_exist_lt, _new_lt)
+                else:
+                    # Range preset: override completely
+                    expanded[f"{base}__lt"] = _new_lt
         else:
             expanded[k] = v
+    import sys
+    sys.stderr.write(f"[DATE_PRESET_DEBUG] Input WHERE keys: {list(where.items())}\n")
+    sys.stderr.write(f"[DATE_PRESET_DEBUG] Output WHERE keys: {list(expanded.items())}\n")
+    sys.stderr.flush()
     return expanded
 
 
@@ -863,6 +897,10 @@ def _coerce_date_like(v: Any) -> Any:
     if isinstance(v, str):
         s = v.strip()
         if not s:
+            return v
+        # Only parse if it looks like a date (contains date separators or keywords)
+        # This prevents parsing short strings like '10', '20', '50' as dates
+        if not re.search(r'[-/:T]|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|mon|tue|wed|thu|fri|sat|sun|today|now|yesterday|tomorrow', s, re.IGNORECASE):
             return v
         try:
             dt = date_parser.parse(s)
@@ -4640,6 +4678,15 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     except Exception:
         pass
     
+    # Save __weekends config before _resolve_date_presets strips UI meta keys (needed for avg_wday)
+    _spec_weekends = 'SAT_SUN'
+    try:
+        _ow = (payload.spec.where or {}) if (hasattr(payload, 'spec') and payload.spec) else {}
+        _sw = str(_ow.get('__weekends', os.environ.get('WEEKENDS', 'SAT_SUN'))).upper().strip()
+        _spec_weekends = _sw if _sw in ('SAT_SUN', 'FRI_SAT') else 'SAT_SUN'
+    except Exception:
+        pass
+
     # Resolve date presets (e.g. __date_preset: "today") to concrete __gte/__lt at execution time
     if hasattr(payload, 'spec') and payload.spec and getattr(payload.spec, 'where', None):
         payload.spec.where = _resolve_date_presets(payload.spec.where)
@@ -5243,6 +5290,171 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         })
     
     agg = (spec.agg or "none").lower()
+
+    # ── Period-average early exit ──────────────────────────────────────────────
+    # avg_daily  → numerator / COUNT(DISTINCT DATE(date_col))
+    # avg_wday   → numerator / COUNT(DISTINCT CASE WHEN is_workday THEN DATE(date_col) END)
+    # avg_weekly → numerator / COUNT(DISTINCT DATE_TRUNC('week', date_col))
+    # avg_monthly→ numerator / COUNT(DISTINCT DATE_TRUNC('month', date_col))
+    _PERIOD_AGG = frozenset({'avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly'})
+    if agg in _PERIOD_AGG:
+        val_field = getattr(spec, 'y', None)
+        date_field = getattr(spec, 'avgDateField', None)
+        if not val_field or not date_field:
+            raise HTTPException(status_code=400, detail="avg_daily/avg_wday/avg_weekly/avg_monthly require both 'y' (value column) and 'avgDateField' (date column)")
+        d = (ds_type or '').lower()
+        vcol = _q_ident(val_field)
+        _dcol_raw = _q_ident(date_field)
+
+        # ── Auto-detect Unix timestamp columns via INFORMATION_SCHEMA ──────────
+        _avg_is_unix = False
+        if 'mysql' in d:
+            try:
+                _src_parts = str(spec.source or '').replace('`', '').split('.')
+                _tbl_name = _src_parts[-1].strip()
+                _sch_name = _src_parts[-2].strip() if len(_src_parts) > 1 else None
+                _col_lower = str(date_field).strip().strip('`"[]').lower()
+                _probe_sql = (
+                    f"SELECT DATA_TYPE FROM information_schema.COLUMNS "
+                    f"WHERE TABLE_NAME = '{_tbl_name}' AND LOWER(COLUMN_NAME) = '{_col_lower}'"
+                    + (f" AND TABLE_SCHEMA = '{_sch_name}'" if _sch_name else "")
+                    + " LIMIT 1"
+                )
+                _probe_res = run_query(QueryRequest(sql=_probe_sql, datasourceId=payload.datasourceId, limit=1), db)
+                if _probe_res.rows:
+                    _col_dtype = str(_probe_res.rows[0][0]).lower()
+                    _avg_is_unix = _col_dtype in ('int', 'bigint', 'tinyint', 'smallint', 'mediumint', 'integer')
+                    print(f"[AvgPeriod] Col '{date_field}' DATA_TYPE={_col_dtype!r} → is_unix={_avg_is_unix}", flush=True)
+                else:
+                    print(f"[AvgPeriod] INFORMATION_SCHEMA probe returned no rows for col '{date_field}'", flush=True)
+            except Exception as _pe:
+                print(f"[AvgPeriod] Unix-detection probe failed: {_pe}", flush=True)
+
+        # ── Wrap date column in unix→datetime if integer column ────────────────
+        if _avg_is_unix:
+            if 'mysql' in d:
+                dcol = f"FROM_UNIXTIME({_dcol_raw})"
+            elif 'mssql' in d or 'sqlserver' in d:
+                dcol = f"DATEADD(second, {_dcol_raw}, CAST('1970-01-01' AS DATETIME))"
+            elif 'postgres' in d or 'postgre' in d:
+                dcol = f"TO_TIMESTAMP({_dcol_raw})"
+            else:
+                dcol = f"to_timestamp({_dcol_raw})"
+        else:
+            dcol = _dcol_raw
+
+        avg_numerator = (getattr(spec, 'avgNumerator', None) or 'sum').lower()
+        # ── Numerator expression ───────────────────────────────────────────────
+        if avg_numerator == 'count':
+            num_expr = f"COUNT({vcol})"
+        elif avg_numerator == 'distinct':
+            num_expr = f"COUNT(DISTINCT {vcol})"
+        else:  # sum (default)
+            if 'duckdb' in d:
+                y_clean = f"COALESCE(try_cast(regexp_replace(CAST({vcol} AS VARCHAR), '[^0-9.-]', '') AS DOUBLE), try_cast({vcol} AS DOUBLE), 0.0)"
+                num_expr = f"SUM({y_clean})"
+            else:
+                num_expr = f"SUM({vcol})"
+
+        # ── Dialect-aware period bucket (denominator) ──────────────────────────
+        if agg in ('avg_daily', 'avg_wday'):
+            day_cast = f"CAST({dcol} AS DATE)"
+            if agg == 'avg_wday':
+                if 'duckdb' in d or 'postgres' in d or 'postgre' in d:
+                    dow_expr = f"dayofweek({dcol})" if 'duckdb' in d else f"EXTRACT(DOW FROM {dcol})"
+                    wknd_days = "(0, 6)" if _spec_weekends == 'SAT_SUN' else "(5, 6)"
+                elif 'mssql' in d or 'sqlserver' in d:
+                    dow_expr = f"DATEPART(weekday, {dcol})"
+                    wknd_days = "(1, 7)" if _spec_weekends == 'SAT_SUN' else "(6, 7)"
+                elif 'mysql' in d:
+                    dow_expr = f"DAYOFWEEK({dcol})"
+                    wknd_days = "(1, 7)" if _spec_weekends == 'SAT_SUN' else "(6, 7)"
+                else:
+                    dow_expr = f"dayofweek({dcol})"
+                    wknd_days = "(0, 6)" if _spec_weekends == 'SAT_SUN' else "(5, 6)"
+                date_trunc = f"CASE WHEN {dow_expr} NOT IN {wknd_days} THEN {day_cast} END"
+            else:
+                date_trunc = day_cast
+        elif agg == 'avg_weekly':
+            if 'duckdb' in d or 'postgres' in d or 'postgre' in d:
+                date_trunc = f"DATE_TRUNC('week', {dcol})"
+            elif 'mssql' in d or 'sqlserver' in d:
+                date_trunc = f"DATEADD(week, DATEDIFF(week, 0, {dcol}), 0)"
+            elif 'mysql' in d:
+                # Match Excel WEEKNUM(date, 11): Monday-start weeks, week 1 always starts Jan 1.
+                # Formula: CONCAT(YEAR, '-', CEIL((DAYOFYEAR + WEEKDAY(Jan1)) / 7))
+                # where WEEKDAY(Jan1) = 0 for Mon, 2 for Wed, etc.
+                date_trunc = (
+                    f"CONCAT(YEAR({dcol}), '-',"
+                    f" LPAD(CEIL((DAYOFYEAR({dcol}) + WEEKDAY(MAKEDATE(YEAR({dcol}), 1))) / 7), 2, '0'))"
+                )
+            else:
+                date_trunc = f"DATE_TRUNC('week', {dcol})"
+        else:  # avg_monthly
+            if 'duckdb' in d or 'postgres' in d or 'postgre' in d:
+                date_trunc = f"DATE_TRUNC('month', {dcol})"
+            elif 'mssql' in d or 'sqlserver' in d:
+                date_trunc = f"YEAR({dcol}) * 100 + MONTH({dcol})"
+            elif 'mysql' in d:
+                date_trunc = f"DATE_FORMAT({dcol}, '%Y-%m')"
+            else:
+                date_trunc = f"DATE_TRUNC('month', {dcol})"
+
+        den_expr = f"COUNT(DISTINCT {date_trunc})"
+
+        # ── Build WHERE clause ─────────────────────────────────────────────────
+        where_parts: list[str] = []
+        params_avg: dict = {}
+        if where_resolved:
+            for _wk, _wv in where_resolved.items():
+                _wbase = _wk.split('__')[0] if '__' in _wk else _wk
+                _wop   = _wk.split('__', 1)[1] if '__' in _wk else 'eq'
+                # Don't re-quote keys that are already resolved SQL expressions (e.g. "(LEFT(CAST(login AS CHAR), 2))")
+                _wcol  = _wbase if _wbase.startswith('(') else _q_ident(_wbase)
+                _pn    = _pname(_wbase, f"_{_wop}")
+                if isinstance(_wv, list):
+                    placeholders = ', '.join([f':{_pn}_{i}' for i in range(len(_wv))])
+                    where_parts.append(f"{_wcol} IN ({placeholders})")
+                    for _i, _v in enumerate(_wv): params_avg[f'{_pn}_{_i}'] = _v
+                elif _wop == 'gte': where_parts.append(f"{_wcol} >= :{_pn}"); params_avg[_pn] = _wv
+                elif _wop == 'gt':  where_parts.append(f"{_wcol} >  :{_pn}"); params_avg[_pn] = _wv
+                elif _wop == 'lte': where_parts.append(f"{_wcol} <= :{_pn}"); params_avg[_pn] = _wv
+                elif _wop == 'lt':  where_parts.append(f"{_wcol} <  :{_pn}"); params_avg[_pn] = _wv
+                elif _wop == 'ne':  where_parts.append(f"{_wcol} != :{_pn}"); params_avg[_pn] = _wv
+                else:               where_parts.append(f"{_wcol} =  :{_pn}"); params_avg[_pn] = _wv
+        where_clause = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+        # ── Build final SQL (3 columns for debug logging) ──────────────────────
+        sql_avg = (
+            f"SELECT {num_expr} AS num_val, {den_expr} AS den_val, "
+            f"{num_expr} * 1.0 / NULLIF({den_expr}, 0) AS value "
+            f"FROM {_q_source(spec.source)}{where_clause}"
+        )
+        print(f"[AvgPeriod] agg={agg}, source={spec.source}, val_col={val_field}, date_col={date_field}, is_unix={_avg_is_unix}, numerator={avg_numerator}, weekends={_spec_weekends}", flush=True)
+        print(f"[AvgPeriod] SQL: {sql_avg[:800]}", flush=True)
+        if params_avg:
+            print(f"[AvgPeriod] params: { {k: v for k, v in list(params_avg.items())[:10]} }", flush=True)
+
+        _avg_ds_id = None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId
+        _avg_req   = QueryRequest(sql=sql_avg, datasourceId=_avg_ds_id, limit=1, offset=0, includeTotal=False, params=params_avg or None)
+        _avg_res   = run_query(_avg_req, db)
+
+        # ── Log component values ───────────────────────────────────────────────
+        try:
+            if _avg_res.rows:
+                _r, _c = _avg_res.rows[0], list(_avg_res.columns or [])
+                _nv = _r[_c.index('num_val')] if 'num_val' in _c else '?'
+                _dv = _r[_c.index('den_val')] if 'den_val' in _c else '?'
+                _vv = _r[_c.index('value')]   if 'value'   in _c else '?'
+                print(f"[AvgPeriod] num_val={_nv}, den_val={_dv}, result={_vv}", flush=True)
+            else:
+                print("[AvgPeriod] query returned no rows", flush=True)
+        except Exception as _le:
+            print(f"[AvgPeriod] result logging failed: {_le}", flush=True)
+
+        return _avg_res
+    # ── End period-average early exit ─────────────────────────────────────────
+
     has_chart_semantics = bool(spec.x or spec.y or spec.measure or spec.legend or (spec.groupBy and spec.groupBy != "none") or (agg and agg != "none"))
     # If there are no chart semantics at all, treat it as a plain SELECT
     if not has_chart_semantics:
@@ -5687,7 +5899,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         _validated_where[k] = v
                         continue
                     col_norm = _norm_name(base_col)
-                    if col_norm in available_cols:
+                    # Check if column exists in available_cols OR if it's a computed column in expr_map
+                    if col_norm in available_cols or (expr_map and base_col in expr_map):
                         _validated_where[k] = v
             else:
                 _validated_where = _where_source
@@ -5847,7 +6060,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     if re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(base_col), flags=re.IGNORECASE):
                         _validated_where[k] = v
                         continue
-                    if _norm_name(base_col) in available_cols_direct:
+                    # Check if column exists in available_cols_direct OR if it's a computed column in expr_map
+                    if _norm_name(base_col) in available_cols_direct or (expr_map and base_col in expr_map):
                         _validated_where[k] = v
             else:
                 _validated_where = _where_source
@@ -5960,6 +6174,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
                         params[pname] = _coerce_filter_value(base_col, v)
             where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+            sys.stderr.write(f"[SCALAR_AGG_DEBUG] where_sql: {where_sql[:300]}\n")
+            sys.stderr.write(f"[SCALAR_AGG_DEBUG] params: {params}\n")
+            sys.stderr.write(f"[SCALAR_AGG_DEBUG] base_from_sql: {base_from_sql[:200] if base_from_sql else 'None'}\n")
+            sys.stderr.write(f"[SCALAR_AGG_DEBUG] series_scalar: {bool(series_scalar and len(series_scalar) > 0)}\n")
+            sys.stderr.flush()
 
             if series_scalar and len(series_scalar) > 0:
                 union_parts = []
@@ -6124,7 +6343,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 preferLocalDuck=prefer_local,
                 preferLocalTable=spec.source,
             )
-            return run_query(q, db)
+            result = run_query(q, db)
+            return result
 
         # Special case: no X field but legend is present - group by legend only
         # Allow this even when agg is 'none' by defaulting to COUNT(*)

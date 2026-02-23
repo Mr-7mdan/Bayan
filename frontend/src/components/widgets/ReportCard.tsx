@@ -106,14 +106,30 @@ function formatValue(raw: unknown, variable: ReportVariable): string {
 // Uses the same query path as KPI/Chart widgets: y + agg (no x → no GROUP BY)
 function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<string, any>) {
   return {
-    queryKey: ['report-var', variable.id, variable.datasourceId, variable.source, variable.value?.field, variable.value?.agg, JSON.stringify(variable.where), JSON.stringify(globalFilters)],
+    queryKey: ['report-var', variable.id, variable.datasourceId, variable.source, variable.value?.field, variable.value?.agg, variable.value?.avgDateField, variable.value?.avgNumerator, JSON.stringify(variable.where), JSON.stringify(globalFilters), variable.multiplyBy, variable.divideBy, variable.roundMode, variable.roundDecimals],
     queryFn: async () => {
       if (!variable.source || !variable.value?.field) return null
       const agg = variable.value.agg && variable.value.agg !== 'none' ? variable.value.agg : null
       const field = variable.value.field
-      const where = { ...(variable.where || {}), ...(globalFilters || {}) }
+      const where: Record<string, any> = { ...(variable.where || {}), ...(globalFilters || {}) }
+      // For period-average vars: map global startDate/endDate onto avgDateField as gte/lt bounds.
+      // This wires the dashboard date range picker into the period-average calculation.
+      const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly'
+      if (isPeriodAvg && variable.value?.avgDateField) {
+        const dc = variable.value.avgDateField
+        if (globalFilters?.startDate && !where[`${dc}__gte`]) where[`${dc}__gte`] = globalFilters.startDate
+        if (globalFilters?.endDate   && !where[`${dc}__lt`])  where[`${dc}__lt`]  = globalFilters.endDate
+      }
+      // Ensure __weekends and __week_start_day are always sent when a date preset is present
+      const hasDatePreset = Object.keys(where).some(k => k.endsWith('__date_preset'))
+      if (hasDatePreset) {
+        if (!where['__weekends']) where['__weekends'] = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN'
+        if (!where['__week_start_day']) where['__week_start_day'] = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
+      }
       const hasWhere = Object.keys(where).length > 0
 
+      let rawValue: number | null = null
+      
       if (agg) {
         // Same pattern as KpiCard: set y + agg, NO x (avoids GROUP BY)
         const spec: any = {
@@ -122,6 +138,12 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
           y: field.trim(),
           where: hasWhere ? where : undefined,
         }
+        // Period-average agg types need the date field for COUNT(DISTINCT period)
+        const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly'
+        if (isPeriodAvg && variable.value?.avgDateField) {
+          spec.avgDateField = variable.value.avgDateField
+          if (variable.value.avgNumerator) spec.avgNumerator = variable.value.avgNumerator
+        }
         const r = await QueryApi.querySpec({ spec, datasourceId: variable.datasourceId, limit: 1000, offset: 0, includeTotal: false })
         if (!r?.rows?.length) return null
         // Backend returns columns like ['value'] or [fieldName] for a simple aggregate
@@ -129,12 +151,19 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
         const rows = r.rows as any[]
         // Sum all rows in case backend returns multiple (shouldn't for no-x aggregate)
         const valIdx = cols.includes('value') ? cols.indexOf('value') : (cols.length > 1 ? cols.length - 1 : 0)
-        let total = 0
-        for (const row of rows) {
-          const v = Array.isArray(row) ? Number(row[valIdx] ?? 0) : Number(row ?? 0)
-          if (!isNaN(v)) total += v
+        // Check if ALL values are null (backend returns null when no matching data)
+        const allNull = rows.every((row: any) => {
+          const cell = Array.isArray(row) ? row[valIdx] : row
+          return cell === null || cell === undefined
+        })
+        if (allNull) { rawValue = null } else {
+          let total = 0
+          for (const row of rows) {
+            const v = Array.isArray(row) ? Number(row[valIdx] ?? 0) : Number(row ?? 0)
+            if (!isNaN(v)) total += v
+          }
+          rawValue = total
         }
-        return total
       } else {
         // No aggregation: fetch raw first row value
         const spec: any = {
@@ -146,11 +175,43 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
         }
         const r = await QueryApi.querySpec({ spec, datasourceId: variable.datasourceId, limit: 1, offset: 0, includeTotal: false })
         if (!r?.rows?.length) return null
-        return r.rows[0]?.[0] ?? null
+        rawValue = Number(r.rows[0]?.[0] ?? 0)
       }
+
+      // Apply calculations
+      if (rawValue != null && !isNaN(rawValue)) {
+        // 1. Multiply
+        if (variable.multiplyBy != null && !isNaN(variable.multiplyBy)) {
+          rawValue = rawValue * variable.multiplyBy
+        }
+        // 2. Divide
+        if (variable.divideBy != null && !isNaN(variable.divideBy) && variable.divideBy !== 0) {
+          rawValue = rawValue / variable.divideBy
+        }
+        // 3. Round
+        if (variable.roundMode && variable.roundMode !== 'none') {
+          const decimals = variable.roundDecimals ?? 0
+          const multiplier = Math.pow(10, decimals)
+          switch (variable.roundMode) {
+            case 'round':
+              rawValue = Math.round(rawValue * multiplier) / multiplier
+              break
+            case 'roundup':
+              rawValue = Math.ceil(rawValue * multiplier) / multiplier
+              break
+            case 'rounddown':
+              rawValue = Math.floor(rawValue * multiplier) / multiplier
+              break
+          }
+        }
+      }
+
+      return rawValue
     },
     enabled: !!(variable.source && variable.value?.field),
     staleTime: 30_000,
+    placeholderData: undefined,
+    retry: 1,
   }
 }
 

@@ -422,6 +422,13 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
         if agg and agg != 'none':
             where = {**(v.get('where') or {}), **gf}
             spec: dict = {'source': source, 'agg': agg, 'y': field}
+            if agg in ('avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly'):
+                avg_date_field = val_cfg.get('avgDateField')
+                if avg_date_field:
+                    spec['avgDateField'] = avg_date_field
+                avg_numerator = val_cfg.get('avgNumerator')
+                if avg_numerator:
+                    spec['avgNumerator'] = avg_numerator
             if where:
                 spec['where'] = where
             try:

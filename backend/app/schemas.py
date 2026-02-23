@@ -335,6 +335,8 @@ class QuerySpec(BaseModel):
     order: Optional[str] = Field(default=None, description="asc|desc")
     # Week start convention for groupBy=week (default ISO Monday)
     weekStart: Optional[str] = Field(default=None, description="mon|sun")
+    avgDateField: Optional[str] = Field(default=None, description="Date field for avg_daily/avg_weekly/avg_monthly period averaging")
+    avgNumerator: Optional[str] = Field(default=None, description="Numerator aggregation for period averages: sum (default)|count|distinct")
 
 
 class QuerySpecRequest(BaseModel):
