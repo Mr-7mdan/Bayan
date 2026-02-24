@@ -47,11 +47,19 @@ export type JoinSpec = {
 export type SortSpec = { by: string; direction: 'asc'|'desc'; semantic?: 'numeric'|'alpha'|'date'|'latest_to_oldest'|'oldest_to_latest' }
 export type TopNSpec = { n: number; by: string; direction: 'asc'|'desc'; scope?: 'pre-agg'|'post-agg' }
 
+export type RemoteAttachment = {
+  id: string
+  alias: string
+  datasourceId: string
+  database?: string
+}
+
 export type DatasourceTransforms = {
   customColumns: CustomColumn[]
   transforms: Transform[]
   joins: JoinSpec[]
   defaults?: { sort?: SortSpec; limitTopN?: TopNSpec }
+  remoteAttachments?: RemoteAttachment[]
 }
 
 export type PreviewResponse = { sql?: string; columns?: string[]; rows?: any[]; warnings?: string[] }

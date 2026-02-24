@@ -53,6 +53,7 @@ export default function DataModelPage() {
   const [users, setUsers] = useState<Array<{ id: string; username?: string; email?: string }>>([])
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [explorerDs, setExplorerDs] = useState<DatasourceOut | null>(null)
   const [customColumnsByDs, setCustomColumnsByDs] = useState<Record<string, Array<{ name: string; type: string; scope?: string | { level: string; table?: string | null; widgetId?: string | null }; formula?: string }>>>({})
 
   // Keep defaultDsId in sync with localStorage and custom events
@@ -266,6 +267,15 @@ export default function DataModelPage() {
             <div className="text-xs text-muted-foreground">Create a new local DuckDB file, set default for new widgets, or delete old entries.</div>
           </div>
           <div className="flex items-center gap-2 text-xs">
+            {selectedDuckId && (() => {
+              const selDs = datasources.find(d => d.id === selectedDuckId)
+              return selDs ? (
+                <button
+                  className="px-2 py-1 rounded-md border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5 text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10"
+                  onClick={() => setExplorerDs(selDs)}
+                >Open Explorer</button>
+              ) : null
+            })()}
             <button
               className="px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
               onClick={() => setCreateOpen(true)}
@@ -348,6 +358,10 @@ export default function DataModelPage() {
                             }}
                           >Set Active (Sync)</button>
                         )}
+                        <button
+                          className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
+                          onClick={(e) => { e.stopPropagation(); setExplorerDs(d) }}
+                        >Explorer</button>
                         <button 
                           className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" 
                           onClick={(e)=>{
@@ -805,6 +819,10 @@ export default function DataModelPage() {
             <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>Next</button>
           </div>
         </div>
+      )}
+
+      {explorerDs && (
+        <DataExplorerDialog open={!!explorerDs} onClose={() => setExplorerDs(null)} datasource={explorerDs} />
       )}
 
       {preview.open && preview.dsId && preview.table && (() => {

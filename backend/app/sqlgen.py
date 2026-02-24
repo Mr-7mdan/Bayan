@@ -118,6 +118,111 @@ def _unquote_ident(name: str) -> str:
     return s
 
 
+_SQL_NON_COL_WORDS = frozenset([
+    # DML / clauses
+    'select', 'from', 'where', 'and', 'or', 'not', 'in', 'is', 'like', 'as',
+    'case', 'when', 'then', 'else', 'end', 'distinct', 'by', 'order', 'group',
+    'having', 'join', 'on', 'all', 'union', 'null', 'true', 'false',
+    'inner', 'outer', 'full', 'cross', 'between', 'exists', 'over', 'partition',
+    # Data types
+    'char', 'varchar', 'nvarchar', 'nchar', 'text', 'tinytext', 'mediumtext', 'longtext',
+    'int', 'integer', 'bigint', 'smallint', 'tinyint', 'mediumint',
+    'float', 'double', 'decimal', 'numeric', 'real', 'bit', 'boolean', 'bool',
+    'date', 'datetime', 'datetime2', 'time', 'timestamp', 'year',
+    'blob', 'binary', 'varbinary',
+    # Common SQL functions (anything followed by '(' is already skipped, but include anyway)
+    'cast', 'convert', 'coalesce', 'isnull', 'nullif', 'ifnull', 'nvl',
+    'left', 'right', 'substring', 'substr', 'mid', 'len', 'length',
+    'ltrim', 'rtrim', 'trim', 'upper', 'lower', 'ucase', 'lcase',
+    'concat', 'concat_ws', 'format', 'lpad', 'rpad', 'repeat', 'reverse', 'space',
+    'year', 'month', 'day', 'hour', 'minute', 'second', 'quarter',
+    'dayofweek', 'dayofmonth', 'dayofyear', 'weekday', 'week',
+    'dateadd', 'datediff', 'datepart', 'datename', 'date_format', 'date_trunc',
+    'makedate', 'str_to_date', 'from_unixtime', 'unix_timestamp',
+    'now', 'curdate', 'curtime', 'getdate', 'sysdate', 'current_date', 'current_time',
+    'round', 'floor', 'ceiling', 'ceil', 'abs', 'mod', 'power', 'pow', 'sqrt',
+    'log', 'log2', 'log10', 'exp', 'pi', 'rand', 'sign', 'truncate',
+    'sum', 'count', 'avg', 'min', 'max', 'std', 'variance',
+    'if', 'iif', 'iff', 'ifnull', 'nvl',
+    'replace', 'stuff', 'charindex', 'instr', 'locate', 'position', 'find_in_set',
+    'regexp_replace', 'regexp_like', 'regexp_substr',
+    'row_number', 'rank', 'dense_rank', 'ntile', 'lead', 'lag',
+    'first_value', 'last_value', 'cume_dist', 'percent_rank',
+    'greatest', 'least', 'field', 'elt',
+])
+
+
+def _qualify_bare_col_refs(expr: str, base_cols: set, base_alias: str) -> str:
+    """Qualify unquoted bare column-name references in a SQL expression with base_alias.
+    Used when building a _base subquery that has JOINs, to avoid MySQL 1052
+    'Column X is ambiguous' errors when the joined table has the same column name.
+
+    When base_cols is provided and non-empty, only qualifies identifiers in base_cols.
+    When base_cols is empty, falls back to qualifying any identifier NOT in the SQL
+    keywords/types/functions blocklist (_SQL_NON_COL_WORDS).
+
+    Skips: function calls (identifier followed by '('), already-qualified refs (preceded by '.'),
+    quoted identifiers (`...`, "...", [...]), and string literals ('...')."""
+    base_cols_lower = {c.lower() for c in (base_cols or set())}
+    use_blocklist = not base_cols_lower  # fallback when probe failed
+
+    result: list[str] = []
+    i = 0
+    L = len(expr)
+    in_sq = False
+    while i < L:
+        ch = expr[i]
+        if ch == "'":
+            in_sq = not in_sq
+            result.append(ch)
+            i += 1
+            continue
+        if in_sq:
+            result.append(ch)
+            i += 1
+            continue
+        # Pass through quoted identifiers unchanged
+        if ch in ('`', '"', '['):
+            close = {'`': '`', '"': '"', '[': ']'}[ch]
+            j = expr.find(close, i + 1)
+            if j != -1:
+                result.append(expr[i:j + 1])
+                i = j + 1
+            else:
+                result.append(ch)
+                i += 1
+            continue
+        # Bare word token
+        if ch.isalpha() or ch == '_':
+            j = i
+            while j < L and (expr[j].isalnum() or expr[j] == '_'):
+                j += 1
+            word = expr[i:j]
+            # Check what follows — '(' means function call, don't qualify
+            k = j
+            while k < L and expr[k] == ' ':
+                k += 1
+            is_func = k < L and expr[k] == '('
+            # Check what precedes — '.' means already qualified
+            already_qualified = bool(result) and result[-1] == '.'
+            if not is_func and not already_qualified:
+                word_lower = word.lower()
+                should_qualify = (
+                    (not use_blocklist and word_lower in base_cols_lower) or
+                    (use_blocklist and word_lower not in _SQL_NON_COL_WORDS)
+                )
+                if should_qualify:
+                    result.append(f"{base_alias}.{word}")
+                    i = j
+                    continue
+            result.append(word)
+            i = j
+            continue
+        result.append(ch)
+        i += 1
+    return ''.join(result)
+
+
 def _normalize_expr_idents(dialect: str, expr: str, *, numericify: bool = False) -> str:
     """Normalize bracket-quoted identifiers inside free-form expressions
     to the correct quoting for the given dialect. This allows users to write
@@ -337,6 +442,7 @@ def build_sql(
     joins: List[Dict[str, Any]] | None,
     defaults: Dict[str, Any] | None,
     limit: int | None,
+    base_cols: set | None = None,
 ) -> Tuple[str, List[str], List[str]]:
     warnings: List[str] = []
     d = _dialect_name(dialect)
@@ -803,7 +909,12 @@ def build_sql(
                 ident = m.group(0)  # e.g. "Category4"
                 return f"COALESCE(try_cast({ident} AS DOUBLE), 0.0)"
             expr = _re_cc.sub(r'"[^"]+"', _wrap_duckdb_numeric, expr)
-        
+
+        # When joins are present, qualify bare base-table column refs with the base alias
+        # to avoid "Column X is ambiguous" errors (MySQL 1052) when joined tables share column names.
+        if joins:
+            expr = _qualify_bare_col_refs(expr, base_cols or set(), base_alias)
+
         select_cols.append(f"({expr}) AS {_qal(d, name)}")
 
     for tr in (transforms or []):
@@ -850,6 +961,11 @@ def build_sql(
                         ident = m.group(0)
                         return f"COALESCE(try_cast({ident} AS DOUBLE), 0.0)"
                     expr = _re_cc.sub(r'"[^"]+"', _wrap_duckdb_numeric, expr)
+
+                # When joins are present, qualify bare base-table column refs with the base alias
+                # to avoid "Column X is ambiguous" errors (MySQL 1052).
+                if joins:
+                    expr = _qualify_bare_col_refs(expr, base_cols or set(), base_alias)
 
                 select_cols.append(f"({expr}) AS {_qal(d, name)}")
         elif t == "case":

@@ -337,6 +337,7 @@ class QuerySpec(BaseModel):
     weekStart: Optional[str] = Field(default=None, description="mon|sun")
     avgDateField: Optional[str] = Field(default=None, description="Date field for avg_daily/avg_weekly/avg_monthly period averaging")
     avgNumerator: Optional[str] = Field(default=None, description="Numerator aggregation for period averages: sum (default)|count|distinct")
+    ignoreTransforms: Optional[bool] = Field(default=False, description="Skip datasource-level transforms/joins (useful for timeout recovery)")
 
 
 class QuerySpecRequest(BaseModel):
@@ -698,11 +699,19 @@ class TopNSpec(BaseModel):
     scope: Optional[str] = None  # 'pre-agg'|'post-agg'
 
 
+class RemoteAttachment(BaseModel):
+    id: str
+    alias: str
+    datasourceId: str
+    database: Optional[str] = None
+
+
 class DatasourceTransforms(BaseModel):
     customColumns: List[CustomColumn] = []
     transforms: List[Transform] = []
     joins: List[JoinSpec] = []
     defaults: Optional[Dict[str, Any]] = None  # { sort?: SortSpec, limitTopN?: TopNSpec }
+    remoteAttachments: List[RemoteAttachment] = []
 
 
 class TransformsPreviewRequest(DatasourceTransforms):

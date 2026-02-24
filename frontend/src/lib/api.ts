@@ -1055,8 +1055,9 @@ export type QuerySpec = {
   measure?: string
   legend?: string
   // Ranking hints for Top-N
-  orderBy?: 'x' | 'value'
+  orderBy?: string
   order?: 'asc' | 'desc'
+  ignoreTransforms?: boolean
   series?: Array<{
     label?: string
     x?: string
@@ -1091,7 +1092,7 @@ export const QueryApi = {
       // Preserve x as string | string[] for multi-level X support; only normalize legend
       if (Array.isArray(spec.legend)) spec.legend = spec.legend[0]
       // Forward the normalized payload
-      return await http<QueryResponse>('/query/spec', { method: 'POST', body: JSON.stringify({ ...payload, spec }) })
+      return await http<QueryResponse>('/query/spec', { method: 'POST', body: JSON.stringify({ ...payload, spec }) }, 60000)
     } catch (e) {
       throw e
     }

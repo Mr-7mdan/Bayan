@@ -567,6 +567,98 @@ def _actor_sem(actor_id: Optional[str]) -> Optional[threading.BoundedSemaphore]:
             _ACTOR_SEMS[k] = sem
         return sem
 
+def _parse_mysql_dsn(dsn: str) -> dict:
+    """Parse a MySQL DSN (mysql+pymysql://user:pass@host:port/db) into a connection dict."""
+    try:
+        from urllib.parse import urlparse, unquote as _unquote
+        clean = re.sub(r'^mysql\+\w+://', 'mysql://', (dsn or '').strip())
+        p = urlparse(clean)
+        return {
+            'host': p.hostname or 'localhost',
+            'port': p.port or 3306,
+            'user': _unquote(p.username or ''),
+            'password': _unquote(p.password or ''),
+            'database': (p.path or '').lstrip('/'),
+        }
+    except Exception:
+        return {}
+
+
+def _build_mysql_attach_str(info: dict, db_override: str = '') -> str:
+    """Build the DuckDB MySQL ATTACH connection string from parsed DSN info."""
+    parts = [f"host={info.get('host', 'localhost')}"]
+    parts.append(f"port={info.get('port', 3306)}")
+    if info.get('user'):
+        parts.append(f"user={info['user']}")
+    if info.get('password'):
+        parts.append(f"password={info['password']}")
+    db = (db_override or info.get('database') or '').strip()
+    if db:
+        parts.append(f"database={db}")
+    return ' '.join(parts)
+
+
+def _duck_attach_type(ds_type: str) -> Optional[str]:
+    """Return the DuckDB ATTACH type string for a given datasource type, or None if unsupported."""
+    t = (ds_type or '').lower()
+    if 'mysql' in t or 'mariadb' in t:
+        return 'mysql'
+    if 'postgres' in t or 'postgresql' in t:
+        return 'postgres'
+    return None
+
+
+def _apply_duck_mysql_attachments(conn, attachments: list, db_session) -> None:
+    """ATTACH configured remote datasources (MySQL/PostgreSQL) to an open DuckDB cursor/connection."""
+    if not attachments:
+        return
+    for att in attachments:
+        alias = str((att or {}).get('alias') or '').strip()
+        ref_ds_id = str((att or {}).get('datasourceId') or '').strip()
+        db_override = str((att or {}).get('database') or '').strip()
+        if not alias or not ref_ds_id:
+            continue
+        try:
+            from ..models import Datasource as _DS
+            ref_ds = db_session.get(_DS, ref_ds_id)
+            if not ref_ds:
+                sys.stderr.write(f"[RemoteAttach] Datasource {ref_ds_id} not found for alias '{alias}'\n")
+                continue
+            enc = getattr(ref_ds, 'connection_encrypted', None)
+            if not enc:
+                sys.stderr.write(f"[RemoteAttach] No connection string for datasource {ref_ds_id}\n")
+                continue
+            attach_type = _duck_attach_type(getattr(ref_ds, 'type', '') or '')
+            if not attach_type:
+                sys.stderr.write(f"[RemoteAttach] Unsupported type '{getattr(ref_ds, 'type', '')}' for alias '{alias}'\n")
+                continue
+            try:
+                conn.execute(f"INSTALL {attach_type}")
+            except Exception:
+                pass
+            try:
+                conn.execute(f"LOAD {attach_type}")
+            except Exception:
+                pass
+            dsn = decrypt_text(enc)
+            info = _parse_mysql_dsn(dsn)
+            if not info.get('host'):
+                continue
+            attach_str = _build_mysql_attach_str(info, db_override)
+            try:
+                conn.execute(f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})")
+                sys.stderr.write(f"[RemoteAttach] Attached '{alias}' ({attach_type}) → {info.get('host')}/{info.get('database')}\n")
+            except Exception as e:
+                msg = str(e).lower()
+                if 'already' in msg or 'exists' in msg:
+                    pass  # Already attached on the shared connection
+                else:
+                    sys.stderr.write(f"[RemoteAttach] ATTACH '{alias}' failed: {e}\n")
+        except Exception as e:
+            sys.stderr.write(f"[RemoteAttach] Error processing '{alias}': {e}\n")
+    sys.stderr.flush()
+
+
 def _duck_has_table(table: Optional[str]) -> bool:
     if not table:
         return False
@@ -3981,6 +4073,7 @@ def preview_pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), acto
             joins=__joins_eff,
             defaults={},
             limit=None,
+            base_cols=__cols,
         )
         # Handle different return value formats (3 or 4 elements)
         if len(result) == 3:
@@ -4377,6 +4470,15 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
 
             cache_ds = f"{payload.datasourceId or '__local__'}@{db_path}"
 
+            # Load remote MySQL attachments for this DuckDB datasource
+            _remote_attachments: list = []
+            if payload.datasourceId and ds_obj:
+                try:
+                    _rat_opts = json.loads(getattr(ds_obj, 'options_json', None) or '{}')
+                    _remote_attachments = (_rat_opts.get('transforms') or {}).get('remoteAttachments') or []
+                except Exception:
+                    _remote_attachments = []
+
             # Replace named params in the inner SQL with positional '?' for duckdb
             inner_qm = re.sub(r":([A-Za-z_][A-Za-z0-9_]*)", "?", sql_inner)
             sql_native = f"SELECT * FROM ({inner_qm}) AS _q LIMIT {limit_lit} OFFSET {offset_lit}"
@@ -4398,6 +4500,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                 except Exception:
                     pass
                 with open_duck_native(db_path) as conn:
+                    _apply_duck_mysql_attachments(conn, _remote_attachments, db)
                     cur = conn.execute(sql_native, values)
                     desc = getattr(cur, 'description', None) or []
                     cols = [str(col[0]) for col in desc]
@@ -4437,6 +4540,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                         pass
                     count_text_qm = f"SELECT COUNT(*) AS __cnt FROM ({inner_qm}) AS _q"
                     with open_duck_native(db_path) as conn:
+                        _apply_duck_mysql_attachments(conn, _remote_attachments, db)
                         cur = conn.execute(count_text_qm, values)
                         cnt_val = cur.fetchone()
                     total_rows = int(cnt_val[0]) if cnt_val and cnt_val[0] is not None else 0
@@ -5357,8 +5461,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 num_expr = f"SUM({vcol})"
 
         # ── Dialect-aware period bucket (denominator) ──────────────────────────
+        _wday_dow_expr: str | None = None   # saved for distinct subquery
+        _wday_wknd_days: str | None = None  # saved for distinct subquery
+        _day_cast: str | None = None        # saved for distinct subquery
         if agg in ('avg_daily', 'avg_wday'):
             day_cast = f"CAST({dcol} AS DATE)"
+            _day_cast = day_cast
             if agg == 'avg_wday':
                 if 'duckdb' in d or 'postgres' in d or 'postgre' in d:
                     dow_expr = f"dayofweek({dcol})" if 'duckdb' in d else f"EXTRACT(DOW FROM {dcol})"
@@ -5372,6 +5480,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 else:
                     dow_expr = f"dayofweek({dcol})"
                     wknd_days = "(0, 6)" if _spec_weekends == 'SAT_SUN' else "(5, 6)"
+                _wday_dow_expr = dow_expr
+                _wday_wknd_days = wknd_days
                 date_trunc = f"CASE WHEN {dow_expr} NOT IN {wknd_days} THEN {day_cast} END"
             else:
                 date_trunc = day_cast
@@ -5425,11 +5535,35 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         where_clause = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
 
         # ── Build final SQL (3 columns for debug logging) ──────────────────────
-        sql_avg = (
-            f"SELECT {num_expr} AS num_val, {den_expr} AS den_val, "
-            f"{num_expr} * 1.0 / NULLIF({den_expr}, 0) AS value "
-            f"FROM {_q_source(spec.source)}{where_clause}"
-        )
+        if avg_numerator == 'distinct':
+            # For distinct: count distinct per period → SUM those counts / number of periods.
+            # A single COUNT(DISTINCT col) would collapse across all periods giving the wrong answer.
+            # Inner query groups by period, outer query aggregates.
+            if agg == 'avg_wday':
+                # Filter weekends in WHERE; group by plain date (no CASE needed in inner query)
+                inner_period = _day_cast
+                inner_where_parts = list(where_parts)
+                inner_where_parts.append(f"{_wday_dow_expr} NOT IN {_wday_wknd_days}")
+                inner_where_clause = f" WHERE {' AND '.join(inner_where_parts)}"
+            else:
+                inner_period = date_trunc
+                inner_where_clause = where_clause
+            inner_sql = (
+                f"SELECT {inner_period} AS _period, COUNT(DISTINCT {vcol}) AS _cnt "
+                f"FROM {_q_source(spec.source)}{inner_where_clause} "
+                f"GROUP BY {inner_period}"
+            )
+            sql_avg = (
+                f"SELECT SUM(_cnt) AS num_val, COUNT(*) AS den_val, "
+                f"SUM(_cnt) * 1.0 / NULLIF(COUNT(*), 0) AS value "
+                f"FROM ({inner_sql}) _avg_sub"
+            )
+        else:
+            sql_avg = (
+                f"SELECT {num_expr} AS num_val, {den_expr} AS den_val, "
+                f"{num_expr} * 1.0 / NULLIF({den_expr}, 0) AS value "
+                f"FROM {_q_source(spec.source)}{where_clause}"
+            )
         print(f"[AvgPeriod] agg={agg}, source={spec.source}, val_col={val_field}, date_col={date_field}, is_unix={_avg_is_unix}, numerator={avg_numerator}, weekends={_spec_weekends}", flush=True)
         print(f"[AvgPeriod] SQL: {sql_avg[:800]}", flush=True)
         if params_avg:
@@ -5460,7 +5594,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     if not has_chart_semantics:
         # Load datasource-level transforms if any
         ds_transforms = {}
-        if ds is not None:
+        _ignore_transforms = bool(getattr(spec, 'ignoreTransforms', False))
+        if ds is not None and not _ignore_transforms:
             try:
                 opts = json.loads(ds.options_json or "{}")
             except Exception:
@@ -5647,7 +5782,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
                     params[pname] = _coerce_filter_value(base_col, v)
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        sql_inner = f"SELECT * FROM ({base_sql}) AS _base{where_sql}"
+        _sort_col = getattr(spec, 'orderBy', None)
+        _sort_dir = str(getattr(spec, 'order', None) or 'asc').upper()
+        if _sort_dir not in ('ASC', 'DESC'):
+            _sort_dir = 'ASC'
+        _order_sql = f" ORDER BY {_q_ident(_sort_col)} {_sort_dir}" if _sort_col else ""
+        sql_inner = f"SELECT * FROM ({base_sql}) AS _base{where_sql}{_order_sql}"
         sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: where_clauses = {where_clauses}\n")
         sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: params = {params}\n")
         sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: sql_inner[:200] = {sql_inner[:200]}\n")
@@ -5717,6 +5857,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 joins=__joins_eff,
                 defaults={},  # avoid sort/limit on base for aggregated queries
                 limit=None,
+                base_cols=__cols,
             )
             # Handle different return value formats
             if len(result2) == 3:
@@ -6311,9 +6452,14 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                             f"try_cast({_q_ident(spec.y)} AS DOUBLE), 0.0)"
                         )
                         value_expr = f"{agg.upper()}({y_clean})"
+                    elif agg in ("sum", "avg", "min", "max"):
+                        # Wrap with COALESCE so LEFT JOIN nulls return 0 instead of null
+                        value_expr = f"COALESCE({agg.upper()}({_q_ident(spec.y)}), 0)"
                     else:
                         value_expr = f"{agg.upper()}({_q_ident(spec.y)})"
             inner = f"SELECT 'total' as x, {value_expr} as value{base_from_sql}"
+            sys.stderr.write(f"[SCALAR_AGG_DEBUG] sql_inner: {(inner + where_sql)[:400]}\n")
+            sys.stderr.flush()
             # Apply datasource defaults (order/TopN) when present
             order_seg = " ORDER BY 1"  # only x column exists in this branch
             limit_override: int | None = None
@@ -7735,6 +7881,7 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                 # any alias-based custom columns/transforms in the _base projection.
                 needed_aliases = set()
 
+            _keep_joins = True
             if needed_aliases:
                 ds_ccs = [
                     cc for cc in ds_ccs
@@ -7760,14 +7907,16 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                 ]
             else:
                 # No alias-based dependencies are required for this field; drop all
-                # custom columns/transforms to avoid bringing in unused ones.
+                # custom columns/transforms AND joins to avoid bringing in unused ones.
+                # A base column like "Time" does not need a JOIN to be distinct-queried.
                 ds_ccs = []
                 ds_trs = []
+                _keep_joins = False
 
             ds_transforms = {
                 'customColumns': ds_ccs,
                 'transforms': ds_trs,
-                'joins': (ds_transforms.get('joins') or []) if isinstance(ds_transforms, dict) else [],
+                'joins': ((ds_transforms.get('joins') or []) if isinstance(ds_transforms, dict) else []) if _keep_joins else [],
                 'defaults': (ds_transforms.get('defaults') or {}) if isinstance(ds_transforms, dict) else {},
             }
         except Exception:
@@ -7789,25 +7938,31 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
         field_name = str(payload.field)
         base_select_list = ["*", field_name]
         print(f"[Legacy] /distinct: Adding '{field_name}' to base_select (will be materialized if it's custom/datepart)")
-        
-        result = build_sql(
-            dialect=ds_type or dialect,
-            source=str(payload.source),
-            base_select=base_select_list,
-            custom_columns=(ds_transforms.get("customColumns", []) if isinstance(ds_transforms, dict) else []),
-            transforms=(ds_transforms.get("transforms", []) if isinstance(ds_transforms, dict) else []),
-            joins=__joins_eff,
-            defaults={},  # do not apply defaults like TopN
-            limit=None,
-        )
-        # Handle different return value formats
-        if len(result) == 3:
-            base_sql, _unused_cols, _warns = result
-        elif len(result) == 4:
-            base_sql, _unused_cols, _warns, _ = result
-        else:
-            base_sql = result[0] if result else ""
-        base_from_sql = f"({base_sql}) AS _base"
+
+        _eff_ccs = ds_transforms.get("customColumns", []) if isinstance(ds_transforms, dict) else []
+        _eff_trs = ds_transforms.get("transforms", []) if isinstance(ds_transforms, dict) else []
+        # Only build a subquery when there are actual transforms/joins to apply.
+        # A plain base-column field can be queried directly, allowing the DB to use indexes.
+        if _eff_ccs or _eff_trs or __joins_eff:
+            result = build_sql(
+                dialect=ds_type or dialect,
+                source=str(payload.source),
+                base_select=base_select_list,
+                custom_columns=_eff_ccs,
+                transforms=_eff_trs,
+                joins=__joins_eff,
+                defaults={},  # do not apply defaults like TopN
+                limit=None,
+            )
+            # Handle different return value formats
+            if len(result) == 3:
+                base_sql, _unused_cols, _warns = result
+            elif len(result) == 4:
+                base_sql, _unused_cols, _warns, _ = result
+            else:
+                base_sql = result[0] if result else ""
+            base_from_sql = f"({base_sql}) AS _base"
+        # else: leave base_from_sql = None → query directly from source table
     # If no datasource or no transforms, select directly from source
     effective_source = base_from_sql or str(payload.source)
     

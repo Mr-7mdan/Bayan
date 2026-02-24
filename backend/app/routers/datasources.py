@@ -1714,6 +1714,7 @@ def get_transforms(ds_id: str, db: Session = Depends(get_db)):
         customColumns=cfg.get("customColumns", []),
         transforms=cfg.get("transforms", []),
         joins=cfg.get("joins", []),
+        remoteAttachments=cfg.get("remoteAttachments", []),
         defaults=cfg.get("defaults"),
     )
     return out
@@ -1905,6 +1906,95 @@ def list_local_tables_only():
         raise HTTPException(status_code=500, detail=f"List tables failed: {e}")
 
 
+def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
+    """ATTACH configured remote datasources to conn, query their schemas, return list[SchemaInfo]."""
+    from urllib.parse import urlparse, unquote as _unq
+    result: list[SchemaInfo] = []
+    try:
+        opts = json.loads(options_json or '{}')
+        attachments = (opts.get('transforms') or {}).get('remoteAttachments') or []
+        if not attachments:
+            return result
+        for att in (attachments or []):
+            alias = str((att or {}).get('alias') or '').strip()
+            ref_ds_id = str((att or {}).get('datasourceId') or '').strip()
+            db_override = str((att or {}).get('database') or '').strip()
+            if not alias or not ref_ds_id:
+                continue
+            try:
+                ref_ds = db_session.get(Datasource, ref_ds_id)
+                if not ref_ds or not getattr(ref_ds, 'connection_encrypted', None):
+                    continue
+                dsn = decrypt_text(ref_ds.connection_encrypted)
+                ds_type = (getattr(ref_ds, 'type', '') or '').lower()
+                if 'mysql' in ds_type or 'mariadb' in ds_type:
+                    attach_type = 'mysql'
+                    default_port = 3306
+                elif 'postgres' in ds_type:
+                    attach_type = 'postgres'
+                    default_port = 5432
+                else:
+                    print(f"[Introspect] Unsupported remote type '{ds_type}' for alias '{alias}'")
+                    continue
+                clean = re.sub(r'^(mysql|postgres|postgresql)\+\w+://', lambda m: m.group(1) + '://', dsn or '')
+                p = urlparse(clean)
+                host = p.hostname or 'localhost'
+                port = p.port or default_port
+                user = _unq(p.username or '')
+                password = _unq(p.password or '')
+                database = db_override or (p.path or '').lstrip('/')
+                parts = [f"host={host}", f"port={port}"]
+                if user:
+                    parts.append(f"user={user}")
+                if password:
+                    parts.append(f"password={password}")
+                if database:
+                    parts.append(f"database={database}")
+                attach_str = ' '.join(parts)
+                try:
+                    conn.execute(f"INSTALL {attach_type}")
+                except Exception:
+                    pass
+                try:
+                    conn.execute(f"LOAD {attach_type}")
+                except Exception:
+                    pass
+                try:
+                    conn.execute(f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})")
+                except Exception as e:
+                    if 'already' not in str(e).lower() and 'exists' not in str(e).lower():
+                        print(f"[Introspect] ATTACH '{alias}' failed: {e}")
+                        continue
+                # Use duckdb_columns() — works reliably for all attached catalogs
+                try:
+                    col_rows = conn.execute(
+                        "SELECT schema_name, table_name, column_name, CAST(data_type AS VARCHAR) "
+                        "FROM duckdb_columns() "
+                        "WHERE database_name = ? "
+                        "ORDER BY schema_name, table_name, column_index",
+                        (alias,),
+                    ).fetchall()
+                    by_sch: dict[str, dict[str, list[ColumnInfo]]] = {}
+                    for sch, tbl, col_name, col_type in col_rows:
+                        by_sch.setdefault(str(sch), {}).setdefault(str(tbl), []).append(
+                            ColumnInfo(name=str(col_name), type=str(col_type))
+                        )
+                    for sch, tables_dict in by_sch.items():
+                        tables: list[TableInfo] = [
+                            TableInfo(name=tbl, columns=cols)
+                            for tbl, cols in tables_dict.items()
+                        ]
+                        result.append(SchemaInfo(name=f"{alias}.{sch}", tables=tables))
+                    print(f"[Introspect] Remote '{alias}': {sum(len(t) for t in by_sch.values())} tables across {len(by_sch)} schemas")
+                except Exception as e:
+                    print(f"[Introspect] Remote schema query for '{alias}' failed: {e}")
+            except Exception as e:
+                print(f"[Introspect] Error processing remote attachment '{alias}': {e}")
+    except Exception as e:
+        print(f"[Introspect] _introspect_attach_remotes error: {e}")
+    return result
+
+
 @router.get("/{ds_id}/schema", response_model=IntrospectResponse)
 def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
     print(f"[/schema] Called for datasource {ds_id}")
@@ -1976,6 +2066,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                                 cols = [ColumnInfo(name=str(cn), type=str(dt)) for (cn, dt) in cols_rows]
                                 tables.append(TableInfo(name=tname, columns=cols))
                             schemas.append(SchemaInfo(name=sch, tables=tables))
+                        schemas.extend(_introspect_attach_remotes(conn, ds.options_json or '{}', db))
                         return IntrospectResponse(schemas=schemas)
                 except HTTPException:
                     raise
@@ -2051,6 +2142,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                         cols = [ColumnInfo(name=str(cn), type=str(dt)) for (cn, dt) in cols_rows]
                         tables.append(TableInfo(name=tname, columns=cols))
                     schemas.append(SchemaInfo(name=sch, tables=tables))
+                schemas.extend(_introspect_attach_remotes(conn, ds.options_json or '{}', db))
                 return IntrospectResponse(schemas=schemas)
         except Exception as e:
             # Try falling back to the default local store path
@@ -2089,6 +2181,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                             cols = [ColumnInfo(name=str(cn), type=str(dt)) for (cn, dt) in cols_rows]
                             tables.append(TableInfo(name=tname, columns=cols))
                         schemas.append(SchemaInfo(name=sch, tables=tables))
+                    schemas.extend(_introspect_attach_remotes(conn, ds.options_json or '{}', db))
                     return IntrospectResponse(schemas=schemas)
             except Exception as e2:
                 raise HTTPException(status_code=500, detail=f"DuckDB introspection failed for path '{path}': {e2}")
