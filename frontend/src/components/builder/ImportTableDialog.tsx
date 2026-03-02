@@ -9,6 +9,23 @@ type Step = 'input' | 'preview' | 'done'
 type Mode = 'sql' | 'file'
 type IfExists = 'replace' | 'append' | 'fail'
 
+const DUCK_TYPES = ['VARCHAR', 'INTEGER', 'BIGINT', 'DOUBLE', 'BOOLEAN', 'DATE', 'TIMESTAMP'] as const
+type DuckType = typeof DUCK_TYPES[number]
+
+function detectColumnType(values: unknown[]): DuckType {
+  const nonNull = values.filter(v => v !== null && v !== undefined && v !== '')
+  if (nonNull.length === 0) return 'VARCHAR'
+  const strs = nonNull.map(v => String(v).trim())
+  if (strs.every(s => ['true', 'false'].includes(s.toLowerCase()))) return 'BOOLEAN'
+  if (strs.every(s => /^-?\d+$/.test(s))) {
+    return strs.some(s => Math.abs(Number(s)) > 2147483647) ? 'BIGINT' : 'INTEGER'
+  }
+  if (strs.every(s => s !== '' && !isNaN(Number(s)) && /^-?[\d]*\.?[\d]+([eE][+-]?\d+)?$/.test(s))) return 'DOUBLE'
+  if (strs.every(s => /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s))) return 'TIMESTAMP'
+  if (strs.every(s => /^\d{4}-\d{2}-\d{2}$/.test(s))) return 'DATE'
+  return 'VARCHAR'
+}
+
 interface PreviewResult {
   columns: string[]
   rows: Record<string, unknown>[]
@@ -37,6 +54,7 @@ export default function ImportTableDialog({ open, dsId, datasources = [], onClos
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [tableName, setTableName] = useState('')
   const [ifExists, setIfExists] = useState<IfExists>('replace')
+  const [columnTypes, setColumnTypes] = useState<Record<string, string>>({})
   const [committing, setCommitting] = useState(false)
   const [commitError, setCommitError] = useState<string | null>(null)
   const [result, setResult] = useState<{ tableName: string; rowCount: number } | null>(null)
@@ -45,7 +63,7 @@ export default function ImportTableDialog({ open, dsId, datasources = [], onClos
   const reset = () => {
     setStep('input'); setSql(''); setFile(null); setPreview(null)
     setPreviewError(null); setTableName(''); setCommitError(null); setResult(null)
-    setIfExists('replace')
+    setIfExists('replace'); setColumnTypes({})
     setSourceDsId(sourceDatasources[0]?.id || '')
   }
 
@@ -79,6 +97,12 @@ export default function ImportTableDialog({ open, dsId, datasources = [], onClos
         if (!tableName && res.fileName) setTableName(res.fileName.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase())
       }
       setPreview(res)
+      const detected: Record<string, string> = {}
+      for (const col of res.columns) {
+        const vals = res.rows.map(r => r[col])
+        detected[col] = detectColumnType(vals)
+      }
+      setColumnTypes(detected)
       setStep('preview')
     } catch (e: any) {
       setPreviewError(e?.message || 'Preview failed')
@@ -96,10 +120,10 @@ export default function ImportTableDialog({ open, dsId, datasources = [], onClos
       if (mode === 'sql') {
         const sid = sourceDsId || sourceDatasources[0]?.id || ''
         if (!sid) throw new Error('Select a source datasource first')
-        res = await Api.importSqlCommit(dsId, { sql, sourceDsId: sid, tableName: tableName.trim(), ifExists })
+        res = await Api.importSqlCommit(dsId, { sql, sourceDsId: sid, tableName: tableName.trim(), ifExists, columnTypes })
       } else {
         if (!file) throw new Error('No file available')
-        res = await Api.importFileCommit(dsId, file, tableName.trim(), ifExists)
+        res = await Api.importFileCommit(dsId, file, tableName.trim(), ifExists, columnTypes)
       }
       setResult({ tableName: res.tableName, rowCount: res.rowCount })
       setStep('done')
@@ -246,14 +270,29 @@ export default function ImportTableDialog({ open, dsId, datasources = [], onClos
                 {preview.fileName && <span>from <span className="font-mono">{preview.fileName}</span></span>}
               </div>
 
+              {/* Type-editor hint */}
+              <div className="flex items-center gap-1.5 px-1 text-[11px] text-[hsl(var(--muted-foreground))]">
+                <span className="inline-block w-2 h-2 rounded-full bg-[hsl(var(--primary))]/60 flex-shrink-0" />
+                Click the type badge under each column header to change its data type before importing.
+              </div>
+
               {/* Data grid */}
-              <div className="overflow-auto rounded-lg border border-[hsl(var(--border))] max-h-[320px]">
+              <div className="overflow-auto rounded-lg border border-[hsl(var(--border))] max-h-[300px]">
                 <table className="min-w-full text-xs">
                   <thead className="sticky top-0 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] z-10">
                     <tr>
                       {preview.columns.map((col) => (
-                        <th key={col} className="px-3 py-2 text-left font-medium whitespace-nowrap text-[hsl(var(--muted-foreground))]">
-                          {col}
+                        <th key={col} className="px-3 py-2 text-left font-medium whitespace-nowrap min-w-[110px]">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[hsl(var(--muted-foreground))] truncate max-w-[160px]" title={col}>{col}</span>
+                            <select
+                              className="text-[10px] px-1.5 py-0.5 rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] font-normal cursor-pointer focus:outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]/40"
+                              value={columnTypes[col] || 'VARCHAR'}
+                              onChange={(e) => setColumnTypes(prev => ({ ...prev, [col]: e.target.value }))}
+                            >
+                              {DUCK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </div>
                         </th>
                       ))}
                     </tr>

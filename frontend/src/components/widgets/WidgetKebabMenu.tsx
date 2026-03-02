@@ -1,20 +1,24 @@
 "use client"
 
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 export type WidgetKebabMenuProps = {
   open: boolean
   anchorEl: HTMLElement | null
   onCloseAction: () => void
-  onAction: (action: 'duplicate' | 'delete' | 'viewSpec' | 'viewSql' | 'viewJson' | 'aiAssist' | 'embed' | 'downloadPNG' | 'downloadSVG') => void
+  onAction: (action: 'duplicate' | 'delete' | 'viewSpec' | 'viewSql' | 'viewJson' | 'aiAssist' | 'embed' | 'downloadPNG' | 'downloadSVG' | 'downloadPdfPortrait' | 'downloadPdfLandscape') => void
   widgetType?: string
   chartType?: string
 }
 
 export default function WidgetKebabMenu({ open, anchorEl, onCloseAction, onAction, widgetType, chartType }: WidgetKebabMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null)
-  
+  const [pdfPickerOpen, setPdfPickerOpen] = useState(false)
+
+  // Reset orientation picker when menu closes
+  useEffect(() => { if (!open) setPdfPickerOpen(false) }, [open])
+
   // Determine if this widget supports chart downloads
   // Supported: chart type widgets (except non-ECharts types like badges, progress, tracker, categoryBar, barList, tremorTable)
   const supportsDownload = useMemo(() => {
@@ -24,6 +28,8 @@ export default function WidgetKebabMenu({ open, anchorEl, onCloseAction, onActio
     if (chartType && nonEChartsTypes.includes(chartType)) return false
     return true
   }, [widgetType, chartType])
+
+  const supportsReportDownload = widgetType === 'report'
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
@@ -99,6 +105,34 @@ export default function WidgetKebabMenu({ open, anchorEl, onCloseAction, onActio
             <div className="my-1 h-px bg-[hsl(var(--border))]" />
             <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)]" onClick={() => { onAction('downloadPNG'); onCloseAction() }}>Download PNG</button>
             <button className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)]" onClick={() => { onAction('downloadSVG'); onCloseAction() }}>Download SVG</button>
+          </>
+        )}
+        {supportsReportDownload && (
+          <>
+            <div className="my-1 h-px bg-[hsl(var(--border))]" />
+            <button
+              className="w-full text-left text-xs px-3 py-1.5 hover:bg-[hsl(var(--secondary)/0.6)] flex items-center justify-between"
+              onClick={() => setPdfPickerOpen(v => !v)}
+            >
+              <span>Download PDF</span>
+              <span className="opacity-50 text-[10px]">{pdfPickerOpen ? '▲' : '▼'}</span>
+            </button>
+            {pdfPickerOpen && (
+              <div className="flex gap-1 px-3 pb-1.5">
+                <button
+                  className="flex-1 text-center text-xs py-1 rounded border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary)/0.6)]"
+                  onClick={() => { onAction('downloadPdfPortrait'); onCloseAction() }}
+                >
+                  Portrait
+                </button>
+                <button
+                  className="flex-1 text-center text-xs py-1 rounded border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary)/0.6)]"
+                  onClick={() => { onAction('downloadPdfLandscape'); onCloseAction() }}
+                >
+                  Landscape
+                </button>
+              </div>
+            )}
           </>
         )}
         <div className="my-1 h-px bg-[hsl(var(--border))]" />

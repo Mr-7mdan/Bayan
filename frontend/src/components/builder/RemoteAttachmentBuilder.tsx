@@ -15,6 +15,19 @@ function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')
 }
 
+function genId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {}
+  // Fallback for HTTP (non-secure) contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+  })
+}
+
 export default function RemoteAttachmentBuilder({ datasources, onAddAction, onCancelAction, initial }: Props) {
   const remoteDatasources = datasources.filter(d => !/duckdb/i.test(d.type || ''))
 
@@ -35,7 +48,7 @@ export default function RemoteAttachmentBuilder({ datasources, onAddAction, onCa
   function handleSave() {
     if (!canSave) return
     onAddAction({
-      id: initial?.id ?? crypto.randomUUID(),
+      id: initial?.id ?? genId(),
       alias: alias.trim(),
       datasourceId: dsId,
       database: database.trim() || undefined,

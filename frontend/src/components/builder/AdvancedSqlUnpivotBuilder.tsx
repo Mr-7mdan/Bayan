@@ -30,6 +30,7 @@ export default function AdvancedSqlUnpivotBuilder({ columns, dsType, widgetId, d
   const [mode, setMode] = useState<'auto'|'unpivot'|'union'>('auto')
   const [omitZeroNull, setOmitZeroNull] = useState<boolean>(true)
   const [scope, setScope] = useState<'widget'|'table'|'datasource'>(() => (source ? 'table' : 'datasource'))
+  const [scopeTableOverride, setScopeTableOverride] = useState<string | undefined>(undefined)
   const [useAliases, setUseAliases] = useState<boolean>(true)
 
   // Load alias map from datasource customColumns (simple proxy columns)
@@ -66,9 +67,9 @@ export default function AdvancedSqlUnpivotBuilder({ columns, dsType, widgetId, d
       setOmitZeroNull(Boolean(initial.omitZeroNull))
       const sc: any = (initial as any).scope
       if (sc && sc.level) {
-        if (sc.level === 'datasource') setScope('datasource')
-        else if (sc.level === 'table') setScope('table')
-        else if (sc.level === 'widget') setScope('widget')
+        if (sc.level === 'datasource') { setScope('datasource'); setScopeTableOverride(undefined) }
+        else if (sc.level === 'table') { setScope('table'); setScopeTableOverride(sc.table || undefined) }
+        else if (sc.level === 'widget') { setScope('widget'); setScopeTableOverride(undefined) }
       }
     } catch {}
   }, [initial])
@@ -167,7 +168,7 @@ export default function AdvancedSqlUnpivotBuilder({ columns, dsType, widgetId, d
             payload.mode = effMode
             if (omitZeroNull) payload.omitZeroNull = true
             if (scope === 'datasource') payload.scope = { level: 'datasource' }
-            else if (scope === 'table' && source) payload.scope = { level: 'table', table: source }
+            else if (scope === 'table') payload.scope = { level: 'table', table: scopeTableOverride || source }
             else if (scope === 'widget' && widgetId) payload.scope = { level: 'widget', widgetId }
             onAddAction(payload)
           }}

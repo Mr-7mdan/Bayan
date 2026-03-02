@@ -5,7 +5,7 @@ from typing import Any, Optional
 from uuid import uuid4
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response as FastAPIResponse
 import anyio
 from decimal import Decimal
 import base64
@@ -18,7 +18,7 @@ from ..models import SessionLocal, AlertRule, EmailConfig, SmsConfigHadara, Aler
 from ..security import encrypt_text, decrypt_text
 from ..alerts_service import run_rule, send_email, send_sms_hadara, evaluate_threshold, _render_kpi_html  # type: ignore
 from ..scheduler import schedule_all_alert_jobs as _sync_alert_jobs
-from ..alerts_service import _render_table_html, _apply_base_template, _apply_xpick_to_where, _render_report_html, _lookup_widget_config  # type: ignore
+from ..alerts_service import _render_table_html, _apply_base_template, _apply_xpick_to_where, _render_report_html, _lookup_widget_config, _render_report_pdf  # type: ignore
 from ..alerts_service import _build_kpi_svg, _build_chart_svg_placeholder, _to_svg_data_uri, _fmt_num  # type: ignore
 from ..routers.query import run_query_spec, run_pivot, period_totals  # reuse query execution
 from ..config import settings
@@ -2892,6 +2892,30 @@ async def put_sms_config_hadara(payload: SmsConfigPayload, db: Session = Depends
     db.add(c)
     db.commit()
     return {"ok": True}
+
+
+# --- Report PDF download ---
+@router.get("/report-pdf/{dashboard_id}/{widget_id}")
+def download_report_pdf(
+    dashboard_id: str,
+    widget_id: str,
+    landscape: bool = False,
+    db: Session = Depends(get_db),
+) -> FastAPIResponse:
+    """Generate and stream a report widget as a single-page PDF."""
+    wcfg = _lookup_widget_config(db, dashboard_id=dashboard_id, widget_id=widget_id)
+    if not wcfg:
+        raise HTTPException(status_code=404, detail="Widget not found")
+    pdf_bytes = _render_report_pdf(wcfg, db, landscape=landscape)
+    if not pdf_bytes:
+        raise HTTPException(status_code=500, detail="PDF generation failed")
+    title = str(wcfg.get("title") or "report")
+    safe_title = _re.sub(r'[^\w\-]', '_', title)
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.pdf"'},
+    )
 
 
 # --- Tests ---

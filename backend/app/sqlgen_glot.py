@@ -335,16 +335,22 @@ class SQLGlotBuilder:
             legend_field = legend_field_resolved
             
             # Start with base table
-            # Handle schema.table format (e.g., "main.table_name")
+            # Handle schema.table or catalog.schema.table formats
             if "." in source:
-                parts = source.split(".", 1)
-                schema_name = parts[0]
-                table_name = parts[1]
-                # Use exp.Table directly to avoid parsing issues
-                table_expr = exp.Table(
-                    this=exp.Identifier(this=table_name, quoted=True),
-                    db=exp.Identifier(this=schema_name, quoted=False)
-                )
+                parts = source.split(".")
+                if len(parts) >= 3:
+                    catalog_name, schema_name, table_name = parts[0], parts[1], ".".join(parts[2:])
+                    table_expr = exp.Table(
+                        this=exp.Identifier(this=table_name, quoted=True),
+                        db=exp.Identifier(this=schema_name, quoted=True),
+                        catalog=exp.Identifier(this=catalog_name, quoted=False)
+                    )
+                else:
+                    schema_name, table_name = parts[0], parts[1]
+                    table_expr = exp.Table(
+                        this=exp.Identifier(this=table_name, quoted=True),
+                        db=exp.Identifier(this=schema_name, quoted=False)
+                    )
             else:
                 # Simple table name
                 table_expr = exp.Table(this=exp.Identifier(this=source, quoted=True))
@@ -606,18 +612,23 @@ class SQLGlotBuilder:
             
             # Start with base table or subquery
             if source.strip().startswith("(") and " AS " in source.upper():
-                # It's a subquery like "(SELECT ...) AS _base"
-                # Parse it as raw SQL
                 from_clause = sqlglot.parse_one(source, dialect=self.dialect)
                 query = sqlglot.select("*").from_(from_clause)
             elif "." in source:
-                parts = source.split(".", 1)
-                schema_name = parts[0]
-                table_name = parts[1]
-                table_expr = exp.Table(
-                    this=exp.Identifier(this=table_name, quoted=True),
-                    db=exp.Identifier(this=schema_name, quoted=False)
-                )
+                parts = source.split(".")
+                if len(parts) >= 3:
+                    catalog_name, schema_name, table_name = parts[0], parts[1], ".".join(parts[2:])
+                    table_expr = exp.Table(
+                        this=exp.Identifier(this=table_name, quoted=True),
+                        db=exp.Identifier(this=schema_name, quoted=True),
+                        catalog=exp.Identifier(this=catalog_name, quoted=False)
+                    )
+                else:
+                    schema_name, table_name = parts[0], parts[1]
+                    table_expr = exp.Table(
+                        this=exp.Identifier(this=table_name, quoted=True),
+                        db=exp.Identifier(this=schema_name, quoted=False)
+                    )
                 query = sqlglot.select("*").from_(table_expr)
             else:
                 table_expr = exp.Table(this=exp.Identifier(this=source, quoted=True))
@@ -743,13 +754,20 @@ class SQLGlotBuilder:
                 from_clause = sqlglot.parse_one(source, dialect=self.dialect)
                 query = sqlglot.select("*").from_(from_clause)
             elif "." in source:
-                parts = source.split(".", 1)
-                schema_name = parts[0]
-                table_name = parts[1]
-                table_expr = exp.Table(
-                    this=exp.Identifier(this=table_name, quoted=True),
-                    db=exp.Identifier(this=schema_name, quoted=False)
-                )
+                parts = source.split(".")
+                if len(parts) >= 3:
+                    catalog_name, schema_name, table_name = parts[0], parts[1], ".".join(parts[2:])
+                    table_expr = exp.Table(
+                        this=exp.Identifier(this=table_name, quoted=True),
+                        db=exp.Identifier(this=schema_name, quoted=True),
+                        catalog=exp.Identifier(this=catalog_name, quoted=False)
+                    )
+                else:
+                    schema_name, table_name = parts[0], parts[1]
+                    table_expr = exp.Table(
+                        this=exp.Identifier(this=table_name, quoted=True),
+                        db=exp.Identifier(this=schema_name, quoted=False)
+                    )
                 query = sqlglot.select("*").from_(table_expr)
             else:
                 table_expr = exp.Table(this=exp.Identifier(this=source, quoted=True))

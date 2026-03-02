@@ -17,6 +17,7 @@ export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCan
   const [expr, setExpr] = useState<string>('')
   const [valueType, setValueType] = useState<'string'|'number'|'date'|'boolean' | ''>('')
   const [scopeLevel, setScopeLevel] = useState<'datasource' | 'table'>('datasource')
+  const [scopeTable, setScopeTable] = useState<string>('')
 
   useEffect(() => {
     if (!initial) return
@@ -27,16 +28,19 @@ export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCan
       const initScope = initial.scope
       if (initScope?.level === 'table') {
         setScopeLevel('table')
+        setScopeTable(String(initScope.table || tableName || ''))
       } else {
         setScopeLevel('datasource')
+        setScopeTable(tableName || '')
       }
     } catch {}
   }, [initial])
 
-  // Default to table scope if table is selected
+  // Default to table scope if table is selected (new items only)
   useEffect(() => {
     if (tableName && !initial) {
       setScopeLevel('table')
+      setScopeTable(tableName)
     }
   }, [tableName, initial])
 
@@ -64,9 +68,9 @@ export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCan
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
         <label className="text-xs text-muted-foreground sm:col-span-1">Scope</label>
-        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e)=>setScopeLevel(e.target.value as any)}>
+        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e) => { setScopeLevel(e.target.value as any); if (e.target.value === 'table' && !scopeTable) setScopeTable(tableName || '') }}>
           <option value="datasource">Datasource-wide</option>
-          {tableName && <option value="table">Table: {tableName}</option>}
+          {(tableName || scopeTable) && <option value="table">Table: {scopeTable || tableName}</option>}
         </select>
       </div>
       <div className="flex items-center justify-end gap-2">
@@ -75,8 +79,8 @@ export default function AdvancedSqlComputedBuilder({ columns, onAddAction, onCan
           const payload: any = { type: 'computed' as const, name: name.trim(), expr: expr.trim() }
           if (valueType) payload.valueType = valueType
           // Build scope
-          if (scopeLevel === 'table' && tableName) {
-            payload.scope = { level: 'table', table: tableName }
+          if (scopeLevel === 'table' && (scopeTable || tableName)) {
+            payload.scope = { level: 'table', table: scopeTable || tableName }
           } else {
             payload.scope = { level: 'datasource' }
           }

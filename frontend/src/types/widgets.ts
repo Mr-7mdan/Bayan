@@ -227,7 +227,7 @@ export type ReportVariable = {
   source?: string // table name
   value: {
     field: string
-    agg: 'none' | 'count' | 'distinct' | 'avg' | 'sum' | 'min' | 'max' | 'avg_daily' | 'avg_wday' | 'avg_weekly' | 'avg_monthly'
+    agg: 'none' | 'count' | 'distinct' | 'avg' | 'sum' | 'min' | 'max' | 'avg_daily' | 'avg_wday' | 'avg_weekly' | 'avg_monthly' | 'last_daily_sum'
     avgDateField?: string
     avgNumerator?: 'sum' | 'count' | 'distinct'
   }

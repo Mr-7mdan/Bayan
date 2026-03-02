@@ -101,6 +101,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
   const [template, setTemplate] = useState('')
   const [renderMode, setRenderMode] = useState<'kpi'|'table'|'chart'|'report'>('kpi')
   const [attachPdf, setAttachPdf] = useState<boolean>(false)
+  const [pdfLandscape, setPdfLandscape] = useState<boolean>(false)
   const [triggerType, setTriggerType] = useState<'threshold'|'time'>('threshold')
   const [operator, setOperator] = useState('>')
   const [value, setValue] = useState('0')
@@ -143,7 +144,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
     setTemplate(String(cfg.template || ''))
     const r = cfg.render || { mode: 'kpi' }
     setRenderMode((r.mode || 'kpi') as any)
-    try { setAttachPdf(!!((Array.isArray(cfg.actions) ? cfg.actions : []).find((a: any) => String(a?.type) === 'email') || {}).attachPdf) } catch {}
+    try { const _ea = (Array.isArray(cfg.actions) ? cfg.actions : []).find((a: any) => String(a?.type) === 'email') || {}; setAttachPdf(!!(_ea as any).attachPdf); setPdfLandscape(!!(_ea as any).pdfLandscape) } catch {}
     const t0 = Array.isArray(cfg.triggers) ? cfg.triggers[0] : null
     if (t0 && String(t0.type) === 'time') {
       setTriggerType('time')
@@ -253,7 +254,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
       }
     }
     const actions: any[] = []
-    if (emails.length) actions.push({ type: 'email', to: emails, subject: name, ...(attachPdf ? { attachPdf: true } : {}) })
+    if (emails.length) actions.push({ type: 'email', to: emails, subject: name, ...(attachPdf ? { attachPdf: true, ...(pdfLandscape ? { pdfLandscape: true } : {}) } : {}) })
     if (phones.length) actions.push({ type: 'sms', to: phones, message: template || name })
     const prevRender = (cfgIn.render || {}) as Record<string, any>
     const renderBase: Record<string, any> = {}
@@ -467,7 +468,12 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <label className="text-sm">Mode<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={renderMode} onChange={(e)=>setRenderMode(e.target.value as any)}><option value="kpi">KPI</option><option value="table">Table</option><option value="chart">Chart (link)</option><option value="report">Report</option></select></label>
             {renderMode === 'report' && (
-              <label className="text-sm inline-flex items-center gap-2 mt-5"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> Attach PDF</label>
+              <div className="inline-flex items-center gap-2 mt-5">
+                <label className="text-sm inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> Attach PDF</label>
+                {attachPdf && (
+                  <label className="text-sm inline-flex items-center gap-2 ml-2 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={pdfLandscape} onChange={(e)=> setPdfLandscape(e.target.checked)} /> Landscape</label>
+                )}
+              </div>
             )}
           </div>
         </div>

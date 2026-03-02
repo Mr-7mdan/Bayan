@@ -109,12 +109,13 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
     queryKey: ['report-var', variable.id, variable.datasourceId, variable.source, variable.value?.field, variable.value?.agg, variable.value?.avgDateField, variable.value?.avgNumerator, JSON.stringify(variable.where), JSON.stringify(globalFilters), variable.multiplyBy, variable.divideBy, variable.roundMode, variable.roundDecimals],
     queryFn: async () => {
       if (!variable.source || !variable.value?.field) return null
+      try {
       const agg = variable.value.agg && variable.value.agg !== 'none' ? variable.value.agg : null
       const field = variable.value.field
       const where: Record<string, any> = { ...(variable.where || {}), ...(globalFilters || {}) }
       // For period-average vars: map global startDate/endDate onto avgDateField as gte/lt bounds.
       // This wires the dashboard date range picker into the period-average calculation.
-      const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly'
+      const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly' || agg === 'last_daily_sum'
       if (isPeriodAvg && variable.value?.avgDateField) {
         const dc = variable.value.avgDateField
         if (globalFilters?.startDate && !where[`${dc}__gte`]) where[`${dc}__gte`] = globalFilters.startDate
@@ -139,13 +140,18 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
           where: hasWhere ? where : undefined,
         }
         // Period-average agg types need the date field for COUNT(DISTINCT period)
-        const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly'
+        const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly' || agg === 'last_daily_sum'
         if (isPeriodAvg && variable.value?.avgDateField) {
           spec.avgDateField = variable.value.avgDateField
           if (variable.value.avgNumerator) spec.avgNumerator = variable.value.avgNumerator
         }
+        console.log(`[ReportCard] Querying var=${variable.name}, agg=${agg}, field=${field}, where=`, where)
         const r = await QueryApi.querySpec({ spec, datasourceId: variable.datasourceId, limit: 1000, offset: 0, includeTotal: false })
-        if (!r?.rows?.length) return null
+        console.log(`[ReportCard] Response for var=${variable.name}:`, { columns: r?.columns, rows: r?.rows, rowCount: r?.rows?.length })
+        if (!r?.rows?.length) {
+          console.log(`[ReportCard] No rows for var=${variable.name}, returning null`)
+          return null
+        }
         // Backend returns columns like ['value'] or [fieldName] for a simple aggregate
         const cols = (r.columns || []) as string[]
         const rows = r.rows as any[]
@@ -207,11 +213,17 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
       }
 
       return rawValue
+      } catch (err) {
+        console.error(`[ReportCard] queryFn ERROR for var=${variable.name}:`, err)
+        throw err
+      }
     },
     enabled: !!(variable.source && variable.value?.field),
     staleTime: 30_000,
     placeholderData: undefined,
-    retry: 1,
+    retry: 2,
+    refetchOnMount: 'always' as const,
+    refetchOnWindowFocus: true,
   }
 }
 
@@ -221,12 +233,14 @@ function ReportElementView({ element, variables, resolvedValues }: {
   variables: ReportVariable[]
   resolvedValues: Record<string, { value: unknown; loading: boolean }>
 }) {
-  const resolveText = (text: string): string => {
-    return text.replace(/\{\{(\w+)\}\}/g, (_, name) => {
-      const v = variables.find(v => v.name === name)
-      if (!v) return `{{${name}}}`
+  const resolveText = (text: string | undefined | null): string => {
+    if (!text) return text ?? ''
+    return text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, name) => {
+      const trimmed = name.trim()
+      const v = variables.find(v => v.name === trimmed)
+      if (!v) return `{{${trimmed}}}`
       const rv = resolvedValues[v.id]
-      if (!rv) return `{{${name}}}`
+      if (!rv) return `{{${trimmed}}}`
       if (rv.loading) return '…'
       return formatValue(rv.value, v)
     })
@@ -255,7 +269,7 @@ function ReportElementView({ element, variables, resolvedValues }: {
             fontStyle: lbl.fontStyle === 'italic' ? 'italic' : undefined,
             color: lbl.color || undefined,
           }}
-        >{resolveText(lbl.text)}</span>
+        >{resolveText(lbl.text || '')}</span>
       </div>
     )
   }
@@ -375,6 +389,7 @@ function ReportElementView({ element, variables, resolvedValues }: {
                         borderWidth: bWidth,
                         borderColor: bColor,
                         verticalAlign: 'middle',
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       {resolveText(header.text)}
@@ -397,6 +412,7 @@ function ReportElementView({ element, variables, resolvedValues }: {
                         borderStyle: bStyle,
                         borderWidth: bWidth,
                         borderColor: bColor,
+                        whiteSpace: 'nowrap',
                         width: tbl.colWidths?.[sc.colIdx] ? `${tbl.colWidths[sc.colIdx]}%` : undefined,
                       }}
                     >
@@ -506,9 +522,17 @@ export default function ReportCard({
     // Query-based variables
     queryVars.forEach((v, i) => {
       const q = queryResults[i]
+      // Debug: log query state including errors
+      if (q?.isError) {
+        console.error(`[ReportCard] Query ERROR for var=${v.name}:`, q.error)
+      }
       const raw = q?.data ?? null
       const val = (v.reverseSign && typeof raw === 'number') ? -raw : raw
       rv[v.id] = { value: val, loading: q?.isLoading ?? false }
+      // Debug: log resolved value
+      if (!q?.isLoading) {
+        console.log(`[ReportCard] Resolved var=${v.name}: raw=${raw}, val=${val}, isError=${q?.isError}, status=${q?.status}`)
+      }
     })
 
     // Datetime variables (client-side)
@@ -606,6 +630,60 @@ export default function ReportCard({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryVars, queryResults, variables])
 
+  const gridRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!widgetId) return
+    function onDownload(e: Event) {
+      const { widgetId: wid, landscape } = (e as CustomEvent).detail || {}
+      if (wid !== widgetId) return
+      const el = gridRef.current
+      if (!el) return
+
+      // Copy current theme class so CSS variables (hsl(var(--border)) etc.) resolve correctly
+      const htmlClass = document.documentElement.className || ''
+      const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+        .map(s => s.outerHTML)
+        .join('\n')
+
+      // A4 dimensions in mm
+      const pageW_mm = landscape ? 297 : 210
+      const marginMm = 10
+      const MM_TO_PX = 96 / 25.4
+      const printableW_px = (pageW_mm - marginMm * 2) * MM_TO_PX
+
+      const contentW = el.offsetWidth
+      const contentH = el.offsetHeight
+      // Scale down to fit page width (never scale up)
+      const scale = Math.min(1, printableW_px / contentW)
+      const scaledH_mm = (contentH * scale) / MM_TO_PX
+      // Page height = scaled content + top/bottom margins + small buffer
+      const finalPageH_mm = scaledH_mm + marginMm * 2 + 2
+
+      const pw = window.open('', '_blank', 'width=900,height=700')
+      if (!pw) return
+      pw.document.write(`<!DOCTYPE html><html class="${htmlClass}"><head><meta charset="utf-8">
+${styles}
+<style>
+  /* margin:0 suppresses browser-added date/URL/page-number headers and footers */
+  @page { size: ${pageW_mm}mm ${finalPageH_mm.toFixed(1)}mm; margin: 0; }
+  html, body { margin: 0; padding: 0; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+</style>
+</head><body>
+<div style="padding:${marginMm}mm;box-sizing:border-box;">
+  <div style="zoom:${scale.toFixed(6)};width:${contentW}px;height:${contentH}px;">
+    ${el.outerHTML}
+  </div>
+</div>
+</body></html>`)
+      pw.document.close()
+      pw.focus()
+      setTimeout(() => { pw.print(); pw.close() }, 400)
+    }
+    window.addEventListener('widget-download-pdf', onDownload)
+    return () => window.removeEventListener('widget-download-pdf', onDownload)
+  }, [widgetId])
+
   if (!report) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-sm">No report configured. Click the gear icon to open the report builder.</div>
 
   const gridCols = report.gridCols || 12
@@ -615,6 +693,7 @@ export default function ReportCard({
   return (
     <div className="h-full w-full overflow-auto">
       <div
+        ref={gridRef}
         className="relative"
         style={{
           width: `${gridCols * cellSize}px`,

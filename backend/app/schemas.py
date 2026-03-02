@@ -324,7 +324,7 @@ class QuerySpec(BaseModel):
     # x can be a single field or array for multi-level axis (e.g., ["Day", "Year"])
     x: Optional[Union[str, List[str]]] = None
     y: Optional[str] = None
-    agg: Optional[str] = Field(default=None, description="none|count|distinct|avg|sum|min|max")
+    agg: Optional[str] = Field(default=None, description="none|count|distinct|avg|sum|min|max|avg_daily|avg_wday|avg_weekly|avg_monthly|last_daily_sum")
     groupBy: Optional[str] = Field(default=None, description="none|day|week|month|quarter|year")
     measure: Optional[str] = Field(default=None, description="Custom SQL expression for value")
     # Optional multi-series; kept flexible to avoid over-constraining client payload
@@ -677,13 +677,15 @@ Transform = TransformCase | TransformReplace | TransformTranslate | TransformNul
 
 
 class JoinSpec(BaseModel):
-    joinType: str  # 'left'|'inner'|'right'
+    joinType: str  # 'left'|'inner'|'right'|'lateral'
     targetTable: str
     sourceKey: str
     targetKey: str
     columns: Optional[List[Dict[str, Optional[str]]]] = None
     aggregate: Optional[Dict[str, Any]] = None
     filter: Optional[Condition] = None
+    scope: Optional[Scope] = None
+    lateral: Optional[Dict[str, Any]] = None
 
 
 class SortSpec(BaseModel):

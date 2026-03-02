@@ -150,6 +150,10 @@ if ($content -notmatch '^CORS_ORIGINS=') { $content += "`nCORS_ORIGINS=http://lo
 if ($content -notmatch '^ADMIN_EMAIL=') { $content += "`nADMIN_EMAIL=$AdminEmail" } else { $content = ($content -replace '^ADMIN_EMAIL=.*', "ADMIN_EMAIL=$AdminEmail") }
 if ($content -notmatch '^ADMIN_PASSWORD=') { $content += "`nADMIN_PASSWORD=$AdminPassword" } else { $content = ($content -replace '^ADMIN_PASSWORD=.*', "ADMIN_PASSWORD=$AdminPassword") }
 if ($content -notmatch '^ADMIN_NAME=') { $content += "`nADMIN_NAME=$AdminName" } else { $content = ($content -replace '^ADMIN_NAME=.*', "ADMIN_NAME=$AdminName") }
+# Playwright browser path (system-wide so backend service can find it)
+$playwrightBrowsersPath = 'C:\ProgramData\ms-playwright'
+if ($content -notmatch '^PLAYWRIGHT_BROWSERS_PATH=') { $content += "`nPLAYWRIGHT_BROWSERS_PATH=$playwrightBrowsersPath" }
+else { $content = ($content -replace '^PLAYWRIGHT_BROWSERS_PATH=.*', "PLAYWRIGHT_BROWSERS_PATH=$playwrightBrowsersPath") }
 Set-Content -LiteralPath $envFile -Value $content -Encoding UTF8
 
 Write-Heading "Setting up backend virtual environment"
@@ -161,6 +165,17 @@ if (-not (Test-Path (Join-Path $venvPath 'Scripts\python.exe'))) {
 }
 & "$venvPath\Scripts\python.exe" -m pip install --upgrade pip
 & "$venvPath\Scripts\pip.exe" install -r (Join-Path $backendDir 'requirements.txt')
+
+Write-Heading "Installing Playwright Chromium (system-wide)"
+$playwrightBrowsersPath = 'C:\ProgramData\ms-playwright'
+$env:PLAYWRIGHT_BROWSERS_PATH = $playwrightBrowsersPath
+Ensure-Dir $playwrightBrowsersPath
+try {
+  & "$venvPath\Scripts\playwright.exe" install chromium
+  Write-Host "Playwright Chromium installed to $playwrightBrowsersPath" -ForegroundColor Green
+} catch {
+  Write-Warning "Playwright install failed: $($_.Exception.Message). PDF generation in alerts will be unavailable until you run: playwright install chromium"
+}
 Pop-Location
 
 Write-Heading "Setting up frontend (install and build)"
@@ -266,6 +281,8 @@ if (-not $exists) {
 }
 & $nssm set $backendSvc AppDirectory $backendDir
 & $nssm set $backendSvc Start SERVICE_AUTO_START
+# Ensure the service process inherits PLAYWRIGHT_BROWSERS_PATH so Chromium is found
+& $nssm set $backendSvc AppEnvironmentExtra "PLAYWRIGHT_BROWSERS_PATH=C:\ProgramData\ms-playwright"
 & $nssm set $backendSvc AppStdout (Join-Path $InstallDir 'logs\backend.out.log')
 & $nssm set $backendSvc AppStderr (Join-Path $InstallDir 'logs\backend.err.log')
 # Log rotation and restart throttling

@@ -1,14 +1,16 @@
 "use client"
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 export type AdvancedSqlInsertBuilderProps = {
   columns: string[]
-  onAddAction: (col: { name: string; expr: string; type?: 'string'|'number'|'date'|'boolean' }) => void
+  onAddAction: (col: { name: string; expr: string; type?: 'string'|'number'|'date'|'boolean'; scope?: any }) => void
   onCancelAction?: () => void
+  tableName?: string | null
+  initial?: { name: string; expr: string; type?: 'string'|'number'|'date'|'boolean'; scope?: any }
 }
 
-export default function AdvancedSqlInsertBuilder({ columns, onAddAction, onCancelAction }: AdvancedSqlInsertBuilderProps) {
+export default function AdvancedSqlInsertBuilder({ columns, onAddAction, onCancelAction, tableName, initial }: AdvancedSqlInsertBuilderProps) {
   const [sourceCol, setSourceCol] = useState<string>(columns[0] || '')
   const [name, setName] = useState<string>('')
   const [findLines, setFindLines] = useState<string>('')
@@ -16,6 +18,31 @@ export default function AdvancedSqlInsertBuilder({ columns, onAddAction, onCance
   const [pasteGrid, setPasteGrid] = useState<string>('')
   const [elseVal, setElseVal] = useState<string>('')
   const [colType, setColType] = useState<''|'string'|'number'|'date'|'boolean'>('string')
+  const [scopeLevel, setScopeLevel] = useState<'datasource' | 'table'>('datasource')
+  const [scopeTable, setScopeTable] = useState<string>('')
+
+  useEffect(() => {
+    if (!initial) return
+    try {
+      setName(String(initial.name || ''))
+      setColType((initial.type as any) || 'string')
+      const initScope = (initial as any).scope
+      if (initScope?.level === 'table') {
+        setScopeLevel('table')
+        setScopeTable(String(initScope.table || tableName || ''))
+      } else {
+        setScopeLevel('datasource')
+        setScopeTable(tableName || '')
+      }
+    } catch {}
+  }, [initial])
+
+  useEffect(() => {
+    if (tableName && !initial) {
+      setScopeLevel('table')
+      setScopeTable(tableName)
+    }
+  }, [tableName, initial])
 
   const pairs = useMemo(() => {
     const f = findLines.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
@@ -108,6 +135,13 @@ export default function AdvancedSqlInsertBuilder({ columns, onAddAction, onCance
           <option value="boolean">boolean</option>
         </select>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
+        <label className="text-xs text-muted-foreground sm:col-span-1">Scope</label>
+        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e) => { setScopeLevel(e.target.value as any); if (e.target.value === 'table' && !scopeTable) setScopeTable(tableName || '') }}>
+          <option value="datasource">Datasource-wide</option>
+          {(tableName || scopeTable) && <option value="table">Table: {scopeTable || tableName}</option>}
+        </select>
+      </div>
 
       <div className="flex items-center justify-end gap-2">
         <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCancelAction}>Cancel</button>
@@ -118,6 +152,11 @@ export default function AdvancedSqlInsertBuilder({ columns, onAddAction, onCance
             const expr = buildCaseExpr()
             const payload: any = { name: name.trim(), expr }
             if (colType) payload.type = colType
+            if (scopeLevel === 'table' && (scopeTable || tableName)) {
+              payload.scope = { level: 'table', table: scopeTable || tableName }
+            } else {
+              payload.scope = { level: 'datasource' }
+            }
             onAddAction(payload)
           }}
         >Add Insert Column</button>

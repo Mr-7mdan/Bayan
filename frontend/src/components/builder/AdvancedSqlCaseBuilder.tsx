@@ -28,6 +28,10 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
   const [useAdvanced, setUseAdvanced] = useState<boolean>(false)
   const [groups, setGroups] = useState<Group[]>([])
   const [scopeLevel, setScopeLevel] = useState<'datasource' | 'table'>('datasource')
+  const [scopeTable, setScopeTable] = useState<string>('')
+  // Raw SQL expression mode — bypasses the CASE builder
+  const [rawSqlMode, setRawSqlMode] = useState<boolean>(false)
+  const [rawSqlExpr, setRawSqlExpr] = useState<string>('')
 
   // Prefill from initial when editing
   useEffect(() => {
@@ -38,8 +42,10 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
       const initScope = (initial as any).scope
       if (initScope?.level === 'table') {
         setScopeLevel('table')
+        setScopeTable(String(initScope.table || tableName || ''))
       } else {
         setScopeLevel('datasource')
+        setScopeTable(tableName || '')
       }
       if (initType === 'case') {
         const init = initial as any
@@ -55,105 +61,26 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
         setUseAdvanced(false)
       } else if (initType === 'computed') {
         const init = initial as any
-        const expr = String(init.expr || '')
-        console.log('[AdvancedSqlCaseBuilder] Parsing computed CASE expr:', expr)
         setTarget(String(init.name || ''))
-        const s = expr
-        const whenRe = /WHEN\s*\((.*?)\)\s*THEN\s*'((?:[^']|'')*)'/gis
-        const groupsParsed: Group[] = []
-        let m: RegExpExecArray | null
-        while ((m = whenRe.exec(s)) !== null) {
-          const inner = m[1]
-          const thenVal = m[2].replace(/''/g, "'")
-          const preds: Pred[] = []
-          const tokens: string[] = []
-          const joins: Array<'AND'|'OR'> = []
-          let i = 0, depth = 0, inStr = false, buf = ''
-          while (i < inner.length) {
-            const ch = inner[i]
-            if (ch === "'") { inStr = !inStr; buf += ch; i++; continue }
-            if (!inStr) {
-              if (ch === '(') { depth++; buf += ch; i++; continue }
-              if (ch === ')') { depth = Math.max(0, depth-1); buf += ch; i++; continue }
-              const rest = inner.slice(i).toUpperCase()
-              if (depth === 0 && (rest.startsWith(' AND ') || rest.startsWith(' OR '))) {
-                tokens.push(buf.trim()); buf = ''
-                joins.push(rest.startsWith(' AND ') ? 'AND' : 'OR')
-                i += rest.startsWith(' AND ') ? 5 : 4
-                continue
-              }
-            }
-            buf += ch; i++
-          }
-          if (buf.trim()) tokens.push(buf.trim())
-          tokens.forEach((tok, idx) => {
-            const jn = idx === 0 ? undefined : joins[idx-1]
-            const t = tok.trim()
-            let p: Pred | null = null
-            // Handle both IN (...) and IN [...] formats
-            const inM = t.match(/^(.*?)\s+IN\s*[\(\[](.*)[ \)\]]\s*$/i)
-            if (inM) {
-              const L = inM[1].trim()
-              const R = inM[2].trim()
-              const vals: string[] = []
-              // Try to extract quoted values
-              const qre = /'((?:[^']|'')*)'/g
-              let qm: RegExpExecArray | null
-              while ((qm = qre.exec(R)) !== null) {
-                const val = qm[1].replace(/''/g, "'")
-                // If the value contains commas, split it
-                if (val.includes(',')) {
-                  vals.push(...val.split(',').map(s => s.trim()).filter(Boolean))
-                } else {
-                  vals.push(val)
-                }
-              }
-              // Fallback: if no quoted values found, try splitting by comma
-              if (vals.length === 0) {
-                vals.push(...R.split(',').map(s => s.trim()).filter(Boolean))
-              }
-              const leftIsCol = /^\s*\[[^\]]+\]\s*$/i.test(L)
-              const left = leftIsCol ? L.replace(/^\s*\[|\]\s*$/g,'').replace(/\]\]/g,']') : L.replace(/^'|'$/g,'').replace(/''/g, "'")
-              p = { leftKind: leftIsCol ? 'col' : 'val', left, op: 'in', rightKind: 'val', right: vals.join(',') }
-            } else {
-              const cmp = t.match(/^(.*?)\s*(=|<>|>=|<=|>|<|LIKE)\s*(.*)$/i)
-              if (cmp) {
-                const L = cmp[1].trim()
-                const opSym = cmp[2].toUpperCase()
-                const R = cmp[3].trim()
-                const map: Record<string, Pred['op']> = { '=':'eq', '<>':'ne', '>':'gt', '>=':'gte', '<':'lt', '<=':'lte', 'LIKE':'like' }
-                const op = (map[opSym] || 'eq') as Pred['op']
-                const leftIsCol = /^\s*\[[^\]]+\]\s*$/i.test(L)
-                const rightIsCol = /^\s*\[[^\]]+\]\s*$/i.test(R)
-                const left = leftIsCol ? L.replace(/^\s*\[|\]\s*$/g,'').replace(/\]\]/g,']') : L.replace(/^'|'$/g,'').replace(/''/g, "'")
-                const right = rightIsCol ? R.replace(/^\s*\[|\]\s*$/g,'').replace(/\]\]/g,']') : R.replace(/^'|'$/g,'').replace(/''/g, "'")
-                p = { leftKind: leftIsCol ? 'col' : 'val', left, op, rightKind: rightIsCol ? 'col' : 'val', right }
-              }
-            }
-            if (p) preds.push({ ...p, join: jn })
-          })
-          groupsParsed.push({ preds, then: thenVal })
-        }
-        const elseM = s.match(/ELSE\s*'((?:[^']|'')*)'/i)
-        if (elseM) setElseVal(elseM[1].replace(/''/g, "'"))
-        console.log('[AdvancedSqlCaseBuilder] Parsed groups:', groupsParsed)
-        setGroups(groupsParsed)
-        setGroups([])
+        setRawSqlExpr(String(init.expr || ''))
+        setRawSqlMode(true)
       }
     } catch (e) {
       console.error('[AdvancedSqlCaseBuilder] Error prefilling:', e)
     }
   }, [initial, columns])
 
-  // Default to table scope if table is selected
+  // Default to table scope if table is selected (new items only)
   useEffect(() => {
     if (tableName && !initial) {
       setScopeLevel('table')
+      setScopeTable(tableName)
     }
   }, [tableName, initial])
 
   const canAdd = useMemo(() => {
     if (!target) return false
+    if (rawSqlMode) return !!rawSqlExpr.trim()
     if (useAdvanced) {
       if (!groups.length) return false
       return groups.every(g => g.then !== '' && g.preds.length > 0 && g.preds.every(p => (
@@ -161,15 +88,60 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
       )))
     }
     return rows.every(r => r.value !== '' && r.then !== '')
-  }, [target, rows, useAdvanced, groups])
+  }, [target, rows, useAdvanced, groups, rawSqlMode, rawSqlExpr])
 
   return (
     <div className="rounded-md border p-2 bg-[hsl(var(--secondary)/0.6)] text-[12px]">
+      {/* Mode toggle */}
+      <div className="flex gap-1 mb-3">
+        <button
+          className={`text-xs px-3 py-1 rounded-md border transition-colors ${!rawSqlMode ? 'bg-[hsl(var(--btn3))] text-black border-transparent' : 'bg-card hover:bg-[hsl(var(--secondary)/0.6)]'}`}
+          onClick={() => setRawSqlMode(false)}
+        >CASE Builder</button>
+        <button
+          className={`text-xs px-3 py-1 rounded-md border transition-colors ${rawSqlMode ? 'bg-[hsl(var(--btn3))] text-black border-transparent' : 'bg-card hover:bg-[hsl(var(--secondary)/0.6)]'}`}
+          onClick={() => setRawSqlMode(true)}
+        >SQL Expression</button>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
         <label className="text-xs text-muted-foreground sm:col-span-1">Output alias</label>
-        <input className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={target} onChange={(e)=>setTarget(e.target.value)} />
+        <input className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={target} onChange={(e)=>setTarget(e.target.value)} placeholder="e.g. Markup" />
       </div>
-      {!useAdvanced && (
+
+      {rawSqlMode && (
+        <>
+          <div className="text-xs text-muted-foreground mb-1">
+            SQL expression — reference columns with <code className="bg-card px-1 rounded">column</code> or quoted aliases with <code className="bg-card px-1 rounded">"Column Name"</code>
+          </div>
+          <textarea
+            className="w-full min-h-[100px] px-2 py-2 rounded-md bg-card text-xs font-mono resize-y mb-2 border border-[hsl(var(--border))]"
+            placeholder={'e.g. CASE\n  WHEN "ClientType" = \'10\' THEN volume * "RevenuePL_Type 1 Markup"\n  WHEN "ClientType" = \'20\' THEN volume * "RevenuePL_Type 2 Markup"\n  ELSE NULL\nEND'}
+            value={rawSqlExpr}
+            onChange={(e) => setRawSqlExpr(e.target.value)}
+            spellCheck={false}
+          />
+          {columns.length > 0 && (
+            <div className="mb-2">
+              <div className="text-xs text-muted-foreground mb-1">Available columns (click to insert)</div>
+              <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto">
+                {columns.map(c => (
+                  <button
+                    key={c}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-card border hover:bg-[hsl(var(--secondary)/0.6)] font-mono"
+                    onClick={() => {
+                      const q = /[\s"]/.test(c) ? `"${c}"` : c
+                      setRawSqlExpr(prev => prev + q)
+                    }}
+                  >{c}</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {!rawSqlMode && !useAdvanced && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
           <label className="text-xs text-muted-foreground sm:col-span-1">Base column</label>
           <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={baseCol} onChange={(e)=>setBaseCol(e.target.value)}>
@@ -177,6 +149,8 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
           </select>
         </div>
       )}
+      {!rawSqlMode && (
+      <>
       <div className="text-xs font-medium mb-1">Conditions</div>
       <div className="space-y-2 mb-2">
         <label className="flex items-center gap-2 text-xs">
@@ -331,17 +305,26 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
         <label className="text-xs text-muted-foreground sm:col-span-1">ELSE</label>
         <input className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" placeholder="Else value (optional)" value={elseVal} onChange={(e)=>setElseVal(e.target.value)} />
       </div>
+      </> )}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
         <label className="text-xs text-muted-foreground sm:col-span-1">Scope</label>
-        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e)=>setScopeLevel(e.target.value as any)}>
+        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e) => { setScopeLevel(e.target.value as any); if (e.target.value === 'table' && !scopeTable) setScopeTable(tableName || '') }}>
           <option value="datasource">Datasource-wide</option>
-          {tableName && <option value="table">Table: {tableName}</option>}
+          {(tableName || scopeTable) && <option value="table">Table: {scopeTable || tableName}</option>}
         </select>
       </div>
       <div className="flex items-center justify-end gap-2">
         <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCancelAction}>Cancel</button>
         <button className={`text-xs px-2 py-1 rounded-md border ${canAdd? 'bg-[hsl(var(--btn3))] text-black':'opacity-60 cursor-not-allowed'}`} disabled={!canAdd} onClick={()=>{
-          if (useAdvanced) {
+          if (rawSqlMode) {
+            const tr: any = { type: 'computed' as const, name: target, expr: rawSqlExpr.trim() }
+            if (scopeLevel === 'table' && (scopeTable || tableName)) {
+              tr.scope = { level: 'table', table: scopeTable || tableName }
+            } else {
+              tr.scope = { level: 'datasource' }
+            }
+            onAddAction(tr)
+          } else if (useAdvanced) {
             const esc = (s: string) => String(s || '').replace(/'/g, "''")
             const qcol = (c: string) => `[${String(c || '').replace(/]/g, ']]')}]`
             const mapOp = (op: string) => ({ eq:'=', ne:'<>', gt:'>', gte:'>=', lt:'<', lte:'<=', like:'LIKE', regex:'LIKE' } as any)[op] || '='
@@ -366,13 +349,13 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
             const expr = parts.join('')
             const tr: any = { type: 'computed' as const, name: target, expr }
             // Add scope
-            if (scopeLevel === 'table' && tableName) {
-              tr.scope = { level: 'table', table: tableName }
+            if (scopeLevel === 'table' && (scopeTable || tableName)) {
+              tr.scope = { level: 'table', table: scopeTable || tableName }
             } else {
               tr.scope = { level: 'datasource' }
             }
             onAddAction(tr)
-          } else {
+          } else if (!rawSqlMode) {
             const cases = rows.map(r => {
               const right = r.op === 'in' ? r.value.split(',').map(s=>s.trim()) : r.value
               const when: Condition = { op: r.op, left: `s.${baseCol}`, right }
@@ -380,8 +363,8 @@ export default function AdvancedSqlCaseBuilder({ columns, onAddAction, onCancelA
             })
             const tr: any = { type: 'case' as const, target, cases, else: elseVal ? elseVal : undefined }
             // Add scope
-            if (scopeLevel === 'table' && tableName) {
-              tr.scope = { level: 'table', table: tableName }
+            if (scopeLevel === 'table' && (scopeTable || tableName)) {
+              tr.scope = { level: 'table', table: scopeTable || tableName }
             } else {
               tr.scope = { level: 'datasource' }
             }

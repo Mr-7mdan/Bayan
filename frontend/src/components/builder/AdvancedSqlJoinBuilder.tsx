@@ -11,6 +11,7 @@ export type AdvancedSqlJoinBuilderProps = {
   schema?: IntrospectResponse
   baseSource?: string
   baseColumns: string[]
+  tableName?: string | null
   onAddAction: (j: { 
     joinType: 'left'|'inner'|'right'|'lateral'; 
     targetTable: string; 
@@ -18,6 +19,7 @@ export type AdvancedSqlJoinBuilderProps = {
     targetKey: string; 
     columns?: JoinColumn[]; 
     aggregate?: JoinAggregate;
+    scope?: { level: 'datasource' } | { level: 'table'; table: string };
     lateral?: {
       correlations: LateralCorrelation[];
       orderBy?: { column: string; direction: 'ASC'|'DESC' }[];
@@ -34,6 +36,7 @@ export type AdvancedSqlJoinBuilderProps = {
     columns?: JoinColumn[]; 
     aggregate?: JoinAggregate; 
     filter?: { op: any; left: string; right: any };
+    scope?: { level: string; table?: string };
     lateral?: {
       correlations?: LateralCorrelation[];
       orderBy?: { column: string; direction: 'ASC'|'DESC' }[];
@@ -44,7 +47,7 @@ export type AdvancedSqlJoinBuilderProps = {
   submitLabel?: string
 }
 
-export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddAction, onCancelAction, initial, submitLabel }: AdvancedSqlJoinBuilderProps) {
+export default function AdvancedSqlJoinBuilder({ schema, baseColumns, tableName, onAddAction, onCancelAction, initial, submitLabel }: AdvancedSqlJoinBuilderProps) {
   const [joinType, setJoinType] = useState<'left'|'inner'|'right'|'lateral'>('left')
   const [targetTable, setTargetTable] = useState<string>('')
   const [sourceKey, setSourceKey] = useState<string>('')
@@ -59,7 +62,19 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
   const [fltLeft, setFltLeft] = useState<string>('')
   const [fltOp, setFltOp] = useState<'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'in'|'like'>('eq')
   const [fltVal, setFltVal] = useState<string>('')
-  
+  const [colPicker, setColPicker] = useState<string>('')
+
+  const [scopeLevel, setScopeLevel] = useState<'datasource' | 'table'>('datasource')
+  const [scopeTable, setScopeTable] = useState<string>('')
+
+  // Default to table scope + pre-fill scopeTable when a table is pre-selected
+  useEffect(() => {
+    if (tableName && !initial) {
+      setScopeLevel('table')
+      setScopeTable(tableName)
+    }
+  }, [tableName, initial])
+
   // LATERAL join specific state
   const [lateralCorrelations, setLateralCorrelations] = useState<LateralCorrelation[]>([])
   const [lateralOrderBy, setLateralOrderBy] = useState<{ column: string; direction: 'ASC'|'DESC' }[]>([])
@@ -103,6 +118,14 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
         setFltVal(Array.isArray(flt.right) ? (flt.right as any[]).join(',') : String(flt.right ?? ''))
       } else {
         setFltEnabled(false)
+      }
+      const initScope = initial.scope
+      if (initScope?.level === 'table') {
+        setScopeLevel('table')
+        setScopeTable(String(initScope.table || tableName || ''))
+      } else {
+        setScopeLevel('datasource')
+        setScopeTable(tableName || '')
       }
       if (initial.lateral) {
         console.log('[AdvancedSqlJoinBuilder] Loading LATERAL config:', initial.lateral)
@@ -166,7 +189,20 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
     return (t?.columns || []).map(c => c.name)
   }, [schema, targetTable])
 
-  const filterCols = useMemo(() => fltSide === 'source' ? baseColumns : targetCols, [fltSide, baseColumns, targetCols])
+  // Derive source columns from schema using the selected scopeTable, falling back to baseColumns prop
+  const sourceCols = useMemo(() => {
+    const raw = String(scopeTable || '')
+    if (schema && raw.includes('.')) {
+      const [sch, tbl] = [raw.split('.').slice(0, -1).join('.'), raw.split('.').slice(-1)[0]]
+      const s = (schema.schemas || []).find(s => s.name === sch)
+      const t = s?.tables.find(t => t.name === tbl)
+      const fromSchema = (t?.columns || []).map(c => c.name)
+      if (fromSchema.length > 0) return fromSchema
+    }
+    return baseColumns
+  }, [schema, scopeTable, baseColumns])
+
+  const filterCols = useMemo(() => fltSide === 'source' ? sourceCols : targetCols, [fltSide, sourceCols, targetCols])
 
   // Alias validation: highlight duplicates and conflicts with base columns
   const aliasCounts = useMemo(() => {
@@ -215,6 +251,47 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
   return (
     <div className="rounded-md border p-2 bg-[hsl(var(--secondary)/0.6)] text-[12px]">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
+        <label className="text-xs text-muted-foreground sm:col-span-1">Scope</label>
+        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e) => {
+          const v = e.target.value as 'datasource' | 'table'
+          setScopeLevel(v)
+          if (v === 'table' && !scopeTable) setScopeTable(tableName || (tables[0] ?? ''))
+        }}>
+          <option value="datasource">Datasource-wide</option>
+          <option value="table">Specific table…</option>
+        </select>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
+        <label className="text-xs text-muted-foreground sm:col-span-1">Source table</label>
+        {tables.length > 0 ? (
+          <select
+            className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2"
+            value={scopeTable}
+            onChange={(e) => {
+              const v = e.target.value
+              setScopeTable(v)
+              setScopeLevel(v ? 'table' : 'datasource')
+            }}
+          >
+            <option value="">(all tables — datasource-wide)</option>
+            {tables.map(t => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2"
+            placeholder="e.g. main.MyTable"
+            value={scopeTable}
+            onChange={(e) => {
+              const v = e.target.value
+              setScopeTable(v)
+              setScopeLevel(v ? 'table' : 'datasource')
+            }}
+          />
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-2">
         <label className="text-xs text-muted-foreground sm:col-span-1">Join type</label>
         <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={joinType} onChange={(e)=>setJoinType(e.target.value as any)}>
           <option value="left">LEFT JOIN</option>
@@ -241,7 +318,10 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
             <div className="sm:col-span-2 grid grid-cols-2 gap-2">
               <select className="h-8 px-2 rounded-md bg-card text-xs" value={sourceKey} onChange={(e)=>setSourceKey(e.target.value)}>
                 <option value="">source key (base)</option>
-                {baseColumns.map(c => (<option key={c} value={c}>{c}</option>))}
+                {sourceCols.map(c => (<option key={c} value={c}>{c}</option>))}
+                {sourceKey && !sourceCols.includes(sourceKey) && (
+                  <option key={`__fallback_${sourceKey}`} value={sourceKey}>{sourceKey} ✓</option>
+                )}
               </select>
               <select className="h-8 px-2 rounded-md bg-card text-xs" value={targetKey} onChange={(e)=>setTargetKey(e.target.value)}>
                 <option value="">target key (joined)</option>
@@ -392,7 +472,11 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
       <div className="mb-2">
         <div className="text-xs text-muted-foreground mb-1">Columns to bring from joined table</div>
         <div className="flex items-center gap-2 mb-2">
-          <select className="h-8 px-2 rounded-md bg-card text-xs" onChange={(e)=>{ addColumn(e.target.value); e.currentTarget.selectedIndex = 0 }}>
+          <select
+            className="h-8 px-2 rounded-md bg-card text-xs"
+            value={colPicker}
+            onChange={(e) => { const v = e.target.value; if (v) { addColumn(v); setColPicker(v) } }}
+          >
             <option value="">(pick column)</option>
             {targetCols.map(c => (<option key={c} value={c}>{c}</option>))}
           </select>
@@ -400,13 +484,12 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
         {cols.length > 0 && (
           <div className="space-y-1">
             {cols.map((c, idx) => (
-              <div key={c.name} className="grid grid-cols-[auto,1fr,auto,auto] gap-2 items-center">
-                <span className="text-[11px] px-2 py-1 bg-card rounded-md border" title={c.name}>{c.name}</span>
+              <div key={c.name} className="grid grid-cols-[1fr,auto,auto] gap-1.5 items-center">
                 <input
-                  className={`h-8 px-2 rounded-md bg-card text-[11px] ${aliasConflict(c.alias) ? 'ring-2 ring-red-500' : ''}`}
-                  placeholder="alias (new column name)"
+                  className={`h-8 px-2 rounded-md bg-card text-[11px] min-w-0 ${aliasConflict(c.alias) ? 'ring-2 ring-red-500' : ''}`}
+                  placeholder={`alias for: ${c.name}`}
                   value={c.alias || ''}
-                  title={aliasConflict(c.alias) ? 'Alias duplicates another or conflicts with a base column' : ''}
+                  title={aliasConflict(c.alias) ? 'Alias duplicates another or conflicts with a base column' : c.name}
                   onChange={(e) => {
                     const next = [...cols]
                     next[idx] = { ...c, alias: e.target.value }
@@ -415,16 +498,17 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
                 />
                 <button
                   type="button"
-                  className="text-[11px] px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+                  className="text-[11px] px-1.5 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] whitespace-nowrap flex-shrink-0"
+                  title="Suggest alias"
                   onClick={() => {
                     const next = [...cols]
                     next[idx] = { ...c, alias: suggestAlias(c.name) }
                     setCols(next)
                   }}
-                >Suggest</button>
+                >↺</button>
                 <button
                   type="button"
-                  className="text-[11px] px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]"
+                  className="text-[11px] px-1.5 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] flex-shrink-0"
                   onClick={() => removeColumn(c.name)}
                 >Remove</button>
               </div>
@@ -506,6 +590,8 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
             const right: any = fltOp === 'in' ? fltVal.split(',').map(s=>s.trim()).filter(Boolean) : fltVal
             payload.filter = { op: fltOp, left, right }
           }
+          if (scopeLevel === 'table' && scopeTable) payload.scope = { level: 'table', table: scopeTable }
+          else payload.scope = { level: 'datasource' }
           return payload
         })(), null, 2)}</pre>
       </div>
@@ -534,6 +620,11 @@ export default function AdvancedSqlJoinBuilder({ schema, baseColumns, onAddActio
             const left = (fltSide === 'source' ? `s.${fltLeft}` : `t.${fltLeft}`)
             const right: any = fltOp === 'in' ? fltVal.split(',').map(s=>s.trim()).filter(Boolean) : fltVal
             payload.filter = { op: fltOp, left, right }
+          }
+          if (scopeLevel === 'table' && scopeTable) {
+            payload.scope = { level: 'table', table: scopeTable }
+          } else {
+            payload.scope = { level: 'datasource' }
           }
           console.log('[AdvancedSqlJoinBuilder] Full payload being sent to onAddAction:', payload)
           onAddAction(payload)

@@ -32,7 +32,14 @@ type EditingTransform = { type: TransformType; index: number | null; initial?: a
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const SYS = new Set(['information_schema', 'sys', 'guest', 'pg_catalog', 'pg_toast'])
-function isSys(n: string) { const l = n.toLowerCase(); return l.startsWith('db_') || SYS.has(l) }
+function isSys(n: string) {
+  const l = n.toLowerCase()
+  if (l.startsWith('db_')) return true
+  if (SYS.has(l)) return true
+  // Filter remote catalog system schemas like "pcma.information_schema"
+  const lastPart = l.split('.').pop() ?? ''
+  return SYS.has(lastPart)
+}
 function fmtCell(v: any) { if (v == null) return ''; if (typeof v === 'boolean') return v ? 'true' : 'false'; return String(v) }
 
 // ─── SchemaTree (Same as original) ────────────────────────────────────────────
@@ -343,6 +350,22 @@ function TransformationPanel({
     return (tblNode?.columns || []).map(c => c.name)
   }, [source, schema])
 
+  // All columns = base + computed transform names + join column aliases
+  const allColumns = useMemo(() => {
+    const extra: string[] = []
+    for (const t of (transforms.transforms || [])) {
+      const name = (t as any).name || (t as any).target || ''
+      if (name && !extra.includes(name)) extra.push(String(name))
+    }
+    for (const j of (transforms.joins || [])) {
+      for (const col of ((j as any).columns || [])) {
+        const alias = col.alias || ''
+        if (alias && !extra.includes(alias)) extra.push(String(alias))
+      }
+    }
+    return [...baseColumns, ...extra]
+  }, [baseColumns, transforms])
+
   const [showAddMenu, setShowAddMenu] = useState(false)
 
   if (collapsed) {
@@ -435,6 +458,7 @@ function TransformationPanel({
               onAddAction={handleSaveJoin}
               onCancelAction={() => setEditing(null)}
               initial={editing.initial}
+              tableName={source}
             />
           )}
           {editing.type === 'computed' && (
@@ -449,7 +473,7 @@ function TransformationPanel({
           )}
           {editing.type === 'case' && (
             <AdvancedSqlCaseBuilder
-              columns={baseColumns}
+              columns={allColumns}
               onAddAction={handleSaveTransform}
               onCancelAction={() => setEditing(null)}
               initial={editing.initial}
@@ -634,9 +658,17 @@ function TransformationPanel({
                     {j.targetTable}
                   </span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--muted))] text-muted-foreground font-medium">
-                    {j.joinType.toUpperCase()} Join
+                    {j.joinType?.toUpperCase()} Join
                   </span>
                 </div>
+                {j.scope && (
+                  <span className={[
+                    'text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-block mb-1',
+                    (j.scope as any).level === 'table' ? 'bg-[#F59E0B]/20 text-[#F59E0B]' : 'bg-[hsl(var(--muted))] text-muted-foreground'
+                  ].join(' ')}>
+                    {(j.scope as any).level === 'table' ? `Table: ${(j.scope as any).table}` : 'Datasource'}
+                  </span>
+                )}
                 <div className="text-[10px] text-muted-foreground">
                   {j.targetTable} on {j.sourceKey} = {j.targetKey}
                 </div>
@@ -928,7 +960,7 @@ function PreviewPanel({ dsId, sel, transforms, refreshTrigger }: {
         // Build server-side where clause from active column filters
         const activeFilters = Object.entries(columnFilters).filter(([, s]) => s.size > 0)
         const specWhere: Record<string, any> | undefined = activeFilters.length > 0
-          ? Object.fromEntries(activeFilters.map(([c, s]) => [c, Array.from(s)]))
+          ? Object.fromEntries(activeFilters.map(([c, s]) => [c, Array.from(s as Set<unknown>)]))
           : undefined
         const res = await QueryApi.querySpec({
           spec: {
@@ -958,7 +990,7 @@ function PreviewPanel({ dsId, sel, transforms, refreshTrigger }: {
           setIsTimedOut(isTO)
           setError(isTO
             ? 'Query timed out — the table may be too large or transforms are slow.'
-            : 'Failed to load data. Table may not exist or transforms may have errors.')
+            : `Failed to load data: ${msg}`)
           setLoading(false)
         }
       }

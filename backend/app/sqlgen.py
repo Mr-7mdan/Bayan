@@ -726,8 +726,14 @@ def build_sql(
                     # but let's be safe if alias has weird chars (unlikely for jN).
                     # Actually _qcol handles "table.col".
                     expr = _qcol(d, f"{alias}.{cname}")
+                    # Map both the alias (e.g., 'RevenuePL_Type 1 Markup') and the original column name
+                    # (e.g., 'Type 1 Markup') so custom columns can reference either
                     cc_expr_map[alias_col] = expr
-                    print(f"[build_sql] Added joined column '{alias_col}' -> '{expr}' to cc_expr_map", flush=True)
+                    if cname != alias_col:
+                        cc_expr_map[cname] = expr
+                        print(f"[build_sql] Added joined column '{alias_col}' and '{cname}' -> '{expr}' to cc_expr_map", flush=True)
+                    else:
+                        print(f"[build_sql] Added joined column '{alias_col}' -> '{expr}' to cc_expr_map", flush=True)
 
     # Also populate cc_expr_map from transforms (computed/case/replace/etc.)
     # so that later transforms (like case) can inline expressions from earlier transforms
@@ -927,19 +933,48 @@ def build_sql(
                 print(f"[build_sql] Skipping computed transform '{name}' (not requested)")
                 continue
             if name and expr:
+                # Normalize accidentally concatenated SQL keywords before processing
+                # (e.g. "NULLEND" typed without space between NULL and END → "NULL END")
+                import re as _re_kw
+                expr = _re_kw.sub(r'(?i)(?<=[A-Za-z0-9_])(CASE|WHEN|THEN|ELSE|END|NULL)\b', r' \1', expr)
                 # Apply substitution for custom columns/joined columns
                 # This mirrors the logic in the custom_columns loop
                 original_expr = expr
-                
+
+                # Pre-compute flags needed inside the substitution closure
+                _is_arith = any(op in original_expr for op in ['+', '-', '*', '/'])
+                _has_case = bool(_re_cc.search(r'\b(CASE|WHEN|THEN|ELSE)\b', original_expr, _re_cc.IGNORECASE))
+                _base_cols_lower = {c.lower() for c in (base_cols or set())}
+                # Pattern that identifies a substituted join column: "jN"."col_name"
+                import re as _re_join
+                _join_col_pat = _re_join.compile(r'^"j\d+"\."[^"]*"$')
+
                 def replace_custom_ref_tr(match):
                     ref_name = match.group(1) or match.group(2)
                     if ref_name in cc_expr_map:
                         substituted = cc_expr_map[ref_name]
+                    else:
+                        # Case-insensitive lookup
+                        substituted = next((v for k, v in cc_expr_map.items() if k.lower() == ref_name.lower()), None)
+                    if substituted is not None:
+                        # In arithmetic CASE expressions, join columns (VARCHAR in MySQL) must be
+                        # cast to DOUBLE so DuckDB doesn't raise "*(UBIGINT, VARCHAR)" errors.
+                        # BUT: skip wrapping if the user's expression already has CAST/TRY_CAST for this ref
+                        # to prevent double-wrapping (e.g. TRY_CAST(TRY_CAST(...) AS DOUBLE) AS DOUBLE)
+                        already_cast = bool(_re_cc.search(
+                            rf'(?i)(TRY_)?CAST\s*\(\s*"{_re_cc.escape(ref_name)}"',
+                            original_expr
+                        ))
+                        if _is_arith and _has_case and _join_col_pat.match(substituted.strip()) and not already_cast:
+                            return f"TRY_CAST({substituted} AS DOUBLE)"
                         return f"({substituted})"
-                    # Try case-insensitive lookup
-                    for k, v in cc_expr_map.items():
-                        if k.lower() == ref_name.lower():
-                            return f"({v})"
+                    # When JOINs are present, qualify known base column refs to avoid
+                    # DuckDB "ambiguous column" errors (e.g. "Volume" → s."volume").
+                    # Use the actual column case from base_cols (not the user's casing)
+                    # so quoted identifiers match the real column name exactly.
+                    if joins and _base_cols_lower and ref_name.lower() in _base_cols_lower:
+                        actual_name = next((c for c in (base_cols or set()) if c.lower() == ref_name.lower()), ref_name)
+                        return f'{base_alias}.{_qal(d, actual_name)}'
                     return match.group(0)
 
                 # Substitute "Col" or [Col] or "s"."Col" patterns
@@ -955,8 +990,11 @@ def build_sql(
                 expr = normalize_sql_expression(expr, d)
                 
                 # DuckDB numeric wrapper for arithmetic expressions
+                # Skip if the expression contains CASE/WHEN/THEN — wrapping all quoted identifiers
+                # would break type comparisons in WHEN conditions (e.g. "ClientType" = '10').
                 is_arithmetic = any(op in original_expr for op in ['+', '-', '*', '/'])
-                if is_arithmetic and d == "duckdb":
+                has_case_keywords = bool(_re_cc.search(r'\b(CASE|WHEN|THEN|ELSE)\b', original_expr, _re_cc.IGNORECASE))
+                if is_arithmetic and not has_case_keywords and d == "duckdb":
                     def _wrap_duckdb_numeric(m):
                         ident = m.group(0)
                         return f"COALESCE(try_cast({ident} AS DOUBLE), 0.0)"
@@ -1313,8 +1351,13 @@ def build_sql(
                         except Exception:
                             pass
                         on_extra = f" AND ({_cond_sql(filt)})"
-                sub = f"(SELECT {_qcol(d, tkey)} AS __k, {expr} AS {al} FROM {_qtable(d, ttable)}{where_sql} GROUP BY {_qcol(d, tkey)})"
-                from_sql += f" {jtype} JOIN {sub} AS {alias} ON {_qcol(d, f'{base_alias}.{skey}')} = {alias}.__k{on_extra}"
+                # Aggregate join: also use unquoted keys for DuckDB case-insensitive resolution
+                if d == 'duckdb':
+                    sub = f"(SELECT {tkey} AS __k, {expr} AS {al} FROM {_qtable(d, ttable)}{where_sql} GROUP BY {tkey})"
+                    from_sql += f" {jtype} JOIN {sub} AS {alias} ON CAST({base_alias}.{skey} AS VARCHAR) = CAST({alias}.__k AS VARCHAR){on_extra}"
+                else:
+                    sub = f"(SELECT {_qcol(d, tkey)} AS __k, {expr} AS {al} FROM {_qtable(d, ttable)}{where_sql} GROUP BY {_qcol(d, tkey)})"
+                    from_sql += f" {jtype} JOIN {sub} AS {alias} ON {_qcol(d, f'{base_alias}.{skey}')} = {alias}.__k{on_extra}"
                 select_cols.append(f"{alias}.{_qcol(d, al)} AS {_qal(d, al)}")
             else:
                 on_extra = ""
@@ -1347,10 +1390,16 @@ def build_sql(
                 lhs_on = _qcol(d, f'{base_alias}.{skey}')
                 rhs_on = _qcol(d, f'{alias}.{tkey}')
                 if d == 'duckdb':
-                    # Optimized join: cast both sides to VARCHAR and compare directly
-                    # This is much faster than trying multiple type conversions with OR conditions
-                    lhs_str = f"CAST({lhs_on} AS VARCHAR)"
-                    rhs_str = f"CAST({rhs_on} AS VARCHAR)"
+                    # Use UNQUOTED table.column references so DuckDB resolves them
+                    # case-insensitively. Quoted identifiers are case-sensitive and fail
+                    # for MySQL-attached tables (lowercase) or local tables (mixed-case).
+                    # Join keys are always simple identifiers so quoting is not needed.
+                    # LOWER(TRIM(...)) to tolerate case/whitespace differences.
+                    # REGEXP_REPLACE(...) strips non-alphanumeric suffixes that MT5 brokers
+                    # append to symbol names after server upgrades (e.g. "XAUUSD.i" → "XAUUSD",
+                    # "EURUSD." → "EURUSD"). The RevenuePL table keeps the base name only.
+                    lhs_str = f"LOWER(TRIM(CAST({base_alias}.{skey} AS VARCHAR)))"
+                    rhs_str = f"LOWER(TRIM(CAST({alias}.{tkey} AS VARCHAR)))"
                     on_cmp = f"({lhs_str} = {rhs_str})"
                     from_sql += f" {jtype} JOIN {_qtable(d, ttable)} AS {alias} ON {on_cmp} {on_extra}"
                 else:

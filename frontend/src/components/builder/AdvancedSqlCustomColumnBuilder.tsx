@@ -21,6 +21,7 @@ export default function AdvancedSqlCustomColumnBuilder({ columns = [], takenName
   const [expr, setExpr] = useState('')
   const [type, setType] = useState<''|'string'|'number'|'date'|'boolean'>('')
   const [scope, setScope] = useState<'widget'|'table'|'datasource'>(() => (source ? 'table' : 'datasource'))
+  const [scopeTableOverride, setScopeTableOverride] = useState<string | undefined>(undefined)
   // Mapping mode state
   const [sourceCol, setSourceCol] = useState<string>(columns[0] || '')
   const [findLines, setFindLines] = useState<string>('')
@@ -52,9 +53,9 @@ export default function AdvancedSqlCustomColumnBuilder({ columns = [], takenName
       setType((initial.type as any) || '')
       const sc = (initial as any).scope
       if (sc && sc.level) {
-        if (sc.level === 'datasource') setScope('datasource')
-        else if (sc.level === 'table') setScope('table')
-        else if (sc.level === 'widget') setScope('widget')
+        if (sc.level === 'datasource') { setScope('datasource'); setScopeTableOverride(undefined) }
+        else if (sc.level === 'table') { setScope('table'); setScopeTableOverride(sc.table || undefined) }
+        else if (sc.level === 'widget') { setScope('widget'); setScopeTableOverride(undefined) }
       }
     } catch {}
   }, [initial])
@@ -244,7 +245,7 @@ export default function AdvancedSqlCustomColumnBuilder({ columns = [], takenName
           if (type) payload.type = type
           // attach scope
           if (scope === 'datasource') payload.scope = { level: 'datasource' }
-          else if (scope === 'table' && source) payload.scope = { level: 'table', table: source }
+          else if (scope === 'table') payload.scope = { level: 'table', table: scopeTableOverride || source }
           else if (scope === 'widget' && widgetId) payload.scope = { level: 'widget', widgetId }
           onAddAction(payload)
         }}>{submitLabel || 'Add Custom Column'}</button>

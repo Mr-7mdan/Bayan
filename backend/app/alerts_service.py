@@ -266,6 +266,54 @@ def _format_date_str(dt: datetime, pattern: str) -> str:
     return r
 
 
+def _apply_var_post_calc(raw: Any, variable: dict) -> Any:
+    """Apply post-query calculations to a raw numeric value — mirrors frontend logic.
+    Order: multiplyBy → divideBy → roundMode → reverseSign
+    """
+    if raw is None:
+        return None
+    try:
+        num = float(raw)
+    except (TypeError, ValueError):
+        return raw
+    # 1. Multiply
+    multiply_by = variable.get('multiplyBy')
+    if multiply_by is not None:
+        try:
+            num = num * float(multiply_by)
+        except (TypeError, ValueError):
+            pass
+    # 2. Divide
+    divide_by = variable.get('divideBy')
+    if divide_by is not None:
+        try:
+            div = float(divide_by)
+            if div != 0:
+                num = num / div
+        except (TypeError, ValueError):
+            pass
+    # 3. Round
+    round_mode = str(variable.get('roundMode') or '').strip()
+    if round_mode and round_mode != 'none':
+        try:
+            decimals = int(variable.get('roundDecimals') or 0)
+            multiplier = 10 ** decimals
+            if round_mode == 'round':
+                num = round(num * multiplier) / multiplier
+            elif round_mode == 'roundup':
+                import math as _math
+                num = _math.ceil(num * multiplier) / multiplier
+            elif round_mode == 'rounddown':
+                import math as _math
+                num = _math.floor(num * multiplier) / multiplier
+        except Exception:
+            pass
+    # 4. Reverse sign
+    if variable.get('reverseSign'):
+        num = -num
+    return num
+
+
 def _format_report_value(raw: Any, variable: dict) -> str:
     """Format a resolved variable value — mirrors frontend formatValue()."""
     prefix = str(variable.get('prefix') or '')
@@ -314,7 +362,7 @@ def _format_report_value(raw: Any, variable: dict) -> str:
     return f"{prefix}{s}{suffix}"
 
 
-def _resolve_report_variables(db: Session, variables: list[dict], global_filters: Optional[dict] = None) -> dict[str, Any]:
+def _resolve_report_variables(db: Session, variables: list[dict], global_filters: Optional[dict] = None) -> dict[str, Any]:  # noqa: E501
     """Resolve all report variables server-side. Returns {variable_id: resolved_value}."""
     resolved: dict[str, Any] = {}
     gf = global_filters or {}
@@ -422,7 +470,7 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
         if agg and agg != 'none':
             where = {**(v.get('where') or {}), **gf}
             spec: dict = {'source': source, 'agg': agg, 'y': field}
-            if agg in ('avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly'):
+            if agg in ('avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly', 'last_daily_sum'):
                 avg_date_field = val_cfg.get('avgDateField')
                 if avg_date_field:
                     spec['avgDateField'] = avg_date_field
@@ -445,7 +493,7 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
                             total += float(cell)
                         except (TypeError, ValueError):
                             pass
-                    resolved[vid] = total
+                    resolved[vid] = _apply_var_post_calc(total, v)
                 else:
                     resolved[vid] = None
             except Exception as e:
@@ -460,7 +508,8 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
                 req = QuerySpecRequest(spec=spec_raw, datasourceId=v.get('datasourceId'), limit=1, offset=0, includeTotal=False)
                 res = run_query_spec(req, db)
                 rows = list(res.rows or [])
-                resolved[vid] = rows[0][0] if rows and isinstance(rows[0], list) and rows[0] else None
+                raw_val = rows[0][0] if rows and isinstance(rows[0], list) and rows[0] else None
+                resolved[vid] = _apply_var_post_calc(raw_val, v)
             except Exception as e:
                 logger.warning("Failed to resolve report variable %s: %s", vid, e)
                 resolved[vid] = None
@@ -493,7 +542,9 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
             # Safe eval: only allow numbers and arithmetic
             allowed = set('0123456789.+-*/() ')
             if all(c in allowed for c in eval_expr.strip()):
-                resolved[vid] = float(eval(eval_expr))  # nosec
+                expr_result = float(eval(eval_expr))  # nosec
+                # Expression variables: only apply reverseSign (mirrors frontend ReportCard.tsx line 615)
+                resolved[vid] = -expr_result if v.get('reverseSign') else expr_result
             else:
                 resolved[vid] = None
         except Exception as e:
@@ -504,9 +555,13 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
 
 
 def _resolve_text(text: str, variables: list[dict], resolved: dict[str, Any]) -> str:
-    """Replace {{VarName}} tokens in text with resolved values."""
+    """Replace {{VarName}} tokens in text with resolved values.
+    Supports variable names with spaces: e.g. {{Today Date}} or {{todayDate}}.
+    """
+    if not text:
+        return text
     def _repl(m):
-        name = m.group(1)
+        name = m.group(1).strip()
         v = next((v for v in variables if str(v.get('name') or '') == name), None)
         if not v:
             return m.group(0)
@@ -515,7 +570,7 @@ def _resolve_text(text: str, variables: list[dict], resolved: dict[str, Any]) ->
         if val is None:
             return '\u2014'
         return _html_escape(_format_report_value(val, v))
-    return _re.sub(r'\{\{(\w+)\}\}', _repl, text)
+    return _re.sub(r'\{\{\s*([^}]+?)\s*\}\}', _repl, text)
 
 
 def _fw(w: Optional[str]) -> int:
@@ -797,6 +852,9 @@ def _render_report_html(widget_cfg: dict, db: Session, global_filters: Optional[
     cell_size = int(report.get('cellSize') or 30)
     raw_w = grid_cols * cell_size
 
+    logger.info("[ReportHTML] Starting render: %d elements, %d variables, grid=%dx%d, target_width=%d",
+                len(elements), len(variables), grid_cols, grid_rows, target_width)
+
     # Scale factor — applied to font sizes and padding only
     scale = target_width / raw_w if raw_w > 0 else 1.0
     col_w_px = round(target_width / grid_cols)
@@ -804,6 +862,8 @@ def _render_report_html(widget_cfg: dict, db: Session, global_filters: Optional[
 
     # Resolve all variables
     resolved = _resolve_report_variables(db, variables, global_filters)
+    logger.info("[ReportHTML] Variables resolved: %d/%d have values",
+                sum(1 for v in resolved.values() if v is not None), len(resolved))
 
     # ---- Build 2D occupancy map ----
     # occupancy[r][c] = element dict for the element that owns that cell,
@@ -899,30 +959,61 @@ def _render_report_html(widget_cfg: dict, db: Session, global_filters: Optional[
 
 # --- PDF generation (uses Playwright print-to-PDF) ---
 
-def _html_to_pdf(html: str, *, width: str = "210mm", height: str = "297mm", landscape: bool = False) -> Optional[bytes]:
-    """Convert a full HTML string to PDF using Playwright's Chromium print-to-PDF."""
+def _html_to_pdf(html: str, *, width: str = "210mm", height: str = "297mm", landscape: bool = False, fit_one_page: bool = False) -> Optional[bytes]:
+    """Convert a full HTML string to PDF using Playwright's Chromium print-to-PDF.
+
+    When fit_one_page=True the PDF page height is dynamically measured from the
+    rendered content so the entire report always fits on exactly one page.
+    """
+    import os as _os
+    _pbp = getattr(settings, 'playwright_browsers_path', None)
+    if _pbp and not _os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
+        _os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(_pbp)
+        logger.info("[PDF] Set PLAYWRIGHT_BROWSERS_PATH=%s", _pbp)
     try:
         from playwright.sync_api import sync_playwright
-    except Exception:
-        logger.warning("Playwright not available for PDF generation")
+    except ImportError:
+        logger.error("Playwright is not installed — PDF attachment skipped. Run: playwright install chromium")
         return None
+    except Exception as e:
+        logger.error("Playwright import failed: %s", e)
+        return None
+    logger.info("[PDF] Launching Chromium for PDF generation (landscape=%s, fit_one_page=%s, html_len=%d)", landscape, fit_one_page, len(html))
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch()
             try:
                 page = browser.new_page()
-                page.set_content(html, wait_until="networkidle")
-                pdf_bytes = page.pdf(
-                    format="A4",
-                    landscape=landscape,
-                    print_background=True,
-                    margin={"top": "12mm", "right": "10mm", "bottom": "12mm", "left": "10mm"},
-                )
+                # Use domcontentloaded instead of networkidle to avoid blocking on
+                # external CDN resources (e.g. Google Fonts) when server has no internet access
+                page.set_content(html, wait_until="domcontentloaded", timeout=30000)
+                if fit_one_page:
+                    # Measure actual rendered content height so the PDF is exactly one page tall.
+                    # scrollHeight includes the body's own padding (16px top + 16px bottom).
+                    content_h_px = page.evaluate("document.body.scrollHeight")
+                    # Convert px → mm at 96 dpi, then add top + bottom PDF margins
+                    margin_mm = 12
+                    total_h_mm = (content_h_px * 25.4 / 96) + (margin_mm * 2) + 2  # 2 mm safety buffer
+                    logger.info("[PDF] fit_one_page: content_h=%dpx → page_h=%.1fmm", content_h_px, total_h_mm)
+                    pdf_bytes = page.pdf(
+                        width=width,
+                        height=f"{total_h_mm:.1f}mm",
+                        print_background=True,
+                        margin={"top": f"{margin_mm}mm", "right": "10mm", "bottom": f"{margin_mm}mm", "left": "10mm"},
+                    )
+                else:
+                    pdf_bytes = page.pdf(
+                        format="A4",
+                        landscape=landscape,
+                        print_background=True,
+                        margin={"top": "12mm", "right": "10mm", "bottom": "12mm", "left": "10mm"},
+                    )
+                logger.info("PDF generated successfully (%d bytes, landscape=%s)", len(pdf_bytes), landscape)
                 return pdf_bytes
             finally:
                 browser.close()
     except Exception as e:
-        logger.warning("PDF generation failed: %s", e)
+        logger.error("PDF generation failed: %s", e)
         return None
 
 
@@ -943,7 +1034,8 @@ def _render_report_pdf(widget_cfg: dict, db: Session, global_filters: Optional[d
 <html>
 <head>
   <meta charset="utf-8">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Inter font: inline fallback if CDN unavailable -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
   <style>
     body {{ margin: 0; padding: 16px; font-family: Inter, Arial, sans-serif; color: #111827; background: #fff; }}
     table {{ border-collapse: collapse; }}
@@ -954,7 +1046,7 @@ def _render_report_pdf(widget_cfg: dict, db: Session, global_filters: Optional[d
   {report_html}
 </body>
 </html>"""
-    return _html_to_pdf(full_html, landscape=landscape)
+    return _html_to_pdf(full_html, width="297mm" if landscape else "210mm", landscape=landscape, fit_one_page=True)
 
 
 # --- Widget config lookup ---
@@ -2094,9 +2186,12 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                 wref = (render or {}).get("widgetRef") or {}
                 wid = (wref or {}).get("widgetId") or getattr(rule, "widget_id", None)
                 did = (wref or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
+                logger.info("[RunRule] Report mode: looking up widget_id=%s dashboard_id=%s", wid, did)
                 widget_cfg = _lookup_widget_config(db, dashboard_id=did, widget_id=wid)
                 if widget_cfg:
+                    logger.info("[RunRule] Widget config found, rendering report HTML...")
                     report_html_val = _render_report_html(widget_cfg, db)
+                    logger.info("[RunRule] Report HTML rendered: %d bytes", len(report_html_val or ''))
                     replacements_extra["REPORT_HTML"] = report_html_val
                     replacements_extra["TABLE_HTML"] = report_html_val
                     if not template_present:
@@ -2105,12 +2200,13 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                         try: progress_cb({"id": "snapshot", "status": "ok", "mode": "report"})
                         except Exception: pass
                 else:
+                    logger.error("[RunRule] Widget config NOT FOUND for widget_id=%s dashboard_id=%s", wid, did)
                     html_parts.append("<div>Report widget not found.</div>")
                     if progress_cb:
                         try: progress_cb({"id": "snapshot", "status": "error", "mode": "report", "error": "widget_not_found"})
                         except Exception: pass
             except Exception as e:
-                logger.warning("Failed to render report: %s", e)
+                logger.error("[RunRule] Failed to render report: %s", e, exc_info=True)
                 html_parts.append("<div>Failed to render report.</div>")
                 if progress_cb:
                     try: progress_cb({"id": "snapshot", "status": "error", "mode": "report", "error": str(e)})
@@ -2479,11 +2575,15 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                     except Exception: pass
                 # Build PDF attachment if configured for report mode
                 email_attachments: list[tuple[str, bytes, str]] = []
+                logger.info("[RunRule] Email action: to=%s, attachPdf=%s, render.mode=%s",
+                            to, a.get('attachPdf'), render.get('mode'))
                 if a.get("attachPdf") and render.get("mode") == "report":
                     try:
                         wref_pdf = (render or {}).get("widgetRef") or {}
                         wid_pdf = (wref_pdf or {}).get("widgetId") or getattr(rule, "widget_id", None)
                         did_pdf = (wref_pdf or {}).get("dashboardId") or getattr(rule, "dashboard_id", None)
+                        logger.info("[RunRule] PDF: looking up widget_id=%s dashboard_id=%s landscape=%s",
+                                    wid_pdf, did_pdf, a.get('pdfLandscape'))
                         wcfg_pdf = _lookup_widget_config(db, dashboard_id=did_pdf, widget_id=wid_pdf)
                         if wcfg_pdf:
                             pdf_landscape = bool(a.get("pdfLandscape"))
@@ -2492,9 +2592,15 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                                 _resolved_name = _resolve_datetime_tokens(str(rule.name or 'report'))
                                 pdf_name = f"{_re.sub(r'[^a-zA-Z0-9_-]', '_', _resolved_name)}.pdf"
                                 email_attachments.append((pdf_name, pdf_bytes, "application/pdf"))
+                                logger.info("[RunRule] PDF attachment ready: %s (%d bytes)", pdf_name, len(pdf_bytes))
+                            else:
+                                logger.error("[RunRule] PDF generation returned None — check PDF errors above")
+                        else:
+                            logger.error("[RunRule] PDF: widget config NOT FOUND for widget_id=%s dashboard_id=%s", wid_pdf, did_pdf)
                     except Exception as pdf_err:
-                        logger.warning("PDF attachment generation failed: %s", pdf_err)
+                        logger.error("PDF attachment generation failed: %s", pdf_err, exc_info=True)
                 ok, err = send_email(db, subject=subj, to=to, html=html, replacements=replacements_all, inline_images=inline_images, attachments=email_attachments or None)
+                logger.info("[RunRule] send_email result: ok=%s err=%s attachments=%d", ok, err, len(email_attachments))
                 if not ok and err:
                     errs.append(f"email: {err}")
                     if progress_cb:

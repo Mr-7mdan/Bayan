@@ -954,6 +954,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
               {showBulkCasesBuilder && (
                 <AdvancedSqlBulkCasesBuilder
                   columns={colsAvailable}
+                  tableName={source}
                   onAddAction={(tr: any) => {
                     try {
                       const parsed = JSON.parse(editJson || '{}') as any

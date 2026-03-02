@@ -1,20 +1,46 @@
 "use client"
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Condition } from '@/lib/dsl'
 
 export type AdvancedSqlBulkCasesBuilderProps = {
   columns: string[]
-  onAddAction: (tr: { type: 'case'; target: string; cases: { when: Condition; then: any }[]; else?: any }) => void
+  onAddAction: (tr: { type: 'case'; target: string; cases: { when: Condition; then: any }[]; else?: any; scope?: any }) => void
   onCancelAction?: () => void
+  tableName?: string | null
+  initial?: { type: 'case'; target: string; cases: { when: Condition; then: any }[]; else?: any; scope?: any }
 }
 
-export default function AdvancedSqlBulkCasesBuilder({ columns, onAddAction, onCancelAction }: AdvancedSqlBulkCasesBuilderProps) {
+export default function AdvancedSqlBulkCasesBuilder({ columns, onAddAction, onCancelAction, tableName, initial }: AdvancedSqlBulkCasesBuilderProps) {
   const [target, setTarget] = useState<string>(columns[0] || '')
   const [findLines, setFindLines] = useState<string>('')
   const [replaceLines, setReplaceLines] = useState<string>('')
   const [pasteGrid, setPasteGrid] = useState<string>('')
   const [elseVal, setElseVal] = useState<string>('')
+  const [scopeLevel, setScopeLevel] = useState<'datasource' | 'table'>('datasource')
+  const [scopeTable, setScopeTable] = useState<string>('')
+
+  useEffect(() => {
+    if (!initial) return
+    try {
+      setTarget(String((initial as any).target || columns[0] || ''))
+      const initScope = (initial as any).scope
+      if (initScope?.level === 'table') {
+        setScopeLevel('table')
+        setScopeTable(String(initScope.table || tableName || ''))
+      } else {
+        setScopeLevel('datasource')
+        setScopeTable(tableName || '')
+      }
+    } catch {}
+  }, [initial, columns])
+
+  useEffect(() => {
+    if (tableName && !initial) {
+      setScopeLevel('table')
+      setScopeTable(tableName)
+    }
+  }, [tableName, initial])
 
   const pairs = useMemo(() => {
     const f = findLines.split(/\r?\n/).map(s => s.trim()).filter(s => s !== '')
@@ -87,6 +113,13 @@ export default function AdvancedSqlBulkCasesBuilder({ columns, onAddAction, onCa
         <label className="text-xs text-muted-foreground sm:col-span-1">ELSE</label>
         <input className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" placeholder="Else value (optional)" value={elseVal} onChange={(e)=>setElseVal(e.target.value)} />
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center mb-3">
+        <label className="text-xs text-muted-foreground sm:col-span-1">Scope</label>
+        <select className="h-8 px-2 rounded-md bg-card text-xs sm:col-span-2" value={scopeLevel} onChange={(e) => { setScopeLevel(e.target.value as any); if (e.target.value === 'table' && !scopeTable) setScopeTable(tableName || '') }}>
+          <option value="datasource">Datasource-wide</option>
+          {(tableName || scopeTable) && <option value="table">Table: {scopeTable || tableName}</option>}
+        </select>
+      </div>
 
       <div className="flex items-center justify-end gap-2">
         <button className="text-xs px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCancelAction}>Cancel</button>
@@ -98,7 +131,12 @@ export default function AdvancedSqlBulkCasesBuilder({ columns, onAddAction, onCa
               const when: Condition = { op: 'eq', left: target, right: p.find }
               return { when, then: p.replace }
             })
-            const tr = { type: 'case' as const, target, cases, else: elseVal ? elseVal : undefined }
+            const tr: any = { type: 'case' as const, target, cases, else: elseVal ? elseVal : undefined }
+            if (scopeLevel === 'table' && (scopeTable || tableName)) {
+              tr.scope = { level: 'table', table: scopeTable || tableName }
+            } else {
+              tr.scope = { level: 'datasource' }
+            }
             onAddAction(tr)
           }}
         >Add Cases</button>

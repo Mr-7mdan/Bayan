@@ -1717,6 +1717,12 @@ def get_transforms(ds_id: str, db: Session = Depends(get_db)):
         remoteAttachments=cfg.get("remoteAttachments", []),
         defaults=cfg.get("defaults"),
     )
+    print(f"[/transforms] Returning {len(out.transforms)} transforms:", flush=True)
+    for tr in out.transforms:
+        if isinstance(tr, dict):
+            print(f"  - {tr.get('type')}: {tr.get('name') or tr.get('target')}", flush=True)
+        else:
+            print(f"  - {getattr(tr, 'type', '?')}: {getattr(tr, 'name', None) or getattr(tr, 'target', '?')}", flush=True)
     return out
 
 
@@ -2031,7 +2037,8 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                             """
                             SELECT table_schema, table_name
                             FROM information_schema.tables
-                            WHERE table_schema <> 'information_schema'
+                            WHERE table_catalog = current_catalog()
+                              AND table_schema <> 'information_schema'
                               AND lower(table_name) NOT LIKE 'duckdb_%'
                               AND lower(table_name) NOT LIKE 'sqlite_%'
                               AND lower(table_name) NOT LIKE 'pragma_%'
@@ -2039,7 +2046,8 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                             UNION ALL
                             SELECT table_schema, table_name
                             FROM information_schema.views
-                            WHERE table_schema <> 'information_schema'
+                            WHERE table_catalog = current_catalog()
+                              AND table_schema <> 'information_schema'
                               AND lower(table_name) NOT LIKE 'duckdb_%'
                               AND lower(table_name) NOT LIKE 'sqlite_%'
                               AND lower(table_name) NOT LIKE 'pragma_%'
@@ -2113,14 +2121,16 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                 rows = conn.execute(
                     """
                     SELECT table_schema, table_name FROM information_schema.tables
-                    WHERE table_schema <> 'information_schema'
+                    WHERE table_catalog = current_catalog()
+                      AND table_schema <> 'information_schema'
                       AND lower(table_name) NOT LIKE 'duckdb_%'
                       AND lower(table_name) NOT LIKE 'sqlite_%'
                       AND lower(table_name) NOT LIKE 'pragma_%'
                       AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
                     UNION ALL
                     SELECT table_schema, table_name FROM information_schema.views
-                    WHERE table_schema <> 'information_schema'
+                    WHERE table_catalog = current_catalog()
+                      AND table_schema <> 'information_schema'
                       AND lower(table_name) NOT LIKE 'duckdb_%'
                       AND lower(table_name) NOT LIKE 'sqlite_%'
                       AND lower(table_name) NOT LIKE 'pragma_%'
@@ -2136,7 +2146,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                     tables: list[TableInfo] = []
                     for tname in tbls:
                         cols_rows = conn.execute(
-                            "SELECT column_name, CAST(data_type AS VARCHAR) AS data_type FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+                            "SELECT column_name, CAST(data_type AS VARCHAR) AS data_type FROM information_schema.columns WHERE table_catalog = current_catalog() AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
                             (sch, tname),
                         ).fetchall()
                         cols = [ColumnInfo(name=str(cn), type=str(dt)) for (cn, dt) in cols_rows]
@@ -2152,14 +2162,16 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                     rows = conn.execute(
                         """
                         SELECT table_schema, table_name FROM information_schema.tables
-                        WHERE table_schema <> 'information_schema'
+                        WHERE table_catalog = current_catalog()
+                          AND table_schema <> 'information_schema'
                           AND lower(table_name) NOT LIKE 'duckdb_%'
                           AND lower(table_name) NOT LIKE 'sqlite_%'
                           AND lower(table_name) NOT LIKE 'pragma_%'
                           AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
                         UNION ALL
                         SELECT table_schema, table_name FROM information_schema.views
-                        WHERE table_schema <> 'information_schema'
+                        WHERE table_catalog = current_catalog()
+                          AND table_schema <> 'information_schema'
                           AND lower(table_name) NOT LIKE 'duckdb_%'
                           AND lower(table_name) NOT LIKE 'sqlite_%'
                           AND lower(table_name) NOT LIKE 'pragma_%'
@@ -2749,6 +2761,7 @@ class _ImportSqlCommitRequest(BaseModel):
     sourceDsId: str | None = None  # external source; omit to run SQL on local DuckDB
     tableName: str
     ifExists: str = "replace"   # "replace" | "append" | "fail"
+    columnTypes: dict[str, str] | None = None  # user-overridden column type map
 
 
 def _duck_path_for_ds(ds: Datasource) -> str:
@@ -2767,6 +2780,26 @@ def _duck_path_for_ds(ds: Datasource) -> str:
 def _q(name: str) -> str:
     """Quote an identifier for DuckDB."""
     return '"' + str(name).replace('"', '""') + '"'
+
+
+_ALLOWED_DUCK_TYPES: frozenset[str] = frozenset({
+    'VARCHAR', 'TEXT', 'INTEGER', 'INT', 'BIGINT', 'HUGEINT', 'UBIGINT', 'UINTEGER',
+    'SMALLINT', 'TINYINT', 'DOUBLE', 'FLOAT', 'REAL', 'BOOLEAN', 'BOOL',
+    'DATE', 'TIMESTAMP', 'DECIMAL', 'NUMERIC',
+})
+
+
+def _sanitize_col_types(raw: dict) -> dict[str, str]:
+    """Validate and sanitize user-supplied column type map (prevent SQL injection)."""
+    return {k: v.upper() for k, v in raw.items()
+            if isinstance(k, str) and isinstance(v, str) and v.upper() in _ALLOWED_DUCK_TYPES}
+
+
+def _build_cast_select(columns: list[str], col_types: dict[str, str]) -> str:
+    """Build SELECT clause with TRY_CAST for each column to its user-specified type."""
+    return ", ".join(
+        f"TRY_CAST({_q(c)} AS {col_types.get(c, 'VARCHAR')}) AS {_q(c)}" for c in columns
+    )
 
 
 @router.post("/{ds_id}/local/import-sql-preview")
@@ -2879,22 +2912,26 @@ def import_sql_commit(
                             break
                         rows_as_lists = [[_to_json_safe(v) for v in row] for row in batch]
                         if not created:
-                            sample = rows_as_lists[:64]
-                            types: dict[str, str] = {c: "TEXT" for c in columns}
-                            for idx, col in enumerate(columns):
-                                for r in sample:
-                                    try:
-                                        v = r[idx]
-                                        if v is None:
-                                            continue
-                                        if isinstance(v, bool):
-                                            types[col] = "BOOLEAN"; break
-                                        elif isinstance(v, int):
-                                            types[col] = "BIGINT"; break
-                                        elif isinstance(v, float):
-                                            types[col] = "DOUBLE"; break
-                                    except Exception:
-                                        pass
+                            if payload.columnTypes:
+                                col_types_u = _sanitize_col_types(payload.columnTypes)
+                                types: dict[str, str] = {c: col_types_u.get(c, "TEXT") for c in columns}
+                            else:
+                                types = {c: "TEXT" for c in columns}
+                                sample = rows_as_lists[:64]
+                                for idx, col in enumerate(columns):
+                                    for r in sample:
+                                        try:
+                                            v = r[idx]
+                                            if v is None:
+                                                continue
+                                            if isinstance(v, bool):
+                                                types[col] = "BOOLEAN"; break
+                                            elif isinstance(v, int):
+                                                types[col] = "BIGINT"; break
+                                            elif isinstance(v, float):
+                                                types[col] = "DOUBLE"; break
+                                        except Exception:
+                                            pass
                             cols_sql = ", ".join(f'{_q(c)} {types[c]}' for c in columns)
                             duck.execute(f"CREATE TABLE IF NOT EXISTS {qtbl} ({cols_sql})")
                             created = True
@@ -2913,9 +2950,14 @@ def import_sql_commit(
     # --- Local DuckDB path: execute SQL directly on DuckDB ---
     try:
         with open_duck_native(duck_path) as conn:
+            if payload.columnTypes:
+                ct = _sanitize_col_types(payload.columnTypes)
+                wrapped = f"SELECT {_build_cast_select(list(ct.keys()), ct)} FROM ({sql}) __cast_src"
+            else:
+                wrapped = sql
             if if_exists == "replace":
                 conn.execute(f"DROP TABLE IF EXISTS {qtbl}")
-                conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
+                conn.execute(f"CREATE TABLE {qtbl} AS ({wrapped})")
             elif if_exists == "append":
                 exists = conn.execute(
                     "SELECT count(*) FROM information_schema.tables "
@@ -2923,11 +2965,11 @@ def import_sql_commit(
                     [table_name],
                 ).fetchone()[0]
                 if exists:
-                    conn.execute(f"INSERT INTO {qtbl} SELECT * FROM ({sql}) __q")
+                    conn.execute(f"INSERT INTO {qtbl} SELECT * FROM ({wrapped}) __ins")
                 else:
-                    conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
+                    conn.execute(f"CREATE TABLE {qtbl} AS ({wrapped})")
             else:
-                conn.execute(f"CREATE TABLE {qtbl} AS ({sql})")
+                conn.execute(f"CREATE TABLE {qtbl} AS ({wrapped})")
             row_count = conn.execute(f"SELECT COUNT(*) FROM {qtbl}").fetchone()[0]
         return {"ok": True, "tableName": table_name, "rowCount": int(row_count)}
     except Exception as e:
@@ -3012,6 +3054,7 @@ async def import_file_commit(
     file: UploadFile = File(...),
     tableName: str = Form(...),
     ifExists: str = Form(default="replace"),
+    columnTypes: str | None = Form(default=None),  # JSON: {"col": "INTEGER", ...}
     db: Session = Depends(get_db),
 ):
     """Commit an uploaded CSV/Excel file as a new DuckDB table."""
@@ -3024,6 +3067,13 @@ async def import_file_commit(
     if not table_name:
         raise HTTPException(status_code=400, detail="tableName is required")
     if_exists = str(ifExists or "replace").lower()
+    col_types: dict[str, str] = {}
+    if columnTypes:
+        try:
+            import json as _json
+            col_types = _sanitize_col_types(_json.loads(columnTypes))
+        except Exception:
+            col_types = {}
     fname = (file.filename or "upload").lower()
     is_excel = fname.endswith(".xlsx") or fname.endswith(".xls")
     content = await file.read()
@@ -3053,20 +3103,24 @@ async def import_file_commit(
                         for row in raw_rows:
                             writer.writerow([("" if v is None else str(v)) for v in row])
                         tmp_csv.close()
+                        if col_types:
+                            xls_src = f"SELECT {_build_cast_select(list(col_types.keys()), col_types)} FROM read_csv_auto('{tmp_csv.name}', all_varchar=true)"
+                        else:
+                            xls_src = f"SELECT * FROM read_csv_auto('{tmp_csv.name}')"
                         if if_exists == "replace":
                             conn.execute(f"DROP TABLE IF EXISTS {qtbl}")
-                            conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp_csv.name}')")
+                            conn.execute(f"CREATE TABLE {qtbl} AS {xls_src}")
                         elif if_exists == "append":
                             exists = conn.execute(
                                 "SELECT count(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?",
                                 [table_name],
                             ).fetchone()[0]
                             if exists:
-                                conn.execute(f"INSERT INTO {qtbl} SELECT * FROM read_csv_auto('{tmp_csv.name}') OFFSET 1")
+                                conn.execute(f"INSERT INTO {qtbl} {xls_src}")
                             else:
-                                conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp_csv.name}')")
+                                conn.execute(f"CREATE TABLE {qtbl} AS {xls_src}")
                         else:
-                            conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp_csv.name}')")
+                            conn.execute(f"CREATE TABLE {qtbl} AS {xls_src}")
                     finally:
                         try:
                             _os.unlink(tmp_csv.name)
@@ -3075,20 +3129,24 @@ async def import_file_commit(
                 except ImportError:
                     raise HTTPException(status_code=500, detail="openpyxl not installed")
             else:
+                if col_types:
+                    csv_src = f"SELECT {_build_cast_select(list(col_types.keys()), col_types)} FROM read_csv_auto('{tmp.name}', all_varchar=true)"
+                else:
+                    csv_src = f"SELECT * FROM read_csv_auto('{tmp.name}')"
                 if if_exists == "replace":
                     conn.execute(f"DROP TABLE IF EXISTS {qtbl}")
-                    conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp.name}')")
+                    conn.execute(f"CREATE TABLE {qtbl} AS {csv_src}")
                 elif if_exists == "append":
                     exists = conn.execute(
                         "SELECT count(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?",
                         [table_name],
                     ).fetchone()[0]
                     if exists:
-                        conn.execute(f"INSERT INTO {qtbl} SELECT * FROM read_csv_auto('{tmp.name}')")
+                        conn.execute(f"INSERT INTO {qtbl} {csv_src}")
                     else:
-                        conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp.name}')")
+                        conn.execute(f"CREATE TABLE {qtbl} AS {csv_src}")
                 else:
-                    conn.execute(f"CREATE TABLE {qtbl} AS SELECT * FROM read_csv_auto('{tmp.name}')")
+                    conn.execute(f"CREATE TABLE {qtbl} AS {csv_src}")
             row_count = conn.execute(f"SELECT COUNT(*) FROM {qtbl}").fetchone()[0]
         return {"ok": True, "tableName": table_name, "rowCount": int(row_count)}
     except HTTPException:

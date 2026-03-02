@@ -1887,6 +1887,10 @@ export default function HomePage() {
           else if (action === 'downloadSVG') {
             window.dispatchEvent(new CustomEvent('widget-download-chart', { detail: { widgetId: id, format: 'svg' } }))
           }
+          else if (action === 'downloadPdfPortrait' || action === 'downloadPdfLandscape') {
+            const landscape = action === 'downloadPdfLandscape'
+            window.dispatchEvent(new CustomEvent('widget-download-pdf', { detail: { widgetId: id, landscape } }))
+          }
         }}
       />
       {/* Viewers */}

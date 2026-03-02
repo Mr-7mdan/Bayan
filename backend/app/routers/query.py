@@ -441,6 +441,9 @@ def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: 
         sys.stderr.write(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}\n")
         sys.stderr.flush()
         
+        # Build case-insensitive fallback map
+        expr_map_lower = {k.lower(): v for k, v in expr_map.items()}
+        
         resolved = {}
         resolved_count = 0
         for key, value in where.items():
@@ -448,9 +451,10 @@ def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: 
             base_key = key.split("__")[0] if "__" in key else key
             op_suffix = key.split("__", 1)[1] if "__" in key else None
             
-            # First check if it's a custom column
-            if base_key in expr_map:
-                expr = expr_map[base_key]
+            # First check if it's a custom column (exact match, then case-insensitive fallback)
+            _expr_hit = expr_map.get(base_key) or expr_map_lower.get(base_key.lower())
+            if _expr_hit is not None:
+                expr = _expr_hit
                 # Strip table aliases - handle both quoted and unquoted (e.g., s.ClientID or "s"."ClientID" -> ClientID)
                 expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases like "s".
                 expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases like s.
@@ -1160,17 +1164,18 @@ def _referenced_cols_in_expr(expr: str) -> set[str]:
                 cols.add(_norm_name(m))
         # Bare double-quoted identifiers "Col" (but not "s")
         bare_quoted = _re.findall(r'"([^"]+)"', remaining)
-        import sys
-        if 's' in [b.lower() for b in bare_quoted]:
-            sys.stderr.write(f"[DEBUG _referenced_cols_in_expr] Found 's' in bare quoted identifiers: {bare_quoted}\n")
-            sys.stderr.write(f"[DEBUG _referenced_cols_in_expr] Remaining (first 300 chars): {remaining[:300]}\n")
-            sys.stderr.flush()
         for m in bare_quoted:
             if m.lower() != 's':
                 cols.add(_norm_name(m))
-            else:
-                sys.stderr.write(f"[DEBUG _referenced_cols_in_expr] Skipping bare 's'\n")
-                sys.stderr.flush()
+        # Remove double-quoted identifiers from remaining BEFORE the unquoted word scan.
+        # Without this, multi-word identifiers like "RevenuePL_Type 1 Markup" get split
+        # into fragments ("RevenuePL_Type", "Markup") that pollute refs and cause the
+        # transform to be incorrectly filtered out by _filter_by_basecols.
+        remaining = _re.sub(r'"[^"]+"', ' ', remaining)
+
+        # Insert spaces before SQL keywords that may be accidentally concatenated
+        # (e.g. "NULLEND" from "NULL\nEND" stored without newline → "NULL END")
+        remaining = _re.sub(r'(?i)(?<=[A-Za-z0-9_])(CASE|WHEN|THEN|ELSE|END|NULL)\b', r' \1', remaining)
 
         try:
             expr_no_strings = _re.sub(r"'([^']|'')*'", " ", remaining)
@@ -1229,6 +1234,11 @@ def _filter_by_basecols(ds_tr: dict, base_cols: set[str]) -> dict:
     """
     if not isinstance(ds_tr, dict):
         return {}
+    # When base_cols is empty the probe failed (e.g. remote MySQL table not yet
+    # attached).  Skip filtering so all custom columns are kept — run_query will
+    # activate the attachment before executing and will surface any real errors.
+    if not base_cols:
+        return ds_tr
     base_l = {(_c or '').strip().strip('[]').strip('"').strip('`').lower() for _c in (base_cols or set())}
     ccs = list(ds_tr.get('customColumns') or [])
     trs = list(ds_tr.get('transforms') or [])
@@ -1249,9 +1259,14 @@ def _filter_by_basecols(ds_tr: dict, base_cols: set[str]) -> dict:
                 cols = (j or {}).get('columns') or []
                 for c in cols:
                     try:
-                        nm = str((c or {}).get('alias') or (c or {}).get('name') or '').strip()
-                        if nm:
-                            allowed.add(_norm_name(nm))
+                        # Add both alias (e.g., 'RevenuePL_Type 1 Markup') and original name
+                        # (e.g., 'Type 1 Markup') so custom columns can reference either
+                        alias_nm = str((c or {}).get('alias') or '').strip()
+                        orig_nm = str((c or {}).get('name') or '').strip()
+                        if alias_nm:
+                            allowed.add(_norm_name(alias_nm))
+                        if orig_nm:
+                            allowed.add(_norm_name(orig_nm))
                     except Exception:
                         continue
             except Exception:
@@ -1973,6 +1988,10 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                     if tl in sql_keywords:
                         continue
                     refs.add(tl)
+                # Final safeguard: remove common table aliases that should never be treated as column refs
+                refs.discard('s')
+                refs.discard('u')
+                refs.discard('_base')
                 return refs
             
             # Filter computed transforms and custom columns
@@ -2714,6 +2733,10 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                     if tl in sql_keywords:
                         continue
                     refs.add(tl)
+                # Final safeguard: remove common table aliases that should never be treated as column refs
+                refs.discard('s')
+                refs.discard('u')
+                refs.discard('_base')
                 return refs
 
             def extract_transform_refs_sg(tr: Any) -> set[str]:
@@ -4499,11 +4522,43 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                     counter_inc("query_cache_miss_total", {"endpoint": "query", "kind": "data"})
                 except Exception:
                     pass
+                print(f"[run_query/duck] db_path={db_path} datasourceId={payload.datasourceId} remote_attachments={len(_remote_attachments)}", flush=True)
+                # For DuckDB queries that JOIN a remote MySQL-attached catalog table with local tables,
+                # DuckDB cannot push the outer LIMIT down past the JOIN, so it does a full remote table
+                # scan before LIMIT is applied — this hangs for large MySQL tables.
+                # Fix: rewrite 3-part remote table references to include an inner LIMIT so DuckDB only
+                # scans a bounded number of MySQL rows.  Only applied when JOINs are present.
+                _inner_limit = 10000
+                try:
+                    _inner_limit = int(os.environ.get("DUCK_REMOTE_JOIN_SCAN_LIMIT", "10000") or "10000")
+                except Exception:
+                    _inner_limit = 10000
+                if _remote_attachments and ' JOIN ' in sql_native.upper():
+                    _is_agg_query = bool(re.search(r'\b(SUM|COUNT|AVG|MIN|MAX)\s*\(', sql_native, re.IGNORECASE))
+                    if _is_agg_query:
+                        print(f"[run_query/duck] Aggregation query — skipping remote scan cap for full data access", flush=True)
+                    else:
+                        _remote_3part = re.compile(
+                            r'("[^"]+"\s*\.\s*"[^"]+"\s*\.\s*"[^"]+")\s+AS\s+(\w+)',
+                            re.IGNORECASE,
+                        )
+                        def _cap_remote_scan(m: re.Match) -> str:
+                            return f'(SELECT * FROM {m.group(1)} LIMIT {_inner_limit}) AS {m.group(2)}'
+                        _rewritten = _remote_3part.sub(_cap_remote_scan, sql_native)
+                        if _rewritten != sql_native:
+                            print(f"[run_query/duck] Capped remote scan to {_inner_limit} rows for JOIN preview", flush=True)
+                            sql_native = _rewritten
+                print(f"[run_query/duck] SQL (first 800):\n{sql_native[:800]}", flush=True)
                 with open_duck_native(db_path) as conn:
                     _apply_duck_mysql_attachments(conn, _remote_attachments, db)
-                    cur = conn.execute(sql_native, values)
+                    try:
+                        cur = conn.execute(sql_native, values)
+                    except Exception as _duck_exec_err:
+                        print(f"[run_query/duck] EXECUTE ERROR: {type(_duck_exec_err).__name__}: {_duck_exec_err}", flush=True)
+                        raise
                     desc = getattr(cur, 'description', None) or []
                     cols = [str(col[0]) for col in desc]
+                    print(f"[run_query/duck] Execute OK, cols={cols[:5]}", flush=True)
                     rows = []
                     try:
                         batch_size = int(os.environ.get("DUCKDB_FETCHMANY", "1000") or "1000")
@@ -4511,12 +4566,16 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                         batch_size = 1000
                     if batch_size <= 0:
                         batch_size = 1000
-                    while True:
-                        chunk = cur.fetchmany(batch_size)
-                        if not chunk:
-                            break
-                        for r in chunk:
-                            rows.append([_json_safe_cell(x) for x in r])
+                    try:
+                        while True:
+                            chunk = cur.fetchmany(batch_size)
+                            if not chunk:
+                                break
+                            for r in chunk:
+                                rows.append([_json_safe_cell(x) for x in r])
+                    except Exception as _fetch_err:
+                        print(f"[run_query/duck] FETCHMANY ERROR: {type(_fetch_err).__name__}: {_fetch_err}", flush=True)
+                        raise
                 _cache_set(key, cols, rows)
 
             total_rows = None
@@ -4771,16 +4830,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     - Other engines: build a generic SQL SELECT with WHERE and delegate to /query.
     """
     # Debug: Log WHERE clause and incoming X at the start
-    import sys
-    try:
-        sys.stderr.write(
-            f"[SPEC_DEBUG] run_query_spec called, source={payload.spec.source}, "
-            f"where keys={list(payload.spec.where.keys()) if hasattr(payload.spec, 'where') and payload.spec.where else 'None'}, "
-            f"x={getattr(payload.spec, 'x', None)} (type={type(getattr(payload.spec, 'x', None))})\n"
-        )
-        sys.stderr.flush()
-    except Exception:
-        pass
+    spec = payload.spec
+    x_raw = spec.x if hasattr(spec, 'x') else None
+    y_raw = spec.y if hasattr(spec, 'y') else None
+    agg_raw = spec.agg if hasattr(spec, 'agg') else None
+    print(f"[SPEC_DEBUG] run_query_spec called, source={spec.source}, x={x_raw}, y={y_raw}, agg={agg_raw}, where keys={list(spec.where.keys()) if hasattr(spec, 'where') and spec.where else []}", flush=True)
     
     # Save __weekends config before _resolve_date_presets strips UI meta keys (needed for avg_wday)
     _spec_weekends = 'SAT_SUN'
@@ -4817,7 +4871,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     raise HTTPException(status_code=403, detail="Not allowed to query this datasource")
     else:
         # Auto-detect local DuckDB datasource to load transforms/custom columns
-        import sys
         base_source_raw = payload.spec.source or ""
         if base_source_raw:
             # Look for a DuckDB datasource that matches the local store
@@ -5111,6 +5164,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             sys.stderr.write(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}\n")
             sys.stderr.flush()
             
+            # Build case-insensitive fallback map
+            expr_map_lower = {k.lower(): v for k, v in expr_map.items()}
+            
             resolved = {}
             resolved_count = 0
             for key, value in where.items():
@@ -5118,9 +5174,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 base_key = key.split("__")[0] if "__" in key else key
                 op_suffix = key.split("__", 1)[1] if "__" in key else None
                 
-                # First check if it's a custom column
-                if base_key in expr_map:
-                    expr = expr_map[base_key]
+                # First check if it's a custom column (exact match, then case-insensitive fallback)
+                _expr_hit = expr_map.get(base_key) or expr_map_lower.get(base_key.lower())
+                if _expr_hit is not None:
+                    expr = _expr_hit
                     # Strip table aliases - handle both quoted and unquoted (e.g., s.ClientID or "s"."ClientID" -> ClientID)
                     expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases like "s".
                     expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases like s.
@@ -5400,15 +5457,71 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     # avg_wday   → numerator / COUNT(DISTINCT CASE WHEN is_workday THEN DATE(date_col) END)
     # avg_weekly → numerator / COUNT(DISTINCT DATE_TRUNC('week', date_col))
     # avg_monthly→ numerator / COUNT(DISTINCT DATE_TRUNC('month', date_col))
-    _PERIOD_AGG = frozenset({'avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly'})
+    _PERIOD_AGG = frozenset({'avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly', 'last_daily_sum'})
     if agg in _PERIOD_AGG:
         val_field = getattr(spec, 'y', None)
         date_field = getattr(spec, 'avgDateField', None)
         if not val_field or not date_field:
-            raise HTTPException(status_code=400, detail="avg_daily/avg_wday/avg_weekly/avg_monthly require both 'y' (value column) and 'avgDateField' (date column)")
+            raise HTTPException(status_code=400, detail="avg_daily/avg_wday/avg_weekly/avg_monthly/last_daily_sum require both 'y' (value column) and 'avgDateField' (date column)")
         d = (ds_type or '').lower()
         vcol = _q_ident(val_field)
         _dcol_raw = _q_ident(date_field)
+
+        # Load datasource object if not already loaded (needed for transform subquery)
+        if ds is None and payload.datasourceId:
+            ds = db.get(Datasource, payload.datasourceId)
+
+        # ── Resolve computed val_field: build transform subquery if needed ──────
+        # If val_field is a computed/transform column (e.g. "Markup"), the raw
+        # source table does not have it.  Build the same transform subquery that
+        # the main aggregation path uses so the column is projected as an alias.
+        _period_from_sql = _q_source(spec.source)
+        if 'duckdb' in d and ds is not None:
+            try:
+                _pav_opts = json.loads(getattr(ds, 'options_json', None) or '{}')
+                _pav_tr = _apply_scope((_pav_opts or {}).get("transforms") or {}, spec.source)
+                _pav_computed: set = set()
+                _pav_computed_lower: dict[str, str] = {}  # lowercase -> original case
+                for _cc in (_pav_tr.get("customColumns") or []):
+                    _name = str((_cc or {}).get("name") or "").strip()
+                    _pav_computed.add(_name)
+                    _pav_computed_lower[_name.lower()] = _name
+                for _tr in (_pav_tr.get("transforms") or []):
+                    _name = str((_tr or {}).get("name") or (_tr or {}).get("target") or "").strip()
+                    _pav_computed.add(_name)
+                    _pav_computed_lower[_name.lower()] = _name
+                if val_field.lower() in _pav_computed_lower:
+                    # Use original case from custom column definition
+                    val_field = _pav_computed_lower[val_field.lower()]
+                    _pav_cols: set = set()
+                    try:
+                        with open_duck_native(settings.duckdb_path) as _pav_conn:
+                            _pav_cur = _pav_conn.execute(f"SELECT * FROM {_q_source(spec.source)} WHERE 1=0")
+                            _pav_desc = getattr(_pav_cur, 'description', None) or []
+                            _pav_cols = set(str(c[0]) for c in _pav_desc)
+                    except Exception:
+                        pass
+                    _pav_tr_filt = _filter_by_basecols(_pav_tr, _pav_cols) if _pav_cols else _pav_tr
+                    _pav_cols_lower = {c.lower() for c in (_pav_cols or set())}
+                    _pav_joins = [j for j in (_pav_tr_filt.get('joins') or [])
+                                  if not _pav_cols or str((j or {}).get('sourceKey') or '').strip().lower() in _pav_cols_lower]
+                    _pav_res = build_sql(
+                        dialect=ds_type,
+                        source=_q_source(spec.source),
+                        base_select=["*"],
+                        custom_columns=_pav_tr_filt.get("customColumns", []),
+                        transforms=_pav_tr_filt.get("transforms", []),
+                        joins=_pav_joins,
+                        defaults={},
+                        limit=None,
+                        base_cols=_pav_cols,
+                    )
+                    _pav_sql = _pav_res[0] if _pav_res else ""
+                    if _pav_sql:
+                        _period_from_sql = f"({_pav_sql}) AS _pav_base"
+                        print(f"[AvgPeriod] Using transform subquery for computed column '{val_field}'", flush=True)
+            except Exception as _pav_e:
+                print(f"[AvgPeriod] Transform subquery build failed: {_pav_e}", flush=True)
 
         # ── Auto-detect Unix timestamp columns via INFORMATION_SCHEMA ──────────
         _avg_is_unix = False
@@ -5515,8 +5628,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         # ── Build WHERE clause ─────────────────────────────────────────────────
         where_parts: list[str] = []
         params_avg: dict = {}
-        if where_resolved:
-            for _wk, _wv in where_resolved.items():
+        # When using transform subquery (_pav_base), use original column names (available as aliases)
+        # instead of resolved expressions which reference base table columns not in outer scope
+        uses_pav_transform = "_pav_base" in _period_from_sql
+        where_source = spec.where if uses_pav_transform else where_resolved
+        if where_source:
+            for _wk, _wv in where_source.items():
                 _wbase = _wk.split('__')[0] if '__' in _wk else _wk
                 _wop   = _wk.split('__', 1)[1] if '__' in _wk else 'eq'
                 # Don't re-quote keys that are already resolved SQL expressions (e.g. "(LEFT(CAST(login AS CHAR), 2))")
@@ -5534,6 +5651,34 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 else:               where_parts.append(f"{_wcol} =  :{_pn}"); params_avg[_pn] = _wv
         where_clause = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
 
+        # ── last_daily_sum early return ────────────────────────────────────────
+        # SUM(value) for all rows where CAST(date_col AS DATE) = MAX(CAST(date_col AS DATE)) within the filter window
+        if agg == 'last_daily_sum':
+            if 'mysql' in d:
+                _lds_date_expr = f"DATE({dcol})"
+            else:
+                _lds_date_expr = f"CAST({dcol} AS DATE)"
+            if 'duckdb' in d:
+                _lds_y_clean = f"COALESCE(try_cast(regexp_replace(CAST({vcol} AS VARCHAR), '[^0-9.-]', '') AS DOUBLE), try_cast({vcol} AS DOUBLE), 0.0)"
+                _lds_num = f"SUM({_lds_y_clean})"
+            else:
+                _lds_num = f"SUM({vcol})"
+            _lds_max_sub = f"(SELECT MAX({_lds_date_expr}) FROM {_period_from_sql}{where_clause})"
+            _lds_pred = f"{_lds_date_expr} = {_lds_max_sub}"
+            if where_parts:
+                _lds_where = f" WHERE {' AND '.join(where_parts)} AND {_lds_pred}"
+            else:
+                _lds_where = f" WHERE {_lds_pred}"
+            sql_lds = f"SELECT {_lds_num} AS value FROM {_period_from_sql}{_lds_where}"
+            print(f"[LastDailySum] val={val_field}, date={date_field}, is_unix={_avg_is_unix}", flush=True)
+            print(f"[LastDailySum] SQL: {sql_lds[:800]}", flush=True)
+            if params_avg:
+                print(f"[LastDailySum] params: { {k: v for k, v in list(params_avg.items())[:10]} }", flush=True)
+            _lds_ds_id = None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId
+            _lds_req = QueryRequest(sql=sql_lds, datasourceId=_lds_ds_id, limit=1, offset=0, includeTotal=False, params=params_avg or None)
+            return run_query(_lds_req, db)
+        # ── End last_daily_sum ─────────────────────────────────────────────────
+
         # ── Build final SQL (3 columns for debug logging) ──────────────────────
         if avg_numerator == 'distinct':
             # For distinct: count distinct per period → SUM those counts / number of periods.
@@ -5550,7 +5695,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 inner_where_clause = where_clause
             inner_sql = (
                 f"SELECT {inner_period} AS _period, COUNT(DISTINCT {vcol}) AS _cnt "
-                f"FROM {_q_source(spec.source)}{inner_where_clause} "
+                f"FROM {_period_from_sql}{inner_where_clause} "
                 f"GROUP BY {inner_period}"
             )
             sql_avg = (
@@ -5562,7 +5707,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             sql_avg = (
                 f"SELECT {num_expr} AS num_val, {den_expr} AS den_val, "
                 f"{num_expr} * 1.0 / NULLIF({den_expr}, 0) AS value "
-                f"FROM {_q_source(spec.source)}{where_clause}"
+                f"FROM {_period_from_sql}{where_clause}"
             )
         print(f"[AvgPeriod] agg={agg}, source={spec.source}, val_col={val_field}, date_col={date_field}, is_unix={_avg_is_unix}, numerator={avg_numerator}, weekends={_spec_weekends}", flush=True)
         print(f"[AvgPeriod] SQL: {sql_avg[:800]}", flush=True)
@@ -5624,6 +5769,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 if (ds_type or '').lower().startswith('duckdb') or (payload.datasourceId is None):
                     from ..db import open_duck_native
                     with open_duck_native(settings.duckdb_path) as conn:
+                        # ATTACH remote datasources before probing so remote catalog tables
+                        # (e.g. pcma.mt5.mt5_deals) return their actual column list
+                        if ds is not None:
+                            try:
+                                _rat_opts = json.loads(getattr(ds, 'options_json', None) or '{}')
+                                _ra_probe = (_rat_opts.get('transforms') or {}).get('remoteAttachments') or []
+                                if _ra_probe:
+                                    _apply_duck_mysql_attachments(conn, _ra_probe, db)
+                            except Exception:
+                                pass
                         cur = conn.execute(f"SELECT * FROM {_q_source(spec.source)} WHERE 1=0")
                         desc = getattr(cur, 'description', None) or []
                         return set([str(col[0]) for col in desc])
@@ -5639,8 +5794,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             except Exception:
                 return set()
         _base_cols = _list_source_columns_for_base()
-        # Drop transforms/custom columns that reference columns not present on base
-        ds_transforms = _filter_by_basecols(ds_transforms, _base_cols)
+        # Filter joins FIRST based on sourceKey presence in base columns
         _joins_all = ds_transforms.get("joins", []) if isinstance(ds_transforms, dict) else []
         _joins_eff = []
         for _j in (_joins_all or []):
@@ -5652,6 +5806,13 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     _joins_eff.append(_j)
             except Exception:
                 continue
+        # Now filter transforms/custom columns with the pre-filtered joins
+        # so _filter_by_basecols only seeds 'allowed' with columns from joins that will actually be included
+        ds_transforms_with_filtered_joins = {
+            **ds_transforms,
+            "joins": _joins_eff
+        }
+        ds_transforms = _filter_by_basecols(ds_transforms_with_filtered_joins, _base_cols)
 
         result = build_sql(
             dialect=ds_type,
@@ -5659,9 +5820,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             base_select=eff_select,
             custom_columns=ds_transforms.get("customColumns", []),
             transforms=ds_transforms.get("transforms", []),
-            joins=_joins_eff,
+            joins=ds_transforms.get("joins", []),  # Use filtered joins from ds_transforms
             defaults=ds_transforms.get("defaults", {}),
             limit=None,
+            base_cols=_base_cols,
         )
         # Handle different return value formats
         if len(result) == 3:
@@ -5670,6 +5832,14 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             base_sql, _actual_cols, _warns, _ = result
         else:
             base_sql = result[0] if result else ""
+        # Set base_from_sql: wrap in subquery if transforms were applied, else direct table ref
+        has_any_transforms = bool(
+            ds_transforms.get("customColumns") or ds_transforms.get("transforms") or ds_transforms.get("joins")
+        ) if isinstance(ds_transforms, dict) else False
+        if has_any_transforms and base_sql:
+            base_from_sql = f" FROM ({base_sql}) AS _base"
+        else:
+            base_from_sql = f" FROM {_q_source(spec.source)}"
 
         # Apply WHERE filters on top of transformed subquery
         # Helpers: quote identifiers for WHERE and sanitize param names
@@ -5724,8 +5894,20 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                                     return _q_ident(col)
                 return str(key)
             # Check if the column (including date part aliases) is already in the transformed subquery
-            if ds_transforms and _actual_cols and key in _actual_cols:
-                return _q_ident(key)
+            # Use case-insensitive lookup for DuckDB quoted identifiers
+            if ds_transforms and _actual_cols:
+                print(f"[WHERE_LHS_DEBUG] Looking for key='{key}' in _actual_cols (len={len(_actual_cols)})", flush=True)
+                # Try exact match first
+                if key in _actual_cols:
+                    print(f"[WHERE_LHS_DEBUG] Exact match found: '{key}'", flush=True)
+                    return _q_ident(key)
+                # Try case-insensitive match
+                key_lower = key.lower()
+                for col in _actual_cols:
+                    if col.lower() == key_lower:
+                        print(f"[WHERE_LHS_DEBUG] Case-insensitive match: '{key}' -> '{col}'", flush=True)
+                        return _q_ident(col)  # Use the actual column name with correct casing
+                print(f"[WHERE_LHS_DEBUG] No match found for '{key}'. _actual_cols sample: {list(_actual_cols)[:10]}", flush=True)
             m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
             if m:
                 # If the alias is already in _actual_cols, use it directly
@@ -5736,9 +5918,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             return _derived_lhs(key)
         where_clauses = []
         params: Dict[str, Any] = {}
-        # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
-        where_to_use = where_resolved if where_resolved else (payload.spec.where if hasattr(payload, 'spec') and hasattr(payload.spec, 'where') else {})
-        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}\n")
+        # When using transform subquery (_base), use original column names (available as aliases)
+        # instead of resolved expressions which reference base table columns not in outer scope
+        uses_transform_subquery = "_base" in base_from_sql
+        where_to_use = (payload.spec.where if hasattr(payload, 'spec') and hasattr(payload.spec, 'where') else {}) if uses_transform_subquery else (where_resolved if where_resolved else (payload.spec.where if hasattr(payload, 'spec') and hasattr(payload.spec, 'where') else {}))
+        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, uses_transform_subquery = {uses_transform_subquery}\n")
         sys.stderr.flush()
         if where_to_use:
             for k, v in where_to_use.items():
@@ -5788,13 +5972,13 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             _sort_dir = 'ASC'
         _order_sql = f" ORDER BY {_q_ident(_sort_col)} {_sort_dir}" if _sort_col else ""
         sql_inner = f"SELECT * FROM ({base_sql}) AS _base{where_sql}{_order_sql}"
-        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: where_clauses = {where_clauses}\n")
-        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: params = {params}\n")
-        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: sql_inner[:200] = {sql_inner[:200]}\n")
-        sys.stderr.flush()
+        _prefer_duck_has = _duck_has_table(spec.source)
+        _eff_ds_id = (None if (prefer_local and _prefer_duck_has) else payload.datasourceId)
+        print(f"[spec->run_query] prefer_local={prefer_local} _duck_has_table={_prefer_duck_has} datasourceId={_eff_ds_id}", flush=True)
+        print(f"[spec->run_query] sql_inner (first 400): {sql_inner[:400]}", flush=True)
         q = QueryRequest(
             sql=sql_inner,
-            datasourceId=(None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId),
+            datasourceId=_eff_ds_id,
             limit=lim or 1000,
             offset=off or 0,
             includeTotal=payload.includeTotal,
@@ -5806,7 +5990,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
     if has_chart_semantics:
         # Load datasource-level transforms if any; prepare a FROM fragment
-        import sys
         ds_transforms = {}
         if ds is not None:
             try:
@@ -5815,6 +5998,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 opts = {}
             ds_transforms = _apply_scope((opts or {}).get("transforms") or {}, spec.source)
         base_from_sql = f" FROM {_q_source(spec.source)}"
+        expr_map = None
         if ds_transforms:
             # Filter joins similarly for aggregated/base wrapper
             def _list_cols_for_agg_base() -> set[str]:
@@ -5839,11 +6023,15 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             __cols = _list_cols_for_agg_base()
             ds_transforms = _filter_by_basecols(ds_transforms, __cols)
             __joins_all = ds_transforms.get('joins', []) if isinstance(ds_transforms, dict) else []
+            __cols_lower = {c.lower() for c in (__cols or set())}
             __joins_eff = []
             for __j in (__joins_all or []):
                 try:
                     __skey = str((__j or {}).get('sourceKey') or '').strip()
-                    if __skey and (__skey in __cols or f"[{__skey}]" in __cols or f'"{__skey}"' in __cols):
+                    if not __skey:
+                        continue
+                    # When probe failed (empty cols) keep all joins; otherwise case-insensitive match
+                    if not __cols or __skey.lower() in __cols_lower:
                         __joins_eff.append(__j)
                 except Exception:
                     continue
@@ -5867,7 +6055,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             else:
                 base_sql = result2[0] if result2 else ""
             base_from_sql = f" FROM ({base_sql}) AS _base"
-            
+            print(f"[BASE_FROM_SQL] Set to transform subquery, length={len(base_from_sql)}", flush=True)
+
             # Validate that spec fields (x, y, legend) still exist after applying transforms
             # Use the ACTUAL columns returned by build_sql, plus probed base columns (for s.* cases)
             available_cols = set([_norm_name(c) for c in (_actual_cols or [])])
@@ -6020,9 +6209,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 _validated_series = _series_out
             
             # Also validate WHERE clause filters - remove invalid column references
-            # IMPORTANT: Use where_resolved (with resolved expressions) instead of spec.where
+            # When using transform subquery (_base), use original column names (spec.where) as they become aliases
+            # Only use where_resolved (with resolved expressions) when NOT using subquery
             _validated_where = {}
-            _where_source = where_resolved if where_resolved else spec.where
+            # ds_transforms means we'll use a _base subquery, so keep original column names as aliases
+            _where_source = spec.where if ds_transforms else (where_resolved if where_resolved else spec.where)
             if _where_source:
                 for k, v in _where_source.items():
                     # Skip special date range keys
@@ -6059,6 +6250,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         else:
             # Direct table/view reference; quote per dialect (handles schema-qualified)
             base_from_sql = f" FROM {_q_source(spec.source)}"
+            print(f"[BASE_FROM_SQL] ELSE branch: Using raw table, ds_transforms={bool(ds_transforms)}", flush=True)
             
             # Still validate spec fields even without transforms (custom columns at datasource level)
             # Probe base columns (preserve original case)
@@ -6249,8 +6441,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                                         sys.stderr.write(f"[SPEC_DEBUG] Scalar agg: Using alias '{col}' instead of resolved expr\n")
                                         return _q_ident(col)
                     return str(key)
-                if ds_transforms and _actual_cols and key in _actual_cols:
-                    return _q_ident(key)
+                if ds_transforms and _actual_cols:
+                    # Try exact match first
+                    if key in _actual_cols:
+                        return _q_ident(key)
+                    # Try case-insensitive match for DuckDB quoted identifiers
+                    key_lower = key.lower()
+                    for col in _actual_cols:
+                        if col.lower() == key_lower:
+                            print(f"[WHERE_LHS_SCALAR] Case-insensitive match: '{key}' -> '{col}'", flush=True)
+                            return _q_ident(col)
                 m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
                 if m:
                     if ds_transforms and _actual_cols and key in _actual_cols:
@@ -6260,8 +6460,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
             where_clauses = []
             params: Dict[str, Any] = {}
-            where_to_use = where_resolved if where_resolved else spec.where
-            sys.stderr.write(f"[SPEC_DEBUG] Scalar agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}\n")
+            # When using transform subquery (_base), use original column names (available as aliases)
+            # instead of resolved expressions which reference base table columns not in outer scope
+            uses_transform_subquery = "_base" in base_from_sql
+            where_to_use = spec.where if uses_transform_subquery else (where_resolved if where_resolved else spec.where)
+            sys.stderr.write(f"[SPEC_DEBUG] Scalar agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}, uses_transform_subquery = {uses_transform_subquery}\n")
             sys.stderr.flush()
             if where_to_use:
                 for k, v in where_to_use.items():
@@ -6317,7 +6520,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
             sys.stderr.write(f"[SCALAR_AGG_DEBUG] where_sql: {where_sql[:300]}\n")
             sys.stderr.write(f"[SCALAR_AGG_DEBUG] params: {params}\n")
-            sys.stderr.write(f"[SCALAR_AGG_DEBUG] base_from_sql: {base_from_sql[:200] if base_from_sql else 'None'}\n")
+            sys.stderr.write(f"[SCALAR_AGG_DEBUG] base_from_sql: {base_from_sql[:400] if base_from_sql else 'None'}\n")
+            sys.stderr.write(f"[SCALAR_AGG_DEBUG] ds_transforms exists: {bool(ds_transforms)}\n")
+            sys.stderr.write(f"[SCALAR_AGG_DEBUG] _actual_cols count: {len(_actual_cols) if '_actual_cols' in locals() else 'NOT SET'}\n")
             sys.stderr.write(f"[SCALAR_AGG_DEBUG] series_scalar: {bool(series_scalar and len(series_scalar) > 0)}\n")
             sys.stderr.flush()
 
@@ -6478,6 +6683,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 if by == "x": order_seg = f" ORDER BY 1 {dir_}"
                 elif by == "value": order_seg = f" ORDER BY 2 {dir_}"
             sql_inner = inner + where_sql + order_seg
+            sys.stderr.write(f"[SCALAR_AGG_SQL] sql_inner (first 600): {sql_inner[:600]}\n")
+            sys.stderr.write(f"[SCALAR_AGG_SQL] params: {params}\n")
+            sys.stderr.flush()
             eff_limit = min(int(limit_override or (lim or 1000)), int(lim or 1000)) if (limit_override or lim) else (limit_override or 1000)
             q = QueryRequest(
                 sql=sql_inner,
@@ -6490,6 +6698,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 preferLocalTable=spec.source,
             )
             result = run_query(q, db)
+            print(f"[SCALAR_AGG_RESULT] rows={len(result.rows)}, data={result.rows[:3]}", flush=True)
             return result
 
         # Special case: no X field but legend is present - group by legend only
@@ -6538,7 +6747,6 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     value_expr = "COUNT(*)"
             
             # Build legend expression (reuse logic from later section)
-            import sys
             legend_expr_raw = (spec.legend or legend_orig)
             # Handle legend as array or string
             if isinstance(legend_expr_raw, (list, tuple)) and len(legend_expr_raw) > 0:
@@ -6560,8 +6768,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             
             where_clauses = []
             params: Dict[str, Any] = {}
-            # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
-            where_to_use = where_resolved if where_resolved else spec.where
+            # When using transform subquery (_base), use original column names (available as aliases)
+            # instead of resolved expressions which reference base table columns not in outer scope
+            uses_transform_subquery = "_base" in base_from_sql
+            where_to_use = spec.where if uses_transform_subquery else (where_resolved if where_resolved else spec.where)
             if where_to_use:
                 for k, v in where_to_use.items():
                     if k in ("start", "startDate", "end", "endDate"):
@@ -6961,9 +7171,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             
             where_clauses = []
             params: Dict[str, Any] = {}
-            # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
-            where_to_use = where_resolved if where_resolved else spec.where
-            sys.stderr.write(f"[SPEC_DEBUG] X+legend agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}\n")
+            # When using transform subquery (_base), use original column names (available as aliases)
+            # instead of resolved expressions which reference base table columns not in outer scope
+            uses_transform_subquery = "_base" in base_from_sql
+            where_to_use = spec.where if uses_transform_subquery else (where_resolved if where_resolved else spec.where)
+            sys.stderr.write(f"[SPEC_DEBUG] X+legend agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}, uses_transform_subquery = {uses_transform_subquery}\n")
             sys.stderr.flush()
             if where_to_use:
                 for k, v in where_to_use.items():
@@ -7546,8 +7758,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         
         where_clauses = []
         params: Dict[str, Any] = {}
-        # Use where_resolved if available (contains resolved custom columns), else fall back to spec.where
-        where_to_use = where_resolved if where_resolved else spec.where
+        # When using transform subquery (_base), use original column names (available as aliases)
+        # instead of resolved expressions which reference base table columns not in outer scope
+        uses_transform_subquery = "_base" in base_from_sql
+        where_to_use = spec.where if uses_transform_subquery else (where_resolved if where_resolved else spec.where)
         if where_to_use:
             for k, v in where_to_use.items():
                 if k in ("start", "startDate", "end", "endDate"):
@@ -7790,7 +8004,9 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                     with open_duck_native(settings.duckdb_path) as conn:
                         cur = conn.execute(f"SELECT * FROM {str(payload.source)} WHERE 1=0")
                         desc = getattr(cur, 'description', None) or []
-                        return set([str(col[0]) for col in desc])
+                        cols = set([str(col[0]) for col in desc])
+                        print(f"[_list_cols_for_base] DuckDB: Found {len(cols)} base columns: {sorted(cols)[:10]}", flush=True)
+                        return cols
                 eng = _engine_for_datasource(db, payload.datasourceId, actorId)
                 with eng.connect() as conn:
                     if (ds_type or '').lower() in ("mssql", "mssql+pymssql", "mssql+pyodbc"):
@@ -7798,8 +8014,13 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                     else:
                         probe = text(f"SELECT * FROM {str(payload.source)} WHERE 1=0")
                     res = conn.execute(probe)
-                    return set([str(c) for c in res.keys()])
-            except Exception:
+                    cols = set([str(c) for c in res.keys()])
+                    print(f"[_list_cols_for_base] SQL: Found {len(cols)} base columns: {sorted(cols)[:10]}", flush=True)
+                    return cols
+            except Exception as e:
+                print(f"[_list_cols_for_base] ERROR: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
                 return set()
         __cols = _list_cols_for_base()
         ds_transforms = _filter_by_basecols(ds_transforms, __cols)
@@ -7882,14 +8103,21 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                 needed_aliases = set()
 
             _keep_joins = True
+            print(f"[/distinct filtering] Requested field: '{payload.field}', root_alias: '{root_alias}'", flush=True)
+            print(f"[/distinct filtering] Transform aliases: {transform_aliases}", flush=True)
+            print(f"[/distinct filtering] Needed aliases for this field: {needed_aliases}", flush=True)
+            
+            # Keep original transforms for schema/column list
+            ds_transforms_for_schema = ds_transforms
+            
             if needed_aliases:
-                ds_ccs = [
+                ds_ccs_filtered = [
                     cc for cc in ds_ccs
                     if isinstance(cc, dict)
                     and cc.get('name')
                     and _norm_name(str(cc.get('name') or '')) in needed_aliases
                 ]
-                ds_trs = [
+                ds_trs_filtered = [
                     tr for tr in ds_trs
                     if isinstance(tr, dict)
                     and (
@@ -7905,20 +8133,28 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                         )
                     )
                 ]
+                dropped_trs = [tr.get('name') for tr in ds_trs if tr not in ds_trs_filtered and tr.get('name')]
+                print(f"[/distinct filtering] Dropped transforms for SQL: {dropped_trs}", flush=True)
+                ds_ccs = ds_ccs_filtered
+                ds_trs = ds_trs_filtered
             else:
                 # No alias-based dependencies are required for this field; drop all
                 # custom columns/transforms AND joins to avoid bringing in unused ones.
                 # A base column like "Time" does not need a JOIN to be distinct-queried.
+                print(f"[/distinct filtering] Field is a base column; dropping all transforms/joins for SQL", flush=True)
                 ds_ccs = []
                 ds_trs = []
                 _keep_joins = False
 
-            ds_transforms = {
+            # Use filtered transforms for SQL generation only
+            ds_transforms_for_sql = {
                 'customColumns': ds_ccs,
                 'transforms': ds_trs,
                 'joins': ((ds_transforms.get('joins') or []) if isinstance(ds_transforms, dict) else []) if _keep_joins else [],
                 'defaults': (ds_transforms.get('defaults') or {}) if isinstance(ds_transforms, dict) else {},
             }
+            # Keep using full transforms for schema
+            ds_transforms = ds_transforms_for_schema
         except Exception:
             # On any error, fall back to base-column-filtered transforms
             pass
@@ -8109,7 +8345,17 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
                             db_path = ":memory:"
                 except Exception:
                     pass
+            _distinct_remote_attachments: list = []
+            try:
+                if ds_info:
+                    _rat_ds = db.get(Datasource, ds_info.get("id"))
+                    if _rat_ds:
+                        _rat_opts = json.loads(getattr(_rat_ds, 'options_json', None) or '{}')
+                        _distinct_remote_attachments = (_rat_opts.get('transforms') or {}).get('remoteAttachments') or []
+            except Exception:
+                pass
             with open_duck_native(db_path) as conn:
+                _apply_duck_mysql_attachments(conn, _distinct_remote_attachments, db)
                 cur = conn.execute(sql_qm, vals)
                 rows = cur.fetchall()
             out_vals: list[Any] = []
