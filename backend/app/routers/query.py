@@ -50,6 +50,14 @@ try:
 except Exception:
     _HEAVY_LIMIT = 8
 
+# Concurrency limiter for /spec endpoint — prevents thread-pool starvation when
+# a report fires many variable queries simultaneously (configurable via SPEC_QUERY_CONCURRENCY)
+_SPEC_LIMIT = 4
+try:
+    _SPEC_LIMIT = int(os.environ.get("SPEC_QUERY_CONCURRENCY", "7") or "7")
+except Exception:
+    _SPEC_LIMIT = 4
+
 
 # ─── Date preset resolution (server-side) ─────────────────────────────
 # Converts symbolic __date_preset values to concrete __gte/__lt date ranges
@@ -161,12 +169,22 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
                 lwd = _prev_workday(today)
                 dlwd = _prev_workday(lwd)
                 gte = dlwd; lt = dlwd + timedelta(days=1)
+            elif preset == "twwtlwd":
+                ws = _working_week_start(today)
+                lwd = _prev_workday(today)
+                gte = ws; lt = lwd + timedelta(days=1)
             elif preset == "last_working_week":
                 ws = _working_week_start(today)
-                gte = ws - timedelta(days=7); lt = ws
+                if today.weekday() in weekend_days:
+                    # Today is a weekend: the working week that just ended (Mon → Mon+7)
+                    gte = ws; lt = ws + timedelta(days=7)
+                else:
+                    # Today is a weekday: Mon of this week → today (inclusive)
+                    gte = ws; lt = today + timedelta(days=1)
             elif preset == "week_before_last_working_week":
                 ws = _working_week_start(today)
-                gte = ws - timedelta(days=14); lt = ws - timedelta(days=7)
+                # Always: the complete working week before the current/last one
+                gte = ws - timedelta(days=7); lt = ws
             elif preset == "this_week":
                 ws = _week_start(today)
                 gte = ws; lt = ws + timedelta(days=7)
@@ -182,6 +200,16 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
                     lt = datetime(now.year + 1, 1, 1)
                 else:
                     lt = datetime(now.year, now.month + 1, 1)
+            elif preset == "tmtlwd":
+                # This Month to Last Working Day: 1st of current month → last working day (inclusive)
+                lwd = _prev_workday(today)
+                gte = datetime(now.year, now.month, 1)
+                lt = lwd + timedelta(days=1)
+            elif preset == "ytlwd":
+                # Year to Last Working Day: Jan 1 of current year → last working day (inclusive)
+                lwd = _prev_workday(today)
+                gte = datetime(now.year, 1, 1)
+                lt = lwd + timedelta(days=1)
             elif preset == "last_month":
                 first_this = datetime(now.year, now.month, 1)
                 lt = first_this
@@ -189,6 +217,63 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
                     gte = datetime(now.year - 1, 12, 1)
                 else:
                     gte = datetime(now.year, now.month - 1, 1)
+            elif preset == "last_working_month":
+                # Most recently completed calendar month – always last month regardless of
+                # whether the current month has trading data yet (avoids "this month = 0" on weekends)
+                first_this = datetime(now.year, now.month, 1)
+                lt = first_this
+                if now.month == 1:
+                    gte = datetime(now.year - 1, 12, 1)
+                else:
+                    gte = datetime(now.year, now.month - 1, 1)
+            elif preset == "month_before_last_working_month":
+                # Two calendar months ago
+                if now.month == 1:
+                    lt = datetime(now.year - 1, 12, 1)
+                    gte = datetime(now.year - 1, 11, 1)
+                elif now.month == 2:
+                    lt = datetime(now.year, 1, 1)
+                    gte = datetime(now.year - 1, 12, 1)
+                else:
+                    lt = datetime(now.year, now.month - 1, 1)
+                    gte = datetime(now.year, now.month - 2, 1)
+            # ── EOF (End-of-Period) presets ───────────────────────────────────────
+            # Each resolves to the single last working day of the period.
+            elif preset == "eof_last_working_week":
+                ws = _working_week_start(today)
+                # end = next Mon boundary so prev_workday gives Fri of the current/last week
+                end = ws + timedelta(days=7)
+                ld = _prev_workday(end)
+                # Cap at today — never return a future date
+                _lwd_today = _prev_workday(today + timedelta(days=1))
+                if ld > _lwd_today:
+                    ld = _lwd_today
+                gte = ld; lt = ld + timedelta(days=1)
+            elif preset == "eof_week_before_last_working_week":
+                ws = _working_week_start(today)
+                # prev_workday(ws) = Fri of the week before the current/last one
+                ld = _prev_workday(ws)
+                gte = ld; lt = ld + timedelta(days=1)
+            elif preset == "eof_this_week":
+                # Most recent working day in the current period, capped at today
+                ld = _prev_workday(today + timedelta(days=1))
+                gte = ld; lt = ld + timedelta(days=1)
+            elif preset == "eof_last_week":
+                ws = _week_start(today)
+                ld = _prev_workday(ws)
+                gte = ld; lt = ld + timedelta(days=1)
+            elif preset == "eof_last_working_month":
+                first_this = datetime(now.year, now.month, 1)
+                ld = _prev_workday(first_this)
+                gte = ld; lt = ld + timedelta(days=1)
+            elif preset == "eof_month_before_last_working_month":
+                # Last working day of 2 calendar months ago = prev_workday(first of last month)
+                if now.month == 1:
+                    first_of_lwm = datetime(now.year - 1, 12, 1)
+                else:
+                    first_of_lwm = datetime(now.year, now.month - 1, 1)
+                ld = _prev_workday(first_of_lwm)
+                gte = ld; lt = ld + timedelta(days=1)
             elif preset == "this_quarter":
                 q = (now.month - 1) // 3
                 gte = datetime(now.year, q * 3 + 1, 1)
@@ -496,6 +581,27 @@ def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: 
 if _HEAVY_LIMIT <= 0:
     _HEAVY_LIMIT = 1
 _HEAVY_SEM = threading.BoundedSemaphore(_HEAVY_LIMIT)
+
+if _SPEC_LIMIT <= 0:
+    _SPEC_LIMIT = 1
+_SPEC_SEM = threading.BoundedSemaphore(_SPEC_LIMIT)
+
+def _spec_concurrency_guard():
+    """FastAPI dependency: cap concurrent /spec queries to prevent thread-pool starvation.
+    Blocks up to 45 s for a slot; returns HTTP 503 if the server is still overloaded.
+    Set SPEC_QUERY_CONCURRENCY env var to tune the limit (default: 4).
+    """
+    acquired = _SPEC_SEM.acquire(blocking=True, timeout=45)
+    if not acquired:
+        raise HTTPException(
+            status_code=503,
+            detail="Server busy: too many concurrent queries. Please retry in a moment.",
+            headers={"Retry-After": "5"},
+        )
+    try:
+        yield
+    finally:
+        _SPEC_SEM.release()
 
 # Helper: Resolve table ID to current name
 def _resolve_table_name(ds: Any, source_table_id: str | None, source_name: str | None) -> str | None:
@@ -4504,7 +4610,17 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
 
             # Replace named params in the inner SQL with positional '?' for duckdb
             inner_qm = re.sub(r":([A-Za-z_][A-Za-z0-9_]*)", "?", sql_inner)
-            sql_native = f"SELECT * FROM ({inner_qm}) AS _q LIMIT {limit_lit} OFFSET {offset_lit}"
+            # Hoist ORDER BY from subquery to outer LIMIT/OFFSET so sort applies to the full
+            # dataset before pagination (ORDER BY inside a subquery is not guaranteed by SQL
+            # standard and may be silently dropped by the query optimizer).
+            _iqm_upper = inner_qm.upper()
+            _ob_pos = _iqm_upper.rfind(' ORDER BY ')
+            if _ob_pos >= 0:
+                _ob_clause = inner_qm[_ob_pos + len(' ORDER BY '):].strip()
+                _ob_base = inner_qm[:_ob_pos].rstrip()
+                sql_native = f"SELECT * FROM ({_ob_base}) AS _q ORDER BY {_ob_clause} LIMIT {limit_lit} OFFSET {offset_lit}"
+            else:
+                sql_native = f"SELECT * FROM ({inner_qm}) AS _q LIMIT {limit_lit} OFFSET {offset_lit}"
             # Build positional values list in order of occurrence
             values = [params.get(nm) for nm in name_order]
 
@@ -4709,7 +4825,19 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                         f"ORDER BY __rn OFFSET {offset_lit} ROWS FETCH NEXT {limit_lit} ROWS ONLY"
                     )
             else:
-                sql_text = text(f"SELECT * FROM ({sql_inner}) AS _q LIMIT {limit_lit} OFFSET {offset_lit}")
+                # Hoist ORDER BY from subquery to outer LIMIT/OFFSET (same fix as MSSQL path above).
+                # ORDER BY inside a subquery is not guaranteed by the SQL standard and is ignored
+                # by PostgreSQL and some other engines, causing sort to silently apply only to the
+                # current page rather than the full dataset.
+                _si = (sql_inner or "").strip()
+                _si_upper = _si.upper()
+                _ob_pos2 = _si_upper.rfind(' ORDER BY ')
+                if _ob_pos2 >= 0:
+                    _ob_clause2 = _si[_ob_pos2 + len(' ORDER BY '):].strip()
+                    _ob_base2 = _si[:_ob_pos2].rstrip()
+                    sql_text = text(f"SELECT * FROM ({_ob_base2}) AS _q ORDER BY {_ob_clause2} LIMIT {limit_lit} OFFSET {offset_lit}")
+                else:
+                    sql_text = text(f"SELECT * FROM ({_si}) AS _q LIMIT {limit_lit} OFFSET {offset_lit}")
             try:
                 with engine.connect() as conn:
                     # Cache lookup for data
@@ -4823,7 +4951,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
 
 
 @router.post("/spec", response_model=QueryResponse)
-def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
+def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _guard: None = Depends(_spec_concurrency_guard)) -> QueryResponse:
     """Compile a QuerySpec to SQL and execute via the standard path.
 
     - DuckDB: use Ibis to compile.
@@ -4944,6 +5072,32 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     # Validate required fields
     if not (payload.spec.source and str(payload.spec.source).strip()):
         raise HTTPException(status_code=400, detail="spec.source is required for /query/spec")
+
+    # Resolve 2-part source (schema.table) to 3-part (catalog.schema.table) for
+    # MySQL-attached catalogs in DuckDB. Without this, "mt5"."mt5_deals_lp" fails
+    # because the mt5 schema lives under a non-current catalog (e.g. pcma).
+    try:
+        _src_parts = str(payload.spec.source or '').split('.')
+        if (
+            len(_src_parts) == 2
+            and _duckdb is not None
+            and 'mysql' not in str(ds_type or '').lower()
+            and 'mssql' not in str(ds_type or '').lower()
+            and 'postgres' not in str(ds_type or '').lower()
+        ):
+            with open_duck_native(get_active_duck_path()) as _rconn:
+                _rrow = _rconn.execute(
+                    "SELECT table_catalog FROM information_schema.tables "
+                    "WHERE table_schema = ? AND table_name = ? "
+                    "AND table_catalog <> current_catalog() LIMIT 1",
+                    (_src_parts[0], _src_parts[1])
+                ).fetchone()
+                if _rrow:
+                    _resolved_cat = str(_rrow[0])
+                    payload.spec.source = f"{_resolved_cat}.{payload.spec.source}"
+                    print(f"[CatalogResolve] '{_src_parts[0]}.{_src_parts[1]}' -> '{payload.spec.source}'", flush=True)
+    except Exception:
+        pass
 
     # Helpers available to all branches
     def _q_ident(name: str) -> str:
@@ -5663,13 +5817,28 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 _lds_num = f"SUM({_lds_y_clean})"
             else:
                 _lds_num = f"SUM({vcol})"
-            _lds_max_sub = f"(SELECT MAX({_lds_date_expr}) FROM {_period_from_sql}{where_clause})"
-            _lds_pred = f"{_lds_date_expr} = {_lds_max_sub}"
-            if where_parts:
-                _lds_where = f" WHERE {' AND '.join(where_parts)} AND {_lds_pred}"
+            if 'duckdb' in d:
+                # Use a window function instead of a correlated subquery so the date-bound
+                # params (:w_*_gte / :w_*_lt) appear only once in the SQL.  DuckDB's
+                # positional-? binding can mis-map duplicate param occurrences that appear
+                # inside a nested subquery, causing the predicate to be ignored and all
+                # rows in the window to be summed.
+                _lds_inner_where = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
+                sql_lds = (
+                    f"SELECT SUM(_lds_v) AS value FROM ("
+                    f"SELECT {_lds_y_clean} AS _lds_v, {_lds_date_expr} AS _lds_d, "
+                    f"MAX({_lds_date_expr}) OVER () AS _lds_md "
+                    f"FROM {_period_from_sql}{_lds_inner_where}"
+                    f") WHERE _lds_d = _lds_md"
+                )
             else:
-                _lds_where = f" WHERE {_lds_pred}"
-            sql_lds = f"SELECT {_lds_num} AS value FROM {_period_from_sql}{_lds_where}"
+                _lds_max_sub = f"(SELECT MAX({_lds_date_expr}) FROM {_period_from_sql}{where_clause})"
+                _lds_pred = f"{_lds_date_expr} = {_lds_max_sub}"
+                if where_parts:
+                    _lds_where = f" WHERE {' AND '.join(where_parts)} AND {_lds_pred}"
+                else:
+                    _lds_where = f" WHERE {_lds_pred}"
+                sql_lds = f"SELECT {_lds_num} AS value FROM {_period_from_sql}{_lds_where}"
             print(f"[LastDailySum] val={val_field}, date={date_field}, is_unix={_avg_is_unix}", flush=True)
             print(f"[LastDailySum] SQL: {sql_lds[:800]}", flush=True)
             if params_avg:
@@ -5816,11 +5985,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
         result = build_sql(
             dialect=ds_type,
-            source=spec.source,
+            source=_q_source(spec.source),
             base_select=eff_select,
             custom_columns=ds_transforms.get("customColumns", []),
             transforms=ds_transforms.get("transforms", []),
-            joins=ds_transforms.get("joins", []),  # Use filtered joins from ds_transforms
+            joins=ds_transforms.get("joins", []),
             defaults=ds_transforms.get("defaults", {}),
             limit=None,
             base_cols=_base_cols,
@@ -5971,7 +6140,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         if _sort_dir not in ('ASC', 'DESC'):
             _sort_dir = 'ASC'
         _order_sql = f" ORDER BY {_q_ident(_sort_col)} {_sort_dir}" if _sort_col else ""
-        sql_inner = f"SELECT * FROM ({base_sql}) AS _base{where_sql}{_order_sql}"
+        sql_inner = f"SELECT *{base_from_sql}{where_sql}{_order_sql}"
         _prefer_duck_has = _duck_has_table(spec.source)
         _eff_ds_id = (None if (prefer_local and _prefer_duck_has) else payload.datasourceId)
         print(f"[spec->run_query] prefer_local={prefer_local} _duck_has_table={_prefer_duck_has} datasourceId={_eff_ds_id}", flush=True)

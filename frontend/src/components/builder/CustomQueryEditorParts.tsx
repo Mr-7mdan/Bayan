@@ -100,10 +100,15 @@ export type Condition = {
 
 export function uid() { return Math.random().toString(36).slice(2, 9) }
 
-function qi(n: string) { return `"${n.replace(/"/g, '""')}"` }
+function qi(n: string, dialect?: string) {
+  if (dialect && (dialect.toLowerCase().includes('mysql') || dialect.toLowerCase().includes('mariadb'))) {
+    return `\`${n.replace(/`/g, '``')}\``
+  }
+  return `"${n.replace(/"/g, '""')}"`
+}
 
-function lhs(col: string, dt: string) {
-  return dt ? `DATE_TRUNC('${dt}', ${qi(col)})` : qi(col)
+function lhs(col: string, dt: string, dialect?: string) {
+  return dt ? `DATE_TRUNC('${dt}', ${qi(col, dialect)})` : qi(col, dialect)
 }
 
 function lit(v: string, kind: ColKind) {
@@ -113,14 +118,14 @@ function lit(v: string, kind: ColKind) {
   return `'${t.replace(/'/g, "''")}'`
 }
 
-export function buildWhere(conds: Condition[], km: Record<string, ColKind>): string {
+export function buildWhere(conds: Condition[], km: Record<string, ColKind>, dialect?: string): string {
   const valid = conds.filter((c) => c.column)
   if (!valid.length) return ''
   const parts: string[] = []
   valid.forEach((c, i) => {
     const op = ALL_OPS.find((o) => o.value === c.operator)
     const kind = km[c.column] ?? 'unknown'
-    const l = lhs(c.column, c.dateTrunc)
+    const l = lhs(c.column, c.dateTrunc, dialect)
     let expr = ''
     if (op?.noValue) {
       expr = `${l} ${c.operator}`
@@ -130,6 +135,12 @@ export function buildWhere(conds: Condition[], km: Record<string, ColKind>): str
       const vals = c.value.split(',').map((v) => v.trim()).filter(Boolean)
         .map((v) => lit(v, kind)).join(', ')
       expr = `${l} ${c.operator} (${vals || "''"})`
+    } else if (kind === 'date' && c.operator === '=' && !c.dateTrunc && /^\d{4}-\d{2}-\d{2}$/.test(c.value.trim())) {
+      const dateStr = c.value.trim()
+      const nextDay = new Date(dateStr + 'T00:00:00')
+      nextDay.setDate(nextDay.getDate() + 1)
+      const nextDateStr = nextDay.toISOString().slice(0, 10)
+      expr = `${l} >= '${dateStr} 00:00:00' AND ${l} < '${nextDateStr} 00:00:00'`
     } else {
       expr = `${l} ${c.operator} ${lit(c.value, kind)}`
     }
@@ -142,12 +153,13 @@ export function buildWhere(conds: Condition[], km: Record<string, ColKind>): str
 export function buildQuery(
   schema: string | null | undefined, table: string,
   selCols: string[], conds: Condition[], km: Record<string, ColKind>,
+  dialect?: string
 ): string {
   if (!table) return '-- select a source table first'
-  const tbl = schema ? `${qi(schema)}.${qi(table)}` : qi(table)
-  const sel = selCols.length ? selCols.map(qi).join(',\n  ') : '*'
+  const tbl = schema ? `${qi(schema, dialect)}.${qi(table, dialect)}` : qi(table, dialect)
+  const sel = selCols.length ? selCols.map(c => qi(c, dialect)).join(',\n  ') : '*'
   let sql = `SELECT ${sel.includes('\n') ? '\n  ' + sel : sel}\nFROM ${tbl}`
-  const w = buildWhere(conds, km)
+  const w = buildWhere(conds, km, dialect)
   if (w) sql += `\nWHERE ${w}`
   return sql
 }

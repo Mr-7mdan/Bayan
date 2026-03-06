@@ -110,28 +110,34 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
   })
 
   // ── Extract columns for the currently selected table/view ───────────────────
-  const schemaColumns = useMemo(() => {
-    const src = local?.querySpec?.source
-    const data = schemaQ.data as IntrospectResponse | undefined
-    if (!src || !data) return [] as { name: string; type?: string | null }[]
-
-    // Try "schema.table" split first
-    const parts = src.split('.')
-    if (parts.length >= 2) {
-      const tblName = parts[parts.length - 1]
-      const schName = parts.slice(0, parts.length - 1).join('.')
-      const sch = (data.schemas || []).find(s => s.name === schName)
-      const tbl = sch?.tables.find(t => t.name === tblName)
-      if (tbl) return tbl.columns || []
-    }
-
-    // Fallback: search all schemas by table name
-    for (const sch of (data.schemas || [])) {
-      const tbl = sch.tables.find(t => t.name === src || `${sch.name}.${t.name}` === src)
-      if (tbl) return tbl.columns || []
-    }
-    return []
-  }, [schemaQ.data, local?.querySpec?.source])
+  // Fresh lookup on every source change — same pattern as VariableEditor (staleTime: 0)
+  const columnsQ = useQuery({
+    queryKey: ['cfg-columns', effectiveDsId ?? '_local', local?.querySpec?.source ?? ''],
+    queryFn: async () => {
+      const src = local?.querySpec?.source
+      if (!src) return [] as { name: string; type?: string | null }[]
+      const r = effectiveDsId ? await Api.introspect(effectiveDsId) : await Api.introspectLocal()
+      const raw = r as any
+      if (Array.isArray(raw?.schemas)) {
+        for (const schema of raw.schemas) {
+          if (Array.isArray(schema.tables)) {
+            const tbl = schema.tables.find((t: any) => {
+              const tableName = t.name || String(t)
+              return tableName === src || `${schema.name}.${tableName}` === src
+            })
+            if (tbl?.columns) {
+              return (tbl.columns as any[]).map((c: any) => ({ name: c.name || String(c), type: c.type ?? null }))
+            }
+          }
+        }
+      }
+      return [] as { name: string; type?: string | null }[]
+    },
+    enabled: !!(local?.querySpec?.source),
+    staleTime: 0,
+    retry: 0,
+  })
+  const schemaColumns: { name: string; type?: string | null }[] = columnsQ.data || []
 
   // ── Live result columns from widget (table-columns-change event) ─────────────
   const [resultColumns, setResultColumns] = useState<string[]>([])

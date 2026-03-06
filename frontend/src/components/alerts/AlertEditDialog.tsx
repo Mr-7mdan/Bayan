@@ -419,7 +419,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
               )}
             </div>
           </div>
-          <label className="text-sm md:col-span-3">Template<input className="mt-1 w-full h-8 px-2 rounded-md border bg-card" placeholder="Current KPI value: {{kpi}}" value={template} onChange={(e)=>setTemplate(e.target.value)} /></label>
+          <label className="text-sm md:col-span-3">Template<textarea className="mt-1 w-full h-20 px-2 py-1 rounded-md border bg-card resize-y" placeholder="Current KPI value: {{kpi}}" value={template} onChange={(e)=>setTemplate(e.target.value)} /></label>
         </div>
         <div className="mt-4">
           <div className="text-sm font-medium mb-2">Trigger</div>

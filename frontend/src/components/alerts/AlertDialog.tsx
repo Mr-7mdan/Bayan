@@ -1694,7 +1694,9 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                       {k:'TABLE_HTML', l:'TABLE HTML'},
                       {k:'REPORT_HTML', l:'REPORT HTML'},
                       {k:'source', l:'Source'},
-                      {k:'datasourceId', l:'Datasource'}
+                      {k:'datasourceId', l:'Datasource'},
+                      {k:'RecipientName', l:'Recipient Name'},
+                      {k:'date', l:'Date'}
                     ].map(c => (
                       <button key={c.k} type="button" className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] text-xs" onClick={()=> {
                         const tok = ` {{${c.k}}}`

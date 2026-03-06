@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useMemo, useEffect } from 'react'
 import { RiCodeSSlashLine, RiListCheck2, RiAddLine, RiMagicLine } from '@remixicon/react'
 import * as sqlFormatter from 'sql-formatter-plus'
 import {
@@ -19,18 +19,20 @@ function tryFmt(sql: string) {
 interface Props {
   value: string
   onChange: (v: string) => void
+  onPreviewChange?: (v: string) => void
   columns: string[]
   columnMeta?: CM[]
   sourceTable: string
   sourceSchema?: string | null
   className?: string
+  dialect?: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 export default function CustomQueryEditor({
-  value, onChange, columns, columnMeta, sourceTable, sourceSchema, className,
+  value, onChange, onPreviewChange, columns, columnMeta, sourceTable, sourceSchema, className, dialect,
 }: Props) {
   const [mode, setMode]       = useState<'sql' | 'builder'>('sql')
   const [conds, setConds]     = useState<Condition[]>([])
@@ -79,7 +81,7 @@ export default function CustomQueryEditor({
   const applyBuilder = () => {
     setBErr('')
     if (conds.some((c: Condition) => !c.column)) { setBErr('Select a column for every condition.'); return }
-    onChange(tryFmt(buildQuery(sourceSchema, sourceTable, [...selCols], conds, km)))
+    onChange(tryFmt(buildQuery(sourceSchema, sourceTable, [...selCols], conds, km, dialect)))
     setMode('sql')
   }
 
@@ -90,9 +92,13 @@ export default function CustomQueryEditor({
 
   // ── Live preview ─────────────────────────────────────────────────────────────
   const preview = useMemo(
-    () => tryFmt(buildQuery(sourceSchema, sourceTable, [...selCols], conds, km)),
-    [sourceSchema, sourceTable, selCols, conds, km],
+    () => tryFmt(buildQuery(sourceSchema, sourceTable, [...selCols], conds, km, dialect)),
+    [sourceSchema, sourceTable, selCols, conds, km, dialect],
   )
+  
+  useEffect(() => {
+    if (onPreviewChange) onPreviewChange(preview)
+  }, [preview, onPreviewChange])
 
   // ── Tab button helper ────────────────────────────────────────────────────────
   const tabCls = (m: 'sql' | 'builder') =>

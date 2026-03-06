@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 def _fetch_snapshot_png_direct(*, dashboard_id: Optional[str], public_id: Optional[str], token: Optional[str], widget_id: str, datasource_id: Optional[str], width: int, height: int, theme: str, actor_id: Optional[str], wait_ms: int = 4000, retries: int = 0, backoff_sec: float = 0.5) -> Optional[bytes]:
-    import os as _os
+    import os as _os, platform as _platform
     _pbp = getattr(settings, 'playwright_browsers_path', None)
-    if _pbp and not _os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
-        _os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(_pbp)
+    if _pbp and str(_pbp).strip() and not _os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
+        _pbp_s = str(_pbp).strip()
+        _is_win_path = bool(_re.match(r'^[A-Za-z]:[/\\]', _pbp_s))
+        if not _is_win_path or _platform.system() == 'Windows':
+            _os.environ['PLAYWRIGHT_BROWSERS_PATH'] = _pbp_s
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
-    except Exception:
+    except Exception as _pw_err:
+        try:
+            import logging as _lg
+            _lg.getLogger(__name__).error("[Snapshot] Playwright import failed — install playwright and run 'playwright install chromium': %s", _pw_err)
+        except Exception:
+            pass
         return None
     base_f = (settings.frontend_base_url or "http://localhost:3000").rstrip("/")
     qs: dict[str, str] = {
@@ -31,6 +39,11 @@ def _fetch_snapshot_png_direct(*, dashboard_id: Optional[str], public_id: Option
     else:
         return None
     url = f"{base_f}/render/embed/widget?{urlencode(qs)}"
+    try:
+        import logging as _lg
+        _lg.getLogger(__name__).info("[Snapshot] Starting: widget=%s url=%s retries=%s", widget_id, url, retries)
+    except Exception:
+        pass
     last_err: Exception | None = None
     for attempt in range(0, max(0, int(retries)) + 1):
         try:
@@ -146,6 +159,11 @@ def _fetch_snapshot_png_direct(*, dashboard_id: Optional[str], public_id: Option
                         png = el.screenshot(type="png", omit_background=True)
                     else:
                         png = page.screenshot(type="png", full_page=False, omit_background=True)
+                    try:
+                        import logging as _lg
+                        _lg.getLogger(__name__).info("[Snapshot] Captured %d bytes for widget=%s", len(png) if png else 0, widget_id)
+                    except Exception:
+                        pass
                     context.close()
                     return png
                 finally:
@@ -197,7 +215,7 @@ import xml.etree.ElementTree as ET
 from sqlalchemy.orm import Session
 from .metrics import counter_inc
 
-from .models import AlertRule, EmailConfig, SmsConfigHadara, Dashboard
+from .models import AlertRule, EmailConfig, SmsConfigHadara, Dashboard, Contact
 from .security import decrypt_text
 from .routers.query import run_query_spec
 from .schemas import QuerySpecRequest, QueryResponse
@@ -965,11 +983,14 @@ def _html_to_pdf(html: str, *, width: str = "210mm", height: str = "297mm", land
     When fit_one_page=True the PDF page height is dynamically measured from the
     rendered content so the entire report always fits on exactly one page.
     """
-    import os as _os
+    import os as _os, platform as _platform
     _pbp = getattr(settings, 'playwright_browsers_path', None)
-    if _pbp and not _os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
-        _os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(_pbp)
-        logger.info("[PDF] Set PLAYWRIGHT_BROWSERS_PATH=%s", _pbp)
+    if _pbp and str(_pbp).strip() and not _os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
+        _pbp_s = str(_pbp).strip()
+        _is_win_path = bool(_re.match(r'^[A-Za-z]:[/\\]', _pbp_s))
+        if not _is_win_path or _platform.system() == 'Windows':
+            _os.environ['PLAYWRIGHT_BROWSERS_PATH'] = _pbp_s
+            logger.info("[PDF] Set PLAYWRIGHT_BROWSERS_PATH=%s", _pbp_s)
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -1182,8 +1203,10 @@ def _fetch_snapshot_png_via_http(*, dashboard_id: Optional[str], public_id: Opti
 # --- Email / SMS senders ---
 
 def send_email(db: Session, *, subject: str, to: list[str], html: str, replacements: Optional[dict[str, str]] = None, inline_images: Optional[list[tuple[str, bytes, str, str]]] = None, attachments: Optional[list[tuple[str, bytes, str]]] = None, already_wrapped: bool = False) -> Tuple[bool, Optional[str]]:
+    logger.info("[Email] send_email: to=%s subject=%r attachments=%d", to, subject, len(attachments) if attachments else 0)
     cfg: EmailConfig | None = db.query(EmailConfig).first()
     if not cfg or not cfg.host or not cfg.username or not cfg.password_encrypted:
+        logger.error("[Email] Not configured: cfg_exists=%s host=%s username=%s", bool(cfg), getattr(cfg, 'host', None), getattr(cfg, 'username', None))
         return False, "Email is not configured"
     password = decrypt_text(cfg.password_encrypted or "") or ""
     try:
@@ -1309,23 +1332,46 @@ def send_email(db: Session, *, subject: str, to: list[str], html: str, replaceme
                     msg.add_attachment(att_data, maintype=att_main, subtype=att_sub, filename=att_filename)
                 except Exception as att_err:
                     logger.warning("Failed to attach %s: %s", att_filename, att_err)
-        server = smtplib.SMTP(cfg.host, int(cfg.port or 587), timeout=30)
-        try:
-            if cfg.use_tls:
-                server.starttls()
-            server.login(cfg.username, password)
-            server.send_message(msg)
-        finally:
+        logger.info("[Email] SMTP connect: host=%s port=%s tls=%s from=%s", cfg.host, cfg.port, cfg.use_tls, cfg.username)
+        _send_result: list = []  # [ok: bool, err: str|None]
+
+        def _do_send():
             try:
-                server.quit()
-            except Exception:
-                pass
+                server = smtplib.SMTP(cfg.host, int(cfg.port or 587), timeout=30)
+                try:
+                    if cfg.use_tls:
+                        server.starttls()
+                    server.login(cfg.username, password)
+                    server.send_message(msg)
+                    logger.info("[Email] Sent OK to=%s", to)
+                    _send_result.append((True, None))
+                finally:
+                    try:
+                        server.quit()
+                    except Exception:
+                        pass
+            except Exception as _e:
+                logger.error("[Email] Send failed to=%s error=%s", to, _e, exc_info=True)
+                _send_result.append((False, str(_e)))
+
+        import threading as _threading
+        _t = _threading.Thread(target=_do_send, daemon=True)
+        _t.start()
+        _t.join(timeout=45)
+        if _send_result:
+            _ok, _err = _send_result[0]
+            if not _ok:
+                raise Exception(_err)
+        else:
+            # Still running after 45s — fire-and-forget, treat as submitted
+            logger.info("[Email] SMTP send still in progress after 45s — treating as submitted to=%s", to)
         try:
             counter_inc("notifications_email_sent_total")
         except Exception:
             pass
         return True, None
     except Exception as e:
+        logger.error("[Email] Send failed to=%s error=%s", to, e, exc_info=True)
         try:
             counter_inc("notifications_email_failed_total")
         except Exception:
@@ -1803,6 +1849,20 @@ def _apply_placeholders(s: str, repl: dict[str, str]) -> str:
     return out
 
 
+_RECIPIENT_NAME_PAT = _re.compile(r"\{\{\s*RecipientName\s*\}\}", _re.IGNORECASE)
+
+
+def _lookup_contact_name(db: Session, email: str) -> str:
+    """Return the contact name for the given email address, or the email itself if not found."""
+    try:
+        c = db.query(Contact).filter(Contact.email.ilike(email.strip())).first()
+        if c and c.name:
+            return c.name
+    except Exception:
+        pass
+    return email
+
+
 def _now_matches_time(cond: dict) -> bool:
     try:
         import os as _os
@@ -1836,14 +1896,17 @@ def _now_matches_time(cond: dict) -> bool:
 from typing import Callable
 
 def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_time_window: bool = False, progress_cb: Optional[Callable[[dict], None]] = None) -> Tuple[bool, str]:
+    logger.info("[RunRule] START rule=%r id=%s force=%s", rule.name, rule.id, force_time_ok)
     try:
         cfg = json.loads(rule.config_json or "{}")
     except Exception:
+        logger.error("[RunRule] Invalid config for rule id=%s", rule.id)
         return False, "Invalid config"
     triggers = cfg.get("triggers") or []
     actions = cfg.get("actions") or []
     ds_id = cfg.get("datasourceId")
     render = cfg.get("render") or {}
+    logger.info("[RunRule] render_mode=%s actions=%d triggers=%d template_present=%s", render.get('mode'), len(actions), len(triggers), bool(cfg.get('template')))
     template_present = False
     try:
         template_present = bool(str(cfg.get("template") or "").strip())
@@ -1893,6 +1956,7 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
             except Exception: pass
         logic = str(tg.get("logic") or "AND").upper()
         fired = (time_ok and thr_ok) if logic == "AND" else (time_ok or thr_ok)
+        logger.info("[RunRule] V2 threshold: time_ok=%s thr_ok=%s kpi=%s logic=%s fired=%s", time_ok, thr_ok, kpi_value, logic, fired)
         if not fired:
             if force_time_ok:
                 fired = True
@@ -2270,9 +2334,11 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                         # Do not attempt Playwright without dashboard context
                         raise Exception("snapshot_missing_dashboard_id")
                     snap_wait_ms = 30000 if mode_ == 'report' else 20000
+                    logger.info("[RunRule] V2 snapshot: wid=%s did=%s mode=%s actor=%s wait_ms=%s", wid, did, mode_, actor_for_snapshot, snap_wait_ms)
                     png = _fetch_snapshot_png_direct(dashboard_id=did, public_id=None, token=None, widget_id=str(wid), datasource_id=ds_id, width=w, height=h, theme=th, actor_id=actor_for_snapshot, wait_ms=snap_wait_ms, retries=1)
                     if png:
                         snapshot_ok = True
+                        logger.info("[RunRule] V2 snapshot OK: %d bytes", len(png))
                         if progress_cb:
                             try: progress_cb({"id": "snapshot", "status": "ok", "mode": mode_})
                             except Exception: pass
@@ -2287,11 +2353,12 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                             except Exception:
                                 pass
                     else:
+                        logger.warning("[RunRule] V2 snapshot returned None: wid=%s did=%s mode=%s — check [Snapshot] logs above", wid, did, mode_)
                         if progress_cb:
                             try: progress_cb({"id": "snapshot", "status": "error", "mode": mode_, "error": "returned_none"})
                             except Exception: pass
-            except Exception:
-                pass
+            except Exception as _snap_exc:
+                logger.error("[RunRule] V2 snapshot exception: %s", _snap_exc, exc_info=True)
             if render.get("mode") == "table":
                 try:
                     # If not already set by the snapshot/table branch above, set a basic fallback
@@ -2387,6 +2454,7 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                 "datasourceId": str(ds_id or ""),
                 "alertName": rule.name or "",
                 "runAt": _fmt_run_at(datetime.utcnow()),
+                "date": datetime.utcnow().strftime("%d/%m/%Y"),
             }
             # carry over widget image/table replacements
             for k, v in (replacements_extra or {}).items():
@@ -2394,8 +2462,8 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                     ctx_tokens[k] = str(v)
                 except Exception:
                     pass
-            # Email insert(s)
-            email_insert = str(cfg.get("template") or "")
+            # Email insert(s) — convert bare newlines to <br> so Enter-key line breaks render in HTML
+            email_insert = str(cfg.get("template") or "").replace('\n', '<br>\n')
             legend_field = thr_ctx.get("legendField")
             want_multi = False
             if email_insert and legend_field:
@@ -2599,7 +2667,21 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                             logger.error("[RunRule] PDF: widget config NOT FOUND for widget_id=%s dashboard_id=%s", wid_pdf, did_pdf)
                     except Exception as pdf_err:
                         logger.error("PDF attachment generation failed: %s", pdf_err, exc_info=True)
-                ok, err = send_email(db, subject=subj, to=to, html=html, replacements=replacements_all, inline_images=inline_images, attachments=email_attachments or None)
+                _has_rname_v2 = bool(_RECIPIENT_NAME_PAT.search(html or "") or _RECIPIENT_NAME_PAT.search(str(cfg.get("template") or "")))
+                logger.info("[RunRule] V2 email action: to=%s subject=%r per_recipient=%s", to, subj, _has_rname_v2)
+                if _has_rname_v2:
+                    _per_errs_v2: list[str] = []
+                    for _recip_v2 in to:
+                        _rname_v2 = _lookup_contact_name(db, _recip_v2)
+                        logger.info("[RunRule] V2 per-recipient: to=%s name=%r", _recip_v2, _rname_v2)
+                        _reps_v2 = dict(replacements_all); _reps_v2["RecipientName"] = _rname_v2
+                        _ok_v2, _err_v2 = send_email(db, subject=subj, to=[_recip_v2], html=html, replacements=_reps_v2, inline_images=inline_images, attachments=email_attachments or None)
+                        if not _ok_v2 and _err_v2:
+                            _per_errs_v2.append(_err_v2)
+                    ok = len(_per_errs_v2) == 0
+                    err = ("; ".join(_per_errs_v2)) if _per_errs_v2 else None
+                else:
+                    ok, err = send_email(db, subject=subj, to=to, html=html, replacements=replacements_all, inline_images=inline_images, attachments=email_attachments or None)
                 logger.info("[RunRule] send_email result: ok=%s err=%s attachments=%d", ok, err, len(email_attachments))
                 if not ok and err:
                     errs.append(f"email: {err}")
@@ -2783,10 +2865,12 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                     try: progress_cb({"id": "snapshot", "status": "error", "mode": "chart", "error": "missing_dashboard_id", "wid": str(wid), "did": str(did or '')})
                     except Exception: pass
                 raise Exception("snapshot_missing_dashboard_id")
+            logger.info("[RunRule] V1 snapshot: wid=%s did=%s actor=%s", wid, did, actor_for_snapshot)
             png = _fetch_snapshot_png_direct(dashboard_id=did, public_id=None, token=None, widget_id=str(wid), datasource_id=ds_id, width=w, height=h, theme=th, actor_id=actor_for_snapshot, wait_ms=20000, retries=1)
             if png:
                 widget_img_bytes = png
                 snapshot_ok_v1 = True
+                logger.info("[RunRule] V1 snapshot OK: %d bytes", len(png))
                 if progress_cb:
                     try: progress_cb({"id": "snapshot", "status": "ok", "mode": "chart"})
                     except Exception: pass
@@ -2796,11 +2880,12 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                 except Exception:
                     pass
             else:
+                logger.warning("[RunRule] V1 snapshot returned None: wid=%s did=%s — check [Snapshot] logs above", wid, did)
                 if progress_cb:
                     try: progress_cb({"id": "snapshot", "status": "error", "mode": "chart", "error": "returned_none"})
                     except Exception: pass
-    except Exception:
-        pass
+    except Exception as _v1_snap_exc:
+        logger.error("[RunRule] V1 snapshot exception: %s", _v1_snap_exc, exc_info=True)
 
     # Compute placeholders
     dash_name = None
@@ -2817,6 +2902,7 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
         "runAt": _fmt_run_at(now),
         "range": str(cfg.get("range") or "current period"),
         "kpi": ("" if kpi_value is None else str(kpi_value)),
+        "date": now.strftime("%d/%m/%Y"),
     }
 
     # Add template tokens for widget placeholders
@@ -3085,6 +3171,7 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
     if template:
         try:
             t = _apply_placeholders(str(template), placeholders)
+            t = t.replace('\n', '<br>\n')
             html_parts.append(f"<div>{t}</div>")
         except Exception:
             pass
@@ -3136,8 +3223,22 @@ def run_rule(db: Session, rule: AlertRule, *, force_time_ok: bool = False, skip_
                             email_attachments_v1.append((pdf_name, pdf_bytes, "application/pdf"))
                 except Exception as pdf_err:
                     logger.warning("PDF attachment generation failed (v1): %s", pdf_err)
-            ok, err = send_email(db, subject=subj, to=to, html=html, replacements=placeholders, inline_images=inline_images, attachments=email_attachments_v1 or None)
+            _has_rname_v1 = bool(_RECIPIENT_NAME_PAT.search(html or "") or _RECIPIENT_NAME_PAT.search(str(cfg.get("template") or "")))
+            logger.info("[RunRule] V1 email action: to=%s subject=%r per_recipient=%s", to, subj, _has_rname_v1)
+            if _has_rname_v1:
+                _per_errs_v1: list[str] = []
+                for _recip_v1 in to:
+                    _rname_v1 = _lookup_contact_name(db, _recip_v1)
+                    logger.info("[RunRule] V1 per-recipient: to=%s name=%r", _recip_v1, _rname_v1)
+                    _reps_v1 = dict(placeholders); _reps_v1["RecipientName"] = _rname_v1
+                    _ok_v1, _err_v1 = send_email(db, subject=subj, to=[_recip_v1], html=html, replacements=_reps_v1, inline_images=inline_images, attachments=email_attachments_v1 or None)
+                    if not _ok_v1 and _err_v1:
+                        _per_errs_v1.append(_err_v1)
+                ok, err = (len(_per_errs_v1) == 0), ("; ".join(_per_errs_v1) if _per_errs_v1 else None)
+            else:
+                ok, err = send_email(db, subject=subj, to=to, html=html, replacements=placeholders, inline_images=inline_images, attachments=email_attachments_v1 or None)
             if not ok and err:
+                logger.error("[RunRule] V1 email send failed: %s", err)
                 errs.append(f"email: {err}")
         elif atype == "sms":
             to = [str(x).strip() for x in (a.get("to") or []) if str(x).strip()]

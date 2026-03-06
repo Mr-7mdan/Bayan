@@ -9,6 +9,9 @@ import { Api } from '@/lib/api'
 
 const DATE_PRESETS = [
   'today','yesterday','this_week','last_week','this_month','last_month',
+  'last_working_month','month_before_last_working_month',
+  'eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week',
+  'eof_last_working_month','eof_month_before_last_working_month',
   'this_quarter','last_quarter','this_year','last_year','last_7_days','last_30_days','last_90_days',
 ]
 const FORMAT_OPTIONS = [
@@ -86,14 +89,28 @@ function NumberFilterDetails({ field, onPatch }: { field: string; onPatch: (p: R
 
 function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Record<string,any>) => void }) {
   type DateMode = 'preset'|'custom'
-  type DatePreset = 'today'|'yesterday'|'this_week'|'last_week'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
+  type DatePreset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type CustomOp = 'after'|'before'|'between'
   const [mode, setMode] = useState<DateMode>('preset')
   const [preset, setPreset] = useState<DatePreset>('this_month')
   const [customOp, setCustomOp] = useState<CustomOp>('after')
   const [d1, setD1] = useState('')
   const [d2, setD2] = useState('')
-  const DATE_RULE_PRESETS: DatePreset[] = ['today','yesterday','this_week','last_week','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+  const DATE_RULE_PRESETS: DatePreset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','last_working_month','month_before_last_working_month','this_quarter','last_quarter','this_year','last_year','eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week','eof_last_working_month','eof_month_before_last_working_month','tmtlwd','ytlwd']
+  const PRESET_LABELS: Record<DatePreset, string> = {
+    today:'Today', yesterday:'Yesterday', day_before_yesterday:'Day Before Yesterday',
+    last_working_day:'Last Working Day', day_before_last_working_day:'Day Before Last Working Day',
+    last_working_week:'Last Working Week', week_before_last_working_week:'Week Before Last Working Week',
+    this_week:'This Week', last_week:'Last Week', week_before_last:'Week Before Last',
+    this_month:'This Month', last_month:'Last Month', last_working_month:'Last Working Month',
+    month_before_last_working_month:'Month Before Last Working Month',
+    this_quarter:'This Quarter', last_quarter:'Last Quarter',
+    this_year:'This Year', last_year:'Last Year',
+    eof_last_working_week:'EOF Last Working Week', eof_week_before_last_working_week:'EOF Week Before Last Working Week',
+    eof_this_week:'EOF This Week', eof_last_week:'EOF Last Week',
+    eof_last_working_month:'EOF Last Working Month', eof_month_before_last_working_month:'EOF Month Before Last Working Month',
+    tmtlwd:'This Month to Last Working Day', ytlwd:'Year to Last Working Day',
+  }
   return (
     <div className="space-y-2">
       <div className="flex gap-1 rounded-md border p-0.5 bg-muted/30 w-fit">
@@ -105,7 +122,7 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
       {mode==='preset' ? (
         <div className="space-y-2">
           <select className={selectCls('w-full')} value={preset} onChange={e=>setPreset(e.target.value as DatePreset)}>
-            {DATE_RULE_PRESETS.map(p=><option key={p} value={p}>{p.replace(/_/g,' ')}</option>)}
+            {DATE_RULE_PRESETS.map(p=><option key={p} value={p}>{PRESET_LABELS[p]}</option>)}
           </select>
           <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
             onClick={()=>onPatch({[`${field}__date_preset`]:preset,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>Apply</button>

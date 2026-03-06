@@ -262,7 +262,8 @@ export default function AlertsPage() {
           setRunProg((prev)=> ({ ...prev, [id]: { open: true, steps: steps.map((s) => ({ id: String(s.id||'').toLowerCase(), status: (s.status==='ok'?'ok':(s.status==='error'?'error':'start')), ts: s.ts, mode: s.mode, to: s.to, error: s.error })), final: row.status || undefined, doneAt: row.finishedAt ? Date.now() : (prev[id]?.doneAt) } }))
           if (row.finishedAt || (row.status && (row.status==='ok' || row.status==='failed'))) {
             clearInterval(runTimers.current[id]); delete runTimers.current[id]
-            // Do not auto-hide; keep visible until user closes it
+            // Refresh alert row so lastRunAt updates in the table
+            try { const updated = await Api.getAlert(id); setItems((prev)=>prev.map((x)=>x.id===id?updated:x)) } catch {}
           }
         } catch {}
       }, 1000)
@@ -273,7 +274,6 @@ export default function AlertsPage() {
       const r = await Api.runAlertNow(id)
       const msg = r?.message || 'Triggered'
       setToast(msg); setTimeout(()=>setToast(''), 1500)
-      try { const updated = await Api.getAlert(id); setItems((prev)=>prev.map((x)=>x.id===id?updated:x)) } catch {}
     } catch (e: any) {
       setToast(e?.message || 'Failed'); setTimeout(()=>setToast(''), 1800)
     } finally {

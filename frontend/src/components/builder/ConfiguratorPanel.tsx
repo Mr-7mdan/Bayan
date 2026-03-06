@@ -243,7 +243,7 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
     if (!s) return [] as string[]
     if (s.includes('mssql') || s.includes('sqlserver')) return ['dbo']
     if (s.includes('postgres')) return ['public']
-    if (s.includes('duckdb') || s.includes('sqlite')) return ['main']
+    if (s.includes('duckdb') || s.includes('sqlite')) return []
     return [] as string[]
   }
   const sourceItems = useMemo(() => {
@@ -277,18 +277,34 @@ export default function ConfiguratorPanel({ selected, allWidgets, quickAddAction
     return sourceItems.filter((it) => it.label.toLowerCase().includes(q) || it.value.toLowerCase().includes(q))
   }, [sourceItems, srcFilter])
 
-  const columns = useMemo(() => {
-    const src = local?.querySpec?.source
-    const data = (schemaQ.data as IntrospectResponse | undefined) || (fallbackQ.data as IntrospectResponse | undefined)
-    if (!src || !data) return [] as { name: string; type?: string | null }[]
-    const parts = src.split('.')
-    if (parts.length < 2) return []
-    const tblName = parts.pop() as string
-    const schName = parts.join('.')
-    const sch = data.schemas.find((s) => s.name === schName)
-    const tbl = sch?.tables.find((t) => t.name === tblName)
-    return tbl?.columns || []
-  }, [schemaQ.data, fallbackQ.data, local?.querySpec?.source])
+  // Fresh column lookup — same pattern as VariableEditor (always fetches on source change)
+  const columnsQ = useQuery({
+    queryKey: ['cfg-columns', dsId ?? '_local', local?.querySpec?.source ?? ''],
+    queryFn: async () => {
+      const src = local?.querySpec?.source
+      if (!src) return [] as { name: string; type?: string | null }[]
+      const r = dsId ? await Api.introspect(dsId as string) : await Api.introspectLocal()
+      const raw = r as any
+      if (Array.isArray(raw?.schemas)) {
+        for (const schema of raw.schemas) {
+          if (Array.isArray(schema.tables)) {
+            const tbl = schema.tables.find((t: any) => {
+              const tableName = t.name || String(t)
+              return tableName === src || `${schema.name}.${tableName}` === src
+            })
+            if (tbl?.columns) {
+              return (tbl.columns as any[]).map((c: any) => ({ name: c.name || String(c), type: c.type ?? null }))
+            }
+          }
+        }
+      }
+      return [] as { name: string; type?: string | null }[]
+    },
+    enabled: !!(local?.querySpec?.source),
+    staleTime: 0,
+    retry: 0,
+  })
+  const columns: { name: string; type?: string | null }[] = columnsQ.data || []
 
   // Numeric field list for gating aggregators in value chips
   const numericFields = useMemo(() => {
@@ -872,7 +888,7 @@ function FilterDetailsTabs({ kind, selField, local, setLocal, updateConfig }: { 
 // Date rule editor for Details panel: presets + custom After/Before/Between
 function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
   type Mode = 'preset'|'custom'
-  type Preset = 'today'|'yesterday'|'this_week'|'last_week'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
+  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type CustomOp = 'after'|'before'|'between'
   const storageKey = `cfg-date:${field}`
   const [mode, setMode] = useState<Mode>('preset')
@@ -898,7 +914,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       // Check for symbolic preset first
       const existingPreset = (where as any)?.[`${field}__date_preset`] as string | undefined
       if (existingPreset) {
-        const presets: Preset[] = ['today','yesterday','this_week','last_week','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+        const presets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','last_working_month','month_before_last_working_month','this_quarter','last_quarter','this_year','last_year','eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week','eof_last_working_month','eof_month_before_last_working_month','tmtlwd','ytlwd']
         if (presets.includes(existingPreset as Preset)) { setMode('preset'); setPreset(existingPreset as Preset) }
         return
       }
@@ -935,7 +951,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       // Check for symbolic preset
       const existingPreset = (where as any)?.[`${field}__date_preset`] as string | undefined
       if (existingPreset) {
-        const presets: Preset[] = ['today','yesterday','this_week','last_week','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+        const presets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','last_working_month','month_before_last_working_month','this_quarter','last_quarter','this_year','last_year','eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week','eof_last_working_month','eof_month_before_last_working_month','tmtlwd','ytlwd']
         if (presets.includes(existingPreset as Preset)) {
           if (mode !== 'preset') setMode('preset')
           if (preset !== existingPreset) setPreset(existingPreset as Preset)
@@ -982,35 +998,37 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     const endOfQuarter = (y: number, q: number) => new Date(y, q*3 + 3, 1)
     const startOfYear = (d: Date) => new Date(d.getFullYear(), 0, 1)
     const endOfYear = (d: Date) => new Date(d.getFullYear()+1, 0, 1)
+    // Working day helpers (SAT_SUN weekends)
+    const prevWd = (d: Date) => { const c = new Date(d); c.setDate(c.getDate()-1); while ([0,6].includes(c.getDay())) c.setDate(c.getDate()-1); return c }
+    const startOfWorkingWeek = (d: Date) => { const s = new Date(d.getFullYear(), d.getMonth(), d.getDate()); while (s.getDay() !== 1) s.setDate(s.getDate()-1); return s }
+    const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     switch (p) {
-      case 'today': {
-        const s = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        const e = new Date(s); e.setDate(e.getDate()+1)
-        return { gte: ymd(s), lt: ymd(e) }
-      }
-      case 'yesterday': {
-        const e = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        const s = new Date(e); s.setDate(s.getDate()-1)
-        return { gte: ymd(s), lt: ymd(e) }
-      }
-      case 'this_week': {
-        const dow = now.getDay()
-        const s = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow)
-        const e = new Date(s); e.setDate(e.getDate() + 7)
-        return { gte: ymd(s), lt: ymd(e) }
-      }
-      case 'last_week': {
-        const dow = now.getDay()
-        const thisStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow)
-        const s = new Date(thisStart); s.setDate(s.getDate() - 7)
-        return { gte: ymd(s), lt: ymd(thisStart) }
-      }
+      case 'today': { const e = new Date(today0); e.setDate(e.getDate()+1); return { gte: ymd(today0), lt: ymd(e) } }
+      case 'yesterday': { const e = new Date(today0); const s = new Date(e); s.setDate(s.getDate()-1); return { gte: ymd(s), lt: ymd(e) } }
+      case 'day_before_yesterday': { const lt = new Date(today0); lt.setDate(lt.getDate()-1); const s = new Date(lt); s.setDate(s.getDate()-1); return { gte: ymd(s), lt: ymd(lt) } }
+      case 'last_working_day': { const lwd = prevWd(today0); const e = new Date(lwd); e.setDate(e.getDate()+1); return { gte: ymd(lwd), lt: ymd(e) } }
+      case 'day_before_last_working_day': { const dlwd = prevWd(prevWd(today0)); const e = new Date(dlwd); e.setDate(e.getDate()+1); return { gte: ymd(dlwd), lt: ymd(e) } }
+      case 'last_working_week': { const ws = startOfWorkingWeek(now); if ([0,6].includes(now.getDay())) { const e = new Date(ws); e.setDate(e.getDate()+7); return { gte: ymd(ws), lt: ymd(e) } } else { const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } } }
+      case 'week_before_last_working_week': { const ws = startOfWorkingWeek(now); if ([0,6].includes(now.getDay())) { const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } } else { const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } } }
+      case 'this_week': { const dow = now.getDay(); const s = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const e = new Date(s); e.setDate(e.getDate()+7); return { gte: ymd(s), lt: ymd(e) } }
+      case 'last_week': { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
+      case 'week_before_last': { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
       case 'this_month': return { gte: ymd(startOfMonth(now)), lt: ymd(endOfMonth(now)) }
-      case 'last_month': { const s = startOfMonth(now); s.setMonth(s.getMonth()-1); const e = new Date(s.getFullYear(), s.getMonth()+1, 1); return { gte: ymd(s), lt: ymd(e) } }
+      case 'last_month': { const s = startOfMonth(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
+      case 'last_working_month': { const s = startOfMonth(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
+      case 'month_before_last_working_month': { const s = startOfMonth(now); s.setMonth(s.getMonth()-2); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
       case 'this_quarter': return { gte: ymd(startOfQuarter(now.getFullYear(), quarter)), lt: ymd(endOfQuarter(now.getFullYear(), quarter)) }
       case 'last_quarter': { const q = (quarter+3-1)%4; const yr = quarter===0 ? now.getFullYear()-1 : now.getFullYear(); return { gte: ymd(startOfQuarter(yr, q)), lt: ymd(endOfQuarter(yr, q)) } }
       case 'this_year': return { gte: ymd(startOfYear(now)), lt: ymd(endOfYear(now)) }
       case 'last_year': { const s = new Date(now.getFullYear()-1, 0, 1); const e = new Date(now.getFullYear(), 0, 1); return { gte: ymd(s), lt: ymd(e) } }
+      case 'eof_last_working_week': { const ws = startOfWorkingWeek(now); const endP = [0,6].includes(now.getDay()) ? (() => { const e = new Date(ws); e.setDate(e.getDate()+7); return e })() : new Date(ws); let ld = prevWd(endP); const nxt = new Date(today0); nxt.setDate(nxt.getDate()+1); const cap = prevWd(nxt); if (ld > cap) ld = cap; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_week_before_last_working_week': { const ws = startOfWorkingWeek(now); const endP = [0,6].includes(now.getDay()) ? new Date(ws) : (() => { const e = new Date(ws); e.setDate(e.getDate()-7); return e })(); const ld = prevWd(endP); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_this_week': { const nxt = new Date(today0); nxt.setDate(nxt.getDate()+1); const ld = prevWd(nxt); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_week': { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const ld = prevWd(ws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_working_month': { const ld = prevWd(new Date(now.getFullYear(), now.getMonth(), 1)); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_month_before_last_working_month': { const ld = prevWd(new Date(now.getFullYear(), now.getMonth()-1, 1)); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'tmtlwd': { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), lt: ymd(e2) } }
+      case 'ytlwd': { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), 0, 1)), lt: ymd(e2) } }
     }
   }
 
@@ -1061,16 +1079,50 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       {mode === 'preset' ? (
         <div className="mt-2">
           <select className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={preset} onChange={(e)=>{ interactedRef.current = true; markEditing(); setPreset(e.target.value as Preset) }}>
+            <optgroup label="Days">
             <option value="today">Today</option>
             <option value="yesterday">Yesterday</option>
+            <option value="day_before_yesterday">Day Before Yesterday</option>
+            <option value="last_working_day">Last Working Day</option>
+            <option value="day_before_last_working_day">Day Before Last Working Day</option>
+          </optgroup>
+          <optgroup label="Working Weeks">
+            <option value="last_working_week">Last Working Week</option>
+            <option value="week_before_last_working_week">Week Before Last Working Week</option>
+          </optgroup>
+          <optgroup label="Weeks">
             <option value="this_week">This Week</option>
             <option value="last_week">Last Week</option>
+            <option value="week_before_last">Week Before Last</option>
+          </optgroup>
+          <optgroup label="EOF Weeks">
+            <option value="eof_last_working_week">EOF Last Working Week</option>
+            <option value="eof_week_before_last_working_week">EOF Week Before Last Working Week</option>
+            <option value="eof_this_week">EOF This Week</option>
+            <option value="eof_last_week">EOF Last Week</option>
+          </optgroup>
+          <optgroup label="Months">
             <option value="this_month">This Month</option>
             <option value="last_month">Last Month</option>
+            <option value="last_working_month">Last Working Month</option>
+            <option value="month_before_last_working_month">Month Before Last Working Month</option>
+            <option value="tmtlwd">This Month to Last Working Day</option>
+          </optgroup>
+          <optgroup label="Year to Date">
+            <option value="ytlwd">Year to Last Working Day</option>
+          </optgroup>
+          <optgroup label="EOF Months">
+            <option value="eof_last_working_month">EOF Last Working Month</option>
+            <option value="eof_month_before_last_working_month">EOF Month Before Last Working Month</option>
+          </optgroup>
+          <optgroup label="Quarters">
             <option value="this_quarter">This Quarter</option>
             <option value="last_quarter">Last Quarter</option>
+          </optgroup>
+          <optgroup label="Years">
             <option value="this_year">This Year</option>
             <option value="last_year">Last Year</option>
+          </optgroup>
           </select>
         </div>
       ) : (

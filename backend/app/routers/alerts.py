@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, Optional
 from uuid import uuid4
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response as FastAPIResponse
-import anyio
 from decimal import Decimal
 import base64
 import re as _re
@@ -210,59 +210,79 @@ async def run_alert_now(alert_id: str, db: Session = Depends(get_db)) -> dict:
     a = db.get(AlertRule, alert_id)
     if not a:
         raise HTTPException(status_code=404, detail="Not found")
-    # Log start
     run_id = str(uuid4())
+    alert_id_str = str(a.id)
     ar = AlertRun(id=run_id, alert_id=a.id)
     db.add(ar); db.commit()
-    try:
-        steps: list[dict] = []
-        # Execute in a worker thread with its own DB session; stream progress by writing to AlertRun.message
-        def worker() -> tuple[bool, str, list[dict]]:
-            db2 = SessionLocal()
-            try:
-                def progress_cb(evt: dict):
-                    try:
-                        e = dict(evt or {})
-                        e["ts"] = datetime.utcnow().isoformat() + "Z"
-                        steps.append(e)
-                        try:
-                            row = db2.get(AlertRun, run_id)
-                            if row:
-                                row.message = json.dumps({"steps": steps})
-                                db2.add(row); db2.commit()
-                        except Exception:
-                            db2.rollback()
-                    except Exception:
-                        pass
-                ok_, msg_ = run_rule(db2, a, force_time_ok=True, progress_cb=progress_cb)
-                return ok_, msg_, steps
-            finally:
+
+    steps: list[dict] = []
+
+    def worker() -> None:
+        db2 = SessionLocal()
+        try:
+            def progress_cb(evt: dict):
                 try:
-                    db2.close()
+                    e = dict(evt or {})
+                    e["ts"] = datetime.utcnow().isoformat() + "Z"
+                    steps.append(e)
+                    try:
+                        row = db2.get(AlertRun, run_id)
+                        if row:
+                            row.message = json.dumps({"steps": steps})
+                            db2.add(row); db2.commit()
+                    except Exception:
+                        db2.rollback()
                 except Exception:
                     pass
-        ok, msg, steps = await anyio.to_thread.run_sync(worker)
-        a.last_run_at = datetime.utcnow()
-        a.last_status = (msg or ("ok" if ok else "failed"))
-        # Update run row
-        ar.finished_at = datetime.utcnow()
-        ar.status = ("ok" if ok else "failed")
-        # Finalize message with steps array
-        try:
-            ar.message = json.dumps({"message": (msg or ("ok" if ok else "failed")), "steps": steps})
-        except Exception:
-            ar.message = msg or ("ok" if ok else "failed")
-        db.add(a); db.add(ar); db.commit()
-        return {"ok": ok, "message": msg or ("ok" if ok else "failed"), "runId": run_id, "steps": steps}
-    except Exception as e:
-        ar.finished_at = datetime.utcnow()
-        ar.status = "failed"
-        try:
-            ar.message = json.dumps({"message": str(e), "steps": []})
-        except Exception:
-            ar.message = str(e)
-        db.add(ar); db.commit()
-        raise
+
+            rule = db2.get(AlertRule, alert_id_str)
+            if not rule:
+                raise Exception(f"AlertRule {alert_id_str} not found in worker session")
+            ok_, msg_ = run_rule(db2, rule, force_time_ok=True, progress_cb=progress_cb)
+
+            # Finalize AlertRule
+            try:
+                rule.last_run_at = datetime.utcnow()
+                rule.last_status = (msg_ or ("ok" if ok_ else "failed"))
+                db2.add(rule)
+            except Exception:
+                pass
+
+            # Finalize AlertRun
+            row = db2.get(AlertRun, run_id)
+            if row:
+                row.finished_at = datetime.utcnow()
+                row.status = ("ok" if ok_ else "failed")
+                try:
+                    row.message = json.dumps({"message": (msg_ or ("ok" if ok_ else "failed")), "steps": steps})
+                except Exception:
+                    row.message = msg_ or ("ok" if ok_ else "failed")
+                db2.add(row)
+            db2.commit()
+        except Exception as exc:
+            try:
+                db2.rollback()
+                row = db2.get(AlertRun, run_id)
+                if row:
+                    row.finished_at = datetime.utcnow()
+                    row.status = "failed"
+                    try:
+                        row.message = json.dumps({"message": str(exc), "steps": steps})
+                    except Exception:
+                        row.message = str(exc)
+                    db2.add(row)
+                db2.commit()
+            except Exception:
+                pass
+        finally:
+            try:
+                db2.close()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    return {"ok": True, "message": "Triggered", "runId": run_id, "steps": []}
 
 @router.get("/{alert_id}/runs")
 async def list_alert_runs(alert_id: str, limit: int = 50, db: Session = Depends(get_db)) -> list[AlertRunOut]:

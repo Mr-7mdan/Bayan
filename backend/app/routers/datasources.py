@@ -1834,40 +1834,35 @@ def preview_transforms(ds_id: str, payload: TransformsPreviewRequest, db: Sessio
 
 @router.get("/_local/schema", response_model=IntrospectResponse)
 def introspect_local_schema():
-    """Introspect the default local DuckDB without a datasource record."""
+    """Introspect the default local DuckDB without a datasource record.
+    Uses duckdb_columns() which covers all attached catalogs (local + persistently-attached MySQL/Postgres).
+    """
     if _duckdb is None:
         raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
     try:
         with open_duck_native(settings.duckdb_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT table_schema, table_name
-                FROM information_schema.tables
-                UNION
-                SELECT table_schema, table_name
-                FROM information_schema.views
-                ORDER BY table_schema, table_name
-                """
+            col_rows = conn.execute(
+                "SELECT schema_name, table_name, column_name, CAST(data_type AS VARCHAR) "
+                "FROM duckdb_columns() "
+                "WHERE schema_name NOT IN ('information_schema', 'pg_catalog') "
+                "  AND lower(table_name) NOT LIKE 'duckdb_%' "
+                "  AND lower(table_name) NOT LIKE 'sqlite_%' "
+                "  AND lower(table_name) NOT LIKE 'pragma_%' "
+                "  AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema') "
+                "ORDER BY schema_name, table_name, column_index"
             ).fetchall()
-            by_schema: dict[str, list[str]] = {}
-            for sch, tbl in rows:
-                by_schema.setdefault(str(sch), []).append(str(tbl))
-            schemas: list[SchemaInfo] = []
-            for sch, tbls in by_schema.items():
-                tables: list[TableInfo] = []
-                for tname in tbls:
-                    cols_rows = conn.execute(
-                        """
-                        SELECT column_name, CAST(data_type AS VARCHAR) AS data_type
-                        FROM information_schema.columns
-                        WHERE table_schema = ? AND table_name = ?
-                        ORDER BY ordinal_position
-                        """,
-                        (sch, tname),
-                    ).fetchall()
-                    cols = [ColumnInfo(name=str(cn), type=str(dt)) for (cn, dt) in cols_rows]
-                    tables.append(TableInfo(name=tname, columns=cols))
-                schemas.append(SchemaInfo(name=sch, tables=tables))
+            by_sch: dict[str, dict[str, list[ColumnInfo]]] = {}
+            for sch_name, tbl_name, col_name, col_type in col_rows:
+                by_sch.setdefault(str(sch_name), {}).setdefault(str(tbl_name), []).append(
+                    ColumnInfo(name=str(col_name), type=str(col_type))
+                )
+            schemas: list[SchemaInfo] = [
+                SchemaInfo(name=sch, tables=[
+                    TableInfo(name=tbl, columns=cols)
+                    for tbl, cols in tables_dict.items()
+                ])
+                for sch, tables_dict in by_sch.items()
+            ]
             return IntrospectResponse(schemas=schemas)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Introspection failed: {e}")
@@ -1890,14 +1885,18 @@ def list_local_tables_only():
         with open_duck_native(settings.duckdb_path) as conn:
             rows = conn.execute(
                 """
-                SELECT table_schema, table_name
-                FROM information_schema.tables
-                WHERE table_schema <> 'information_schema'
+                SELECT schema_name, table_name FROM duckdb_tables()
+                WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
                   AND lower(table_name) NOT LIKE 'duckdb_%'
                   AND lower(table_name) NOT LIKE 'sqlite_%'
                   AND lower(table_name) NOT LIKE 'pragma_%'
                   AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                ORDER BY table_schema, table_name
+                UNION ALL
+                SELECT schema_name, table_name FROM duckdb_views()
+                WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
+                  AND lower(table_name) NOT LIKE 'duckdb_%'
+                  AND lower(table_name) NOT LIKE 'sqlite_%'
+                ORDER BY schema_name, table_name
                 """
             ).fetchall()
             by_schema: dict[str, list[str]] = {}
@@ -1990,7 +1989,7 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                             TableInfo(name=tbl, columns=cols)
                             for tbl, cols in tables_dict.items()
                         ]
-                        result.append(SchemaInfo(name=f"{alias}.{sch}", tables=tables))
+                        result.append(SchemaInfo(name=sch, tables=tables))
                     print(f"[Introspect] Remote '{alias}': {sum(len(t) for t in by_sch.values())} tables across {len(by_sch)} schemas")
                 except Exception as e:
                     print(f"[Introspect] Remote schema query for '{alias}' failed: {e}")
@@ -2033,48 +2032,28 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                     raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
                 try:
                     with open_duck_native(get_active_duck_path()) as conn:
-                        rows = conn.execute(
-                            """
-                            SELECT table_schema, table_name
-                            FROM information_schema.tables
-                            WHERE table_catalog = current_catalog()
-                              AND table_schema <> 'information_schema'
-                              AND lower(table_name) NOT LIKE 'duckdb_%'
-                              AND lower(table_name) NOT LIKE 'sqlite_%'
-                              AND lower(table_name) NOT LIKE 'pragma_%'
-                              AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                            UNION ALL
-                            SELECT table_schema, table_name
-                            FROM information_schema.views
-                            WHERE table_catalog = current_catalog()
-                              AND table_schema <> 'information_schema'
-                              AND lower(table_name) NOT LIKE 'duckdb_%'
-                              AND lower(table_name) NOT LIKE 'sqlite_%'
-                              AND lower(table_name) NOT LIKE 'pragma_%'
-                              AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                            ORDER BY table_schema, table_name
-                            """
+                        col_rows = conn.execute(
+                            "SELECT schema_name, table_name, column_name, CAST(data_type AS VARCHAR) "
+                            "FROM duckdb_columns() "
+                            "WHERE schema_name NOT IN ('information_schema', 'pg_catalog') "
+                            "  AND lower(table_name) NOT LIKE 'duckdb_%' "
+                            "  AND lower(table_name) NOT LIKE 'sqlite_%' "
+                            "  AND lower(table_name) NOT LIKE 'pragma_%' "
+                            "  AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema') "
+                            "ORDER BY schema_name, table_name, column_index"
                         ).fetchall()
-                        by_schema: dict[str, list[str]] = {}
-                        for sch, tbl in rows:
-                            by_schema.setdefault(str(sch), []).append(str(tbl))
-                        schemas: list[SchemaInfo] = []
-                        for sch, tbls in by_schema.items():
-                            tables: list[TableInfo] = []
-                            for tname in tbls:
-                                cols_rows = conn.execute(
-                                    """
-                                    SELECT column_name, CAST(data_type AS VARCHAR) AS data_type
-                                    FROM information_schema.columns
-                                    WHERE table_schema = ? AND table_name = ?
-                                    ORDER BY ordinal_position
-                                    """,
-                                    (sch, tname),
-                                ).fetchall()
-                                cols = [ColumnInfo(name=str(cn), type=str(dt)) for (cn, dt) in cols_rows]
-                                tables.append(TableInfo(name=tname, columns=cols))
-                            schemas.append(SchemaInfo(name=sch, tables=tables))
-                        schemas.extend(_introspect_attach_remotes(conn, ds.options_json or '{}', db))
+                        by_sch: dict[str, dict[str, list[ColumnInfo]]] = {}
+                        for sch_name, tbl_name, col_name, col_type in col_rows:
+                            by_sch.setdefault(str(sch_name), {}).setdefault(str(tbl_name), []).append(
+                                ColumnInfo(name=str(col_name), type=str(col_type))
+                            )
+                        schemas: list[SchemaInfo] = [
+                            SchemaInfo(name=sch, tables=[
+                                TableInfo(name=tbl, columns=cols)
+                                for tbl, cols in tables_dict.items()
+                            ])
+                            for sch, tables_dict in by_sch.items()
+                        ]
                         return IntrospectResponse(schemas=schemas)
                 except HTTPException:
                     raise
@@ -2116,85 +2095,41 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
         # Normalize filesystem path
         if path != ':memory:':
             path = os.path.abspath(os.path.expanduser(path))
+        def _duck_introspect_conn(conn) -> IntrospectResponse:
+            """duckdb_columns() across all attached catalogs (local + persistent MySQL/Postgres)."""
+            col_rows = conn.execute(
+                "SELECT schema_name, table_name, column_name, CAST(data_type AS VARCHAR) "
+                "FROM duckdb_columns() "
+                "WHERE schema_name NOT IN ('information_schema', 'pg_catalog') "
+                "  AND lower(table_name) NOT LIKE 'duckdb_%' "
+                "  AND lower(table_name) NOT LIKE 'sqlite_%' "
+                "  AND lower(table_name) NOT LIKE 'pragma_%' "
+                "  AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema') "
+                "ORDER BY schema_name, table_name, column_index"
+            ).fetchall()
+            by_sch: dict[str, dict[str, list[ColumnInfo]]] = {}
+            for sch_name, tbl_name, col_name, col_type in col_rows:
+                by_sch.setdefault(str(sch_name), {}).setdefault(str(tbl_name), []).append(
+                    ColumnInfo(name=str(col_name), type=str(col_type))
+                )
+            schemas_out: list[SchemaInfo] = [
+                SchemaInfo(name=sch, tables=[
+                    TableInfo(name=tbl, columns=cols)
+                    for tbl, cols in tables_dict.items()
+                ])
+                for sch, tables_dict in by_sch.items()
+            ]
+            return IntrospectResponse(schemas=schemas_out)
+
         try:
             with open_duck_native(path) as conn:
-                rows = conn.execute(
-                    """
-                    SELECT table_schema, table_name FROM information_schema.tables
-                    WHERE table_catalog = current_catalog()
-                      AND table_schema <> 'information_schema'
-                      AND lower(table_name) NOT LIKE 'duckdb_%'
-                      AND lower(table_name) NOT LIKE 'sqlite_%'
-                      AND lower(table_name) NOT LIKE 'pragma_%'
-                      AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                    UNION ALL
-                    SELECT table_schema, table_name FROM information_schema.views
-                    WHERE table_catalog = current_catalog()
-                      AND table_schema <> 'information_schema'
-                      AND lower(table_name) NOT LIKE 'duckdb_%'
-                      AND lower(table_name) NOT LIKE 'sqlite_%'
-                      AND lower(table_name) NOT LIKE 'pragma_%'
-                      AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                    ORDER BY table_schema, table_name
-                    """
-                ).fetchall()
-                by_schema: dict[str, list[str]] = {}
-                for sch, tbl in rows:
-                    by_schema.setdefault(str(sch), []).append(str(tbl))
-                schemas: list[SchemaInfo] = []
-                for sch, tbls in by_schema.items():
-                    tables: list[TableInfo] = []
-                    for tname in tbls:
-                        cols_rows = conn.execute(
-                            "SELECT column_name, CAST(data_type AS VARCHAR) AS data_type FROM information_schema.columns WHERE table_catalog = current_catalog() AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-                            (sch, tname),
-                        ).fetchall()
-                        cols = [ColumnInfo(name=str(cn), type=str(dt)) for (cn, dt) in cols_rows]
-                        tables.append(TableInfo(name=tname, columns=cols))
-                    schemas.append(SchemaInfo(name=sch, tables=tables))
-                schemas.extend(_introspect_attach_remotes(conn, ds.options_json or '{}', db))
-                return IntrospectResponse(schemas=schemas)
+                return _duck_introspect_conn(conn)
         except Exception as e:
             # Try falling back to the default local store path
             try:
                 fallback = os.path.abspath(os.path.expanduser(settings.duckdb_path))
                 with open_duck_native(fallback) as conn:
-                    rows = conn.execute(
-                        """
-                        SELECT table_schema, table_name FROM information_schema.tables
-                        WHERE table_catalog = current_catalog()
-                          AND table_schema <> 'information_schema'
-                          AND lower(table_name) NOT LIKE 'duckdb_%'
-                          AND lower(table_name) NOT LIKE 'sqlite_%'
-                          AND lower(table_name) NOT LIKE 'pragma_%'
-                          AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                        UNION ALL
-                        SELECT table_schema, table_name FROM information_schema.views
-                        WHERE table_catalog = current_catalog()
-                          AND table_schema <> 'information_schema'
-                          AND lower(table_name) NOT LIKE 'duckdb_%'
-                          AND lower(table_name) NOT LIKE 'sqlite_%'
-                          AND lower(table_name) NOT LIKE 'pragma_%'
-                          AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                        ORDER BY table_schema, table_name
-                        """
-                    ).fetchall()
-                    by_schema: dict[str, list[str]] = {}
-                    for sch, tbl in rows:
-                        by_schema.setdefault(str(sch), []).append(str(tbl))
-                    schemas: list[SchemaInfo] = []
-                    for sch, tbls in by_schema.items():
-                        tables: list[TableInfo] = []
-                        for tname in tbls:
-                            cols_rows = conn.execute(
-                                "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-                                (sch, tname),
-                            ).fetchall()
-                            cols = [ColumnInfo(name=str(cn), type=str(dt)) for (cn, dt) in cols_rows]
-                            tables.append(TableInfo(name=tname, columns=cols))
-                        schemas.append(SchemaInfo(name=sch, tables=tables))
-                    schemas.extend(_introspect_attach_remotes(conn, ds.options_json or '{}', db))
-                    return IntrospectResponse(schemas=schemas)
+                    return _duck_introspect_conn(conn)
             except Exception as e2:
                 raise HTTPException(status_code=500, detail=f"DuckDB introspection failed for path '{path}': {e2}")
     # Non-duckdb: use SQLAlchemy
@@ -2372,30 +2307,31 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
         if path != ':memory:':
             import os
             path = os.path.abspath(os.path.expanduser(path))
+        def _duck_tables_query(conn):
+            rows = conn.execute(
+                """
+                SELECT schema_name, table_name FROM duckdb_tables()
+                WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
+                  AND lower(table_name) NOT LIKE 'duckdb_%'
+                  AND lower(table_name) NOT LIKE 'sqlite_%'
+                  AND lower(table_name) NOT LIKE 'pragma_%'
+                  AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
+                UNION ALL
+                SELECT schema_name, table_name FROM duckdb_views()
+                WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
+                  AND lower(table_name) NOT LIKE 'duckdb_%'
+                  AND lower(table_name) NOT LIKE 'sqlite_%'
+                ORDER BY schema_name, table_name
+                """
+            ).fetchall()
+            by_schema: dict[str, set[str]] = {}
+            for sch, tbl in rows:
+                by_schema.setdefault(str(sch), set()).add(str(tbl))
+            return [ _TablesSchema(name=sch, tables=sorted(list(tbls))) for sch, tbls in by_schema.items() ]
+
         try:
             with open_duck_native(path) as conn:
-                rows = conn.execute(
-                    """
-                    SELECT table_schema, table_name FROM information_schema.tables
-                    WHERE table_schema <> 'information_schema'
-                      AND lower(table_name) NOT LIKE 'duckdb_%'
-                      AND lower(table_name) NOT LIKE 'sqlite_%'
-                      AND lower(table_name) NOT LIKE 'pragma_%'
-                      AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                    UNION
-                    SELECT table_schema, table_name FROM information_schema.views
-                    WHERE table_schema <> 'information_schema'
-                      AND lower(table_name) NOT LIKE 'duckdb_%'
-                      AND lower(table_name) NOT LIKE 'sqlite_%'
-                      AND lower(table_name) NOT LIKE 'pragma_%'
-                      AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                    ORDER BY table_schema, table_name
-                    """
-                ).fetchall()
-                by_schema: dict[str, set[str]] = {}
-                for sch, tbl in rows:
-                    by_schema.setdefault(str(sch), set()).add(str(tbl))
-                out = [ _TablesSchema(name=sch, tables=sorted(list(tbls))) for sch, tbls in by_schema.items() ]
+                out = _duck_tables_query(conn)
                 print(f"[/tables] Found {len(out)} DuckDB schemas")
                 return TablesOnlyResponse(schemas=out)
         except Exception as e:
@@ -2407,20 +2343,18 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
                     with open_duck_native(fallback) as conn2:
                         rows = conn2.execute(
                             """
-                            SELECT table_schema, table_name FROM information_schema.tables
-                            WHERE table_schema <> 'information_schema'
+                            SELECT schema_name, table_name FROM duckdb_tables()
+                            WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
                               AND lower(table_name) NOT LIKE 'duckdb_%'
                               AND lower(table_name) NOT LIKE 'sqlite_%'
                               AND lower(table_name) NOT LIKE 'pragma_%'
                               AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                            UNION
-                            SELECT table_schema, table_name FROM information_schema.views
-                            WHERE table_schema <> 'information_schema'
+                            UNION ALL
+                            SELECT schema_name, table_name FROM duckdb_views()
+                            WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
                               AND lower(table_name) NOT LIKE 'duckdb_%'
                               AND lower(table_name) NOT LIKE 'sqlite_%'
-                              AND lower(table_name) NOT LIKE 'pragma_%'
-                              AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
-                            ORDER BY table_schema, table_name
+                            ORDER BY schema_name, table_name
                             """
                         ).fetchall()
                         by_schema2: dict[str, set[str]] = {}

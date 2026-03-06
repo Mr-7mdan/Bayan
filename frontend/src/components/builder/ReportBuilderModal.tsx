@@ -582,6 +582,16 @@ function VariableEditor({
 
   return (
       <div className="p-3 space-y-2.5">
+        {/* Variable Name */}
+        <div>
+          <label className="block text-[10px] font-medium text-muted-foreground mb-1">Name</label>
+          <input
+            className="w-full h-7 text-[11px] rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow font-mono"
+            value={variable.name}
+            onChange={(e) => handleChange({ name: e.target.value })}
+            placeholder="variableName"
+          />
+        </div>
         {/* Type selector */}
         <div>
           <label className="block text-[10px] font-medium text-muted-foreground mb-1">Type</label>
@@ -621,12 +631,25 @@ function VariableEditor({
                   <optgroup label="Weeks">
                     <option value="this_week">TW – This Week</option>
                     <option value="last_week">LW – Last Week</option>
+                    <option value="twwtlwd">TWWeek→LWD – This Working Week to Last Working Day</option>
                     <option value="last_working_week">LWWeek – Last Working Week</option>
                     <option value="week_before_last_working_week">WBLWWeek – Week Before Last Working Week</option>
+                  </optgroup>
+                  <optgroup label="EOF Weeks">
+                    <option value="eof_last_working_week">EOFLWWeek – EOF Last Working Week</option>
+                    <option value="eof_week_before_last_working_week">EOFPrevWWeek – EOF Prev Working Week</option>
+                    <option value="eof_this_week">EOFTWeek – EOF This Week</option>
+                    <option value="eof_last_week">EOFLWeek – EOF Last Week</option>
                   </optgroup>
                   <optgroup label="Months">
                     <option value="this_month">TMonth – This Month</option>
                     <option value="last_month">LMonth – Last Month</option>
+                    <option value="last_working_month">LWMonth – Last Working Month</option>
+                    <option value="month_before_last_working_month">MBLWMonth – Month Before Last Working Month</option>
+                  </optgroup>
+                  <optgroup label="EOF Months">
+                    <option value="eof_last_working_month">EOFLWMonth – EOF Last Working Month</option>
+                    <option value="eof_month_before_last_working_month">EOFPrevWMonth – EOF Prev Working Month</option>
                   </optgroup>
                   <optgroup label="Years">
                     <option value="this_year">TYear – This Year</option>
@@ -989,12 +1012,12 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
 // Week-start-day: 0=Sunday (default via NEXT_PUBLIC_WEEK_START_DAY), 1=Monday
 const _DEFAULT_WEEK_START = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
 const _DEFAULT_WEEKENDS = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN'
-const WEEK_PRESETS = new Set(['this_week', 'last_week', 'week_before_last'])
-const WORKING_DAY_PRESETS = new Set(['last_working_day', 'day_before_last_working_day', 'last_working_week', 'week_before_last_working_week'])
-const WORKING_WEEK_PRESETS = new Set(['last_working_week', 'week_before_last_working_week'])
+const WEEK_PRESETS = new Set(['this_week', 'last_week', 'week_before_last', 'eof_this_week', 'eof_last_week'])
+const WORKING_DAY_PRESETS = new Set(['last_working_day', 'day_before_last_working_day', 'twwtlwd', 'last_working_week', 'week_before_last_working_week', 'eof_last_working_week', 'eof_week_before_last_working_week', 'eof_this_week', 'eof_last_week', 'eof_last_working_month', 'eof_month_before_last_working_month', 'tmtlwd', 'ytlwd'])
+const WORKING_WEEK_PRESETS = new Set(['last_working_week', 'week_before_last_working_week', 'eof_last_working_week', 'eof_week_before_last_working_week'])
 
 function DateRuleEditor({ field, where, onPatch }: { field: string; where: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
-  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'
+  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'twwtlwd'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type DateOp = 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'between'
   const [mode, setMode] = useState<'preset'|'custom'>('preset')
   const [preset, setPreset] = useState<Preset>('today')
@@ -1045,17 +1068,28 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       case 'day_before_yesterday': { const lt = new Date(now.getFullYear(), now.getMonth(), now.getDate()); lt.setDate(lt.getDate()-1); const s = new Date(lt); s.setDate(s.getDate()-1); return { gte: ymd(s), lt: ymd(lt) } }
       case 'last_working_day': { const t0 = new Date(now.getFullYear(),now.getMonth(),now.getDate()); const lwd = prevWorkday(t0); const e = new Date(lwd); e.setDate(e.getDate()+1); return { gte: ymd(lwd), lt: ymd(e) } }
       case 'day_before_last_working_day': { const t0 = new Date(now.getFullYear(),now.getMonth(),now.getDate()); const dlwd = prevWorkday(prevWorkday(t0)); const e = new Date(dlwd); e.setDate(e.getDate()+1); return { gte: ymd(dlwd), lt: ymd(e) } }
-      case 'last_working_week': { const ws = startOfWorkingWeek(now); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
-      case 'week_before_last_working_week': { const ws = startOfWorkingWeek(now); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
+      case 'twwtlwd': { const ws = startOfWorkingWeek(now); const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const lwd = prevWorkday(today0); const e = new Date(lwd); e.setDate(e.getDate()+1); return { gte: ymd(ws), lt: ymd(e) } }
+      case 'last_working_week': { const ws = startOfWorkingWeek(now); if (weekendDaysJs.includes(now.getDay())) { const e = new Date(ws); e.setDate(e.getDate()+7); return { gte: ymd(ws), lt: ymd(e) } } else { const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } } }
+      case 'week_before_last_working_week': { const ws = startOfWorkingWeek(now); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
       case 'this_week': { const ws = startOfWeek(now); const e = new Date(ws); e.setDate(e.getDate()+7); return { gte: ymd(ws), lt: ymd(e) } }
       case 'last_week': { const ws = startOfWeek(now); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
       case 'week_before_last': { const ws = startOfWeek(now); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
       case 'this_month': return { gte: ymd(som(now)), lt: ymd(eom(now)) }
       case 'last_month': { const s = som(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
+      case 'last_working_month': { const s = som(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
+      case 'month_before_last_working_month': { const s = som(now); s.setMonth(s.getMonth()-2); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
       case 'this_quarter': return { gte: ymd(soq(now.getFullYear(), q)), lt: ymd(eoq(now.getFullYear(), q)) }
       case 'last_quarter': { const pq = (q+3)%4; const yr = q===0 ? now.getFullYear()-1 : now.getFullYear(); return { gte: ymd(soq(yr, pq)), lt: ymd(eoq(yr, pq)) } }
       case 'this_year': return { gte: ymd(new Date(now.getFullYear(),0,1)), lt: ymd(new Date(now.getFullYear()+1,0,1)) }
       case 'last_year': return { gte: ymd(new Date(now.getFullYear()-1,0,1)), lt: ymd(new Date(now.getFullYear(),0,1)) }
+      case 'eof_last_working_week': { const ws = startOfWorkingWeek(now); const endP = weekendDaysJs.includes(now.getDay()) ? (() => { const e = new Date(ws); e.setDate(e.getDate()+7); return e })() : new Date(ws); let ld = prevWorkday(endP); const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const next0 = new Date(today0); next0.setDate(next0.getDate()+1); const lwdToday = prevWorkday(next0); if (ld > lwdToday) ld = lwdToday; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_week_before_last_working_week': { const ws = startOfWorkingWeek(now); const endP = weekendDaysJs.includes(now.getDay()) ? new Date(ws) : (() => { const e = new Date(ws); e.setDate(e.getDate()-7); return e })(); const ld = prevWorkday(endP); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_this_week': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const next = new Date(today0); next.setDate(next.getDate()+1); const ld = prevWorkday(next); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_week': { const ws = startOfWeek(now); const ld = prevWorkday(ws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_working_month': { const firstThis = new Date(now.getFullYear(), now.getMonth(), 1); const ld = prevWorkday(firstThis); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_month_before_last_working_month': { const firstLWM = new Date(now.getFullYear(), now.getMonth()-1, 1); const ld = prevWorkday(firstLWM); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'tmtlwd': { const lwd = prevWorkday(new Date(now.getFullYear(), now.getMonth(), now.getDate())); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), lt: ymd(e2) } }
+      case 'ytlwd': { const lwd = prevWorkday(new Date(now.getFullYear(), now.getMonth(), now.getDate())); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), 0, 1)), lt: ymd(e2) } }
     }
   }
 
@@ -1199,7 +1233,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       setOp(savedOp)
     }
     if (existingPreset) {
-      const allPresets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','this_quarter','last_quarter','this_year','last_year']
+      const allPresets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','twwtlwd','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','last_working_month','month_before_last_working_month','this_quarter','last_quarter','this_year','last_year','eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week','eof_last_working_month','eof_month_before_last_working_month','tmtlwd','ytlwd']
       if (allPresets.includes(existingPreset as Preset)) { setMode('preset'); setPreset(existingPreset as Preset) }
       const savedWsd = where?.['__week_start_day']
       if (savedWsd != null) setWeekStartDay(String(savedWsd).toUpperCase())
@@ -1260,6 +1294,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
               <option value="day_before_last_working_day">Day Before Last Working Day</option>
             </optgroup>
             <optgroup label="Working Weeks">
+              <option value="twwtlwd">This Working Week to Last Working Day</option>
               <option value="last_working_week">Last Working Week</option>
               <option value="week_before_last_working_week">Week Before Last Working Week</option>
             </optgroup>
@@ -1268,9 +1303,25 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
               <option value="last_week">Last Week</option>
               <option value="week_before_last">Week Before Last</option>
             </optgroup>
+            <optgroup label="EOF Weeks">
+              <option value="eof_last_working_week">EOF Last Working Week</option>
+              <option value="eof_week_before_last_working_week">EOF Week Before Last Working Week</option>
+              <option value="eof_this_week">EOF This Week</option>
+              <option value="eof_last_week">EOF Last Week</option>
+            </optgroup>
             <optgroup label="Months">
               <option value="this_month">This Month</option>
               <option value="last_month">Last Month</option>
+              <option value="last_working_month">Last Working Month</option>
+              <option value="month_before_last_working_month">Month Before Last Working Month</option>
+              <option value="tmtlwd">This Month to Last Working Day</option>
+            </optgroup>
+            <optgroup label="Year to Date">
+              <option value="ytlwd">Year to Last Working Day</option>
+            </optgroup>
+            <optgroup label="EOF Months">
+              <option value="eof_last_working_month">EOF Last Working Month</option>
+              <option value="eof_month_before_last_working_month">EOF Month Before Last Working Month</option>
             </optgroup>
             <optgroup label="Quarters">
               <option value="this_quarter">This Quarter</option>
@@ -2257,20 +2308,35 @@ function ElementProps({
 
 // ─── Period presets shared by cell type and variable editor ──────────
 const PERIOD_PRESETS: { value: string; label: string; group: string }[] = [
-  { value: 'today',                         label: 'Today',                           group: 'Days' },
-  { value: 'yesterday',                     label: 'Yesterday (YTDY)',                group: 'Days' },
-  { value: 'last_working_day',              label: 'Last Working Day (LWDay)',        group: 'Days' },
-  { value: 'day_before_last_working_day',   label: 'Day Before LWDay (DBLWDay)',      group: 'Days' },
-  { value: 'this_week',                     label: 'This Week (TW)',                  group: 'Weeks' },
-  { value: 'last_week',                     label: 'Last Week (LW)',                  group: 'Weeks' },
-  { value: 'last_working_week',             label: 'Last Working Week (LWWeek)',      group: 'Weeks' },
-  { value: 'week_before_last_working_week', label: 'Week Before LWWeek (WBLWWeek)',   group: 'Weeks' },
-  { value: 'this_month',                    label: 'This Month (TMonth)',             group: 'Months' },
-  { value: 'last_month',                    label: 'Last Month (LMonth)',             group: 'Months' },
-  { value: 'this_year',                     label: 'This Year (TYear)',               group: 'Years' },
-  { value: 'last_year',                     label: 'Last Year (LYear)',               group: 'Years' },
-  { value: 'ytd',                           label: 'Year to Date (YTD)',              group: 'Cumulative' },
-  { value: 'mtd',                           label: 'Month to Date (MTD)',             group: 'Cumulative' },
+  { value: 'today',                         label: 'Today',                                group: 'Days' },
+  { value: 'yesterday',                     label: 'Yesterday (YTDY)',                     group: 'Days' },
+  { value: 'day_before_yesterday',          label: 'Day Before Yesterday',                 group: 'Days' },
+  { value: 'last_working_day',              label: 'Last Working Day (LWDay)',             group: 'Days' },
+  { value: 'day_before_last_working_day',   label: 'Day Before LWDay (DBLWDay)',           group: 'Days' },
+  { value: 'twwtlwd',                       label: 'This Working Week to Last Working Day (TWWeek→LWD)', group: 'Working Weeks' },
+  { value: 'last_working_week',             label: 'Last Working Week (LWWeek)',           group: 'Working Weeks' },
+  { value: 'week_before_last_working_week', label: 'Week Before LWWeek (WBLWWeek)',        group: 'Working Weeks' },
+  { value: 'this_week',                     label: 'This Week (TW)',                       group: 'Weeks' },
+  { value: 'last_week',                     label: 'Last Week (LW)',                       group: 'Weeks' },
+  { value: 'week_before_last',              label: 'Week Before Last',                     group: 'Weeks' },
+  { value: 'eof_last_working_week',             label: 'EOF Last Working Week (EOFLWWeek)',    group: 'EOF Weeks' },
+  { value: 'eof_week_before_last_working_week', label: 'EOF Prev Working Week (EOFPrevWWeek)', group: 'EOF Weeks' },
+  { value: 'eof_this_week',                     label: 'EOF This Week (EOFTWeek)',             group: 'EOF Weeks' },
+  { value: 'eof_last_week',                     label: 'EOF Last Week (EOFLWeek)',             group: 'EOF Weeks' },
+  { value: 'this_month',                    label: 'This Month (TMonth)',                  group: 'Months' },
+  { value: 'last_month',                    label: 'Last Month (LMonth)',                  group: 'Months' },
+  { value: 'last_working_month',            label: 'Last Working Month (LWMonth)',         group: 'Months' },
+  { value: 'month_before_last_working_month', label: 'Month Before LWMonth (MBLWMonth)',  group: 'Months' },
+  { value: 'tmtlwd',                        label: 'This Month to Last Working Day',       group: 'Months' },
+  { value: 'ytlwd',                         label: 'Year to Last Working Day',             group: 'Year to Date' },
+  { value: 'eof_last_working_month',            label: 'EOF Last Working Month (EOFLWMonth)',   group: 'EOF Months' },
+  { value: 'eof_month_before_last_working_month', label: 'EOF Prev Working Month (EOFPrevWMonth)', group: 'EOF Months' },
+  { value: 'this_quarter',                  label: 'This Quarter',                         group: 'Quarters' },
+  { value: 'last_quarter',                  label: 'Last Quarter',                         group: 'Quarters' },
+  { value: 'this_year',                     label: 'This Year (TYear)',                    group: 'Years' },
+  { value: 'last_year',                     label: 'Last Year (LYear)',                    group: 'Years' },
+  { value: 'ytd',                           label: 'Year to Date (YTD)',                   group: 'Cumulative' },
+  { value: 'mtd',                           label: 'Month to Date (MTD)',                  group: 'Cumulative' },
 ]
 const PERIOD_LABEL: Record<string, string> = Object.fromEntries(PERIOD_PRESETS.map(p => [p.value, p.label]))
 const PERIOD_GROUPS = [...new Set(PERIOD_PRESETS.map(p => p.group))]
@@ -3152,7 +3218,19 @@ export default function ReportBuilderModal({
   const [leftTab, setLeftTab] = useState<'elements' | 'variables' | 'settings'>('elements')
   const [confirmDeleteVarId, setConfirmDeleteVarId] = useState<string | null>(null)
   const [varSearch, setVarSearch] = useState('')
+  const [renamingVarId, setRenamingVarId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
   const varListRef = useRef<HTMLDivElement>(null)
+
+  // Suspend background query recalculations while the builder is open
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new CustomEvent(open ? 'report-builder-open' : 'report-builder-close'))
+    return () => {
+      if (open) window.dispatchEvent(new CustomEvent('report-builder-close'))
+    }
+  }, [open])
 
   // Scroll selected variable row into view
   useEffect(() => {
@@ -3383,10 +3461,27 @@ export default function ReportBuilderModal({
                     key={v.id}
                     data-var-id={v.id}
                     className={`flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-border/40 transition-colors ${selectedVarId === v.id ? 'bg-primary/10' : 'hover:bg-secondary/50'}`}
-                    onClick={() => { setSelectedVarId(v.id); setSelectedId(null) }}
+                    onClick={() => { if (renamingVarId !== v.id) { setSelectedVarId(v.id); setSelectedId(null) } }}
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="text-[10px] font-medium truncate">{v.name}</div>
+                      {renamingVarId === v.id ? (
+                        <input
+                          ref={renameInputRef}
+                          className="w-full h-5 text-[10px] font-medium rounded px-1 border bg-background outline-none focus:ring-1 focus:ring-primary/50"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => { if (renameValue.trim()) updateVariable(v.id, { ...v, name: renameValue.trim() }); setRenamingVarId(null) }}
+                          onKeyDown={e => { if (e.key === 'Enter') { if (renameValue.trim()) updateVariable(v.id, { ...v, name: renameValue.trim() }); setRenamingVarId(null) } else if (e.key === 'Escape') setRenamingVarId(null) }}
+                          onClick={e => e.stopPropagation()}
+                          autoFocus
+                        />
+                      ) : (
+                        <div
+                          className="text-[10px] font-medium truncate"
+                          onDoubleClick={e => { e.stopPropagation(); setRenamingVarId(v.id); setRenameValue(v.name); setSelectedVarId(v.id); setSelectedId(null) }}
+                          title="Double-click to rename"
+                        >{v.name}</div>
+                      )}
                       <div className="text-[9px] text-muted-foreground truncate">{v.value?.field || v.expression || v.datetimeExpr || '—'}</div>
                     </div>
                     <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold shrink-0 ${v.type === 'expression' ? 'bg-amber-500/10 text-amber-600' : v.type === 'datetime' ? 'bg-blue-500/10 text-blue-500' : 'bg-primary/10 text-primary'}`}>

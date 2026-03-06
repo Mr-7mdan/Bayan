@@ -8,6 +8,31 @@ import { useFilters } from '@/components/providers/FiltersProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
 
+// ── Report variable query concurrency limiter ────────────────────────────────
+// Caps simultaneous /spec calls per browser tab so the backend thread pool
+// is not saturated by a single report with many variables.
+const _REPORT_QUERY_CONCURRENCY = 6
+let _reportQueryActive = 0
+const _reportQueryQueue: Array<() => void> = []
+function _reportQueryAcquire(): Promise<void> {
+  return new Promise((resolve) => {
+    if (_reportQueryActive < _REPORT_QUERY_CONCURRENCY) {
+      _reportQueryActive++
+      resolve()
+    } else {
+      _reportQueryQueue.push(() => { _reportQueryActive++; resolve() })
+    }
+  })
+}
+function _reportQueryRelease(): void {
+  _reportQueryActive = Math.max(0, _reportQueryActive - 1)
+  if (_reportQueryQueue.length > 0) {
+    const next = _reportQueryQueue.shift()!
+    next()
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Format date using a pattern like "dd MMM yyyy", "dd/MM/yyyy", "MMM yyyy", "HH:mm"
 function formatDateStr(date: Date, pattern: string): string {
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -47,19 +72,37 @@ function resolveDatetimeExprToString(expr: string): string {
   const _ms=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const dmm = (d: Date) => `${String(d.getDate()).padStart(2,'0')} ${_ms[d.getMonth()]}`
   const weekRangeStr = (s: Date) => { const e=new Date(s); e.setDate(e.getDate()+6); return `W${isoWeek(s)} (${dmm(s)} - ${dmm(e)})` }
+  // Working week spans Mon–Fri (SAT_SUN) or Sun–Thu (FRI_SAT) → always 4 days after start
+  const workingWeekRangeStr = (s: Date) => { const e=new Date(s); e.setDate(e.getDate()+4); return `W${isoWeek(s)} (${dmm(s)} - ${dmm(e)})` }
+  const weekendDaysJs2 = weekendDaysJs // alias for use inside case blocks
   switch (expr) {
     case 'today': return formatDateStr(today, 'dd MMM yy')
     case 'yesterday': { const d=new Date(today); d.setDate(d.getDate()-1); return formatDateStr(d,'dd MMM yy') }
+    case 'day_before_yesterday': { const d=new Date(today); d.setDate(d.getDate()-2); return formatDateStr(d,'dd MMM yy') }
     case 'last_working_day': return formatDateStr(prevWorkday(today),'dd MMM yy')
     case 'day_before_last_working_day': return formatDateStr(prevWorkday(prevWorkday(today)),'dd MMM yy')
+    case 'twwtlwd': { const ws=startOfWorkingWeek(today); const lwd=prevWorkday(today); return `${dmm(ws)} - ${dmm(lwd)}` }
+    case 'last_working_week': { const ws=startOfWorkingWeek(today); if (weekendDaysJs2.includes(today.getDay())) { return workingWeekRangeStr(ws) } return `W${isoWeek(ws)} (${dmm(ws)} - ${dmm(today)})` }
+    case 'week_before_last_working_week': { const ws=startOfWorkingWeek(today); const s=new Date(ws); s.setDate(s.getDate()-7); return workingWeekRangeStr(s) }
     case 'this_week': return weekRangeStr(startOfWeek(today))
     case 'last_week': { const s=startOfWeek(today); s.setDate(s.getDate()-7); return weekRangeStr(s) }
-    case 'last_working_week': { const ws=startOfWorkingWeek(today); const s=new Date(ws); s.setDate(s.getDate()-7); return weekRangeStr(s) }
-    case 'week_before_last_working_week': { const ws=startOfWorkingWeek(today); const s=new Date(ws); s.setDate(s.getDate()-14); return weekRangeStr(s) }
+    case 'week_before_last': { const s=startOfWeek(today); s.setDate(s.getDate()-14); return weekRangeStr(s) }
+    case 'eof_last_working_week': { const ws=startOfWorkingWeek(today); const endP=new Date(ws); endP.setDate(endP.getDate()+7); let ld=prevWorkday(endP); const lwdToday=prevWorkday(new Date(today.getFullYear(),today.getMonth(),today.getDate()+1)); if (ld>lwdToday) ld=lwdToday; return formatDateStr(ld,'dd MMM yy') }
+    case 'eof_week_before_last_working_week': { const ws=startOfWorkingWeek(today); return formatDateStr(prevWorkday(ws),'dd MMM yy') }
+    case 'eof_this_week': { const next=new Date(today); next.setDate(next.getDate()+1); return formatDateStr(prevWorkday(next),'dd MMM yy') }
+    case 'eof_last_week': { return formatDateStr(prevWorkday(startOfWeek(today)),'dd MMM yy') }
     case 'this_month': return `${_ms[today.getMonth()]}-${today.getFullYear()}`
     case 'last_month': { const d=new Date(today.getFullYear(),today.getMonth()-1,1); return `${_ms[d.getMonth()]}-${d.getFullYear()}` }
+    case 'last_working_month': { const d=new Date(today.getFullYear(),today.getMonth()-1,1); return `${_ms[d.getMonth()]}-${d.getFullYear()}` }
+    case 'month_before_last_working_month': { const d=new Date(today.getFullYear(),today.getMonth()-2,1); return `${_ms[d.getMonth()]}-${d.getFullYear()}` }
+    case 'tmtlwd': { const lwd=prevWorkday(today); return `${dmm(new Date(today.getFullYear(),today.getMonth(),1))} - ${dmm(lwd)}` }
+    case 'eof_last_working_month': { return formatDateStr(prevWorkday(new Date(today.getFullYear(),today.getMonth(),1)),'dd MMM yy') }
+    case 'eof_month_before_last_working_month': { return formatDateStr(prevWorkday(new Date(today.getFullYear(),today.getMonth()-1,1)),'dd MMM yy') }
+    case 'this_quarter': { const q=Math.floor(today.getMonth()/3)+1; return `Q${q} ${today.getFullYear()}` }
+    case 'last_quarter': { const q=Math.floor(today.getMonth()/3); const pq=q===0?4:q; const yr=q===0?today.getFullYear()-1:today.getFullYear(); return `Q${pq} ${yr}` }
     case 'this_year': return String(today.getFullYear())
     case 'last_year': return String(today.getFullYear()-1)
+    case 'ytlwd': { const lwd=prevWorkday(today); return `${dmm(new Date(today.getFullYear(),0,1))} - ${dmm(lwd)}` }
     case 'ytd': return `${dmm(new Date(today.getFullYear(),0,1))} - ${dmm(today)}`
     case 'mtd': return `${dmm(new Date(today.getFullYear(),today.getMonth(),1))} - ${dmm(today)}`
     default: return expr
@@ -109,10 +152,20 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
     queryKey: ['report-var', variable.id, variable.datasourceId, variable.source, variable.value?.field, variable.value?.agg, variable.value?.avgDateField, variable.value?.avgNumerator, JSON.stringify(variable.where), JSON.stringify(globalFilters), variable.multiplyBy, variable.divideBy, variable.roundMode, variable.roundDecimals],
     queryFn: async () => {
       if (!variable.source || !variable.value?.field) return null
+      await _reportQueryAcquire()
       try {
       const agg = variable.value.agg && variable.value.agg !== 'none' ? variable.value.agg : null
       const field = variable.value.field
       const where: Record<string, any> = { ...(variable.where || {}), ...(globalFilters || {}) }
+      // Strip stale explicit __gte/__lt for any field that has a __date_preset.
+      // The backend resolves the preset at query time so stored dates are always stale.
+      for (const key of Object.keys(where)) {
+        if (key.endsWith('__date_preset')) {
+          const base = key.slice(0, -'__date_preset'.length)
+          delete where[`${base}__gte`]
+          delete where[`${base}__lt`]
+        }
+      }
       // For period-average vars: map global startDate/endDate onto avgDateField as gte/lt bounds.
       // This wires the dashboard date range picker into the period-average calculation.
       const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly' || agg === 'last_daily_sum'
@@ -216,6 +269,8 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
       } catch (err) {
         console.error(`[ReportCard] queryFn ERROR for var=${variable.name}:`, err)
         throw err
+      } finally {
+        _reportQueryRelease()
       }
     },
     enabled: !!(variable.source && variable.value?.field),
@@ -499,10 +554,26 @@ export default function ReportCard({
   const elements = report?.elements || []
   const variables = report?.variables || []
 
+  // Suspend queries while the report builder modal is open
+  const [builderActive, setBuilderActive] = useState(false)
+  useEffect(() => {
+    const onOpen  = () => setBuilderActive(true)
+    const onClose = () => setBuilderActive(false)
+    window.addEventListener('report-builder-open',  onOpen)
+    window.addEventListener('report-builder-close', onClose)
+    return () => {
+      window.removeEventListener('report-builder-open',  onOpen)
+      window.removeEventListener('report-builder-close', onClose)
+    }
+  }, [])
+
   // Resolve query-based variables using useQueries (stable hook count)
   const queryVars = useMemo(() => variables.filter(v => v.type !== 'expression' && v.type !== 'datetime'), [variables])
   const queryResults = useQueries({
-    queries: queryVars.map(v => buildVarQueryOptions(v, filters || {})),
+    queries: queryVars.map(v => ({
+      ...buildVarQueryOptions(v, filters || {}),
+      enabled: !builderActive && !!(v.source && v.value?.field),
+    })),
   })
 
   // In snapshot mode, fire widget-data-ready only after all queries have resolved
@@ -577,6 +648,7 @@ export default function ReportCard({
       const _ms = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
       const dmm = (d: Date) => `${String(d.getDate()).padStart(2,'0')} ${_ms[d.getMonth()]}`
       const weekRangeStr = (start: Date) => { const end = new Date(start); end.setDate(end.getDate()+6); return `W${isoWeek(start)} (${dmm(start)} - ${dmm(end)})` }
+      const workingWeekRangeStr = (start: Date) => { const end = new Date(start); end.setDate(end.getDate()+4); return `W${isoWeek(start)} (${dmm(start)} - ${dmm(end)})` }
 
       let val: string
       switch (expr) {
@@ -586,8 +658,9 @@ export default function ReportCard({
         case 'day_before_last_working_day': val = prevWorkday(prevWorkday(today)).toISOString(); break
         case 'this_week': val = weekRangeStr(startOfWeek(today)); break
         case 'last_week': { const s = startOfWeek(today); s.setDate(s.getDate()-7); val = weekRangeStr(s); break }
-        case 'last_working_week': { const ws = startOfWorkingWeek(today); const s = new Date(ws); s.setDate(s.getDate()-7); val = weekRangeStr(s); break }
-        case 'week_before_last_working_week': { const ws = startOfWorkingWeek(today); const s = new Date(ws); s.setDate(s.getDate()-14); val = weekRangeStr(s); break }
+        case 'twwtlwd': { const ws = startOfWorkingWeek(today); const lwd = prevWorkday(today); val = `${dmm(ws)} - ${dmm(lwd)}`; break }
+        case 'last_working_week': { const ws = startOfWorkingWeek(today); if (weekendDaysJs.includes(today.getDay())) { val = workingWeekRangeStr(ws) } else { val = `W${isoWeek(ws)} (${dmm(ws)} - ${dmm(today)})` } break }
+        case 'week_before_last_working_week': { const ws = startOfWorkingWeek(today); const s = new Date(ws); s.setDate(s.getDate()-7); val = workingWeekRangeStr(s); break }
         case 'this_month': val = `${_ms[today.getMonth()]}-${today.getFullYear()}`; break
         case 'last_month': { const d = new Date(today.getFullYear(), today.getMonth()-1, 1); val = `${_ms[d.getMonth()]}-${d.getFullYear()}`; break }
         case 'this_year': val = String(today.getFullYear()); break
