@@ -113,7 +113,7 @@ class IntrospectResponse(BaseModel):
 class QueryRequest(BaseModel):
     sql: str = Field(description="Raw SQL to execute against the target datasource")
     datasourceId: Optional[str] = Field(default=None, description="If omitted, uses local DuckDB")
-    limit: Optional[int] = Field(default=1000)
+    limit: Optional[int] = Field(default=None)
     params: Optional[Dict[str, Any]] = Field(default=None, description="Bound parameters for the SQL (e.g., startDate, endDate)")
     offset: Optional[int] = Field(default=0)
     includeTotal: Optional[bool] = Field(default=False, description="If true, also return total row count of the inner query")

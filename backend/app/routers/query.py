@@ -4495,17 +4495,18 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
     # Important: some drivers (e.g., DuckDB via duckdb-engine) are unreliable with
     # bound parameters in LIMIT/OFFSET. Inline safe integer literals instead.
     sql_inner = payload.sql
-    limit_lit = int(payload.limit or 1000)
+    limit_lit = int(payload.limit) if payload.limit is not None else None
     offset_lit = int(payload.offset or 0)
-    # Clamp limit to a safe maximum
-    try:
-        _max_lim_env = int(os.environ.get("QUERY_MAX_LIMIT", "10000") or "10000")
-    except Exception:
-        _max_lim_env = 10000
-    if limit_lit > _max_lim_env:
-        limit_lit = _max_lim_env
+    # Clamp limit to a safe maximum (only when a limit is set)
+    if limit_lit is not None:
+        try:
+            _max_lim_env = int(os.environ.get("QUERY_MAX_LIMIT", "10000") or "10000")
+        except Exception:
+            _max_lim_env = 10000
+        if limit_lit > _max_lim_env:
+            limit_lit = _max_lim_env
 
-    __heavy = bool(limit_lit >= 5000 or bool(payload.includeTotal))
+    __heavy = bool((limit_lit is None or limit_lit >= 5000) or bool(payload.includeTotal))
 
     # Collect named params referenced in the inner SQL
     name_order = [m.group(1) for m in re.finditer(r":([A-Za-z_][A-Za-z0-9_]*)", sql_inner)]
@@ -4615,7 +4616,9 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
             # standard and may be silently dropped by the query optimizer).
             _iqm_upper = inner_qm.upper()
             _ob_pos = _iqm_upper.rfind(' ORDER BY ')
-            if _ob_pos >= 0:
+            if limit_lit is None:
+                sql_native = inner_qm
+            elif _ob_pos >= 0:
                 _ob_clause = inner_qm[_ob_pos + len(' ORDER BY '):].strip()
                 _ob_base = inner_qm[:_ob_pos].rstrip()
                 sql_native = f"SELECT * FROM ({_ob_base}) AS _q ORDER BY {_ob_clause} LIMIT {limit_lit} OFFSET {offset_lit}"
@@ -4809,9 +4812,12 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                     order_by = m.group(1).strip()
                     sql_base = inner_str[: m.start()].rstrip()
                     outer = (f" ORDER BY {order_by}" if order_by else " ORDER BY 1")
-                    sql_text = text(
-                        f"SELECT * FROM ({sql_base}) AS _q{outer} OFFSET {offset_lit} ROWS FETCH NEXT {limit_lit} ROWS ONLY"
-                    )
+                    if limit_lit is None:
+                        sql_text = text(f"SELECT * FROM ({sql_base}) AS _q{outer}")
+                    else:
+                        sql_text = text(
+                            f"SELECT * FROM ({sql_base}) AS _q{outer} OFFSET {offset_lit} ROWS FETCH NEXT {limit_lit} ROWS ONLY"
+                        )
                 else:
                     # No ORDER BY: wrap with ROW_NUMBER() to ensure a named column for ORDER BY
                     # This avoids MSSQL error 8155 when inner columns lack aliases (e.g., COUNT(*))
@@ -4820,10 +4826,13 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                         safe_inner = re.sub(r"(?is)^(\s*select\s+)(count\s*\(\s*\*\s*\))(\s*)(from\b)", r"\1\2 AS __cnt \4", inner_str, count=1)
                     except Exception:
                         safe_inner = inner_str
-                    sql_text = text(
-                        f"SELECT * FROM (SELECT ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS __rn, * FROM ({safe_inner}) AS _x) AS _q "
-                        f"ORDER BY __rn OFFSET {offset_lit} ROWS FETCH NEXT {limit_lit} ROWS ONLY"
-                    )
+                    if limit_lit is None:
+                        sql_text = text(f"SELECT * FROM ({safe_inner}) AS _q ORDER BY 1")
+                    else:
+                        sql_text = text(
+                            f"SELECT * FROM (SELECT ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS __rn, * FROM ({safe_inner}) AS _x) AS _q "
+                            f"ORDER BY __rn OFFSET {offset_lit} ROWS FETCH NEXT {limit_lit} ROWS ONLY"
+                        )
             else:
                 # Hoist ORDER BY from subquery to outer LIMIT/OFFSET (same fix as MSSQL path above).
                 # ORDER BY inside a subquery is not guaranteed by the SQL standard and is ignored
@@ -4832,7 +4841,9 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                 _si = (sql_inner or "").strip()
                 _si_upper = _si.upper()
                 _ob_pos2 = _si_upper.rfind(' ORDER BY ')
-                if _ob_pos2 >= 0:
+                if limit_lit is None:
+                    sql_text = text(_si)
+                elif _ob_pos2 >= 0:
                     _ob_clause2 = _si[_ob_pos2 + len(' ORDER BY '):].strip()
                     _ob_base2 = _si[:_ob_pos2].rstrip()
                     sql_text = text(f"SELECT * FROM ({_ob_base2}) AS _q ORDER BY {_ob_clause2} LIMIT {limit_lit} OFFSET {offset_lit}")
