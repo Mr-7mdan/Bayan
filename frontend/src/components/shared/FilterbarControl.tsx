@@ -445,12 +445,13 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadingC
 
 function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCache, loadDistinctAction }: { field: string; where?: Record<string, any>; onPatchAction: (patch: Record<string, any>) => void; distinctCache?: Record<string, string[]>; loadingCache?: Record<string, boolean>; loadDistinctAction?: (field: string) => void }) {
   type Mode = 'preset'|'custom'|'manual'
-  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
+  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_this_month'|'eof_last_month'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type CustomOp = 'after'|'before'|'between'
   const storageKey = `frc-date:${field}`
   const initialArr = Array.isArray((where as any)?.[field]) ? ((where as any)?.[field] as any[]).map((v) => String(v)) : []
   const [mode, setMode] = useState<Mode>(initialArr.length > 1 ? 'manual' : 'preset')
   const [preset, setPreset] = useState<Preset>('today')
+  const [eofSkipWeekends, setEofSkipWeekends] = useState<boolean>(true)
   const [op, setOp] = useState<CustomOp>('between')
   const [a, setA] = useState<string>('')
   const [b, setB] = useState<string>('')
@@ -559,12 +560,14 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
         if (p === 'week_before_last') { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
         if (p === 'last_working_month') { const s = startOfMonth(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
         if (p === 'month_before_last_working_month') { const s = startOfMonth(now); s.setMonth(s.getMonth()-2); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
-        if (p === 'eof_last_working_week') { const ws = startOfWorkingWeek(now); const endP = [0,6].includes(now.getDay()) ? (() => { const e = new Date(ws); e.setDate(e.getDate()+7); return e })() : new Date(ws); let ld = prevWd(endP); const nxt = new Date(today0); nxt.setDate(nxt.getDate()+1); const cap = prevWd(nxt); if (ld > cap) ld = cap; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-        if (p === 'eof_week_before_last_working_week') { const ws = startOfWorkingWeek(now); const endP = [0,6].includes(now.getDay()) ? new Date(ws) : (() => { const e = new Date(ws); e.setDate(e.getDate()-7); return e })(); const ld = prevWd(endP); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-        if (p === 'eof_this_week') { const nxt = new Date(today0); nxt.setDate(nxt.getDate()+1); const ld = prevWd(nxt); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-        if (p === 'eof_last_week') { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const ld = prevWd(ws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-        if (p === 'eof_last_working_month') { const ld = prevWd(new Date(now.getFullYear(), now.getMonth(), 1)); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-        if (p === 'eof_month_before_last_working_month') { const ld = prevWd(new Date(now.getFullYear(), now.getMonth()-1, 1)); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_last_working_week') { const ld = prevWd(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_week_before_last_working_week') { const lwd = prevWd(today0); const wws = startOfWorkingWeek(lwd); const ld = prevWd(wws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_this_week') { const ld = eofSkipWeekends ? prevWd(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_last_week') { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const ld = eofSkipWeekends ? prevWd(ws) : (() => { const d = new Date(ws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_this_month') { const ld = eofSkipWeekends ? prevWd(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_last_month') { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = eofSkipWeekends ? prevWd(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_last_working_month') { const ld = prevWd(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_month_before_last_working_month') { const lwd = prevWd(today0); const firstOfLwdMonth = new Date(lwd.getFullYear(), lwd.getMonth(), 1); const ld = prevWd(firstOfLwdMonth); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
         if (p === 'tmtlwd') { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), lt: ymd(e2) } }
         if (p === 'ytlwd') { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), 0, 1)), lt: ymd(e2) } }
         return {}
@@ -629,7 +632,7 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
     }
     const sig = JSON.stringify(patch)
     if (sig !== lastSigRef.current) { lastSigRef.current = sig; onPatchAction(patch) }
-  }, [mode, preset, op, a, b])
+  }, [mode, preset, eofSkipWeekends, op, a, b])
   
   // Emit patch for manual mode
   useEffect(() => {
@@ -674,6 +677,7 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='manual'} onChange={()=>{ interactedRef.current = true; markEditing(); setMode('manual') }} /> Manual</label>
       </div>
       {mode==='preset' ? (
+        <>
         <select className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={preset} onChange={(e)=>{ interactedRef.current = true; markEditing(); setPreset(e.target.value as Preset) }}>
           <optgroup label="Days">
             <option value="today">Today</option>
@@ -708,6 +712,8 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
             <option value="ytlwd">Year to Last Working Day</option>
           </optgroup>
           <optgroup label="EOF Months">
+            <option value="eof_this_month">EOF This Month</option>
+            <option value="eof_last_month">EOF Last Month</option>
             <option value="eof_last_working_month">EOF Last Working Month</option>
             <option value="eof_month_before_last_working_month">EOF Month Before Last Working Month</option>
           </optgroup>
@@ -720,6 +726,16 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
             <option value="last_year">Last Year</option>
           </optgroup>
         </select>
+        {['eof_this_week','eof_last_week','eof_this_month','eof_last_month'].includes(preset) && (
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] text-muted-foreground shrink-0">Skip weekends</span>
+            <button
+              className={`text-[10px] px-2 py-0.5 rounded border ${eofSkipWeekends ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary/60 border-border'}`}
+              onClick={() => { interactedRef.current = true; markEditing(); setEofSkipWeekends(v => !v) }}
+            >{eofSkipWeekends ? 'Yes' : 'No'}</button>
+          </div>
+        )}
+        </>
       ) : mode==='custom' ? (
         <div className="grid grid-cols-3 gap-2">
           <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e)=>{ interactedRef.current = true; markEditing(); setOp(e.target.value as CustomOp) }}>

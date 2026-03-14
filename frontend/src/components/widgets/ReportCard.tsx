@@ -87,8 +87,8 @@ function resolveDatetimeExprToString(expr: string): string {
     case 'this_week': return weekRangeStr(startOfWeek(today))
     case 'last_week': { const s=startOfWeek(today); s.setDate(s.getDate()-7); return weekRangeStr(s) }
     case 'week_before_last': { const s=startOfWeek(today); s.setDate(s.getDate()-14); return weekRangeStr(s) }
-    case 'eof_last_working_week': { const ws=startOfWorkingWeek(today); const endP=new Date(ws); endP.setDate(endP.getDate()+7); let ld=prevWorkday(endP); const lwdToday=prevWorkday(new Date(today.getFullYear(),today.getMonth(),today.getDate()+1)); if (ld>lwdToday) ld=lwdToday; return formatDateStr(ld,'dd MMM yy') }
-    case 'eof_week_before_last_working_week': { const ws=startOfWorkingWeek(today); return formatDateStr(prevWorkday(ws),'dd MMM yy') }
+    case 'eof_last_working_week': return formatDateStr(prevWorkday(today),'dd MMM yy')
+    case 'eof_week_before_last_working_week': return formatDateStr(prevWorkday(startOfWorkingWeek(prevWorkday(today))),'dd MMM yy')
     case 'eof_this_week': { const next=new Date(today); next.setDate(next.getDate()+1); return formatDateStr(prevWorkday(next),'dd MMM yy') }
     case 'eof_last_week': { return formatDateStr(prevWorkday(startOfWeek(today)),'dd MMM yy') }
     case 'this_month': return `${_ms[today.getMonth()]}-${today.getFullYear()}`
@@ -96,8 +96,10 @@ function resolveDatetimeExprToString(expr: string): string {
     case 'last_working_month': { const d=new Date(today.getFullYear(),today.getMonth()-1,1); return `${_ms[d.getMonth()]}-${d.getFullYear()}` }
     case 'month_before_last_working_month': { const d=new Date(today.getFullYear(),today.getMonth()-2,1); return `${_ms[d.getMonth()]}-${d.getFullYear()}` }
     case 'tmtlwd': { const lwd=prevWorkday(today); return `${dmm(new Date(today.getFullYear(),today.getMonth(),1))} - ${dmm(lwd)}` }
-    case 'eof_last_working_month': { return formatDateStr(prevWorkday(new Date(today.getFullYear(),today.getMonth(),1)),'dd MMM yy') }
-    case 'eof_month_before_last_working_month': { return formatDateStr(prevWorkday(new Date(today.getFullYear(),today.getMonth()-1,1)),'dd MMM yy') }
+    case 'eof_this_month': return formatDateStr(prevWorkday(new Date(today.getFullYear(),today.getMonth(),today.getDate()+1)),'dd MMM yy')
+    case 'eof_last_month': { return formatDateStr(prevWorkday(new Date(today.getFullYear(),today.getMonth(),1)),'dd MMM yy') }
+    case 'eof_last_working_month': return formatDateStr(prevWorkday(today),'dd MMM yy')
+    case 'eof_month_before_last_working_month': { const lwd=prevWorkday(today); return formatDateStr(prevWorkday(new Date(lwd.getFullYear(),lwd.getMonth(),1)),'dd MMM yy') }
     case 'this_quarter': { const q=Math.floor(today.getMonth()/3)+1; return `Q${q} ${today.getFullYear()}` }
     case 'last_quarter': { const q=Math.floor(today.getMonth()/3); const pq=q===0?4:q; const yr=q===0?today.getFullYear()-1:today.getFullYear(); return `Q${pq} ${yr}` }
     case 'this_year': return String(today.getFullYear())

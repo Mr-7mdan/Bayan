@@ -89,14 +89,14 @@ function NumberFilterDetails({ field, onPatch }: { field: string; onPatch: (p: R
 
 function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Record<string,any>) => void }) {
   type DateMode = 'preset'|'custom'
-  type DatePreset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
+  type DatePreset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_this_month'|'eof_last_month'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type CustomOp = 'after'|'before'|'between'
   const [mode, setMode] = useState<DateMode>('preset')
   const [preset, setPreset] = useState<DatePreset>('this_month')
   const [customOp, setCustomOp] = useState<CustomOp>('after')
   const [d1, setD1] = useState('')
   const [d2, setD2] = useState('')
-  const DATE_RULE_PRESETS: DatePreset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','last_working_month','month_before_last_working_month','this_quarter','last_quarter','this_year','last_year','eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week','eof_last_working_month','eof_month_before_last_working_month','tmtlwd','ytlwd']
+  const DATE_RULE_PRESETS: DatePreset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','last_working_month','month_before_last_working_month','this_quarter','last_quarter','this_year','last_year','eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week','eof_this_month','eof_last_month','eof_last_working_month','eof_month_before_last_working_month','tmtlwd','ytlwd']
   const PRESET_LABELS: Record<DatePreset, string> = {
     today:'Today', yesterday:'Yesterday', day_before_yesterday:'Day Before Yesterday',
     last_working_day:'Last Working Day', day_before_last_working_day:'Day Before Last Working Day',
@@ -108,6 +108,7 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
     this_year:'This Year', last_year:'Last Year',
     eof_last_working_week:'EOF Last Working Week', eof_week_before_last_working_week:'EOF Week Before Last Working Week',
     eof_this_week:'EOF This Week', eof_last_week:'EOF Last Week',
+    eof_this_month:'EOF This Month', eof_last_month:'EOF Last Month',
     eof_last_working_month:'EOF Last Working Month', eof_month_before_last_working_month:'EOF Month Before Last Working Month',
     tmtlwd:'This Month to Last Working Day', ytlwd:'Year to Last Working Day',
   }

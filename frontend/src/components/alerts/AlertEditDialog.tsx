@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Api, parseUtcDate, type AlertOut, type AlertCreate, type AlertConfig, type AlertRunOut } from '@/lib/api'
 
 function parseCron(cron?: string) {
@@ -113,6 +113,9 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
   const [previewHtml, setPreviewHtml] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // After a successful save, store the API response so re-initialization
+  // uses fresh data even if the parent passes a stale `alert` prop.
+  const _savedRef = useRef<AlertOut | null>(null)
   // Advanced KPI editor (optional override or when no widget is present)
   const [advOpen, setAdvOpen] = useState(false)
   const [advDatasourceId, setAdvDatasourceId] = useState<string>('')
@@ -125,10 +128,14 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
 
   useEffect(() => {
     if (!open || !alert) return
-    setName(alert.name)
-    setKind(alert.kind)
-    setEnabled(!!alert.enabled)
-    const cfg = alert.config || {} as any
+    // Prefer the last API response (if it's for the same alert) over the prop,
+    // which may be stale if the parent did not update its alert state after save.
+    const src = (_savedRef.current?.id === alert.id) ? _savedRef.current! : alert
+    _savedRef.current = null
+    setName(src.name)
+    setKind(src.kind)
+    setEnabled(!!src.enabled)
+    const cfg = src.config || {} as any
     const acts = Array.isArray(cfg.actions) ? cfg.actions : []
     const email = acts.find((a: any) => String(a?.type) === 'email') || {}
     const sms = acts.find((a: any) => String(a?.type) === 'sms') || {}
@@ -284,6 +291,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
       const { emails, phones } = await resolveRecipientLists()
       const payload = buildPayload(emails, phones)
       const res = await Api.updateAlert(alert.id, payload)
+      _savedRef.current = res
       onSavedAction(res)
       onCloseAction()
     } catch (e: any) { setError(e?.message || 'Failed to save') } finally { setSaving(false) }

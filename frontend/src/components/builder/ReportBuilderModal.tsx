@@ -648,6 +648,8 @@ function VariableEditor({
                     <option value="month_before_last_working_month">MBLWMonth – Month Before Last Working Month</option>
                   </optgroup>
                   <optgroup label="EOF Months">
+                    <option value="eof_this_month">EOFTMonth – EOF This Month</option>
+                    <option value="eof_last_month">EOFLMonth – EOF Last Month</option>
                     <option value="eof_last_working_month">EOFLWMonth – EOF Last Working Month</option>
                     <option value="eof_month_before_last_working_month">EOFPrevWMonth – EOF Prev Working Month</option>
                   </optgroup>
@@ -1013,24 +1015,27 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
 const _DEFAULT_WEEK_START = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
 const _DEFAULT_WEEKENDS = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN'
 const WEEK_PRESETS = new Set(['this_week', 'last_week', 'week_before_last', 'eof_this_week', 'eof_last_week'])
-const WORKING_DAY_PRESETS = new Set(['last_working_day', 'day_before_last_working_day', 'twwtlwd', 'last_working_week', 'week_before_last_working_week', 'eof_last_working_week', 'eof_week_before_last_working_week', 'eof_this_week', 'eof_last_week', 'eof_last_working_month', 'eof_month_before_last_working_month', 'tmtlwd', 'ytlwd'])
+const WORKING_DAY_PRESETS = new Set(['last_working_day', 'day_before_last_working_day', 'twwtlwd', 'last_working_week', 'week_before_last_working_week', 'eof_last_working_week', 'eof_week_before_last_working_week', 'eof_this_week', 'eof_last_week', 'eof_this_month', 'eof_last_month', 'eof_last_working_month', 'eof_month_before_last_working_month', 'tmtlwd', 'ytlwd'])
 const WORKING_WEEK_PRESETS = new Set(['last_working_week', 'week_before_last_working_week', 'eof_last_working_week', 'eof_week_before_last_working_week'])
+const EOF_TOGGLE_PRESETS = new Set(['eof_this_week', 'eof_last_week', 'eof_this_month', 'eof_last_month'])
 
 function DateRuleEditor({ field, where, onPatch }: { field: string; where: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
-  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'twwtlwd'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
+  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'twwtlwd'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_this_month'|'eof_last_month'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type DateOp = 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'between'
   const [mode, setMode] = useState<'preset'|'custom'>('preset')
   const [preset, setPreset] = useState<Preset>('today')
   const [weekStartDay, setWeekStartDay] = useState<string>(() => String(where?.['__week_start_day'] ?? _DEFAULT_WEEK_START).toUpperCase())
   const [weekends, setWeekends] = useState<string>(() => String(where?.['__weekends'] ?? _DEFAULT_WEEKENDS).toUpperCase())
+  const [eofSkipWeekends, setEofSkipWeekends] = useState<boolean>(() => where?.['__eof_skip_weekends'] !== false)
   const [op, setOp] = useState<DateOp>('eq')
   const [a, setA] = useState(''); const [b, setB] = useState('')
 
   const isWeekPreset = WEEK_PRESETS.has(preset)
   const isWorkingDayPreset = WORKING_DAY_PRESETS.has(preset)
   const isWorkingWeekPreset = WORKING_WEEK_PRESETS.has(preset)
+  const isEofTogglePreset = EOF_TOGGLE_PRESETS.has(preset)
 
-  function rangeForPreset(p: Preset): { gte?: string; lt?: string } {
+  function rangeForPreset(p: Preset, skipWkds: boolean = eofSkipWeekends): { gte?: string; lt?: string } {
     const now = new Date()
     const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
     const som = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
@@ -1082,22 +1087,25 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       case 'last_quarter': { const pq = (q+3)%4; const yr = q===0 ? now.getFullYear()-1 : now.getFullYear(); return { gte: ymd(soq(yr, pq)), lt: ymd(eoq(yr, pq)) } }
       case 'this_year': return { gte: ymd(new Date(now.getFullYear(),0,1)), lt: ymd(new Date(now.getFullYear()+1,0,1)) }
       case 'last_year': return { gte: ymd(new Date(now.getFullYear()-1,0,1)), lt: ymd(new Date(now.getFullYear(),0,1)) }
-      case 'eof_last_working_week': { const ws = startOfWorkingWeek(now); const endP = weekendDaysJs.includes(now.getDay()) ? (() => { const e = new Date(ws); e.setDate(e.getDate()+7); return e })() : new Date(ws); let ld = prevWorkday(endP); const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const next0 = new Date(today0); next0.setDate(next0.getDate()+1); const lwdToday = prevWorkday(next0); if (ld > lwdToday) ld = lwdToday; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_week_before_last_working_week': { const ws = startOfWorkingWeek(now); const endP = weekendDaysJs.includes(now.getDay()) ? new Date(ws) : (() => { const e = new Date(ws); e.setDate(e.getDate()-7); return e })(); const ld = prevWorkday(endP); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_this_week': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const next = new Date(today0); next.setDate(next.getDate()+1); const ld = prevWorkday(next); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_last_week': { const ws = startOfWeek(now); const ld = prevWorkday(ws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_last_working_month': { const firstThis = new Date(now.getFullYear(), now.getMonth(), 1); const ld = prevWorkday(firstThis); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_month_before_last_working_month': { const firstLWM = new Date(now.getFullYear(), now.getMonth()-1, 1); const ld = prevWorkday(firstLWM); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_working_week': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const ld = prevWorkday(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_week_before_last_working_week': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const lwd = prevWorkday(today0); const wws = startOfWorkingWeek(lwd); const ld = prevWorkday(wws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_this_week': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const ld = skipWkds ? prevWorkday(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_week': { const ws = startOfWeek(now); const ld = skipWkds ? prevWorkday(ws) : (() => { const d = new Date(ws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_this_month': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const ld = skipWkds ? prevWorkday(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_month': { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = skipWkds ? prevWorkday(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_working_month': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const ld = prevWorkday(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_month_before_last_working_month': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const lwd = prevWorkday(today0); const firstOfLwdMonth = new Date(lwd.getFullYear(), lwd.getMonth(), 1); const ld = prevWorkday(firstOfLwdMonth); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
       case 'tmtlwd': { const lwd = prevWorkday(new Date(now.getFullYear(), now.getMonth(), now.getDate())); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), lt: ymd(e2) } }
       case 'ytlwd': { const lwd = prevWorkday(new Date(now.getFullYear(), now.getMonth(), now.getDate())); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), 0, 1)), lt: ymd(e2) } }
     }
   }
 
-  const applyPreset = (p: Preset, wsd?: string, wkends?: string, operator?: DateOp) => {
+  const applyPreset = (p: Preset, wsd?: string, wkends?: string, operator?: DateOp, skipWkds?: boolean) => {
     const effectiveWsd = wsd ?? weekStartDay
     const effectiveWkends = wkends ?? weekends
     const effectiveOp = operator ?? op
-    const range = rangeForPreset(p)
+    const effectiveSkipWkds = skipWkds ?? eofSkipWeekends
+    const range = rangeForPreset(p, effectiveSkipWkds)
     
     // Clear all date-related keys first
     const patch: Record<string, any> = {
@@ -1110,6 +1118,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       [`${field}__date_preset`]: p,
       __week_start_day: effectiveWsd,
       __weekends: effectiveWkends,
+      __eof_skip_weekends: effectiveSkipWkds,
       [`${field}__op`]: effectiveOp,
     }
     
@@ -1320,6 +1329,8 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
               <option value="ytlwd">Year to Last Working Day</option>
             </optgroup>
             <optgroup label="EOF Months">
+              <option value="eof_this_month">EOF This Month</option>
+              <option value="eof_last_month">EOF Last Month</option>
               <option value="eof_last_working_month">EOF Last Working Month</option>
               <option value="eof_month_before_last_working_month">EOF Month Before Last Working Month</option>
             </optgroup>
@@ -1361,6 +1372,15 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
                 <option value="SAT_SUN">Sat – Sun</option>
                 <option value="FRI_SAT">Fri – Sat</option>
               </select>
+            </div>
+          )}
+          {isEofTogglePreset && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground shrink-0">Skip weekends</span>
+              <button
+                className={`text-[10px] px-2 py-0.5 rounded border ${eofSkipWeekends ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary/60 border-border'}`}
+                onClick={() => { const next = !eofSkipWeekends; setEofSkipWeekends(next); applyPreset(preset, undefined, undefined, undefined, next) }}
+              >{eofSkipWeekends ? 'Yes' : 'No'}</button>
             </div>
           )}
           <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => applyPreset(preset)}>Apply</button>
@@ -2329,6 +2349,8 @@ const PERIOD_PRESETS: { value: string; label: string; group: string }[] = [
   { value: 'month_before_last_working_month', label: 'Month Before LWMonth (MBLWMonth)',  group: 'Months' },
   { value: 'tmtlwd',                        label: 'This Month to Last Working Day',       group: 'Months' },
   { value: 'ytlwd',                         label: 'Year to Last Working Day',             group: 'Year to Date' },
+  { value: 'eof_this_month',                     label: 'EOF This Month (EOFTMonth)',            group: 'EOF Months' },
+  { value: 'eof_last_month',                      label: 'EOF Last Month (EOFLMonth)',             group: 'EOF Months' },
   { value: 'eof_last_working_month',            label: 'EOF Last Working Month (EOFLWMonth)',   group: 'EOF Months' },
   { value: 'eof_month_before_last_working_month', label: 'EOF Prev Working Month (EOFPrevWMonth)', group: 'EOF Months' },
   { value: 'this_quarter',                  label: 'This Quarter',                         group: 'Quarters' },

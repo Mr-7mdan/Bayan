@@ -217,7 +217,7 @@ from .metrics import counter_inc
 
 from .models import AlertRule, EmailConfig, SmsConfigHadara, Dashboard, Contact
 from .security import decrypt_text
-from .routers.query import run_query_spec
+from .routers.query import run_query_spec, _resolve_date_presets
 from .schemas import QuerySpecRequest, QueryResponse
 from datetime import datetime, timedelta
 from .config import settings
@@ -487,6 +487,14 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
         agg = val_cfg.get('agg')
         if agg and agg != 'none':
             where = {**(v.get('where') or {}), **gf}
+            # Strip stale __gte/__lt for any field that has a __date_preset, then resolve
+            # presets to current date ranges — mirrors frontend buildVarQueryOptions logic.
+            for _wk in list(where.keys()):
+                if _wk.endswith('__date_preset'):
+                    _base = _wk[:-len('__date_preset')]
+                    where.pop(f'{_base}__gte', None)
+                    where.pop(f'{_base}__lt', None)
+            where = _resolve_date_presets(where) or {}
             spec: dict = {'source': source, 'agg': agg, 'y': field}
             if agg in ('avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly', 'last_daily_sum'):
                 avg_date_field = val_cfg.get('avgDateField')
@@ -519,6 +527,14 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
                 resolved[vid] = None
         else:
             where = {**(v.get('where') or {}), **gf}
+            # Strip stale __gte/__lt for any field that has a __date_preset, then resolve
+            # presets to current date ranges — mirrors frontend buildVarQueryOptions logic.
+            for _wk in list(where.keys()):
+                if _wk.endswith('__date_preset'):
+                    _base = _wk[:-len('__date_preset')]
+                    where.pop(f'{_base}__gte', None)
+                    where.pop(f'{_base}__lt', None)
+            where = _resolve_date_presets(where) or {}
             spec_raw: dict = {'source': source, 'select': [field]}
             if where:
                 spec_raw['where'] = where

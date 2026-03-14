@@ -888,11 +888,12 @@ function FilterDetailsTabs({ kind, selField, local, setLocal, updateConfig }: { 
 // Date rule editor for Details panel: presets + custom After/Before/Between
 function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
   type Mode = 'preset'|'custom'
-  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
+  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_this_month'|'eof_last_month'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type CustomOp = 'after'|'before'|'between'
   const storageKey = `cfg-date:${field}`
   const [mode, setMode] = useState<Mode>('preset')
   const [preset, setPreset] = useState<Preset>('today')
+  const [eofSkipWeekends, setEofSkipWeekends] = useState<boolean>(() => (where as any)?.['__eof_skip_weekends'] !== false)
   const [op, setOp] = useState<CustomOp>('between')
   const [a, setA] = useState<string>('')
   const [b, setB] = useState<string>('')
@@ -983,7 +984,9 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     } catch {}
   }, [field, (where as any)?.[`${field}__date_preset`], (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lt`]])
 
-  function rangeForPreset(p: Preset): { gte?: string; lt?: string } {
+  const isEofTogglePreset = ['eof_this_week','eof_last_week','eof_this_month','eof_last_month'].includes(preset)
+
+  function rangeForPreset(p: Preset, skipWkds: boolean = eofSkipWeekends): { gte?: string; lt?: string } {
     const now = new Date()
     const ymd = (d: Date) => {
       const y = d.getFullYear()
@@ -1021,12 +1024,14 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       case 'last_quarter': { const q = (quarter+3-1)%4; const yr = quarter===0 ? now.getFullYear()-1 : now.getFullYear(); return { gte: ymd(startOfQuarter(yr, q)), lt: ymd(endOfQuarter(yr, q)) } }
       case 'this_year': return { gte: ymd(startOfYear(now)), lt: ymd(endOfYear(now)) }
       case 'last_year': { const s = new Date(now.getFullYear()-1, 0, 1); const e = new Date(now.getFullYear(), 0, 1); return { gte: ymd(s), lt: ymd(e) } }
-      case 'eof_last_working_week': { const ws = startOfWorkingWeek(now); const endP = [0,6].includes(now.getDay()) ? (() => { const e = new Date(ws); e.setDate(e.getDate()+7); return e })() : new Date(ws); let ld = prevWd(endP); const nxt = new Date(today0); nxt.setDate(nxt.getDate()+1); const cap = prevWd(nxt); if (ld > cap) ld = cap; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_week_before_last_working_week': { const ws = startOfWorkingWeek(now); const endP = [0,6].includes(now.getDay()) ? new Date(ws) : (() => { const e = new Date(ws); e.setDate(e.getDate()-7); return e })(); const ld = prevWd(endP); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_this_week': { const nxt = new Date(today0); nxt.setDate(nxt.getDate()+1); const ld = prevWd(nxt); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_last_week': { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const ld = prevWd(ws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_last_working_month': { const ld = prevWd(new Date(now.getFullYear(), now.getMonth(), 1)); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_month_before_last_working_month': { const ld = prevWd(new Date(now.getFullYear(), now.getMonth()-1, 1)); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_working_week': { const ld = prevWd(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_week_before_last_working_week': { const lwd = prevWd(today0); const wws = startOfWorkingWeek(lwd); const ld = prevWd(wws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_this_week': { const ld = skipWkds ? prevWd(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_week': { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const ld = skipWkds ? prevWd(ws) : (() => { const d = new Date(ws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_this_month': { const ld = skipWkds ? prevWd(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_month': { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = skipWkds ? prevWd(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_working_month': { const ld = prevWd(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_month_before_last_working_month': { const lwd = prevWd(today0); const firstOfLwdMonth = new Date(lwd.getFullYear(), lwd.getMonth(), 1); const ld = prevWd(firstOfLwdMonth); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
       case 'tmtlwd': { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), lt: ymd(e2) } }
       case 'ytlwd': { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), 0, 1)), lt: ymd(e2) } }
     }
@@ -1048,6 +1053,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     if (mode === 'preset') {
       // Store symbolic preset name — backend resolves at query execution time
       patch[`${field}__date_preset`] = preset
+      patch['__eof_skip_weekends'] = eofSkipWeekends
       const sig = JSON.stringify(patch)
       if (sig !== lastSigRef.current) { lastSigRef.current = sig; onPatch(patch) }
       return
@@ -1064,7 +1070,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     }
     const sig = JSON.stringify(patch)
     if (sig !== lastSigRef.current) { lastSigRef.current = sig; onPatch(patch) }
-  }, [mode, preset, op, a, b])
+  }, [mode, preset, eofSkipWeekends, op, a, b])
 
   return (
     <div className="rounded-lg border bg-card p-3">
@@ -1080,50 +1086,61 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
         <div className="mt-2">
           <select className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={preset} onChange={(e)=>{ interactedRef.current = true; markEditing(); setPreset(e.target.value as Preset) }}>
             <optgroup label="Days">
-            <option value="today">Today</option>
-            <option value="yesterday">Yesterday</option>
-            <option value="day_before_yesterday">Day Before Yesterday</option>
-            <option value="last_working_day">Last Working Day</option>
-            <option value="day_before_last_working_day">Day Before Last Working Day</option>
-          </optgroup>
-          <optgroup label="Working Weeks">
-            <option value="last_working_week">Last Working Week</option>
-            <option value="week_before_last_working_week">Week Before Last Working Week</option>
-          </optgroup>
-          <optgroup label="Weeks">
-            <option value="this_week">This Week</option>
-            <option value="last_week">Last Week</option>
-            <option value="week_before_last">Week Before Last</option>
-          </optgroup>
-          <optgroup label="EOF Weeks">
-            <option value="eof_last_working_week">EOF Last Working Week</option>
-            <option value="eof_week_before_last_working_week">EOF Week Before Last Working Week</option>
-            <option value="eof_this_week">EOF This Week</option>
-            <option value="eof_last_week">EOF Last Week</option>
-          </optgroup>
-          <optgroup label="Months">
-            <option value="this_month">This Month</option>
-            <option value="last_month">Last Month</option>
-            <option value="last_working_month">Last Working Month</option>
-            <option value="month_before_last_working_month">Month Before Last Working Month</option>
-            <option value="tmtlwd">This Month to Last Working Day</option>
-          </optgroup>
-          <optgroup label="Year to Date">
-            <option value="ytlwd">Year to Last Working Day</option>
-          </optgroup>
-          <optgroup label="EOF Months">
-            <option value="eof_last_working_month">EOF Last Working Month</option>
-            <option value="eof_month_before_last_working_month">EOF Month Before Last Working Month</option>
-          </optgroup>
-          <optgroup label="Quarters">
-            <option value="this_quarter">This Quarter</option>
-            <option value="last_quarter">Last Quarter</option>
-          </optgroup>
-          <optgroup label="Years">
-            <option value="this_year">This Year</option>
-            <option value="last_year">Last Year</option>
-          </optgroup>
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="day_before_yesterday">Day Before Yesterday</option>
+              <option value="last_working_day">Last Working Day</option>
+              <option value="day_before_last_working_day">Day Before Last Working Day</option>
+            </optgroup>
+            <optgroup label="Working Weeks">
+              <option value="last_working_week">Last Working Week</option>
+              <option value="week_before_last_working_week">Week Before Last Working Week</option>
+            </optgroup>
+            <optgroup label="Weeks">
+              <option value="this_week">This Week</option>
+              <option value="last_week">Last Week</option>
+              <option value="week_before_last">Week Before Last</option>
+            </optgroup>
+            <optgroup label="EOF Weeks">
+              <option value="eof_last_working_week">EOF Last Working Week</option>
+              <option value="eof_week_before_last_working_week">EOF Week Before Last Working Week</option>
+              <option value="eof_this_week">EOF This Week</option>
+              <option value="eof_last_week">EOF Last Week</option>
+            </optgroup>
+            <optgroup label="Months">
+              <option value="this_month">This Month</option>
+              <option value="last_month">Last Month</option>
+              <option value="last_working_month">Last Working Month</option>
+              <option value="month_before_last_working_month">Month Before Last Working Month</option>
+              <option value="tmtlwd">This Month to Last Working Day</option>
+            </optgroup>
+            <optgroup label="Year to Date">
+              <option value="ytlwd">Year to Last Working Day</option>
+            </optgroup>
+            <optgroup label="EOF Months">
+              <option value="eof_this_month">EOF This Month</option>
+              <option value="eof_last_month">EOF Last Month</option>
+              <option value="eof_last_working_month">EOF Last Working Month</option>
+              <option value="eof_month_before_last_working_month">EOF Month Before Last Working Month</option>
+            </optgroup>
+            <optgroup label="Quarters">
+              <option value="this_quarter">This Quarter</option>
+              <option value="last_quarter">Last Quarter</option>
+            </optgroup>
+            <optgroup label="Years">
+              <option value="this_year">This Year</option>
+              <option value="last_year">Last Year</option>
+            </optgroup>
           </select>
+          {isEofTogglePreset && (
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[10px] text-muted-foreground shrink-0">Skip weekends</span>
+              <button
+                className={`text-[10px] px-2 py-0.5 rounded border ${eofSkipWeekends ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary/60 border-border'}`}
+                onClick={() => { interactedRef.current = true; markEditing(); setEofSkipWeekends(v => !v) }}
+              >{eofSkipWeekends ? 'Yes' : 'No'}</button>
+            </div>
+          )}
         </div>
       ) : (
         <>

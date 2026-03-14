@@ -1,82 +1,56 @@
 """
-Diagnostic: why do Deposits/Withdrawals differ between This Week (Mar 2-4) and This Month (Mar 1-4)?
-Hypothesis: Daily_Positions has data on Sunday March 1st.
+1. Print full options_json for the DuckDB datasource [9eb8f9f7] (joins config).
+2. Search dashboard JSONs for the New Markup / PriceGateway computed column.
 """
-import duckdb
+import json, sqlite3, re
 
-DUCK_DB_PATH = "/Users/mohammed/Documents/Bayan/backend/.data/new-20251030-1557.duckdb"
+META_DB_PATH = "/Users/mohammed/Documents/Bayan/backend/.data/meta.sqlite"
+meta = sqlite3.connect(META_DB_PATH)
+meta.row_factory = sqlite3.Row
 
-con = duckdb.connect(DUCK_DB_PATH, read_only=True)
+# ── 1. Full config for the DuckDB (New) datasource ───────────────────────────
+print("=" * 90)
+print("DuckDB datasource [9eb8f9f7] full options_json")
+print("=" * 90)
+ds = meta.execute(
+    "SELECT id, name, options_json FROM datasources WHERE id = '9eb8f9f7-1dbe-40f8-bcf8-2a0bcf96f5f8' OR id LIKE '9eb8f9f7%'"
+).fetchone()
+if ds:
+    opts = json.loads(ds["options_json"] or "{}")
+    print(json.dumps(opts, indent=2))
+else:
+    # Try by name
+    ds = meta.execute("SELECT id, name, options_json FROM datasources WHERE type='duckdb'").fetchone()
+    if ds:
+        opts = json.loads(ds["options_json"] or "{}")
+        print(f"id={ds['id']}  name={ds['name']}")
+        print(json.dumps(opts, indent=2))
+    else:
+        print("  Not found")
 
-print("=== Daily_Positions: daily breakdown Mar 1-4 ===")
-try:
-    rows = con.execute("""
-        SELECT created_at,
-               strftime(created_at, '%A') AS day_name,
-               SUM("Client Deposits")    AS deposits,
-               SUM("Client Withdrawals") AS withdrawals,
-               COUNT(*)                  AS rows
-        FROM Daily_Positions
-        WHERE created_at >= '2026-03-01' AND created_at < '2026-03-05'
-        GROUP BY created_at
-        ORDER BY created_at
-    """).fetchall()
-    for r in rows:
-        print(f"  {r[0]}  ({r[1]})  deposits={r[2]:,.2f}  withdrawals={r[3]:,.2f}  rows={r[4]}")
-except Exception as e:
-    print(f"  ERROR: {e}")
-
+# ── 2. Search all dashboard JSONs broadly ─────────────────────────────────────
 print()
-print("=== THIS WEEK sum (Mar 2-4) ===")
-try:
-    r = con.execute("""
-        SELECT SUM("Client Deposits") as dep, SUM("Client Withdrawals") as wd
-        FROM Daily_Positions
-        WHERE created_at >= '2026-03-02' AND created_at < '2026-03-05'
-    """).fetchone()
-    print(f"  Deposits={r[0]:,.2f}  Withdrawals={r[1]:,.2f}")
-except Exception as e:
-    print(f"  ERROR: {e}")
+print("=" * 90)
+print("All dashboards — searching for 'Markup', 'Price', 'customCol', 'expr' ...")
+print("=" * 90)
+dashboards = meta.execute("SELECT id, name, definition_json FROM dashboards ORDER BY name").fetchall()
+for db in dashboards:
+    defn = db["definition_json"] or ""
+    hits = []
+    for keyword in ["Markup", "PriceGateway", "customCol", "ContractSize", "RateProfit"]:
+        if keyword.lower() in defn.lower():
+            hits.append(keyword)
+    if hits:
+        print(f"\n  Dashboard: [{db['id'][:8]}] {db['name']}")
+        print(f"  Keywords found: {hits}")
+        # Extract surrounding context for each keyword
+        for kw in hits[:2]:  # first 2 only
+            idx = defn.lower().find(kw.lower())
+            snippet = defn[max(0, idx-100):idx+300]
+            print(f"  ... context for '{kw}':")
+            print(f"  {snippet}")
+            print()
+    else:
+        print(f"  [{db['id'][:8]}] {db['name']}  — no markup/price keywords")
 
-print()
-print("=== THIS MONTH sum (Mar 1-4) ===")
-try:
-    r = con.execute("""
-        SELECT SUM("Client Deposits") as dep, SUM("Client Withdrawals") as wd
-        FROM Daily_Positions
-        WHERE created_at >= '2026-03-01' AND created_at < '2026-03-05'
-    """).fetchone()
-    print(f"  Deposits={r[0]:,.2f}  Withdrawals={r[1]:,.2f}")
-except Exception as e:
-    print(f"  ERROR: {e}")
-
-print()
-print("=== created_at column type ===")
-try:
-    r = con.execute("""
-        SELECT typeof(created_at), created_at
-        FROM Daily_Positions
-        WHERE created_at >= '2026-03-01' AND created_at < '2026-03-05'
-        LIMIT 3
-    """).fetchall()
-    for row in r:
-        print(f"  type={row[0]}  value={row[1]}")
-except Exception as e:
-    print(f"  ERROR: {e}")
-
-print()
-print("=== Sample rows for Mar 1 (Sunday) ===")
-try:
-    r = con.execute("""
-        SELECT * FROM Daily_Positions
-        WHERE created_at = '2026-03-01'
-        LIMIT 5
-    """).fetchall()
-    cols = [d[0] for d in con.description]
-    print(f"  columns: {cols}")
-    for row in r:
-        print(f"  {dict(zip(cols, row))}")
-except Exception as e:
-    print(f"  ERROR: {e}")
-
-con.close()
+meta.close()
