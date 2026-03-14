@@ -560,14 +560,14 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
         if (p === 'week_before_last') { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
         if (p === 'last_working_month') { const s = startOfMonth(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
         if (p === 'month_before_last_working_month') { const s = startOfMonth(now); s.setMonth(s.getMonth()-2); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
-        if (p === 'eof_last_working_week') { const ld = prevWd(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-        if (p === 'eof_week_before_last_working_week') { const lwd = prevWd(today0); const wws = startOfWorkingWeek(lwd); const ld = prevWd(wws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_last_working_week') { const wws = startOfWorkingWeek(now); const ld = eofSkipWeekends ? prevWd(wws) : (() => { const d = new Date(wws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_week_before_last_working_week') { const lwd = prevWd(today0); const wws = startOfWorkingWeek(lwd); const ld = eofSkipWeekends ? prevWd(wws) : (() => { const d = new Date(wws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
         if (p === 'eof_this_week') { const ld = eofSkipWeekends ? prevWd(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
         if (p === 'eof_last_week') { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const ld = eofSkipWeekends ? prevWd(ws) : (() => { const d = new Date(ws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
         if (p === 'eof_this_month') { const ld = eofSkipWeekends ? prevWd(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
         if (p === 'eof_last_month') { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = eofSkipWeekends ? prevWd(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-        if (p === 'eof_last_working_month') { const ld = prevWd(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-        if (p === 'eof_month_before_last_working_month') { const lwd = prevWd(today0); const firstOfLwdMonth = new Date(lwd.getFullYear(), lwd.getMonth(), 1); const ld = prevWd(firstOfLwdMonth); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_last_working_month') { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = eofSkipWeekends ? prevWd(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+        if (p === 'eof_month_before_last_working_month') { const lwd = prevWd(today0); const firstOfLwdMonth = new Date(lwd.getFullYear(), lwd.getMonth(), 1); const ld = eofSkipWeekends ? prevWd(firstOfLwdMonth) : new Date(lwd.getFullYear(), lwd.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
         if (p === 'tmtlwd') { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), lt: ymd(e2) } }
         if (p === 'ytlwd') { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), 0, 1)), lt: ymd(e2) } }
         return {}
@@ -726,7 +726,7 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
             <option value="last_year">Last Year</option>
           </optgroup>
         </select>
-        {['eof_this_week','eof_last_week','eof_this_month','eof_last_month'].includes(preset) && (
+        {['eof_this_week','eof_last_week','eof_this_month','eof_last_month','eof_last_working_week','eof_week_before_last_working_week','eof_last_working_month','eof_month_before_last_working_month'].includes(preset) && (
           <div className="flex items-center gap-2 mt-1">
             <span className="text-[10px] text-muted-foreground shrink-0">Skip weekends</span>
             <button

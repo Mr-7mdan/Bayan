@@ -984,7 +984,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
     } catch {}
   }, [field, (where as any)?.[`${field}__date_preset`], (where as any)?.[`${field}__gte`], (where as any)?.[`${field}__lt`]])
 
-  const isEofTogglePreset = ['eof_this_week','eof_last_week','eof_this_month','eof_last_month'].includes(preset)
+  const isEofTogglePreset = ['eof_this_week','eof_last_week','eof_this_month','eof_last_month','eof_last_working_week','eof_week_before_last_working_week','eof_last_working_month','eof_month_before_last_working_month'].includes(preset)
 
   function rangeForPreset(p: Preset, skipWkds: boolean = eofSkipWeekends): { gte?: string; lt?: string } {
     const now = new Date()
@@ -1024,14 +1024,14 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
       case 'last_quarter': { const q = (quarter+3-1)%4; const yr = quarter===0 ? now.getFullYear()-1 : now.getFullYear(); return { gte: ymd(startOfQuarter(yr, q)), lt: ymd(endOfQuarter(yr, q)) } }
       case 'this_year': return { gte: ymd(startOfYear(now)), lt: ymd(endOfYear(now)) }
       case 'last_year': { const s = new Date(now.getFullYear()-1, 0, 1); const e = new Date(now.getFullYear(), 0, 1); return { gte: ymd(s), lt: ymd(e) } }
-      case 'eof_last_working_week': { const ld = prevWd(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_week_before_last_working_week': { const lwd = prevWd(today0); const wws = startOfWorkingWeek(lwd); const ld = prevWd(wws); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_working_week': { const wws = startOfWorkingWeek(now); const ld = skipWkds ? prevWd(wws) : (() => { const d = new Date(wws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_week_before_last_working_week': { const lwd = prevWd(today0); const wws = startOfWorkingWeek(lwd); const ld = skipWkds ? prevWd(wws) : (() => { const d = new Date(wws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
       case 'eof_this_week': { const ld = skipWkds ? prevWd(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
       case 'eof_last_week': { const dow = now.getDay(); const ws = new Date(now.getFullYear(), now.getMonth(), now.getDate()-dow); const ld = skipWkds ? prevWd(ws) : (() => { const d = new Date(ws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
       case 'eof_this_month': { const ld = skipWkds ? prevWd(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
       case 'eof_last_month': { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = skipWkds ? prevWd(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_last_working_month': { const ld = prevWd(today0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_month_before_last_working_month': { const lwd = prevWd(today0); const firstOfLwdMonth = new Date(lwd.getFullYear(), lwd.getMonth(), 1); const ld = prevWd(firstOfLwdMonth); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_last_working_month': { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = skipWkds ? prevWd(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
+      case 'eof_month_before_last_working_month': { const lwd = prevWd(today0); const firstOfLwdMonth = new Date(lwd.getFullYear(), lwd.getMonth(), 1); const ld = skipWkds ? prevWd(firstOfLwdMonth) : new Date(lwd.getFullYear(), lwd.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
       case 'tmtlwd': { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), lt: ymd(e2) } }
       case 'ytlwd': { const lwd = prevWd(today0); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), 0, 1)), lt: ymd(e2) } }
     }

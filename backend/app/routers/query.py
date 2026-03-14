@@ -240,17 +240,18 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
             # ── EOF (End-of-Period) presets ───────────────────────────────────────
             # Each resolves to the single last working day of the period.
             elif preset == "eof_last_working_week":
-                # Last working day strictly before today:
-                # Mon → Fri of last week, Tue→Mon, Wed→Tue, weekend→Fri
-                ld = _prev_workday(today)
+                _skip = where.get('__eof_skip_weekends', True)
+                if _skip:
+                    ld = _prev_workday(today)
+                else:
+                    ld = _working_week_start(today) - timedelta(days=1)
                 gte = ld; lt = ld + timedelta(days=1)
             elif preset == "eof_week_before_last_working_week":
-                # Find the week that contains last working week, then go one more week back.
-                # prev_workday(today) = last working day; its week-start = start of last working week;
-                # prev_workday(that start) = EOF of the week before last working week.
-                # e.g. Mon: prev_workday(Mon)=Fri, week_start(Fri)=Mon-prev, prev_workday(Mon-prev)=Fri-2wks ✓
-                #      Tue: prev_workday(Tue)=Mon, week_start(Mon)=Mon,    prev_workday(Mon)=Fri-last ✓
-                ld = _prev_workday(_working_week_start(_prev_workday(today)))
+                _skip = where.get('__eof_skip_weekends', True)
+                if _skip:
+                    ld = _prev_workday(_working_week_start(_prev_workday(today)))
+                else:
+                    ld = _working_week_start(_prev_workday(today)) - timedelta(days=1)
                 gte = ld; lt = ld + timedelta(days=1)
             elif preset == "eof_this_week":
                 _skip = where.get('__eof_skip_weekends', True)
@@ -271,20 +272,15 @@ def _resolve_date_presets(where: dict | None) -> dict | None:
                 ld = _prev_workday(_first) if _skip else _first - timedelta(days=1)
                 gte = ld; lt = ld + timedelta(days=1)
             elif preset == "eof_last_working_month":
-                # Last working day strictly before today — last working month can be
-                # this month (if we're past the 1st), just like last working week can
-                # be this week. On the 1st working day of the month this naturally
-                # falls back to the last day of the previous month.
-                ld = _prev_workday(today)
+                _skip = where.get('__eof_skip_weekends', True)
+                _first = datetime(today.year, today.month, 1)
+                ld = _prev_workday(_first) if _skip else _first - timedelta(days=1)
                 gte = ld; lt = ld + timedelta(days=1)
             elif preset == "eof_month_before_last_working_month":
-                # Walk back to last working day, find the 1st of that month, then
-                # prev_workday gives the last working day of the month before it.
-                # e.g. Mar 15 → lwd=Mar13 → first_of_Mar=Mar1 → prev_wd=Feb27 ✓
-                #      Mar 1  → lwd=Feb27 → first_of_Feb=Feb1 → prev_wd=Jan31/30 ✓
+                _skip = where.get('__eof_skip_weekends', True)
                 _lwd = _prev_workday(today)
                 _first_of_lwd_month = datetime(_lwd.year, _lwd.month, 1)
-                ld = _prev_workday(_first_of_lwd_month)
+                ld = _prev_workday(_first_of_lwd_month) if _skip else _first_of_lwd_month - timedelta(days=1)
                 gte = ld; lt = ld + timedelta(days=1)
             elif preset == "this_quarter":
                 q = (now.month - 1) // 3
