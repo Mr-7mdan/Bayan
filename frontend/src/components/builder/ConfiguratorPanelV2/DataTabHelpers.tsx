@@ -6,6 +6,7 @@ import { Switch } from '@/components/Switch'
 import { FormRow, inputCls, selectCls } from './shared'
 import { chartColors, tokenToColorKey, colorKeyToToken, type AvailableChartColorsKeys } from '@/lib/chartUtils'
 import { Api } from '@/lib/api'
+import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick } from '@/lib/datePresets'
 
 const DATE_PRESETS = [
   'today','yesterday','this_week','last_week','this_month','last_month',
@@ -89,29 +90,25 @@ function NumberFilterDetails({ field, onPatch }: { field: string; onPatch: (p: R
 
 function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Record<string,any>) => void }) {
   type DateMode = 'preset'|'custom'
-  type DatePreset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_this_month'|'eof_last_month'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type CustomOp = 'after'|'before'|'between'
   const [mode, setMode] = useState<DateMode>('preset')
-  const [preset, setPreset] = useState<DatePreset>('this_month')
+  const [config, setConfig] = useState<PresetConfig>({ ...DEFAULT_PRESET, period: 'month' })
+  const [selectedQuickPick, setSelectedQuickPick] = useState<string | null>(null)
   const [customOp, setCustomOp] = useState<CustomOp>('after')
   const [d1, setD1] = useState('')
   const [d2, setD2] = useState('')
-  const DATE_RULE_PRESETS: DatePreset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','last_working_month','month_before_last_working_month','this_quarter','last_quarter','this_year','last_year','eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week','eof_this_month','eof_last_month','eof_last_working_month','eof_month_before_last_working_month','tmtlwd','ytlwd']
-  const PRESET_LABELS: Record<DatePreset, string> = {
-    today:'Today', yesterday:'Yesterday', day_before_yesterday:'Day Before Yesterday',
-    last_working_day:'Last Working Day', day_before_last_working_day:'Day Before Last Working Day',
-    last_working_week:'Last Working Week', week_before_last_working_week:'Week Before Last Working Week',
-    this_week:'This Week', last_week:'Last Week', week_before_last:'Week Before Last',
-    this_month:'This Month', last_month:'Last Month', last_working_month:'Last Working Month',
-    month_before_last_working_month:'Month Before Last Working Month',
-    this_quarter:'This Quarter', last_quarter:'Last Quarter',
-    this_year:'This Year', last_year:'Last Year',
-    eof_last_working_week:'EOF Last Working Week', eof_week_before_last_working_week:'EOF Week Before Last Working Week',
-    eof_this_week:'EOF This Week', eof_last_week:'EOF Last Week',
-    eof_this_month:'EOF This Month', eof_last_month:'EOF Last Month',
-    eof_last_working_month:'EOF Last Working Month', eof_month_before_last_working_month:'EOF Month Before Last Working Month',
-    tmtlwd:'This Month to Last Working Day', ytlwd:'Year to Last Working Day',
-  }
+
+  // On config change: match quick pick
+  useEffect(() => {
+    const match = matchQuickPick(config)
+    setSelectedQuickPick(match?.label ?? null)
+  }, [config])
+
+  // Group quick picks for the dropdown
+  const groups = QUICK_PICKS.reduce<Record<string, QuickPick[]>>((acc, qp) => {
+    (acc[qp.group] ??= []).push(qp); return acc
+  }, {})
+
   return (
     <div className="space-y-2">
       <div className="flex gap-1 rounded-md border p-0.5 bg-muted/30 w-fit">
@@ -122,11 +119,58 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
       </div>
       {mode==='preset' ? (
         <div className="space-y-2">
-          <select className={selectCls('w-full')} value={preset} onChange={e=>setPreset(e.target.value as DatePreset)}>
-            {DATE_RULE_PRESETS.map(p=><option key={p} value={p}>{PRESET_LABELS[p]}</option>)}
+          {/* Quick Pick dropdown */}
+          <select className={selectCls('w-full')} value={selectedQuickPick ?? ''} onChange={e=>{
+            const label = e.target.value
+            const qp = QUICK_PICKS.find(q => q.label === label)
+            if (qp) setConfig({ ...qp.config })
+          }}>
+            {!selectedQuickPick && <option value="">— Select a preset —</option>}
+            {Object.entries(groups).map(([group, picks]) => (
+              <optgroup key={group} label={group}>
+                {picks.map(qp => <option key={qp.label} value={qp.label}>{qp.label}</option>)}
+              </optgroup>
+            ))}
           </select>
+          {/* Composable dimension controls */}
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <span className="text-[10px] text-muted-foreground">Period</span>
+              <select className={selectCls('w-full')} value={config.period} onChange={e => setConfig(c => ({ ...c, period: e.target.value as any }))}>
+                {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <span className="text-[10px] text-muted-foreground">Offset</span>
+              <select className={selectCls('w-full')} value={config.offset} onChange={e => setConfig(c => ({ ...c, offset: e.target.value as any }))}>
+                {OFFSET_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <span className="text-[10px] text-muted-foreground">As Of</span>
+              <select className={selectCls('w-full')} value={config.as_of} onChange={e => setConfig(c => ({ ...c, as_of: e.target.value as any }))}>
+                {AS_OF_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <span className="text-[10px] text-muted-foreground">Range Mode</span>
+              <select className={selectCls('w-full')} value={config.range_mode} onChange={e => setConfig(c => ({ ...c, range_mode: e.target.value as any }))}>
+                {RANGE_MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="inline-flex items-center gap-1 text-[10px]">
+              <input type="checkbox" checked={config.include_weekends} onChange={e => setConfig(c => ({ ...c, include_weekends: e.target.checked }))} />
+              <span className="text-muted-foreground">Include Weekends</span>
+            </label>
+            <label className="inline-flex items-center gap-1 text-[10px]">
+              <input type="checkbox" checked={config.apply_holidays} onChange={e => setConfig(c => ({ ...c, apply_holidays: e.target.checked }))} />
+              <span className="text-muted-foreground">Apply Holidays</span>
+            </label>
+          </div>
           <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
-            onClick={()=>onPatch({[`${field}__date_preset`]:preset,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>Apply</button>
+            onClick={()=>onPatch({[`${field}__date_preset`]:config,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>Apply</button>
         </div>
       ) : (
         <div className="space-y-2">

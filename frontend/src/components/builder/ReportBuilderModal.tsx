@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Api, QueryApi } from '@/lib/api'
+import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, presetConfigToLabel, LEGACY_PRESET_MAP } from '@/lib/datePresets'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
 import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine } from '@remixicon/react'
@@ -623,44 +624,13 @@ function VariableEditor({
                     <option value="now">now()</option>
                     <option value="today">today()</option>
                   </optgroup>
-                  <optgroup label="Days">
-                    <option value="yesterday">YTDY – Yesterday</option>
-                    <option value="last_working_day">LWDay – Last Working Day</option>
-                    <option value="day_before_last_working_day">DBLWDay – Day Before Last Working Day</option>
-                  </optgroup>
-                  <optgroup label="Weeks">
-                    <option value="this_week">TW – This Week</option>
-                    <option value="last_week">LW – Last Week</option>
-                    <option value="twwtlwd">TWWeek→LWD – This Working Week to Last Working Day</option>
-                    <option value="last_working_week">LWWeek – Last Working Week</option>
-                    <option value="week_before_last_working_week">WBLWWeek – Week Before Last Working Week</option>
-                  </optgroup>
-                  <optgroup label="EOF Weeks">
-                    <option value="eof_last_working_week">EOFLWWeek – EOF Last Working Week</option>
-                    <option value="eof_week_before_last_working_week">EOFPrevWWeek – EOF Prev Working Week</option>
-                    <option value="eof_this_week">EOFTWeek – EOF This Week</option>
-                    <option value="eof_last_week">EOFLWeek – EOF Last Week</option>
-                  </optgroup>
-                  <optgroup label="Months">
-                    <option value="this_month">TMonth – This Month</option>
-                    <option value="last_month">LMonth – Last Month</option>
-                    <option value="last_working_month">LWMonth – Last Working Month</option>
-                    <option value="month_before_last_working_month">MBLWMonth – Month Before Last Working Month</option>
-                  </optgroup>
-                  <optgroup label="EOF Months">
-                    <option value="eof_this_month">EOFTMonth – EOF This Month</option>
-                    <option value="eof_last_month">EOFLMonth – EOF Last Month</option>
-                    <option value="eof_last_working_month">EOFLWMonth – EOF Last Working Month</option>
-                    <option value="eof_month_before_last_working_month">EOFPrevWMonth – EOF Prev Working Month</option>
-                  </optgroup>
-                  <optgroup label="Years">
-                    <option value="this_year">TYear – This Year</option>
-                    <option value="last_year">LYear – Last Year</option>
-                  </optgroup>
-                  <optgroup label="Cumulative">
-                    <option value="ytd">YTD – Year to Date</option>
-                    <option value="mtd">MTD – Month to Date</option>
-                  </optgroup>
+                  {Object.entries(QUICK_PICKS.reduce<Record<string, QuickPick[]>>((acc, qp) => {
+                    (acc[qp.group] ??= []).push(qp); return acc
+                  }, {})).map(([group, picks]) => (
+                    <optgroup key={group} label={group}>
+                      {picks.map(qp => <option key={qp.label} value={JSON.stringify(qp.config)}>{qp.label}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
               {['now','today','yesterday','last_working_day','day_before_last_working_day'].includes(variable.datetimeExpr || 'now') && (
@@ -1014,100 +984,59 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
 // Week-start-day: 0=Sunday (default via NEXT_PUBLIC_WEEK_START_DAY), 1=Monday
 const _DEFAULT_WEEK_START = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
 const _DEFAULT_WEEKENDS = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN'
-const WEEK_PRESETS = new Set(['this_week', 'last_week', 'week_before_last', 'eof_this_week', 'eof_last_week'])
-const WORKING_DAY_PRESETS = new Set(['last_working_day', 'day_before_last_working_day', 'twwtlwd', 'last_working_week', 'week_before_last_working_week', 'eof_last_working_week', 'eof_week_before_last_working_week', 'eof_this_week', 'eof_last_week', 'eof_this_month', 'eof_last_month', 'eof_last_working_month', 'eof_month_before_last_working_month', 'tmtlwd', 'ytlwd'])
-const WORKING_WEEK_PRESETS = new Set(['last_working_week', 'week_before_last_working_week', 'eof_last_working_week', 'eof_week_before_last_working_week'])
-const EOF_TOGGLE_PRESETS = new Set(['eof_this_week', 'eof_last_week', 'eof_this_month', 'eof_last_month', 'eof_last_working_week', 'eof_week_before_last_working_week', 'eof_last_working_month', 'eof_month_before_last_working_month'])
-
 function DateRuleEditor({ field, where, onPatch }: { field: string; where: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
-  type Preset = 'today'|'yesterday'|'day_before_yesterday'|'last_working_day'|'day_before_last_working_day'|'twwtlwd'|'last_working_week'|'week_before_last_working_week'|'this_week'|'last_week'|'week_before_last'|'this_month'|'last_month'|'last_working_month'|'month_before_last_working_month'|'this_quarter'|'last_quarter'|'this_year'|'last_year'|'eof_last_working_week'|'eof_week_before_last_working_week'|'eof_this_week'|'eof_last_week'|'eof_this_month'|'eof_last_month'|'eof_last_working_month'|'eof_month_before_last_working_month'|'tmtlwd'|'ytlwd'
   type DateOp = 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'between'
   const [mode, setMode] = useState<'preset'|'custom'>('preset')
-  const [preset, setPreset] = useState<Preset>('today')
-  const [weekStartDay, setWeekStartDay] = useState<string>(() => String(where?.['__week_start_day'] ?? _DEFAULT_WEEK_START).toUpperCase())
-  const [weekends, setWeekends] = useState<string>(() => String(where?.['__weekends'] ?? _DEFAULT_WEEKENDS).toUpperCase())
-  const [eofSkipWeekends, setEofSkipWeekends] = useState<boolean>(() => where?.['__eof_skip_weekends'] !== false)
+  const [config, setConfig] = useState<PresetConfig>({ ...DEFAULT_PRESET })
+  const [selectedQuickPick, setSelectedQuickPick] = useState<string | null>(null)
   const [op, setOp] = useState<DateOp>('eq')
   const [a, setA] = useState(''); const [b, setB] = useState('')
 
-  const isWeekPreset = WEEK_PRESETS.has(preset)
-  const isWorkingDayPreset = WORKING_DAY_PRESETS.has(preset)
-  const isWorkingWeekPreset = WORKING_WEEK_PRESETS.has(preset)
-  const isEofTogglePreset = EOF_TOGGLE_PRESETS.has(preset)
+  // On mount: detect legacy string or structured object
+  useEffect(() => {
+    const existingPreset = where?.[`${field}__date_preset`]
+    const savedOp = where?.[`${field}__op`] as DateOp | undefined
+    if (savedOp && ['eq','ne','gt','gte','lt','lte','between'].includes(savedOp)) {
+      setOp(savedOp)
+    }
+    if (existingPreset) {
+      if (typeof existingPreset === 'string') {
+        // Legacy string preset — convert
+        const converted = parseLegacyPreset(existingPreset)
+        if (converted) { setMode('preset'); setConfig(converted) }
+      } else if (typeof existingPreset === 'object') {
+        // New structured preset
+        setMode('preset'); setConfig(existingPreset as PresetConfig)
+      }
+      return
+    }
+    // Hydrate custom mode from explicit dates
+    const gte = where?.[`${field}__gte`] as string | undefined
+    const gt = where?.[`${field}__gt`] as string | undefined
+    const lt = where?.[`${field}__lt`] as string | undefined
+    const lte = where?.[`${field}__lte`] as string | undefined
+    const ne = where?.[`${field}__ne`] as string | undefined
+    const eq = where?.[field]
+    if (gte || gt || lt || lte || ne || eq) {
+      setMode('custom')
+      if (gte && lt) { setOp('between'); setA(gte); try { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); setB(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`) } catch {} }
+      else if (gte && !lt) { setOp('gte'); setA(gte) }
+      else if (gt) { setOp('gt'); setA(gt) }
+      else if (lt && !gte) { setOp('lt'); setA(lt) }
+      else if (lte) { setOp('lte'); setA(lte) }
+      else if (ne) { setOp('ne'); setA(String(ne)) }
+      else if (eq) { setOp('eq'); setA(String(eq)) }
+    }
+  }, [field])
 
-  function rangeForPreset(p: Preset, skipWkds: boolean = eofSkipWeekends): { gte?: string; lt?: string } {
-    const now = new Date()
-    const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-    const som = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
-    const eom = (d: Date) => new Date(d.getFullYear(), d.getMonth()+1, 1)
-    const q = Math.floor(now.getMonth()/3)
-    const soq = (y: number, qq: number) => new Date(y, qq*3, 1)
-    const eoq = (y: number, qq: number) => new Date(y, qq*3+3, 1)
-    // Week helpers — respects weekStartDay (DDD: SUN/MON/TUE/WED/THU/FRI/SAT). JS getDay(): 0=Sun…6=Sat
-    const _WSD_MAP: Record<string, number> = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 }
-    const wsdNum = _WSD_MAP[weekStartDay] ?? 0
-    const startOfWeek = (d: Date) => {
-      const s = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-      const dow = s.getDay() // 0=Sun…6=Sat
-      const offset = (dow - wsdNum + 7) % 7
-      s.setDate(s.getDate() - offset)
-      return s
-    }
-    // JS getDay(): 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
-    const weekendDaysJs = weekends === 'FRI_SAT' ? [5, 6] : [0, 6]
-    const prevWorkday = (d: Date) => {
-      const c = new Date(d); c.setDate(c.getDate() - 1)
-      while (weekendDaysJs.includes(c.getDay())) c.setDate(c.getDate() - 1)
-      return c
-    }
-    // Working week starts on Monday (SAT_SUN weekends) or Sunday (FRI_SAT weekends)
-    const workingWeekStartDay = weekends === 'FRI_SAT' ? 0 : 1 // JS getDay(): 0=Sun, 1=Mon
-    const startOfWorkingWeek = (d: Date) => {
-      const s = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-      while (s.getDay() !== workingWeekStartDay) s.setDate(s.getDate() - 1)
-      return s
-    }
-    switch (p) {
-      case 'today': { const s = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const e = new Date(s); e.setDate(e.getDate()+1); return { gte: ymd(s), lt: ymd(e) } }
-      case 'yesterday': { const e = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const s = new Date(e); s.setDate(s.getDate()-1); return { gte: ymd(s), lt: ymd(e) } }
-      case 'day_before_yesterday': { const lt = new Date(now.getFullYear(), now.getMonth(), now.getDate()); lt.setDate(lt.getDate()-1); const s = new Date(lt); s.setDate(s.getDate()-1); return { gte: ymd(s), lt: ymd(lt) } }
-      case 'last_working_day': { const t0 = new Date(now.getFullYear(),now.getMonth(),now.getDate()); const lwd = prevWorkday(t0); const e = new Date(lwd); e.setDate(e.getDate()+1); return { gte: ymd(lwd), lt: ymd(e) } }
-      case 'day_before_last_working_day': { const t0 = new Date(now.getFullYear(),now.getMonth(),now.getDate()); const dlwd = prevWorkday(prevWorkday(t0)); const e = new Date(dlwd); e.setDate(e.getDate()+1); return { gte: ymd(dlwd), lt: ymd(e) } }
-      case 'twwtlwd': { const ws = startOfWorkingWeek(now); const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const lwd = prevWorkday(today0); const e = new Date(lwd); e.setDate(e.getDate()+1); return { gte: ymd(ws), lt: ymd(e) } }
-      case 'last_working_week': { const ws = startOfWorkingWeek(now); if (weekendDaysJs.includes(now.getDay())) { const e = new Date(ws); e.setDate(e.getDate()+7); return { gte: ymd(ws), lt: ymd(e) } } else { const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } } }
-      case 'week_before_last_working_week': { const ws = startOfWorkingWeek(now); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
-      case 'this_week': { const ws = startOfWeek(now); const e = new Date(ws); e.setDate(e.getDate()+7); return { gte: ymd(ws), lt: ymd(e) } }
-      case 'last_week': { const ws = startOfWeek(now); const s = new Date(ws); s.setDate(s.getDate()-7); return { gte: ymd(s), lt: ymd(ws) } }
-      case 'week_before_last': { const ws = startOfWeek(now); const s = new Date(ws); s.setDate(s.getDate()-14); const e = new Date(ws); e.setDate(e.getDate()-7); return { gte: ymd(s), lt: ymd(e) } }
-      case 'this_month': return { gte: ymd(som(now)), lt: ymd(eom(now)) }
-      case 'last_month': { const s = som(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
-      case 'last_working_month': { const s = som(now); s.setMonth(s.getMonth()-1); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
-      case 'month_before_last_working_month': { const s = som(now); s.setMonth(s.getMonth()-2); return { gte: ymd(s), lt: ymd(new Date(s.getFullYear(), s.getMonth()+1, 1)) } }
-      case 'this_quarter': return { gte: ymd(soq(now.getFullYear(), q)), lt: ymd(eoq(now.getFullYear(), q)) }
-      case 'last_quarter': { const pq = (q+3)%4; const yr = q===0 ? now.getFullYear()-1 : now.getFullYear(); return { gte: ymd(soq(yr, pq)), lt: ymd(eoq(yr, pq)) } }
-      case 'this_year': return { gte: ymd(new Date(now.getFullYear(),0,1)), lt: ymd(new Date(now.getFullYear()+1,0,1)) }
-      case 'last_year': return { gte: ymd(new Date(now.getFullYear()-1,0,1)), lt: ymd(new Date(now.getFullYear(),0,1)) }
-      case 'eof_last_working_week': { const wws = startOfWorkingWeek(now); const ld = skipWkds ? prevWorkday(wws) : (() => { const d = new Date(wws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_week_before_last_working_week': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const lwd = prevWorkday(today0); const wws = startOfWorkingWeek(lwd); const ld = skipWkds ? prevWorkday(wws) : (() => { const d = new Date(wws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_this_week': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const ld = skipWkds ? prevWorkday(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_last_week': { const ws = startOfWeek(now); const ld = skipWkds ? prevWorkday(ws) : (() => { const d = new Date(ws); d.setDate(d.getDate()-1); return d })(); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_this_month': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const ld = skipWkds ? prevWorkday(new Date(today0.getFullYear(), today0.getMonth(), today0.getDate()+1)) : today0; const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_last_month': { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = skipWkds ? prevWorkday(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_last_working_month': { const first = new Date(now.getFullYear(), now.getMonth(), 1); const ld = skipWkds ? prevWorkday(first) : new Date(now.getFullYear(), now.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'eof_month_before_last_working_month': { const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const lwd = prevWorkday(today0); const firstOfLwdMonth = new Date(lwd.getFullYear(), lwd.getMonth(), 1); const ld = skipWkds ? prevWorkday(firstOfLwdMonth) : new Date(lwd.getFullYear(), lwd.getMonth(), 0); const e2 = new Date(ld); e2.setDate(e2.getDate()+1); return { gte: ymd(ld), lt: ymd(e2) } }
-      case 'tmtlwd': { const lwd = prevWorkday(new Date(now.getFullYear(), now.getMonth(), now.getDate())); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), lt: ymd(e2) } }
-      case 'ytlwd': { const lwd = prevWorkday(new Date(now.getFullYear(), now.getMonth(), now.getDate())); const e2 = new Date(lwd); e2.setDate(e2.getDate()+1); return { gte: ymd(new Date(now.getFullYear(), 0, 1)), lt: ymd(e2) } }
-    }
-  }
+  // On config change: match quick pick
+  useEffect(() => {
+    const match = matchQuickPick(config)
+    setSelectedQuickPick(match?.label ?? null)
+  }, [config])
 
-  const applyPreset = (p: Preset, wsd?: string, wkends?: string, operator?: DateOp, skipWkds?: boolean) => {
-    const effectiveWsd = wsd ?? weekStartDay
-    const effectiveWkends = wkends ?? weekends
+  const applyPreset = (cfg: PresetConfig, operator?: DateOp) => {
     const effectiveOp = operator ?? op
-    const effectiveSkipWkds = skipWkds ?? eofSkipWeekends
-    const range = rangeForPreset(p, effectiveSkipWkds)
-    
-    // Clear all date-related keys first
     const patch: Record<string, any> = {
       [`${field}__gte`]: undefined,
       [`${field}__gt`]: undefined,
@@ -1115,49 +1044,9 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       [`${field}__lte`]: undefined,
       [`${field}__ne`]: undefined,
       [field]: undefined,
-      [`${field}__date_preset`]: p,
-      __week_start_day: effectiveWsd,
-      __weekends: effectiveWkends,
-      __eof_skip_weekends: effectiveSkipWkds,
+      [`${field}__date_preset`]: cfg,
       [`${field}__op`]: effectiveOp,
     }
-    
-    // Apply based on operator
-    if (range.gte && range.lt) {
-      switch (effectiveOp) {
-        case 'eq':
-          // Equals: date is in the preset range (use between logic)
-          patch[`${field}__gte`] = range.gte
-          patch[`${field}__lt`] = range.lt
-          break
-        case 'ne':
-          // Not equals: date is NOT in the preset range
-          patch[`${field}__ne`] = range.gte // Store the start date as reference
-          break
-        case 'gt':
-          // Greater than: after the preset range end
-          patch[`${field}__gt`] = range.lt
-          break
-        case 'gte':
-          // Greater or equal: on or after the preset range start
-          patch[`${field}__gte`] = range.gte
-          break
-        case 'lt':
-          // Less than: before the preset range start
-          patch[`${field}__lt`] = range.gte
-          break
-        case 'lte':
-          // Less or equal: on or before the preset range end
-          patch[`${field}__lte`] = range.lt
-          break
-        case 'between':
-          // Between: the full preset range
-          patch[`${field}__gte`] = range.gte
-          patch[`${field}__lt`] = range.lt
-          break
-      }
-    }
-    
     onPatch(patch)
   }
 
@@ -1170,111 +1059,59 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       [`${field}__ne`]: undefined,
       [field]: undefined,
       [`${field}__date_preset`]: undefined,
-      __week_start_day: undefined,
-      __weekends: undefined,
       [`${field}__op`]: op,
     }
-    
     const has = (x: string) => x && x.trim() !== ''
-    
     switch (op) {
       case 'eq':
         if (has(a)) {
-          // Equals: on this specific date
           patch[`${field}__gte`] = a
-          const nextDay = new Date(`${a}T00:00:00`)
-          nextDay.setDate(nextDay.getDate() + 1)
+          const nextDay = new Date(`${a}T00:00:00`); nextDay.setDate(nextDay.getDate() + 1)
           patch[`${field}__lt`] = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`
         }
         break
       case 'ne':
-        if (has(a)) {
-          // Not equals: not on this specific date
-          patch[field] = a // Store for reference, backend will handle as NOT equals
-        }
+        if (has(a)) patch[field] = a
         break
       case 'gt':
         if (has(a)) {
-          // Greater than: after this date
-          const nextDay = new Date(`${a}T00:00:00`)
-          nextDay.setDate(nextDay.getDate() + 1)
+          const nextDay = new Date(`${a}T00:00:00`); nextDay.setDate(nextDay.getDate() + 1)
           patch[`${field}__gt`] = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`
         }
         break
       case 'gte':
-        if (has(a)) {
-          // Greater or equal: on or after this date
-          patch[`${field}__gte`] = a
-        }
+        if (has(a)) patch[`${field}__gte`] = a
         break
       case 'lt':
-        if (has(a)) {
-          // Less than: before this date
-          patch[`${field}__lt`] = a
-        }
+        if (has(a)) patch[`${field}__lt`] = a
         break
       case 'lte':
         if (has(a)) {
-          // Less or equal: on or before this date
-          const nextDay = new Date(`${a}T00:00:00`)
-          nextDay.setDate(nextDay.getDate() + 1)
+          const nextDay = new Date(`${a}T00:00:00`); nextDay.setDate(nextDay.getDate() + 1)
           patch[`${field}__lt`] = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`
         }
         break
       case 'between':
         if (has(a)) patch[`${field}__gte`] = a
         if (has(b)) {
-          const nextDay = new Date(`${b}T00:00:00`)
-          nextDay.setDate(nextDay.getDate() + 1)
+          const nextDay = new Date(`${b}T00:00:00`); nextDay.setDate(nextDay.getDate() + 1)
           patch[`${field}__lt`] = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`
         }
         break
     }
-    
     onPatch(patch)
   }
 
-  // Hydrate from where on mount
-  useEffect(() => {
-    const existingPreset = where?.[`${field}__date_preset`] as string | undefined
-    const savedOp = where?.[`${field}__op`] as DateOp | undefined
-    if (savedOp && ['eq','ne','gt','gte','lt','lte','between'].includes(savedOp)) {
-      setOp(savedOp)
-    }
-    if (existingPreset) {
-      const allPresets: Preset[] = ['today','yesterday','day_before_yesterday','last_working_day','day_before_last_working_day','twwtlwd','last_working_week','week_before_last_working_week','this_week','last_week','week_before_last','this_month','last_month','last_working_month','month_before_last_working_month','this_quarter','last_quarter','this_year','last_year','eof_last_working_week','eof_week_before_last_working_week','eof_this_week','eof_last_week','eof_last_working_month','eof_month_before_last_working_month','tmtlwd','ytlwd']
-      if (allPresets.includes(existingPreset as Preset)) { setMode('preset'); setPreset(existingPreset as Preset) }
-      const savedWsd = where?.['__week_start_day']
-      if (savedWsd != null) setWeekStartDay(String(savedWsd).toUpperCase())
-      const savedWkends = where?.['__weekends']
-      if (savedWkends != null) setWeekends(String(savedWkends).toUpperCase())
-      return
-    }
-    const gte = where?.[`${field}__gte`] as string | undefined
-    const gt = where?.[`${field}__gt`] as string | undefined
-    const lt = where?.[`${field}__lt`] as string | undefined
-    const lte = where?.[`${field}__lte`] as string | undefined
-    const ne = where?.[`${field}__ne`] as string | undefined
-    const eq = where?.[field]
-    
-    if (gte || gt || lt || lte || ne || eq) {
-      setMode('custom')
-      // Detect operator from where
-      if (gte && lt) { setOp('between'); setA(gte); try { const d = new Date(`${lt}T00:00:00`); d.setDate(d.getDate()-1); setB(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`) } catch {} }
-      else if (gte && !lt) { setOp('gte'); setA(gte) }
-      else if (gt) { setOp('gt'); setA(gt) }
-      else if (lt && !gte) { setOp('lt'); setA(lt) }
-      else if (lte) { setOp('lte'); setA(lte) }
-      else if (ne) { setOp('ne'); setA(String(ne)) }
-      else if (eq) { setOp('eq'); setA(String(eq)) }
-    }
-  }, [field])
+  // Group quick picks for the dropdown
+  const groups = QUICK_PICKS.reduce<Record<string, QuickPick[]>>((acc, qp) => {
+    (acc[qp.group] ??= []).push(qp); return acc
+  }, {})
 
   return (
     <div className="rounded-md border bg-card p-2 space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-[11px] font-medium">Date rule: {field}</div>
-        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setPreset('today'); setOp('between'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gte`]: undefined, [`${field}__gt`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined, [`${field}__date_preset`]: undefined, [`${field}__op`]: undefined, __week_start_day: undefined, __weekends: undefined }) }}>Clear</button>
+        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setConfig({ ...DEFAULT_PRESET }); setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gte`]: undefined, [`${field}__gt`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined, [`${field}__date_preset`]: undefined, [`${field}__op`]: undefined }) }}>Clear</button>
       </div>
       <div className="flex items-center gap-3 text-[11px]">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={() => setMode('preset')} /> Preset</label>
@@ -1282,7 +1119,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       </div>
       
       {/* Operator selector - shown for both modes */}
-      <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={op} onChange={e => { const newOp = e.target.value as DateOp; setOp(newOp); if (mode === 'preset') applyPreset(preset, undefined, undefined, newOp) }}>
+      <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={op} onChange={e => { const newOp = e.target.value as DateOp; setOp(newOp); if (mode === 'preset') applyPreset(config, newOp) }}>
         <option value="eq">Equals</option>
         <option value="ne">Not equals</option>
         <option value="gt">Greater than (after)</option>
@@ -1294,96 +1131,58 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       
       {mode === 'preset' ? (
         <div className="space-y-1.5">
-          <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={preset} onChange={e => { const p = e.target.value as Preset; setPreset(p); applyPreset(p) }}>
-            <optgroup label="Days">
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="day_before_yesterday">Day Before Yesterday</option>
-              <option value="last_working_day">Last Working Day</option>
-              <option value="day_before_last_working_day">Day Before Last Working Day</option>
-            </optgroup>
-            <optgroup label="Working Weeks">
-              <option value="twwtlwd">This Working Week to Last Working Day</option>
-              <option value="last_working_week">Last Working Week</option>
-              <option value="week_before_last_working_week">Week Before Last Working Week</option>
-            </optgroup>
-            <optgroup label="Weeks">
-              <option value="this_week">This Week</option>
-              <option value="last_week">Last Week</option>
-              <option value="week_before_last">Week Before Last</option>
-            </optgroup>
-            <optgroup label="EOF Weeks">
-              <option value="eof_last_working_week">EOF Last Working Week</option>
-              <option value="eof_week_before_last_working_week">EOF Week Before Last Working Week</option>
-              <option value="eof_this_week">EOF This Week</option>
-              <option value="eof_last_week">EOF Last Week</option>
-            </optgroup>
-            <optgroup label="Months">
-              <option value="this_month">This Month</option>
-              <option value="last_month">Last Month</option>
-              <option value="last_working_month">Last Working Month</option>
-              <option value="month_before_last_working_month">Month Before Last Working Month</option>
-              <option value="tmtlwd">This Month to Last Working Day</option>
-            </optgroup>
-            <optgroup label="Year to Date">
-              <option value="ytlwd">Year to Last Working Day</option>
-            </optgroup>
-            <optgroup label="EOF Months">
-              <option value="eof_this_month">EOF This Month</option>
-              <option value="eof_last_month">EOF Last Month</option>
-              <option value="eof_last_working_month">EOF Last Working Month</option>
-              <option value="eof_month_before_last_working_month">EOF Month Before Last Working Month</option>
-            </optgroup>
-            <optgroup label="Quarters">
-              <option value="this_quarter">This Quarter</option>
-              <option value="last_quarter">Last Quarter</option>
-            </optgroup>
-            <optgroup label="Years">
-              <option value="this_year">This Year</option>
-              <option value="last_year">Last Year</option>
-            </optgroup>
+          {/* Quick Pick dropdown */}
+          <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={selectedQuickPick ?? ''} onChange={e => {
+            const label = e.target.value
+            const qp = QUICK_PICKS.find(q => q.label === label)
+            if (qp) { setConfig({ ...qp.config }); applyPreset(qp.config) }
+          }}>
+            {!selectedQuickPick && <option value="">— Select a preset —</option>}
+            {Object.entries(groups).map(([group, picks]) => (
+              <optgroup key={group} label={group}>
+                {picks.map(qp => <option key={qp.label} value={qp.label}>{qp.label}</option>)}
+              </optgroup>
+            ))}
           </select>
-          {(isWeekPreset || isWorkingWeekPreset) && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground shrink-0">Week starts on</span>
-              <select
-                className="flex-1 px-2 py-0.5 rounded bg-secondary/60 text-[11px]"
-                value={weekStartDay}
-                onChange={e => { setWeekStartDay(e.target.value); applyPreset(preset, e.target.value) }}
-              >
-                <option value="SUN">Sunday</option>
-                <option value="MON">Monday</option>
-                <option value="TUE">Tuesday</option>
-                <option value="WED">Wednesday</option>
-                <option value="THU">Thursday</option>
-                <option value="FRI">Friday</option>
-                <option value="SAT">Saturday</option>
+
+          {/* Composable dimension controls */}
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <span className="text-[10px] text-muted-foreground">Period</span>
+              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-[11px]" value={config.period} onChange={e => { const next = { ...config, period: e.target.value as any }; setConfig(next); applyPreset(next) }}>
+                {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
-          )}
-          {isWorkingDayPreset && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground shrink-0">Weekends</span>
-              <select
-                className="flex-1 px-2 py-0.5 rounded bg-secondary/60 text-[11px]"
-                value={weekends}
-                onChange={e => { setWeekends(e.target.value); applyPreset(preset, undefined, e.target.value) }}
-              >
-                <option value="SAT_SUN">Sat – Sun</option>
-                <option value="FRI_SAT">Fri – Sat</option>
+            <div>
+              <span className="text-[10px] text-muted-foreground">Offset</span>
+              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-[11px]" value={config.offset} onChange={e => { const next = { ...config, offset: e.target.value as any }; setConfig(next); applyPreset(next) }}>
+                {OFFSET_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
-          )}
-          {isEofTogglePreset && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground shrink-0">Skip weekends</span>
-              <button
-                className={`text-[10px] px-2 py-0.5 rounded border ${eofSkipWeekends ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary/60 border-border'}`}
-                onClick={() => { const next = !eofSkipWeekends; setEofSkipWeekends(next); applyPreset(preset, undefined, undefined, undefined, next) }}
-              >{eofSkipWeekends ? 'Yes' : 'No'}</button>
+            <div>
+              <span className="text-[10px] text-muted-foreground">As Of</span>
+              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-[11px]" value={config.as_of} onChange={e => { const next = { ...config, as_of: e.target.value as any }; setConfig(next); applyPreset(next) }}>
+                {AS_OF_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
             </div>
-          )}
-          <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => applyPreset(preset)}>Apply</button>
+            <div>
+              <span className="text-[10px] text-muted-foreground">Range Mode</span>
+              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-[11px]" value={config.range_mode} onChange={e => { const next = { ...config, range_mode: e.target.value as any }; setConfig(next); applyPreset(next) }}>
+                {RANGE_MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="inline-flex items-center gap-1 text-[10px]">
+              <input type="checkbox" checked={config.include_weekends} onChange={e => { const next = { ...config, include_weekends: e.target.checked }; setConfig(next); applyPreset(next) }} />
+              <span className="text-muted-foreground">Include Weekends</span>
+            </label>
+            <label className="inline-flex items-center gap-1 text-[10px]">
+              <input type="checkbox" checked={config.apply_holidays} onChange={e => { const next = { ...config, apply_holidays: e.target.checked }; setConfig(next); applyPreset(next) }} />
+              <span className="text-muted-foreground">Apply Holidays</span>
+            </label>
+          </div>
+          <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => applyPreset(config)}>Apply</button>
         </div>
       ) : (
         <div className="space-y-2">
@@ -1968,6 +1767,36 @@ function ElementProps({
         ...(subheaders && { subheaders }),
       })
     }
+    const insertColAt = (afterHi: number) => {
+      // Calculate the actual column index after header[afterHi] (sum of colspans 0..afterHi)
+      const actualInsertIdx = tbl.headers.slice(0, afterHi + 1).reduce((sum, h) => {
+        const header = typeof h === 'string' ? { text: h, colspan: 1 } : h
+        return sum + (header.colspan || 1)
+      }, 0)
+      const newHeaders = [
+        ...tbl.headers.slice(0, afterHi + 1),
+        { text: '', colspan: 1 },
+        ...tbl.headers.slice(afterHi + 1),
+      ]
+      const cells = tbl.cells.map((row) => [
+        ...row.slice(0, actualInsertIdx),
+        { type: 'text' as const, text: '' },
+        ...row.slice(actualInsertIdx),
+      ])
+      const newTotalCols = newHeaders.reduce((sum, h) => {
+        const header = typeof h === 'string' ? { text: h, colspan: 1 } : h
+        return sum + (header.colspan || 1)
+      }, 0)
+      let subheaders = tbl.subheaders
+      if (subheaders) {
+        subheaders = [
+          ...subheaders.slice(0, actualInsertIdx),
+          '',
+          ...subheaders.slice(actualInsertIdx),
+        ]
+      }
+      patchTbl({ cols: tbl.cols + 1, headers: newHeaders, cells, ...(subheaders && { subheaders }) })
+    }
     const updateHeader = (ci: number, text: string) => {
       const headers = tbl.headers.map((h, i) => {
         const current = typeof h === 'string' ? { text: h, colspan: 1 } : h
@@ -2193,27 +2022,38 @@ function ElementProps({
               {tbl.subheaders ? 'Remove' : 'Add'} Subheaders
             </button>
           </div>
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {tbl.headers.map((h, ci) => {
               const header = typeof h === 'string' ? { text: h, colspan: 1 } : h
               return (
-                <div key={ci} className="flex items-center gap-1">
-                  <input 
-                    className="h-6 text-[11px] rounded border bg-secondary/60 px-1 flex-1" 
-                    value={header.text} 
-                    onChange={(e) => updateHeader(ci, e.target.value)} 
-                    placeholder="Header text"
-                  />
-                  <input 
-                    type="number" 
-                    className="h-6 text-[11px] rounded border bg-secondary/60 px-1 w-12" 
-                    value={header.colspan || 1} 
-                    onChange={(e) => updateHeaderColspan(ci, +e.target.value)}
-                    min="1"
-                    title="Colspan"
-                  />
-                  {tbl.cols > 1 && <button className="text-destructive hover:bg-destructive/10 rounded p-0.5" onClick={() => removeCol(ci)}><RiCloseLine className="h-3 w-3" /></button>}
-                </div>
+                <>
+                  <div key={ci} className="flex items-center gap-1">
+                    <input 
+                      className="h-6 text-[11px] rounded border bg-secondary/60 px-1 flex-1" 
+                      value={header.text} 
+                      onChange={(e) => updateHeader(ci, e.target.value)} 
+                      placeholder="Header text"
+                    />
+                    <input 
+                      type="number" 
+                      className="h-6 text-[11px] rounded border bg-secondary/60 px-1 w-12" 
+                      value={header.colspan || 1} 
+                      onChange={(e) => updateHeaderColspan(ci, +e.target.value)}
+                      min="1"
+                      title="Colspan"
+                    />
+                    {tbl.cols > 1 && <button className="text-destructive hover:bg-destructive/10 rounded p-0.5" onClick={() => removeCol(ci)}><RiCloseLine className="h-3 w-3" /></button>}
+                  </div>
+                  {ci < tbl.headers.length - 1 && (
+                    <div className="flex items-center gap-1 pl-1">
+                      <button
+                        className="text-[9px] text-muted-foreground hover:text-foreground hover:bg-muted px-1 rounded border border-dashed border-muted-foreground/40 leading-4"
+                        title="Insert header after this one"
+                        onClick={() => insertColAt(ci)}
+                      >+ insert</button>
+                    </div>
+                  )}
+                </>
               )
             })}
           </div>
@@ -2327,39 +2167,11 @@ function ElementProps({
 }
 
 // ─── Period presets shared by cell type and variable editor ──────────
-const PERIOD_PRESETS: { value: string; label: string; group: string }[] = [
-  { value: 'today',                         label: 'Today',                                group: 'Days' },
-  { value: 'yesterday',                     label: 'Yesterday (YTDY)',                     group: 'Days' },
-  { value: 'day_before_yesterday',          label: 'Day Before Yesterday',                 group: 'Days' },
-  { value: 'last_working_day',              label: 'Last Working Day (LWDay)',             group: 'Days' },
-  { value: 'day_before_last_working_day',   label: 'Day Before LWDay (DBLWDay)',           group: 'Days' },
-  { value: 'twwtlwd',                       label: 'This Working Week to Last Working Day (TWWeek→LWD)', group: 'Working Weeks' },
-  { value: 'last_working_week',             label: 'Last Working Week (LWWeek)',           group: 'Working Weeks' },
-  { value: 'week_before_last_working_week', label: 'Week Before LWWeek (WBLWWeek)',        group: 'Working Weeks' },
-  { value: 'this_week',                     label: 'This Week (TW)',                       group: 'Weeks' },
-  { value: 'last_week',                     label: 'Last Week (LW)',                       group: 'Weeks' },
-  { value: 'week_before_last',              label: 'Week Before Last',                     group: 'Weeks' },
-  { value: 'eof_last_working_week',             label: 'EOF Last Working Week (EOFLWWeek)',    group: 'EOF Weeks' },
-  { value: 'eof_week_before_last_working_week', label: 'EOF Prev Working Week (EOFPrevWWeek)', group: 'EOF Weeks' },
-  { value: 'eof_this_week',                     label: 'EOF This Week (EOFTWeek)',             group: 'EOF Weeks' },
-  { value: 'eof_last_week',                     label: 'EOF Last Week (EOFLWeek)',             group: 'EOF Weeks' },
-  { value: 'this_month',                    label: 'This Month (TMonth)',                  group: 'Months' },
-  { value: 'last_month',                    label: 'Last Month (LMonth)',                  group: 'Months' },
-  { value: 'last_working_month',            label: 'Last Working Month (LWMonth)',         group: 'Months' },
-  { value: 'month_before_last_working_month', label: 'Month Before LWMonth (MBLWMonth)',  group: 'Months' },
-  { value: 'tmtlwd',                        label: 'This Month to Last Working Day',       group: 'Months' },
-  { value: 'ytlwd',                         label: 'Year to Last Working Day',             group: 'Year to Date' },
-  { value: 'eof_this_month',                     label: 'EOF This Month (EOFTMonth)',            group: 'EOF Months' },
-  { value: 'eof_last_month',                      label: 'EOF Last Month (EOFLMonth)',             group: 'EOF Months' },
-  { value: 'eof_last_working_month',            label: 'EOF Last Working Month (EOFLWMonth)',   group: 'EOF Months' },
-  { value: 'eof_month_before_last_working_month', label: 'EOF Prev Working Month (EOFPrevWMonth)', group: 'EOF Months' },
-  { value: 'this_quarter',                  label: 'This Quarter',                         group: 'Quarters' },
-  { value: 'last_quarter',                  label: 'Last Quarter',                         group: 'Quarters' },
-  { value: 'this_year',                     label: 'This Year (TYear)',                    group: 'Years' },
-  { value: 'last_year',                     label: 'Last Year (LYear)',                    group: 'Years' },
-  { value: 'ytd',                           label: 'Year to Date (YTD)',                   group: 'Cumulative' },
-  { value: 'mtd',                           label: 'Month to Date (MTD)',                  group: 'Cumulative' },
-]
+const PERIOD_PRESETS: { value: string; label: string; group: string }[] = QUICK_PICKS.map(qp => ({
+  value: JSON.stringify(qp.config),
+  label: qp.label,
+  group: qp.group,
+}))
 const PERIOD_LABEL: Record<string, string> = Object.fromEntries(PERIOD_PRESETS.map(p => [p.value, p.label]))
 const PERIOD_GROUPS = [...new Set(PERIOD_PRESETS.map(p => p.group))]
 

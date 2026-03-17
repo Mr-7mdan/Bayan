@@ -391,33 +391,31 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
         vtype = str(v.get('type') or 'query')
         if vtype == 'datetime':
             import os as _os
+            from .date_presets import (
+                _get_weekend_days, _infer_week_start, _prev_workday,
+                _week_start as _dp_week_start,
+            )
+
             now = datetime.utcnow()
             today = datetime(now.year, now.month, now.day)
             expr = str(v.get('datetimeExpr') or 'now')
 
-            # Weekends config (SAT_SUN default: Sat=5, Sun=6 in Python weekday Mon=0)
-            _weekends_env = _os.environ.get('WEEKENDS', 'SAT_SUN').upper().strip()
-            _weekend_days = (4, 5) if _weekends_env == 'FRI_SAT' else (5, 6)
+            # Shared weekend config from date_presets module
+            _weekend_days = _get_weekend_days()
+
+            # Calendar week start: read from WEEK_START_DAY env var (default SUN=6 in Python weekday)
+            _WSD_MAP_BE = {'SUN': 6, 'MON': 0, 'TUE': 1, 'WED': 2, 'THU': 3, 'FRI': 4, 'SAT': 5}
+            _wsd_env = _os.environ.get('WEEK_START_DAY', 'SUN').upper().strip()
+            _cal_week_start = _WSD_MAP_BE.get(_wsd_env, 6)  # Python weekday: Mon=0..Sun=6, default Sunday
+
+            # Working-week start: first non-weekend day (Mon=0 for SAT_SUN, Sun=6 for FRI_SAT)
+            _working_week_start_dow = _infer_week_start(_weekend_days)
 
             def _prev_wd(d: datetime) -> datetime:
-                c = d - timedelta(days=1)
-                while c.weekday() in _weekend_days:
-                    c -= timedelta(days=1)
-                return c
-
-            # Week start config
-            _WSD_MAP_BE = {'SUN': 0, 'MON': 1, 'TUE': 2, 'WED': 3, 'THU': 4, 'FRI': 5, 'SAT': 6}
-            _wsd_env = _os.environ.get('WEEK_START_DAY', 'SUN').upper().strip()
-            _wsd_num = _WSD_MAP_BE.get(_wsd_env, 0)  # Python weekday: Mon=0..Sun=6
+                return _prev_workday(d, _weekend_days)
 
             def _start_of_week(d: datetime) -> datetime:
-                if _wsd_num == 0:  # Sunday-start
-                    offset = (d.weekday() + 1) % 7
-                else:
-                    offset = (d.weekday() - _wsd_num + 7) % 7
-                return d - timedelta(days=offset)
-
-            _working_week_start_dow = 6 if _weekends_env == 'FRI_SAT' else 0  # Python: Sun=6, Mon=0
+                return _dp_week_start(d, _cal_week_start)
 
             def _start_of_working_week(d: datetime) -> datetime:
                 c = datetime(d.year, d.month, d.day)

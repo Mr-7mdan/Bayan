@@ -267,6 +267,19 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE ai_config ADD COLUMN base_url TEXT"))
         except Exception:
             pass
+        # ensure holiday_rules table exists
+        try:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS holiday_rules ("
+                "id TEXT PRIMARY KEY, "
+                "name TEXT NOT NULL, "
+                "rule_type TEXT NOT NULL, "
+                "specific_date TEXT, "
+                "recurrence_expr TEXT, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+            ))
+        except Exception:
+            pass
 
 
 # --- Helpers ---
@@ -837,3 +850,15 @@ class AlertRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+# Holiday calendar rules (system-wide, per-report opt-in/out)
+class HolidayRule(Base):
+    __tablename__ = "holiday_rules"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    rule_type: Mapped[str] = mapped_column(String, nullable=False)  # "specific" | "recurring"
+    specific_date: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # "YYYY-MM-DD"
+    recurrence_expr: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # e.g. "DEC-25", "NTH-MON-3-JAN"
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

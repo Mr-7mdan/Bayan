@@ -60,13 +60,11 @@ except Exception:
 
 
 # ─── Date preset resolution (server-side) ─────────────────────────────
-# Converts symbolic __date_preset values to concrete __gte/__lt date ranges
-# at query execution time so cron jobs / alerts always use the current date.
-_UI_META_KEYS = frozenset({
-    "filterPreset", "filter_preset", "_preset", "_meta",
-    "startDate", "endDate", "start", "end",
-    "__week_start_day", "__weekends",
-})
+# Delegates to the composable date_presets module.  Supports both legacy
+# string presets and new structured PresetConfig dicts.
+from ..date_presets import resolve_date_presets as _resolve_date_presets_impl
+from ..date_presets import materialize_holidays as _materialize_holidays
+
 
 def _strip_ui_op_keys(where: dict | None) -> dict | None:
     """Strip frontend-only operator hint keys (field__op) that are not real SQL operators."""
@@ -74,267 +72,35 @@ def _strip_ui_op_keys(where: dict | None) -> dict | None:
         return where
     return {k: v for k, v in where.items() if not (isinstance(k, str) and k.endswith("__op"))}
 
+
+def _load_holidays() -> frozenset[str]:
+    """Load materialized holiday dates for current + surrounding years."""
+    from ..models import HolidayRule, SessionLocal
+    from datetime import datetime as _dt
+    db = SessionLocal()
+    try:
+        rules = db.query(HolidayRule).all()
+        rule_dicts = [
+            {
+                "rule_type": r.rule_type,
+                "specific_date": r.specific_date,
+                "recurrence_expr": r.recurrence_expr,
+            }
+            for r in rules
+        ]
+        year = _dt.now().year
+        # Materialize for current year and adjacent years (for cross-year presets)
+        all_dates: set[str] = set()
+        for y in (year - 1, year, year + 1):
+            all_dates.update(_materialize_holidays(rule_dicts, y))
+        return frozenset(all_dates)
+    finally:
+        db.close()
+
+
 def _resolve_date_presets(where: dict | None) -> dict | None:
-    """Expand any `field__date_preset` entries into `field__gte` / `field__lt` pairs.
-
-    Week-start convention (``__week_start_day`` key in *where* or ``WEEK_START_DAY`` env var):
-      0 = Sunday (default), 1 = Monday
-    """
-    if not where:
-        return where
-    import os
-    from datetime import datetime, timedelta
-
-    # Read __week_start_day BEFORE stripping UI meta keys.
-    # Accepts DDD names (SUN/MON/TUE/WED/THU/FRI/SAT) or legacy 0/1 integers.
-    # Internal: 0=Sunday-start, 1=Monday-start.
-    _WSD_MAP = {"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
-    _wsd_raw = str(where.get("__week_start_day", os.environ.get("WEEK_START_DAY", "SUN"))).upper().strip()
-    if _wsd_raw in _WSD_MAP:
-        week_start_dow = _WSD_MAP[_wsd_raw]
-    else:
-        try:
-            week_start_dow = int(_wsd_raw)
-        except (ValueError, TypeError):
-            week_start_dow = 0  # default Sunday
-
-    # Read __weekends BEFORE stripping UI meta keys.
-    # SAT_SUN (default): weekend days are Sat(5) and Sun(6) in Python weekday (Mon=0).
-    # FRI_SAT: weekend days are Fri(4) and Sat(5).
-    _weekends_raw = str(where.get("__weekends", os.environ.get("WEEKENDS", "SAT_SUN"))).upper().strip()
-    _WEEKENDS_MAP = {"SAT_SUN": (5, 6), "FRI_SAT": (4, 5)}
-    weekend_days: tuple[int, int] = _WEEKENDS_MAP.get(_weekends_raw, (5, 6))
-    # Working week starts on the first non-weekend day (Mon for SAT_SUN, Sun for FRI_SAT)
-    _working_week_start_dow = 6 if _weekends_raw == "FRI_SAT" else 0  # Python: Mon=0…Sun=6
-
-    # Read operator hints (field__op) BEFORE stripping, so preset expansion can respect them.
-    # e.g. {"Time__op": "lt"} means "Time < preset_date" → only emit the lt bound.
-    _op_hints: dict[str, str] = {}
-    for _ok, _ov in where.items():
-        if isinstance(_ok, str) and _ok.endswith("__op") and isinstance(_ov, str):
-            _op_hints[_ok[:-4]] = _ov.lower().strip()  # base_field → operator
-
-    # Strip UI-only meta keys that are not real database columns
-    where = {k: v for k, v in where.items() if k not in _UI_META_KEYS}
-    # Strip frontend-only operator hint keys (field__op) that are not real SQL operators
-    where = _strip_ui_op_keys(where) or {}
-
-    # ── helpers ──────────────────────────────────────────────────────────────
-
-    def _week_start(d: datetime) -> datetime:
-        """Most recent week-start day at or before *d* per week_start_dow."""
-        # Python weekday(): Mon=0 … Sun=6
-        if week_start_dow == 0:          # Sunday-start: offset = (weekday+1) % 7
-            offset = (d.weekday() + 1) % 7
-        else:                             # Monday-start: offset = weekday()
-            offset = d.weekday()
-        return d - timedelta(days=offset)
-
-    def _prev_workday(d: datetime) -> datetime:
-        """Last working day strictly before *d* (skips weekend_days)."""
-        candidate = d - timedelta(days=1)
-        while candidate.weekday() in weekend_days:
-            candidate -= timedelta(days=1)
-        return candidate
-
-    def _working_week_start(d: datetime) -> datetime:
-        """Most recent working-week start at or before *d*."""
-        candidate = datetime(d.year, d.month, d.day)
-        while candidate.weekday() != _working_week_start_dow:
-            candidate -= timedelta(days=1)
-        return candidate
-
-    # ── preset resolution ────────────────────────────────────────────────────
-
-    expanded: dict = {}
-    for k, v in where.items():
-        if isinstance(k, str) and k.endswith("__date_preset") and isinstance(v, str):
-            base = k[: -len("__date_preset")]
-            now = datetime.now()
-            today = datetime(now.year, now.month, now.day)
-            preset = v.lower().strip()
-            gte: datetime | None = None
-            lt: datetime | None = None
-
-            if preset == "today":
-                gte = today; lt = today + timedelta(days=1)
-            elif preset == "yesterday":
-                gte = today - timedelta(days=1); lt = today
-            elif preset == "day_before_yesterday":
-                gte = today - timedelta(days=2); lt = today - timedelta(days=1)
-            elif preset == "last_working_day":
-                lwd = _prev_workday(today)
-                gte = lwd; lt = lwd + timedelta(days=1)
-            elif preset == "day_before_last_working_day":
-                lwd = _prev_workday(today)
-                dlwd = _prev_workday(lwd)
-                gte = dlwd; lt = dlwd + timedelta(days=1)
-            elif preset == "twwtlwd":
-                ws = _working_week_start(today)
-                lwd = _prev_workday(today)
-                gte = ws; lt = lwd + timedelta(days=1)
-            elif preset == "last_working_week":
-                ws = _working_week_start(today)
-                if today.weekday() in weekend_days:
-                    # Today is a weekend: the working week that just ended (Mon → Mon+7)
-                    gte = ws; lt = ws + timedelta(days=7)
-                else:
-                    # Today is a weekday: Mon of this week → today (inclusive)
-                    gte = ws; lt = today + timedelta(days=1)
-            elif preset == "week_before_last_working_week":
-                ws = _working_week_start(today)
-                # Always: the complete working week before the current/last one
-                gte = ws - timedelta(days=7); lt = ws
-            elif preset == "this_week":
-                ws = _week_start(today)
-                gte = ws; lt = ws + timedelta(days=7)
-            elif preset == "last_week":
-                ws = _week_start(today)
-                gte = ws - timedelta(days=7); lt = ws
-            elif preset == "week_before_last":
-                ws = _week_start(today)
-                gte = ws - timedelta(days=14); lt = ws - timedelta(days=7)
-            elif preset == "this_month":
-                gte = datetime(now.year, now.month, 1)
-                if now.month == 12:
-                    lt = datetime(now.year + 1, 1, 1)
-                else:
-                    lt = datetime(now.year, now.month + 1, 1)
-            elif preset == "tmtlwd":
-                # This Month to Last Working Day: 1st of current month → last working day (inclusive)
-                lwd = _prev_workday(today)
-                gte = datetime(now.year, now.month, 1)
-                lt = lwd + timedelta(days=1)
-            elif preset == "ytlwd":
-                # Year to Last Working Day: Jan 1 of current year → last working day (inclusive)
-                lwd = _prev_workday(today)
-                gte = datetime(now.year, 1, 1)
-                lt = lwd + timedelta(days=1)
-            elif preset == "last_month":
-                first_this = datetime(now.year, now.month, 1)
-                lt = first_this
-                if now.month == 1:
-                    gte = datetime(now.year - 1, 12, 1)
-                else:
-                    gte = datetime(now.year, now.month - 1, 1)
-            elif preset == "last_working_month":
-                # Most recently completed calendar month – always last month regardless of
-                # whether the current month has trading data yet (avoids "this month = 0" on weekends)
-                first_this = datetime(now.year, now.month, 1)
-                lt = first_this
-                if now.month == 1:
-                    gte = datetime(now.year - 1, 12, 1)
-                else:
-                    gte = datetime(now.year, now.month - 1, 1)
-            elif preset == "month_before_last_working_month":
-                # Two calendar months ago
-                if now.month == 1:
-                    lt = datetime(now.year - 1, 12, 1)
-                    gte = datetime(now.year - 1, 11, 1)
-                elif now.month == 2:
-                    lt = datetime(now.year, 1, 1)
-                    gte = datetime(now.year - 1, 12, 1)
-                else:
-                    lt = datetime(now.year, now.month - 1, 1)
-                    gte = datetime(now.year, now.month - 2, 1)
-            # ── EOF (End-of-Period) presets ───────────────────────────────────────
-            # Each resolves to the single last working day of the period.
-            elif preset == "eof_last_working_week":
-                _skip = where.get('__eof_skip_weekends', True)
-                if _skip:
-                    ld = _prev_workday(today)
-                else:
-                    ld = _working_week_start(today) - timedelta(days=1)
-                gte = ld; lt = ld + timedelta(days=1)
-            elif preset == "eof_week_before_last_working_week":
-                _skip = where.get('__eof_skip_weekends', True)
-                if _skip:
-                    ld = _prev_workday(_working_week_start(_prev_workday(today)))
-                else:
-                    ld = _working_week_start(_prev_workday(today)) - timedelta(days=1)
-                gte = ld; lt = ld + timedelta(days=1)
-            elif preset == "eof_this_week":
-                _skip = where.get('__eof_skip_weekends', True)
-                ld = _prev_workday(today + timedelta(days=1)) if _skip else today
-                gte = ld; lt = ld + timedelta(days=1)
-            elif preset == "eof_last_week":
-                ws = _week_start(today)
-                _skip = where.get('__eof_skip_weekends', True)
-                ld = _prev_workday(ws) if _skip else ws - timedelta(days=1)
-                gte = ld; lt = ld + timedelta(days=1)
-            elif preset == "eof_this_month":
-                _skip = where.get('__eof_skip_weekends', True)
-                ld = _prev_workday(today + timedelta(days=1)) if _skip else today
-                gte = ld; lt = ld + timedelta(days=1)
-            elif preset == "eof_last_month":
-                _first = datetime(today.year, today.month, 1)
-                _skip = where.get('__eof_skip_weekends', True)
-                ld = _prev_workday(_first) if _skip else _first - timedelta(days=1)
-                gte = ld; lt = ld + timedelta(days=1)
-            elif preset == "eof_last_working_month":
-                _skip = where.get('__eof_skip_weekends', True)
-                _first = datetime(today.year, today.month, 1)
-                ld = _prev_workday(_first) if _skip else _first - timedelta(days=1)
-                gte = ld; lt = ld + timedelta(days=1)
-            elif preset == "eof_month_before_last_working_month":
-                _skip = where.get('__eof_skip_weekends', True)
-                _lwd = _prev_workday(today)
-                _first_of_lwd_month = datetime(_lwd.year, _lwd.month, 1)
-                ld = _prev_workday(_first_of_lwd_month) if _skip else _first_of_lwd_month - timedelta(days=1)
-                gte = ld; lt = ld + timedelta(days=1)
-            elif preset == "this_quarter":
-                q = (now.month - 1) // 3
-                gte = datetime(now.year, q * 3 + 1, 1)
-                nq = q + 1
-                if nq > 3:
-                    lt = datetime(now.year + 1, 1, 1)
-                else:
-                    lt = datetime(now.year, nq * 3 + 1, 1)
-            elif preset == "last_quarter":
-                q = (now.month - 1) // 3
-                pq = q - 1
-                if pq < 0:
-                    gte = datetime(now.year - 1, 10, 1)
-                    lt = datetime(now.year, 1, 1)
-                else:
-                    gte = datetime(now.year, pq * 3 + 1, 1)
-                    lt = datetime(now.year, q * 3 + 1, 1)
-            elif preset == "this_year":
-                gte = datetime(now.year, 1, 1)
-                lt = datetime(now.year + 1, 1, 1)
-            elif preset == "last_year":
-                gte = datetime(now.year - 1, 1, 1)
-                lt = datetime(now.year, 1, 1)
-            else:
-                # Unknown preset – pass through as-is
-                expanded[k] = v
-                continue
-            _bound_op = _op_hints.get(base, '')
-            if gte and _bound_op not in ('lt', 'lte'):
-                _new_gte = gte.strftime("%Y-%m-%d")
-                _exist_gte = expanded.get(f"{base}__gte")
-                if _bound_op in ('gte', 'gt') and _exist_gte:
-                    # Single-bound preset: take the more restrictive (larger) gte
-                    expanded[f"{base}__gte"] = max(_exist_gte, _new_gte)
-                else:
-                    # Range preset: override completely
-                    expanded[f"{base}__gte"] = _new_gte
-            if lt and _bound_op not in ('gte', 'gt'):
-                _new_lt = lt.strftime("%Y-%m-%d")
-                _exist_lt = expanded.get(f"{base}__lt")
-                if _bound_op in ('lt', 'lte') and _exist_lt:
-                    # Single-bound preset: take the more restrictive (smaller) lt
-                    expanded[f"{base}__lt"] = min(_exist_lt, _new_lt)
-                else:
-                    # Range preset: override completely
-                    expanded[f"{base}__lt"] = _new_lt
-        else:
-            expanded[k] = v
-    import sys
-    sys.stderr.write(f"[DATE_PRESET_DEBUG] Input WHERE keys: {list(where.items())}\n")
-    sys.stderr.write(f"[DATE_PRESET_DEBUG] Output WHERE keys: {list(expanded.items())}\n")
-    sys.stderr.flush()
-    return expanded
+    """Thin wrapper delegating to the date_presets module with holidays support."""
+    return _resolve_date_presets_impl(where, holidays_loader=_load_holidays)
 
 
 # SQLGlot helper functions (module-level to be reusable across endpoints)
@@ -2302,6 +2068,8 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
     if payload.where:
         for k, v in payload.where.items():
             if k in ("start", "startDate", "end", "endDate"):
+                continue
+            if isinstance(k, str) and k.startswith('__'):
                 continue
             if v is None:
                 where_clauses.append(f"{_q_ident(k)} IS NULL")

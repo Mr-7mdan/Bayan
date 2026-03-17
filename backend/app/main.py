@@ -36,6 +36,7 @@ from .routers import contacts as contacts_router
 from .routers import metrics as metrics_router
 from .routers import updates as updates_router
 from .routers import issues as issues_router
+from .routers import holidays as holidays_router
 from .metrics import counter_inc, gauge_inc, gauge_dec, summary_observe, render_prometheus
 
 app = FastAPI(title=settings.app_name)
@@ -139,6 +140,7 @@ app.include_router(contacts_router.router, prefix="/api")
 app.include_router(metrics_router.router, prefix="/api")
 app.include_router(updates_router.router, prefix="/api")
 app.include_router(issues_router.router, prefix="/api")
+app.include_router(holidays_router.router, prefix="/api")
 
 
 @app.get("/api/healthz", response_model=HealthResponse)

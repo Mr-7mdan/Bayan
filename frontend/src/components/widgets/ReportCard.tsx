@@ -7,6 +7,7 @@ import { useAuth } from '@/components/providers/AuthProvider'
 import { useFilters } from '@/components/providers/FiltersProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
+import { PresetConfig, presetConfigToLabel, LEGACY_PRESET_MAP } from '@/lib/datePresets'
 
 // ── Report variable query concurrency limiter ────────────────────────────────
 // Caps simultaneous /spec calls per browser tab so the backend thread pool
@@ -57,7 +58,20 @@ function formatDateStr(date: Date, pattern: string): string {
 }
 
 // Resolve a datetime expression (period cell type) to a display string — no variable needed
-function resolveDatetimeExprToString(expr: string): string {
+function resolveDatetimeExprToString(expr: string | PresetConfig): string {
+  // Handle structured PresetConfig objects
+  if (typeof expr === 'object' && expr !== null && 'period' in expr) {
+    return presetConfigToLabel(expr as PresetConfig)
+  }
+  // Handle JSON-stringified PresetConfig
+  if (typeof expr === 'string' && expr.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(expr)
+      if (parsed && typeof parsed === 'object' && 'period' in parsed) {
+        return presetConfigToLabel(parsed as PresetConfig)
+      }
+    } catch {}
+  }
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const _weekendsEnv = (typeof process !== 'undefined' && (process.env?.NEXT_PUBLIC_WEEKENDS || '')) || 'SAT_SUN'
@@ -176,11 +190,18 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
         if (globalFilters?.startDate && !where[`${dc}__gte`]) where[`${dc}__gte`] = globalFilters.startDate
         if (globalFilters?.endDate   && !where[`${dc}__lt`])  where[`${dc}__lt`]  = globalFilters.endDate
       }
-      // Ensure __weekends and __week_start_day are always sent when a date preset is present
-      const hasDatePreset = Object.keys(where).some(k => k.endsWith('__date_preset'))
-      if (hasDatePreset) {
-        if (!where['__weekends']) where['__weekends'] = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN'
-        if (!where['__week_start_day']) where['__week_start_day'] = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
+      // Ensure __weekends and __week_start_day are always sent when a LEGACY STRING date preset is present
+      // For new structured PresetConfig objects, these are self-contained (include_weekends field)
+      const datePresetKeys = Object.keys(where).filter(k => k.endsWith('__date_preset'))
+      for (const dpKey of datePresetKeys) {
+        const val = where[dpKey]
+        if (typeof val === 'string') {
+          // Legacy string preset — inject meta keys
+          if (!where['__weekends']) where['__weekends'] = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN'
+          if (!where['__week_start_day']) where['__week_start_day'] = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
+          break
+        }
+        // Structured PresetConfig — no meta keys needed, backend reads from object
       }
       const hasWhere = Object.keys(where).length > 0
 

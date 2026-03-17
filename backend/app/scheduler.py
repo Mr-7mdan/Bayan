@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -239,4 +239,51 @@ def schedule_all_alert_jobs(default_cron: str = "*/15 * * * *") -> dict:
             db.close()
         except Exception:
             pass
+    # --- Catch-up: fire any job that was missed since the last run ---
+    # Handles server restarts and post-scheduled-time edits where APScheduler
+    # recalculates next_run_time into the future, skipping today's already-due slot.
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo as _ZI  # type: ignore
+        _tz = _ZI(_SCHEDULER_TZ)
+        _now_local = datetime.now(_tz)
+        _window_start = _now_local - timedelta(hours=24)
+        for a in rules:
+            try:
+                _cfg = __import__('json').loads(a.config_json or '{}')
+                _trigs = _cfg.get('triggers') or []
+                _crons = [
+                    str((t or {}).get('cron') or '').strip()
+                    for t in _trigs
+                    if str((t or {}).get('cron') or '').strip()
+                ]
+                if not _crons or _crons[0] == default_cron:
+                    continue
+                _trig = CronTrigger.from_crontab(_crons[0], timezone=_SCHEDULER_TZ)
+                _candidate = _trig.get_next_fire_time(None, _window_start)
+                if _candidate is None or _candidate >= _now_local:
+                    continue
+                _last = a.last_run_at
+                if _last is not None:
+                    if _last.tzinfo is None:
+                        _last = _last.replace(tzinfo=timezone.utc)
+                    if _last.astimezone(_tz) >= _candidate:
+                        continue
+                sched.add_job(
+                    func=run_alert_rule_job,
+                    trigger='date',
+                    run_date=datetime.now(_tz) + timedelta(seconds=10),
+                    id=f"alert_catchup:{a.id}",
+                    replace_existing=True,
+                    kwargs={"alert_id": a.id},
+                    max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=3600,
+                )
+            except Exception:
+                continue
+    except Exception:
+        pass
     return {"added": added, "updated": updated, "removed": removed, "total": len(desired)}
