@@ -3,6 +3,9 @@
  * Single source of truth for the frontend.
  */
 
+import { useState, useEffect, useRef } from "react";
+import { Api } from "./api";
+
 // ── Dimension types ──────────────────────────────────────────────────────
 
 export type Period = "day" | "week" | "month" | "quarter" | "year";
@@ -65,7 +68,9 @@ export interface QuickPick {
 export const QUICK_PICKS: QuickPick[] = [
   // Days
   { label: "Today", group: "Days", config: { period: "day", offset: "this", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false } },
+  { label: "Yesterday", group: "Days", config: { period: "day", offset: "previous", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false } },
   { label: "Last Working Day", group: "Days", config: { period: "day", offset: "this", as_of: "last_working_day", range_mode: "full", include_weekends: false, apply_holidays: false } },
+  { label: "Day Before Last Working Day", group: "Days", config: { period: "day", offset: "previous", as_of: "last_working_day", range_mode: "full", include_weekends: false, apply_holidays: false } },
   // Weeks
   { label: "This Week", group: "Weeks", config: { period: "week", offset: "this", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false } },
   { label: "This Week to Date", group: "Weeks", config: { period: "week", offset: "this", as_of: "today", range_mode: "to_date", include_weekends: true, apply_holidays: false } },
@@ -157,17 +162,44 @@ export const LEGACY_PRESET_MAP: Record<string, PresetConfig> = {
   eof_lwmtlwd:                    { period: "month", offset: "previous", as_of: "last_working_day", range_mode: "end_of_period", include_weekends: false, apply_holidays: false },
 };
 
+/**
+ * Legacy "last N days" presets sent by DataTabHelpers.
+ * These are relative-day ranges (today - N … tomorrow) and don't map cleanly
+ * to the composable PresetConfig model. The backend handles them via a regex
+ * pattern match (`last_(\d+)_days`).
+ *
+ * Listed here so the frontend can recognize them and display a label.
+ */
+export const LAST_N_DAYS_PRESETS: Record<string, { days: number; label: string }> = {
+  last_7_days:  { days: 7,  label: "Last 7 Days" },
+  last_30_days: { days: 30, label: "Last 30 Days" },
+  last_90_days: { days: 90, label: "Last 90 Days" },
+};
+
 // ── Utility functions ────────────────────────────────────────────────────
 
 /**
  * Detect if a __date_preset value is a legacy string and convert to PresetConfig.
  * Returns null if the string is not recognized.
+ *
+ * Note: "last_N_days" presets (e.g. last_7_days) are not convertible to
+ * PresetConfig — they are handled directly by the backend. Use
+ * {@link isLastNDaysPreset} to check for them separately.
  */
 export function parseLegacyPreset(value: string | PresetConfig): PresetConfig | null {
   if (typeof value === "string") {
     return LEGACY_PRESET_MAP[value.toLowerCase().trim()] ?? null;
   }
   return null;
+}
+
+/**
+ * Check if a legacy preset string is a "last N days" type.
+ * Returns the matching entry from LAST_N_DAYS_PRESETS or null.
+ */
+export function isLastNDaysPreset(value: string): { days: number; label: string } | null {
+  const key = value.toLowerCase().trim();
+  return LAST_N_DAYS_PRESETS[key] ?? null;
 }
 
 /**
@@ -217,4 +249,73 @@ export function presetConfigToLabel(config: PresetConfig): string {
   if (config.apply_holidays) parts.push("(excl. holidays)");
 
   return parts.join(" ");
+}
+
+// ── Preview hook ─────────────────────────────────────────────────────────
+
+export interface PresetPreview {
+  gte: string;
+  lt: string;
+  label: string;
+  loading: boolean;
+}
+
+/**
+ * React hook that debounces a PresetConfig and calls POST /date-presets/preview.
+ * Returns { gte, lt, label, loading }.
+ */
+export function usePresetPreview(config: PresetConfig | null): PresetPreview {
+  const [result, setResult] = useState<Omit<PresetPreview, "loading">>({ gte: "", lt: "", label: "" });
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!config) {
+      setResult({ gte: "", lt: "", label: "" });
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    // Clear previous debounce timer
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    timerRef.current = setTimeout(() => {
+      // Abort any in-flight request
+      if (abortRef.current) abortRef.current.abort();
+      abortRef.current = new AbortController();
+
+      Api.previewDatePreset({
+        period: config.period,
+        offset: config.offset,
+        as_of: config.as_of,
+        range_mode: config.range_mode,
+        include_weekends: config.include_weekends,
+        apply_holidays: config.apply_holidays,
+      })
+        .then((res) => {
+          setResult({ gte: res.gte, lt: res.lt, label: res.label });
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (err?.name !== "AbortError") setLoading(false);
+        });
+    }, 300);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, [
+    config?.period,
+    config?.offset,
+    config?.as_of,
+    config?.range_mode,
+    config?.include_weekends,
+    config?.apply_holidays,
+  ]);
+
+  return { ...result, loading };
 }

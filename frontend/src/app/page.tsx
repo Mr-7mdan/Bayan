@@ -654,7 +654,24 @@ export default function HomePage() {
     if (autosaveRef.current) window.clearTimeout(autosaveRef.current)
     const doSave = async () => {
       try {
-        await Api.saveDashboard({ id: dashboardId, name: dashboardName || 'New Dashboard', userId: user?.id || 'dev_user', definition: { ...(def as any), options } })
+        // Strip stale __gte/__lt for any field that already has a __date_preset saved.
+        // This prevents leftover explicit date bounds from overriding the preset on future loads.
+        const sanitizedWidgets: Record<string, WidgetConfig> = {}
+        for (const [wid, wcfg] of Object.entries(def.widgets)) {
+          const where = (wcfg.querySpec?.where || {}) as Record<string, any>
+          const cleaned: Record<string, any> = { ...where }
+          for (const k of Object.keys(where)) {
+            if (k.endsWith('__date_preset')) {
+              const base = k.slice(0, -'__date_preset'.length)
+              delete cleaned[`${base}__gte`]
+              delete cleaned[`${base}__lt`]
+            }
+          }
+          sanitizedWidgets[wid] = wcfg.querySpec
+            ? { ...wcfg, querySpec: { ...wcfg.querySpec, where: cleaned } }
+            : wcfg
+        }
+        await Api.saveDashboard({ id: dashboardId, name: dashboardName || 'New Dashboard', userId: user?.id || 'dev_user', definition: { ...(def as any), widgets: sanitizedWidgets, options } })
         userEditedRef.current = false
       } catch {
         // ignore autosave errors

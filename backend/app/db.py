@@ -207,9 +207,182 @@ _ENGINE_CACHE: dict[str, Engine] = {}
 _ENGINE_REVERSE: dict[int, str] = {}
 _DUCK_CONFIGURED: bool = False
 
-# Single shared native DuckDB connection (Option A)
+# Single shared native DuckDB connection (Option A) — used for write paths
+# and lightweight metadata queries.  Read-heavy query endpoints use the
+# connection *pool* (_DUCK_READ_POOL) instead so they can execute in parallel.
 _DUCK_SHARED_CONN = None
 _DUCK_SHARED_PATH: str | None = None
+
+# ── DuckDB read connection pool ────────────────────────────────────
+# A simple thread-safe pool of independent duckdb.connect() handles.
+# Each handle is a full connection (not a cursor off the shared one)
+# which allows DuckDB's multi-reader concurrency.
+import queue as _queue
+import threading as _threading
+
+_DUCK_READ_POOL: _queue.SimpleQueue | None = None
+_DUCK_READ_POOL_PATH: str | None = None
+_DUCK_READ_POOL_LOCK = _threading.Lock()
+_DUCK_READ_POOL_SIZE = int(os.environ.get("DUCKDB_READ_POOL_SIZE", "0") or "0") or 0  # 0 = sized at init
+
+# ── ATTACH registry ────────────────────────────────────────────────
+# Stores tuples of (alias, sql) for every successful ATTACH executed on
+# any DuckDB connection (shared or pooled).  When a pooled connection is
+# checked out, any ATTACHes not yet present on that connection are replayed
+# so that remote catalogs (e.g. "pcma") are visible.
+_DUCK_ATTACH_REGISTRY: list[tuple[str, str]] = []  # [(alias, full_attach_sql), ...]
+_DUCK_ATTACH_REGISTRY_LOCK = _threading.Lock()
+# Per-connection set of aliases already ATTACHed (keyed by id(conn))
+_DUCK_CONN_ATTACHED: dict[int, set[str]] = {}
+
+
+def register_duck_attach(alias: str, attach_sql: str) -> None:
+    """Record a successful ATTACH statement so it can be replayed on pool connections."""
+    with _DUCK_ATTACH_REGISTRY_LOCK:
+        # Avoid duplicates for the same alias
+        for existing_alias, _ in _DUCK_ATTACH_REGISTRY:
+            if existing_alias == alias:
+                return
+        _DUCK_ATTACH_REGISTRY.append((alias, attach_sql))
+
+
+def _replay_attaches_on_conn(conn) -> None:
+    """Replay any registered ATTACH statements that haven't been applied to *conn*."""
+    with _DUCK_ATTACH_REGISTRY_LOCK:
+        if not _DUCK_ATTACH_REGISTRY:
+            return
+        registry_snapshot = list(_DUCK_ATTACH_REGISTRY)
+    conn_id = id(conn)
+    already = _DUCK_CONN_ATTACHED.get(conn_id)
+    if already is None:
+        already = set()
+        _DUCK_CONN_ATTACHED[conn_id] = already
+    for alias, sql in registry_snapshot:
+        if alias in already:
+            continue
+        try:
+            conn.execute(sql)
+        except Exception as e:
+            msg = str(e).lower()
+            if 'already' in msg or 'exists' in msg:
+                pass  # Already attached (e.g. from a prior borrow cycle)
+            else:
+                # Install + load the extension if needed and retry once
+                try:
+                    # Infer type from the SQL (TYPE mysql / TYPE postgres)
+                    import re as _re
+                    m = _re.search(r'\(TYPE\s+(\w+)\)', sql, _re.IGNORECASE)
+                    if m:
+                        ext = m.group(1).lower()
+                        try:
+                            conn.execute(f"INSTALL {ext}")
+                        except Exception:
+                            pass
+                        try:
+                            conn.execute(f"LOAD {ext}")
+                        except Exception:
+                            pass
+                        conn.execute(sql)
+                except Exception:
+                    continue  # Skip this attach on this connection
+        already.add(alias)
+
+
+def _forget_conn_attached(conn) -> None:
+    """Remove tracking for a connection being closed/discarded."""
+    _DUCK_CONN_ATTACHED.pop(id(conn), None)
+
+
+def _init_duck_read_pool(target: str, size: int = 0) -> None:
+    """Pre-populate the read connection pool for *target* path."""
+    global _DUCK_READ_POOL, _DUCK_READ_POOL_PATH
+    if _duckdb is None:
+        return
+    # Drain old pool if path changed
+    if _DUCK_READ_POOL is not None and _DUCK_READ_POOL_PATH != target:
+        _drain_duck_read_pool()
+    if _DUCK_READ_POOL is not None:
+        return  # already initialized for this path
+    pool_size = size or _DUCK_READ_POOL_SIZE or max(4, (os.cpu_count() or 4) * 2)
+    _DUCK_READ_POOL = _queue.SimpleQueue()
+    _DUCK_READ_POOL_PATH = target
+    for _ in range(pool_size):
+        try:
+            # NOTE: We intentionally do NOT use read_only=True here.
+            # Pool connections need to execute ATTACH statements for remote
+            # catalogs (MySQL/PostgreSQL), which requires write access to the
+            # connection's internal catalog metadata.
+            c = _duckdb.connect(target)
+            _apply_duck_pragmas(c)
+            _DUCK_READ_POOL.put(c)
+        except Exception:
+            pass
+
+
+def _drain_duck_read_pool() -> None:
+    """Close all connections in the read pool."""
+    global _DUCK_READ_POOL, _DUCK_READ_POOL_PATH
+    pool = _DUCK_READ_POOL
+    if pool is None:
+        return
+    _DUCK_READ_POOL = None
+    _DUCK_READ_POOL_PATH = None
+    while True:
+        try:
+            c = pool.get_nowait()
+            try:
+                _forget_conn_attached(c)
+                c.close()
+            except Exception:
+                pass
+        except Exception:
+            break
+
+
+class _PooledCursorWrap:
+    """Context manager that borrows a connection from the read pool,
+    creates a cursor, and returns the connection on exit.
+
+    On checkout, any registered ATTACH statements (remote MySQL/PG catalogs)
+    are replayed so that 3-part names like ``pcma.mt5.mt5_deals`` resolve
+    correctly regardless of which pool connection we happen to receive.
+    """
+
+    __slots__ = ("_conn", "_cur", "_pool")
+
+    def __init__(self, conn, pool: _queue.SimpleQueue):
+        self._conn = conn
+        # Replay any registered ATTACH statements that this connection is missing
+        try:
+            _replay_attaches_on_conn(conn)
+        except Exception:
+            pass
+        self._cur = conn.cursor()
+        self._pool = pool
+
+    # Proxy attribute access to the cursor
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+    def __enter__(self):
+        return self._cur
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self._cur.close()
+        except Exception:
+            pass
+        # Return connection to pool (don't close it)
+        try:
+            self._pool.put(self._conn)
+        except Exception:
+            # Pool was drained / replaced; close the connection
+            try:
+                _forget_conn_attached(self._conn)
+                self._conn.close()
+            except Exception:
+                pass
+        return False
 
 
 def _compute_duck_config() -> dict:
@@ -313,6 +486,11 @@ def init_duck_shared(db_path: str | None = None) -> None:
         _apply_duck_pragmas(_DUCK_SHARED_CONN)
     except Exception:
         pass
+    # Initialize the read connection pool alongside the shared connection
+    try:
+        _init_duck_read_pool(target)
+    except Exception:
+        pass
 
 
 def _get_duck_shared(db_path: str | None = None):
@@ -323,8 +501,16 @@ def _get_duck_shared(db_path: str | None = None):
 
 def open_duck_native(db_path: str | None = None):
     """Return a context manager yielding a duckdb.Cursor.
-    - If db_path is None or equals the shared connection path, use the shared connection.
-    - If db_path differs, open a temporary native connection to that path and close it on exit.
+
+    Connection strategy (in order of preference):
+    1. **Read pool** — if the target matches the pooled path, borrow a dedicated
+       connection from the pool.  This is the fast-path for concurrent queries;
+       each pool connection is independent so DuckDB can execute reads in parallel.
+    2. **Shared connection** — fallback when the pool is empty or not yet
+       initialised (e.g. during startup).  Cursors from the shared connection
+       execute *serially* under DuckDB's single-writer model.
+    3. **Ephemeral connection** — when db_path differs from the shared/pool
+       path, open a temporary connection that is closed on context exit.
     """
     if _duckdb is None:
         raise RuntimeError("duckdb module not available")
@@ -333,8 +519,18 @@ def open_duck_native(db_path: str | None = None):
     except Exception:
         active_default = settings.duckdb_path
     target = _normalize_duck_path(db_path or (_DUCK_SHARED_PATH or active_default))
-    use_shared = (_DUCK_SHARED_CONN is not None and _normalize_duck_path(_DUCK_SHARED_PATH or '') == target)
-    if use_shared:
+    is_default_path = (_DUCK_SHARED_CONN is not None and _normalize_duck_path(_DUCK_SHARED_PATH or '') == target)
+
+    # ── Strategy 1: read pool ────────────────────────────────────────
+    if is_default_path and _DUCK_READ_POOL is not None:
+        try:
+            conn = _DUCK_READ_POOL.get_nowait()
+            return _PooledCursorWrap(conn, _DUCK_READ_POOL)
+        except Exception:
+            pass  # pool exhausted — fall through
+
+    # ── Strategy 2: shared connection (serial) ───────────────────────
+    if is_default_path:
         con = _get_duck_shared(target)
         cur = con.cursor()
         class _CursorWrap:
@@ -346,7 +542,8 @@ def open_duck_native(db_path: str | None = None):
                 except Exception: pass
                 return False
         return _CursorWrap(cur)
-    # Open an ephemeral connection to the requested path
+
+    # ── Strategy 3: ephemeral connection ─────────────────────────────
     con = _duckdb.connect(target)
     try:
         _apply_duck_pragmas(con)
@@ -367,8 +564,17 @@ def open_duck_native(db_path: str | None = None):
 
 
 def close_duck_shared() -> None:
-    """Close the shared DuckDB connection (used on app shutdown)."""
+    """Close the shared DuckDB connection and drain the read pool (used on app shutdown)."""
     global _DUCK_SHARED_CONN, _DUCK_SHARED_PATH
+    # Clear ATTACH registry — catalogs are connection-scoped
+    with _DUCK_ATTACH_REGISTRY_LOCK:
+        _DUCK_ATTACH_REGISTRY.clear()
+    _DUCK_CONN_ATTACHED.clear()
+    # Drain read pool first (connections hold file handles)
+    try:
+        _drain_duck_read_pool()
+    except Exception:
+        pass
     try:
         if _DUCK_SHARED_CONN is not None:
             _DUCK_SHARED_CONN.close()

@@ -22,6 +22,7 @@ import {
   RiUserLine,
   RiSettings3Line,
   RiCalendar2Line,
+  RiCalendarCheckLine,
   RiNotification2Line,
   RiContactsBook3Line,
   RiInformationLine,
@@ -45,6 +46,7 @@ function iconFor(label: string) {
     case 'Users': return <RiUserLine className="w-4 h-4" />
     case 'Environment': return <RiSettings3Line className="w-4 h-4" />
     case 'Schedule Workers': return <RiCalendar2Line className="w-4 h-4" />
+    case 'Holidays': return <RiCalendarCheckLine className="w-4 h-4" />
     default: return <span className="w-4 h-4 inline-block" />
   }
 }
@@ -110,6 +112,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
           { type: 'item', label: 'Users', href: '/admin/users' },
           { type: 'item', label: 'Environment', href: '/admin/environment' },
           { type: 'item', label: 'Schedule Workers', href: '/admin/schedules' },
+          { type: 'item', label: 'Holidays', href: '/admin/holidays' },
         ],
       }
       return [...base, adminGroup]

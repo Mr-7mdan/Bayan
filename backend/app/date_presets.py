@@ -8,6 +8,7 @@ via LEGACY_PRESET_MAP for backward compatibility.
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Any, Literal, Optional, Sequence, TypedDict
 
@@ -75,6 +76,21 @@ def _prev_workday_inclusive(
 ) -> datetime:
     """Most recent working day at or before *d*."""
     return _prev_workday(d + timedelta(days=1), weekend_days, holidays)
+
+
+def _next_workday_inclusive(
+    d: datetime,
+    weekend_days: tuple[int, int],
+    holidays: frozenset[str] | None = None,
+) -> datetime:
+    """Earliest working day at or after *d* (skips weekends + holidays)."""
+    candidate = d
+    while (
+        candidate.weekday() in weekend_days
+        or (holidays and candidate.strftime("%Y-%m-%d") in holidays)
+    ):
+        candidate += timedelta(days=1)
+    return candidate
 
 
 def _week_start(d: datetime, week_start_dow: int) -> datetime:
@@ -227,33 +243,23 @@ def resolve_preset(
 
     # ── Step 1: Determine anchor ──
     if as_of == "last_working_day":
-        anchor = _prev_workday_inclusive(today, weekend_days, active_holidays)
+        # Always exclude today — "last working day" means the most recent
+        # working day *before* today (e.g. the last trading day).
+        anchor = _prev_workday(today, weekend_days, active_holidays)
     else:
         anchor = today
 
-    # ── Step 2: Determine "this" period boundaries ──
+    # ── Step 2: Determine "this" period boundaries (always calendar) ──
     if period == "day":
         this_start = anchor
         this_end = anchor + timedelta(days=1)
         prev_start = anchor - timedelta(days=1)
         prev_end = anchor
     elif period == "week":
-        if include_weekends:
-            this_start = _week_start(anchor, week_start_dow)
-            this_end = this_start + timedelta(days=7)
-            prev_start = this_start - timedelta(days=7)
-            prev_end = this_start
-        else:
-            # Working week: infer working-week start from weekends
-            working_week_start_dow = (max(weekend_days) + 1) % 7
-            # Walk back to find working week start
-            candidate = datetime(anchor.year, anchor.month, anchor.day)
-            while candidate.weekday() != working_week_start_dow:
-                candidate -= timedelta(days=1)
-            this_start = candidate
-            this_end = this_start + timedelta(days=7)
-            prev_start = this_start - timedelta(days=7)
-            prev_end = this_start
+        this_start = _week_start(anchor, week_start_dow)
+        this_end = this_start + timedelta(days=7)
+        prev_start = this_start - timedelta(days=7)
+        prev_end = this_start
     elif period == "month":
         this_start = _month_start(anchor)
         this_end = _next_month_start(anchor)
@@ -272,6 +278,19 @@ def resolve_preset(
     else:
         raise ValueError(f"Unknown period: {period}")
 
+    # ── Step 2b: Trim to working days when include_weekends=False ──
+    # For "day" period, as_of="last_working_day" already handles anchor
+    # selection; no boundary trimming needed.
+    # Save calendar boundaries for to_date mirroring (needs calendar positions).
+    cal_this_start = this_start
+    cal_prev_start = prev_start
+    if not include_weekends and period != "day":
+        this_start = _next_workday_inclusive(this_start, weekend_days, active_holidays)
+        # lt is exclusive, so: day after last working day before the calendar end
+        this_end = _prev_workday(this_end, weekend_days, active_holidays) + timedelta(days=1)
+        prev_start = _next_workday_inclusive(prev_start, weekend_days, active_holidays)
+        prev_end = _prev_workday(prev_end, weekend_days, active_holidays) + timedelta(days=1)
+
     # ── Step 3: Select period based on offset ──
     if offset == "this":
         p_start = this_start
@@ -287,14 +306,23 @@ def resolve_preset(
     elif range_mode == "to_date":
         gte = p_start
         if offset == "this":
-            # Up to and including the anchor
-            lt = anchor + timedelta(days=1)
+            # Up to and including the anchor (clamped to working day if needed)
+            effective_anchor = anchor
+            if not include_weekends:
+                effective_anchor = _prev_workday_inclusive(anchor, weekend_days, active_holidays)
+            lt = effective_anchor + timedelta(days=1)
         else:
             # Mirror anchor's position into the previous period
+            # Use calendar boundaries for mirroring, not trimmed ones
             to_date_end = _to_date_anchor_in_previous_period(
-                anchor, period, this_start, p_start,
+                anchor, period, cal_this_start, cal_prev_start,
             )
+            if not include_weekends:
+                to_date_end = _prev_workday_inclusive(to_date_end, weekend_days, active_holidays)
             lt = to_date_end + timedelta(days=1)
+        # Clamp lt to not exceed the period end
+        if lt > p_end:
+            lt = p_end
     elif range_mode == "end_of_period":
         # Single day: last day of the period
         ld = _last_day_of_period(
@@ -370,6 +398,9 @@ _BEFORE_LAST_PRESETS: dict[str, str] = {
     "eof_week_before_last_working_week": "eof_last_working_week",
     "eof_month_before_last_working_month": "eof_last_working_month",
 }
+
+# Pattern for "last_N_days" relative-day presets (e.g. last_7_days, last_30_days)
+_LAST_N_DAYS_RE = re.compile(r"^last_(\d+)_days$")
 
 
 def _shift_one_period_back(
@@ -513,16 +544,37 @@ def resolve_date_presets(
         if isinstance(k, str) and k.endswith("__date_preset"):
             base = k[: -len("__date_preset")]
 
+            # Guard: skip empty / None / falsy presets entirely
+            if not v:
+                continue
+
             # Determine if legacy string or new structured dict
             if isinstance(v, str):
                 preset_key = v.lower().strip()
+                if not preset_key:  # empty after strip
+                    continue
                 config = LEGACY_PRESET_MAP.get(preset_key)
                 if config is None:
+                    # Check for last_N_days pattern (e.g. last_7_days, last_30_days)
+                    m = _LAST_N_DAYS_RE.match(preset_key)
+                    if m:
+                        n = int(m.group(1))
+                        today = datetime.now().replace(
+                            hour=0, minute=0, second=0, microsecond=0
+                        )
+                        gte = today - timedelta(days=n)
+                        lt = today + timedelta(days=1)
+                        expanded[f"{base}__gte"] = gte.strftime("%Y-%m-%d")
+                        expanded[f"{base}__lt"] = lt.strftime("%Y-%m-%d")
+                        continue
                     # Unknown legacy preset — pass through
                     expanded[k] = v
                     continue
                 is_before_last = preset_key in _BEFORE_LAST_PRESETS
             elif isinstance(v, dict):
+                # Guard: require at least 'period' key for structured presets
+                if "period" not in v:
+                    continue
                 config = PresetConfig(**{
                     key: val for key, val in v.items()
                     if key in PresetConfig.__annotations__

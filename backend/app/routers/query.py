@@ -529,13 +529,24 @@ def _apply_duck_mysql_attachments(conn, attachments: list, db_session) -> None:
             if not info.get('host'):
                 continue
             attach_str = _build_mysql_attach_str(info, db_override)
+            attach_sql = f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})"
             try:
-                conn.execute(f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})")
+                conn.execute(attach_sql)
                 sys.stderr.write(f"[RemoteAttach] Attached '{alias}' ({attach_type}) → {info.get('host')}/{info.get('database')}\n")
+                try:
+                    from ..db import register_duck_attach
+                    register_duck_attach(alias, attach_sql)
+                except Exception:
+                    pass
             except Exception as e:
                 msg = str(e).lower()
                 if 'already' in msg or 'exists' in msg:
-                    pass  # Already attached on the shared connection
+                    # Still register so pool connections can replay
+                    try:
+                        from ..db import register_duck_attach
+                        register_duck_attach(alias, attach_sql)
+                    except Exception:
+                        pass
                 else:
                     sys.stderr.write(f"[RemoteAttach] ATTACH '{alias}' failed: {e}\n")
         except Exception as e:
@@ -5502,6 +5513,14 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             dcol = _dcol_raw
 
         avg_numerator = (getattr(spec, 'avgNumerator', None) or 'sum').lower()
+        # ── Holiday exclusion for avg_wday ─────────────────────────────────────
+        apply_holidays = getattr(spec, 'applyHolidays', False) or False
+        _holiday_dates: frozenset[str] | None = None
+        _holiday_date_literals: str = ""
+        if apply_holidays and agg == 'avg_wday':
+            _holiday_dates = _load_holidays()
+            if _holiday_dates:
+                _holiday_date_literals = ", ".join(f"'{d}'" for d in sorted(_holiday_dates))
         # ── Numerator expression ───────────────────────────────────────────────
         if avg_numerator == 'count':
             num_expr = f"COUNT({vcol})"
@@ -5536,7 +5555,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     wknd_days = "(0, 6)" if _spec_weekends == 'SAT_SUN' else "(5, 6)"
                 _wday_dow_expr = dow_expr
                 _wday_wknd_days = wknd_days
-                date_trunc = f"CASE WHEN {dow_expr} NOT IN {wknd_days} THEN {day_cast} END"
+                if apply_holidays and _holiday_dates and _holiday_date_literals:
+                    date_trunc = f"CASE WHEN {dow_expr} NOT IN {wknd_days} AND CAST({day_cast} AS VARCHAR) NOT IN ({_holiday_date_literals}) THEN {day_cast} END"
+                else:
+                    date_trunc = f"CASE WHEN {dow_expr} NOT IN {wknd_days} THEN {day_cast} END"
             else:
                 date_trunc = day_cast
         elif agg == 'avg_weekly':
@@ -5591,6 +5613,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 elif _wop == 'ne':  where_parts.append(f"{_wcol} != :{_pn}"); params_avg[_pn] = _wv
                 else:               where_parts.append(f"{_wcol} =  :{_pn}"); params_avg[_pn] = _wv
         where_clause = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+        # ── Holiday exclusion in WHERE clause for avg_wday ─────────────────────
+        if apply_holidays and _holiday_dates and _holiday_date_literals and agg == 'avg_wday':
+            where_parts.append(f"CAST({dcol} AS DATE) NOT IN ({_holiday_date_literals})")
+            where_clause = f" WHERE {' AND '.join(where_parts)}"
 
         # ── last_daily_sum early return ────────────────────────────────────────
         # SUM(value) for all rows where CAST(date_col AS DATE) = MAX(CAST(date_col AS DATE)) within the filter window
@@ -5665,7 +5692,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 f"{num_expr} * 1.0 / NULLIF({den_expr}, 0) AS value "
                 f"FROM {_period_from_sql}{where_clause}"
             )
-        print(f"[AvgPeriod] agg={agg}, source={spec.source}, val_col={val_field}, date_col={date_field}, is_unix={_avg_is_unix}, numerator={avg_numerator}, weekends={_spec_weekends}", flush=True)
+        print(f"[AvgPeriod] agg={agg}, source={spec.source}, val_col={val_field}, date_col={date_field}, is_unix={_avg_is_unix}, numerator={avg_numerator}, weekends={_spec_weekends}, holidays={len(_holiday_dates) if _holiday_dates else 0}", flush=True)
         print(f"[AvgPeriod] SQL: {sql_avg[:800]}", flush=True)
         if params_avg:
             print(f"[AvgPeriod] params: { {k: v for k, v in list(params_avg.items())[:10]} }", flush=True)

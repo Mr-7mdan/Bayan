@@ -230,6 +230,7 @@ export type ReportVariable = {
     agg: 'none' | 'count' | 'distinct' | 'avg' | 'sum' | 'min' | 'max' | 'avg_daily' | 'avg_wday' | 'avg_weekly' | 'avg_monthly' | 'last_daily_sum'
     avgDateField?: string
     avgNumerator?: 'sum' | 'count' | 'distinct'
+    applyHolidays?: boolean
   }
   expression?: string // e.g. "var2 + var3" or "var2 * 1.15"
   datetimeExpr?: 'now' | 'today' | 'yesterday' | 'last_working_day' | 'day_before_last_working_day' | 'this_week' | 'last_week' | 'last_working_week' | 'week_before_last_working_week' | 'twwtlwd' | 'this_month' | 'last_month' | 'this_year' | 'last_year' | 'ytd' | 'mtd' // date/time function

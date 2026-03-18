@@ -337,6 +337,7 @@ class QuerySpec(BaseModel):
     weekStart: Optional[str] = Field(default=None, description="mon|sun")
     avgDateField: Optional[str] = Field(default=None, description="Date field for avg_daily/avg_weekly/avg_monthly period averaging")
     avgNumerator: Optional[str] = Field(default=None, description="Numerator aggregation for period averages: sum (default)|count|distinct")
+    applyHolidays: Optional[bool] = Field(default=False, description="Exclude holiday dates from working-day count in avg_wday")
     ignoreTransforms: Optional[bool] = Field(default=False, description="Skip datasource-level transforms/joins (useful for timeout recovery)")
 
 

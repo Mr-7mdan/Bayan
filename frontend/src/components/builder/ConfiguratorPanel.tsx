@@ -26,7 +26,7 @@ import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
 import * as SchemaCache from '@/lib/schemaCache'
-import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick } from '@/lib/datePresets'
+import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, usePresetPreview } from '@/lib/datePresets'
 import HeatmapCard from '@/components/widgets/HeatmapCard'
 import ChartCard from '@/components/widgets/ChartCard'
 import TabsControls from '@/components/builder/TabsControls'
@@ -902,6 +902,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
   const interactedRef = useRef(false)
   const editingRef = useRef(false)
   const editTimerRef = useRef<number | null>(null)
+  const preview = usePresetPreview(mode === 'preset' ? config : null)
   const markEditing = () => {
     editingRef.current = true
     if (typeof window !== 'undefined') {
@@ -1093,6 +1094,7 @@ function DateRuleDetails({ field, where, onPatch }: { field: string; where?: Rec
               <span className="text-muted-foreground">Apply Holidays</span>
             </label>
           </div>
+          {preview.label && <p className="text-[10px] text-muted-foreground">{preview.loading ? 'Resolving…' : preview.label}</p>}
         </div>
       ) : (
         <>

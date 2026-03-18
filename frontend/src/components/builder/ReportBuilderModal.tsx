@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Api, QueryApi } from '@/lib/api'
-import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, presetConfigToLabel, LEGACY_PRESET_MAP } from '@/lib/datePresets'
+import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, presetConfigToLabel, LEGACY_PRESET_MAP, usePresetPreview } from '@/lib/datePresets'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
 import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine } from '@remixicon/react'
@@ -747,6 +747,12 @@ function VariableEditor({
                   </div>
                 </div>
                 <p className="text-[9px] text-muted-foreground">{variable.value?.avgNumerator === 'distinct' ? 'COUNT(DISTINCT column)' : variable.value?.avgNumerator === 'count' ? 'COUNT(column)' : 'SUM(column)'} ÷ COUNT(DISTINCT {variable.value?.agg === 'avg_daily' ? 'day' : variable.value?.agg === 'avg_wday' ? 'working day' : variable.value?.agg === 'avg_weekly' ? 'week' : 'month'}){variable.value?.agg === 'avg_wday' ? ' — weekends excluded per app config' : ''}</p>
+                {variable.value?.agg === 'avg_wday' && (
+                  <label className="inline-flex items-center gap-1.5 text-[10px]">
+                    <input type="checkbox" className="rounded border-input" checked={!!variable.value?.applyHolidays} onChange={(e) => handleChange({ value: { ...variable.value, applyHolidays: e.target.checked } })} />
+                    <span className="text-muted-foreground">Exclude holidays from working days</span>
+                  </label>
+                )}
               </div>
             )}
           </>
@@ -991,6 +997,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
   const [selectedQuickPick, setSelectedQuickPick] = useState<string | null>(null)
   const [op, setOp] = useState<DateOp>('eq')
   const [a, setA] = useState(''); const [b, setB] = useState('')
+  const preview = usePresetPreview(mode === 'preset' ? config : null)
 
   // On mount: detect legacy string or structured object
   useEffect(() => {
@@ -1182,6 +1189,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
               <span className="text-muted-foreground">Apply Holidays</span>
             </label>
           </div>
+          {preview.label && <p className="text-[10px] text-muted-foreground">{preview.loading ? 'Resolving…' : preview.label}</p>}
           <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => applyPreset(config)}>Apply</button>
         </div>
       ) : (

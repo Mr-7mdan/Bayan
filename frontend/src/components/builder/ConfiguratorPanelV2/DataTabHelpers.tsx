@@ -6,7 +6,7 @@ import { Switch } from '@/components/Switch'
 import { FormRow, inputCls, selectCls } from './shared'
 import { chartColors, tokenToColorKey, colorKeyToToken, type AvailableChartColorsKeys } from '@/lib/chartUtils'
 import { Api } from '@/lib/api'
-import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick } from '@/lib/datePresets'
+import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, usePresetPreview } from '@/lib/datePresets'
 
 const DATE_PRESETS = [
   'today','yesterday','this_week','last_week','this_month','last_month',
@@ -97,6 +97,7 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
   const [customOp, setCustomOp] = useState<CustomOp>('after')
   const [d1, setD1] = useState('')
   const [d2, setD2] = useState('')
+  const preview = usePresetPreview(mode === 'preset' ? config : null)
 
   // On config change: match quick pick
   useEffect(() => {
@@ -169,6 +170,7 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
               <span className="text-muted-foreground">Apply Holidays</span>
             </label>
           </div>
+          {preview.label && <p className="text-[10px] text-muted-foreground">{preview.loading ? 'Resolving…' : preview.label}</p>}
           <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
             onClick={()=>onPatch({[`${field}__date_preset`]:config,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>Apply</button>
         </div>

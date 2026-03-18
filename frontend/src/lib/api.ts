@@ -945,6 +945,21 @@ export const Api = {
     http<{ ok: boolean; count: number; queued?: boolean; jobId?: string; success?: number; failed?: number; failures?: Array<{ recipient: string; error: string }> }>(`/contacts/send-sms`, { method: 'POST', body: JSON.stringify(payload) }),
   contactsSendStatus: (jobId: string) =>
     http<{ type: 'email'|'sms'; total: number; success: number; failed: number; failures: Array<{ recipient: string; error: string }>; done: boolean }>(`/contacts/send-status?jobId=${encodeURIComponent(jobId)}`),
+  previewDatePreset: (config: { period: string; offset: string; as_of: string; range_mode: string; include_weekends: boolean; apply_holidays: boolean; weekends?: string }) =>
+    http<{ gte: string; lt: string; label: string }>(`/date-presets/preview`, { method: 'POST', body: JSON.stringify(config) }),
+  // --- Holiday Rules (admin) ---
+  listHolidays: () => http<HolidayRuleOut[]>(`/holidays`),
+  createHoliday: (payload: HolidayRuleCreate) =>
+    http<HolidayRuleOut>(`/holidays`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateHoliday: (id: string, payload: HolidayRuleCreate) =>
+    http<HolidayRuleOut>(`/holidays/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteHoliday: (id: string) =>
+    http<{ ok: boolean }>(`/holidays/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  uploadHolidays: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return http<{ created: number; ids: string[] }>(`/holidays/upload`, { method: 'POST', body: fd })
+  },
 }
 
 export type QueryRequest = {
@@ -1242,6 +1257,22 @@ export type SmsConfigPayload = {
 
 export type TestEmailPayload = { to: string[]; subject?: string; html?: string }
 export type TestSmsPayload = { to: string[]; message: string }
+
+// --- Holiday Rules ---
+export type HolidayRuleCreate = {
+  name: string
+  rule_type: 'specific' | 'recurring'
+  specific_date?: string | null
+  recurrence_expr?: string | null
+}
+
+export type HolidayRuleOut = {
+  id: string
+  name: string
+  rule_type: string
+  specific_date?: string | null
+  recurrence_expr?: string | null
+}
 
 // Favorites (per-user) — backend should implement these endpoints.
 // We keep types minimal so UI can render a list; caller can fetch full dashboard details if needed.

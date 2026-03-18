@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { RiArrowDownSLine, RiCalendar2Line, RiHashtag, RiTextWrap } from '@remixicon/react'
-import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick } from '@/lib/datePresets'
+import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, usePresetPreview } from '@/lib/datePresets'
 
 export type FilterbarControlProps = {
   active?: string
@@ -460,6 +460,7 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
   const interactedRef = useRef(false)
   const editingRef = useRef(false)
   const editTimerRef = useRef<number | null>(null)
+  const preview = usePresetPreview(mode === 'preset' ? config : null)
   
   // Load distinct values for manual mode
   useEffect(() => {
@@ -698,6 +699,7 @@ function DateRuleInline({ field, where, onPatchAction, distinctCache, loadingCac
             <span className="text-muted-foreground">Apply Holidays</span>
           </label>
         </div>
+        {preview.label && <p className="text-[10px] text-muted-foreground">{preview.loading ? 'Resolving…' : preview.label}</p>}
         </>
       ) : mode==='custom' ? (
         <div className="grid grid-cols-3 gap-2">

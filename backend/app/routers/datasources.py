@@ -1964,12 +1964,24 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                     conn.execute(f"LOAD {attach_type}")
                 except Exception:
                     pass
+                attach_sql = f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})"
                 try:
-                    conn.execute(f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})")
+                    conn.execute(attach_sql)
+                    try:
+                        from ..db import register_duck_attach
+                        register_duck_attach(alias, attach_sql)
+                    except Exception:
+                        pass
                 except Exception as e:
                     if 'already' not in str(e).lower() and 'exists' not in str(e).lower():
                         print(f"[Introspect] ATTACH '{alias}' failed: {e}")
                         continue
+                    # Still register so pool connections can replay
+                    try:
+                        from ..db import register_duck_attach
+                        register_duck_attach(alias, attach_sql)
+                    except Exception:
+                        pass
                 # Use duckdb_columns() — works reliably for all attached catalogs
                 try:
                     col_rows = conn.execute(
@@ -2212,6 +2224,105 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Introspection failed: {e}")
 
 
+def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
+    """ATTACH configured remoteAttachments to conn and return table names as _TablesSchema list.
+    Lighter than _introspect_attach_remotes — fetches table names only (no columns).
+    Schema name format: 'alias' or 'alias.schema' when the remote has multiple non-trivial schemas.
+    """
+    from urllib.parse import urlparse, unquote as _unq
+    result: list[_TablesSchema] = []
+    try:
+        opts = json.loads(options_json or '{}')
+        attachments = (opts.get('transforms') or {}).get('remoteAttachments') or []
+        if not attachments:
+            return result
+        for att in (attachments or []):
+            alias = str((att or {}).get('alias') or '').strip()
+            ref_ds_id = str((att or {}).get('datasourceId') or '').strip()
+            db_override = str((att or {}).get('database') or '').strip()
+            if not alias or not ref_ds_id:
+                continue
+            try:
+                ref_ds = db_session.get(Datasource, ref_ds_id)
+                if not ref_ds or not getattr(ref_ds, 'connection_encrypted', None):
+                    print(f"[/tables] Remote attachment '{alias}': datasource not found or no connection")
+                    continue
+                dsn = decrypt_text(ref_ds.connection_encrypted)
+                ds_type = (getattr(ref_ds, 'type', '') or '').lower()
+                if 'mysql' in ds_type or 'mariadb' in ds_type:
+                    attach_type = 'mysql'
+                    default_port = 3306
+                elif 'postgres' in ds_type:
+                    attach_type = 'postgres'
+                    default_port = 5432
+                else:
+                    print(f"[/tables] Unsupported remote type '{ds_type}' for alias '{alias}', skipping")
+                    continue
+                clean = re.sub(r'^(mysql|postgres|postgresql)\+\w+://', lambda m: m.group(1) + '://', dsn or '')
+                p = urlparse(clean)
+                host = p.hostname or 'localhost'
+                port = p.port or default_port
+                user = _unq(p.username or '')
+                password = _unq(p.password or '')
+                database = db_override or (p.path or '').lstrip('/')
+                parts = [f"host={host}", f"port={port}"]
+                if user:
+                    parts.append(f"user={user}")
+                if password:
+                    parts.append(f"password={password}")
+                if database:
+                    parts.append(f"database={database}")
+                attach_str = ' '.join(parts)
+                try:
+                    conn.execute(f"INSTALL {attach_type}")
+                except Exception:
+                    pass
+                try:
+                    conn.execute(f"LOAD {attach_type}")
+                except Exception:
+                    pass
+                attach_sql = f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})"
+                try:
+                    conn.execute(attach_sql)
+                    try:
+                        from ..db import register_duck_attach
+                        register_duck_attach(alias, attach_sql)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    if 'already' not in str(e).lower() and 'exists' not in str(e).lower():
+                        print(f"[/tables] ATTACH '{alias}' failed: {e}")
+                        continue
+                    # Still register so pool connections can replay
+                    try:
+                        from ..db import register_duck_attach
+                        register_duck_attach(alias, attach_sql)
+                    except Exception:
+                        pass
+                try:
+                    tbl_rows = conn.execute(
+                        "SELECT schema_name, table_name FROM duckdb_tables() "
+                        "WHERE database_name = ? ORDER BY schema_name, table_name",
+                        (alias,),
+                    ).fetchall()
+                    by_sch: dict[str, list[str]] = {}
+                    for sch, tbl in tbl_rows:
+                        # Use 'alias.schema' when schema is meaningful, else just 'alias'
+                        trivial = sch.lower() in ('main', 'public', alias.lower(), '')
+                        sch_key = alias if trivial else f"{alias}.{sch}"
+                        by_sch.setdefault(sch_key, []).append(str(tbl))
+                    for sch_key, tbls in by_sch.items():
+                        result.append(_TablesSchema(name=sch_key, tables=sorted(tbls)))
+                    print(f"[/tables] Remote '{alias}': {sum(len(t) for t in by_sch.values())} tables across {len(by_sch)} schema groups")
+                except Exception as e:
+                    print(f"[/tables] Remote '{alias}' table query failed: {e}")
+            except Exception as e:
+                print(f"[/tables] Remote attachment '{alias}' error: {e}")
+    except Exception as e:
+        print(f"[/tables] _list_remote_attached_tables error: {e}")
+    return result
+
+
 @router.get("/{ds_id}/tables", response_model=TablesOnlyResponse)
 def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
     print(f"[/tables] Called for datasource {ds_id}")
@@ -2265,6 +2376,7 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
                 for sch, tbl in rows:
                     by_schema.setdefault(str(sch), set()).add(str(tbl))
                 out = [ _TablesSchema(name=sch, tables=sorted(list(tbls))) for sch, tbls in by_schema.items() ]
+                out += _list_remote_attached_tables(conn, ds.options_json or '{}', db)
                 return TablesOnlyResponse(schemas=out)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"List tables failed: {e}")
@@ -2317,10 +2429,10 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
                   AND lower(table_name) NOT LIKE 'pragma_%'
                   AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
                 UNION ALL
-                SELECT schema_name, table_name FROM duckdb_views()
+                SELECT schema_name, view_name AS table_name FROM duckdb_views()
                 WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
-                  AND lower(table_name) NOT LIKE 'duckdb_%'
-                  AND lower(table_name) NOT LIKE 'sqlite_%'
+                  AND lower(view_name) NOT LIKE 'duckdb_%'
+                  AND lower(view_name) NOT LIKE 'sqlite_%'
                 ORDER BY schema_name, table_name
                 """
             ).fetchall()
@@ -2333,6 +2445,7 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
             with open_duck_native(path) as conn:
                 out = _duck_tables_query(conn)
                 print(f"[/tables] Found {len(out)} DuckDB schemas")
+                out += _list_remote_attached_tables(conn, ds.options_json or '{}', db)
                 return TablesOnlyResponse(schemas=out)
         except Exception as e:
             print(f"[/tables] WARNING: DuckDB path '{path}' failed ({e}), falling back to active path")
@@ -2350,10 +2463,10 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
                               AND lower(table_name) NOT LIKE 'pragma_%'
                               AND lower(table_name) NOT IN ('sqlite_master','sqlite_temp_master','sqlite_schema','sqlite_temp_schema')
                             UNION ALL
-                            SELECT schema_name, table_name FROM duckdb_views()
+                            SELECT schema_name, view_name AS table_name FROM duckdb_views()
                             WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
-                              AND lower(table_name) NOT LIKE 'duckdb_%'
-                              AND lower(table_name) NOT LIKE 'sqlite_%'
+                              AND lower(view_name) NOT LIKE 'duckdb_%'
+                              AND lower(view_name) NOT LIKE 'sqlite_%'
                             ORDER BY schema_name, table_name
                             """
                         ).fetchall()
