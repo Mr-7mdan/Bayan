@@ -340,15 +340,27 @@ def _drain_duck_read_pool() -> None:
 
 
 class _PooledCursorWrap:
-    """Context manager that borrows a connection from the read pool,
-    creates a cursor, and returns the connection on exit.
+    """Context manager that borrows a connection from the read pool
+    and returns the **raw connection** on enter (not a cursor).
 
-    On checkout, any registered ATTACH statements (remote MySQL/PG catalogs)
-    are replayed so that 3-part names like ``pcma.mt5.mt5_deals`` resolve
-    correctly regardless of which pool connection we happen to receive.
+    Returning the raw connection (instead of ``conn.cursor()``) is critical:
+    callers such as ``_apply_duck_mysql_attachments`` execute ``ATTACH``
+    statements on the object yielded by ``open_duck_native``.  ``ATTACH`` on
+    a child cursor may or may not propagate reliably to the parent connection
+    depending on the DuckDB version.  By handing out the raw connection we
+    guarantee that (a) ATTACH operations persist for the lifetime of the
+    connection (surviving cursor close), (b) the ``_DUCK_CONN_ATTACHED``
+    tracking keyed by ``id(conn)`` stays valid across borrow cycles, and
+    (c) subsequent borrows of the same connection see the previously
+    ATTACHed catalogs via ``_replay_attaches_on_conn``.
+
+    DuckDB connections expose the same API surface as cursors (``execute``,
+    ``executemany``, ``fetchall``, ``fetchone``, ``fetchmany``,
+    ``description``, ``commit``, ``close``), so all existing callers work
+    unchanged.
     """
 
-    __slots__ = ("_conn", "_cur", "_pool")
+    __slots__ = ("_conn", "_pool")
 
     def __init__(self, conn, pool: _queue.SimpleQueue):
         self._conn = conn
@@ -357,21 +369,16 @@ class _PooledCursorWrap:
             _replay_attaches_on_conn(conn)
         except Exception:
             pass
-        self._cur = conn.cursor()
         self._pool = pool
 
-    # Proxy attribute access to the cursor
+    # Proxy attribute access to the connection
     def __getattr__(self, name):
-        return getattr(self._cur, name)
+        return getattr(self._conn, name)
 
     def __enter__(self):
-        return self._cur
+        return self._conn
 
     def __exit__(self, exc_type, exc, tb):
-        try:
-            self._cur.close()
-        except Exception:
-            pass
         # Return connection to pool (don't close it)
         try:
             self._pool.put(self._conn)
