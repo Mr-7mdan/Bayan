@@ -539,6 +539,10 @@ def open_duck_native(db_path: str | None = None):
     # ── Strategy 2: shared connection (serial) ───────────────────────
     if is_default_path:
         con = _get_duck_shared(target)
+        try:
+            _replay_attaches_on_conn(con)
+        except Exception:
+            pass
         cur = con.cursor()
         class _CursorWrap:
             def __init__(self, c): self._c = c
@@ -554,6 +558,10 @@ def open_duck_native(db_path: str | None = None):
     con = _duckdb.connect(target)
     try:
         _apply_duck_pragmas(con)
+    except Exception:
+        pass
+    try:
+        _replay_attaches_on_conn(con)
     except Exception:
         pass
     cur = con.cursor()
