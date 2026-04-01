@@ -2287,7 +2287,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
         const m = (local?.measures || []).find(mm => mm.id === v.measureId)
         return { label: v.label || m?.name, measure: m?.formula, format: v.format, colorToken: v.colorToken, stackId: v.stackId, style: v.style, conditionalRules: v.conditionalRules, secondaryAxis: v.secondaryAxis }
       }
-      return { label: v.label, y: v.field, agg: (v.agg || 'count') as any, format: v.format, colorToken: v.colorToken, stackId: v.stackId, style: v.style, conditionalRules: v.conditionalRules, secondaryAxis: v.secondaryAxis }
+      return { label: v.label, y: v.field, agg: (v.agg || 'count') as any, format: v.format, colorToken: v.colorToken, stackId: v.stackId, style: v.style, conditionalRules: v.conditionalRules, secondaryAxis: v.secondaryAxis, ...(v.avgDateField ? { avgDateField: v.avgDateField } : {}), ...(v.avgNumerator ? { avgNumerator: v.avgNumerator } : {}), ...(v.applyHolidays ? { applyHolidays: v.applyHolidays } : {}) }
     })
     const nextSeriesTop = (p.values || []).map((v, i) => ({ id: `s${i + 1}`, x: p.x || '', y: v.field || '', agg: (v.agg || 'count') as any, secondaryAxis: v.secondaryAxis }))
 
@@ -2322,6 +2322,17 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
         } else if (v0?.field) {
           baseSpec.y = v0.field
           baseSpec.agg = (v0.agg || 'count') as any
+          const _datetimeAggs = ['avg_daily','avg_wday','avg_weekly','avg_monthly','last_daily_sum','ma7','ma14','ma30','ma60']
+          if (_datetimeAggs.includes(baseSpec.agg)) {
+            const _xField = Array.isArray(p.x) ? p.x[0] : p.x
+            baseSpec.avgDateField = v0.avgDateField || _xField || undefined
+            if (v0.avgNumerator) baseSpec.avgNumerator = v0.avgNumerator; else delete baseSpec.avgNumerator
+            if (v0.applyHolidays) baseSpec.applyHolidays = v0.applyHolidays; else delete baseSpec.applyHolidays
+          } else {
+            delete baseSpec.avgDateField
+            delete baseSpec.avgNumerator
+            delete baseSpec.applyHolidays
+          }
           delete baseSpec.measure
         }
         // Preserve per-series format even for single series
@@ -2358,7 +2369,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
       pivot: {
         x: p.x,
         legend: p.legend,
-        values: p.values.map(v => ({ field: v.field, measureId: v.measureId, agg: v.agg, label: v.label, secondaryAxis: v.secondaryAxis, sort: (v as any).sort } as any)),
+        values: p.values.map(v => ({ field: v.field, measureId: v.measureId, agg: v.agg, label: v.label, avgDateField: v.avgDateField, avgNumerator: v.avgNumerator, applyHolidays: v.applyHolidays, secondaryAxis: v.secondaryAxis, sort: (v as any).sort } as any)),
         filters: p.filters,
       } as any,
       options: (() => {
@@ -2812,6 +2823,7 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
                 setLocal(next)
                 updateConfig(next)
               }}
+              allWidgets={allWidgets}
             />
           )}
         </Section>
@@ -6153,24 +6165,103 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               const isMeasure = !!sel?.measureId
               return (
                 <>
-                  {!isMeasure && (
-                    <div>
-                      <label className="block text-xs text-muted-foreground mb-1">Aggregation</label>
-                      <select
-                        className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
-                        value={sel?.agg || 'count'}
-                        onChange={(e) => {
-                          const agg = e.target.value as any
-                          const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, agg } : v) }
-                          applyPivot(nextP)
-                        }}
-                      >
-                        {['none', 'count', 'distinct', 'avg', 'sum', 'min', 'max'].map((a) => (
-                          <option key={a} value={a}>{a}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  {!isMeasure && (() => {
+                    const xField = Array.isArray(pivot.x) ? pivot.x[0] : pivot.x
+                    const xIsDate = !!xField && dateLikeFields.includes(xField)
+                    const curAgg = sel?.agg || 'count'
+                    const isPeriodicAgg = ['avg_daily','avg_wday','avg_weekly','avg_monthly'].includes(curAgg)
+                    const isMaAgg = ['ma7','ma14','ma30','ma60'].includes(curAgg)
+                    const isLastAgg = curAgg === 'last_daily_sum'
+                    const needsDateField = isPeriodicAgg || isMaAgg || isLastAgg
+                    return (
+                      <div className="space-y-2 col-span-2">
+                        <div>
+                          <label className="block text-xs text-muted-foreground mb-1">Aggregation</label>
+                          <select
+                            className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
+                            value={curAgg}
+                            onChange={(e) => {
+                              const agg = e.target.value as any
+                              const autoDate = xField || undefined
+                              const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, agg, avgDateField: v.avgDateField || autoDate } : v) }
+                              applyPivot(nextP)
+                            }}
+                          >
+                            <optgroup label="Standard">
+                              {(['none','count','distinct','avg','sum','min','max'] as const).map(a => <option key={a} value={a}>{a}</option>)}
+                            </optgroup>
+                            {xIsDate && (<>
+                              <optgroup label="Period Average">
+                                <option value="avg_daily">Avg / Day</option>
+                                <option value="avg_wday">Avg / WDay (working days)</option>
+                                <option value="avg_weekly">Avg / Week</option>
+                                <option value="avg_monthly">Avg / Month</option>
+                              </optgroup>
+                              <optgroup label="Last Period">
+                                <option value="last_daily_sum">Last Daily Sum</option>
+                              </optgroup>
+                              <optgroup label="Moving Average">
+                                <option value="ma7">MA-7 (7-day)</option>
+                                <option value="ma14">MA-14 (14-day)</option>
+                                <option value="ma30">MA-30 (30-day)</option>
+                                <option value="ma60">MA-60 (60-day)</option>
+                              </optgroup>
+                            </>)}
+                          </select>
+                        </div>
+                        {needsDateField && (
+                          <div>
+                            <label className="block text-xs text-muted-foreground mb-1">Date column</label>
+                            <select
+                              className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
+                              value={sel?.avgDateField || xField || ''}
+                              onChange={(e) => {
+                                const avgDateField = e.target.value || undefined
+                                const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, avgDateField } : v) }
+                                applyPivot(nextP)
+                              }}
+                            >
+                              <option value="">— select —</option>
+                              {dateLikeFields.map(f => <option key={f} value={f}>{f}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        {isPeriodicAgg && (
+                          <div>
+                            <label className="block text-xs text-muted-foreground mb-1">Numerator</label>
+                            <select
+                              className="w-full px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-xs"
+                              value={sel?.avgNumerator || 'sum'}
+                              onChange={(e) => {
+                                const avgNumerator = e.target.value as 'sum'|'count'|'distinct'
+                                const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, avgNumerator } : v) }
+                                applyPivot(nextP)
+                              }}
+                            >
+                              <option value="sum">sum</option>
+                              <option value="count">count</option>
+                              <option value="distinct">distinct</option>
+                            </select>
+                          </div>
+                        )}
+                        {curAgg === 'avg_wday' && (
+                          <label className="flex items-center gap-1.5 text-xs col-span-2">
+                            <input
+                              type="checkbox"
+                              className="accent-[hsl(var(--primary))]"
+                              checked={!!sel?.applyHolidays}
+                              onChange={(e) => {
+                                const applyHolidays = e.target.checked
+                                const nextP: PivotAssignments = { ...pivot, values: pivot.values.map(v => ((v.measureId ? v.measureId : v.field) === selField) ? { ...v, applyHolidays } : v) }
+                                applyPivot(nextP)
+                              }}
+                            />
+                            Exclude holidays
+                          </label>
+                        )}
+                      </div>
+                    )
+                  })()}
                   {(local.chartType && ['combo','line','area','bar','column','scatter'].includes(local.chartType)) && (
                     <label className="flex items-center gap-2 text-xs">
                       <input

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useQueries } from '@tanstack/react-query'
 import { QueryApi } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
@@ -8,6 +9,8 @@ import { useFilters } from '@/components/providers/FiltersProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
 import { PresetConfig, presetConfigToLabel, LEGACY_PRESET_MAP } from '@/lib/datePresets'
+
+const ChartCard = dynamic(() => import('@/components/widgets/ChartCard'), { ssr: false })
 
 // ── Report variable query concurrency limiter ────────────────────────────────
 // Caps simultaneous /spec calls per browser tab so the backend thread pool
@@ -307,10 +310,11 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
 }
 
 // Render a single report element
-function ReportElementView({ element, variables, resolvedValues }: {
+function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
   element: ReportElement
   variables: ReportVariable[]
   resolvedValues: Record<string, { value: unknown; loading: boolean }>
+  allWidgets?: Record<string, WidgetConfig>
 }) {
   const resolveText = (text: string | undefined | null): string => {
     if (!text) return text ?? ''
@@ -554,6 +558,54 @@ function ReportElementView({ element, variables, resolvedValues }: {
     )
   }
 
+  if (element.type === 'chart') {
+    const linked = element.chart
+    if (!linked?.widgetId) {
+      return (
+        <div className="h-full w-full flex flex-col items-center justify-center gap-1 text-muted-foreground text-xs">
+          <span>Chart not linked</span>
+          <span className="text-[10px] opacity-60">Open Report Builder to select a widget</span>
+        </div>
+      )
+    }
+    const w = allWidgets?.[linked.widgetId]
+    if (!w) {
+      return (
+        <div className="h-full w-full flex flex-col items-center justify-center gap-1 text-muted-foreground text-xs">
+          <span className="font-medium">{linked.title || linked.widgetId}</span>
+          <span className="text-[10px] opacity-60">Widget not found on this dashboard</span>
+        </div>
+      )
+    }
+    const embeddedWidgetId = `${linked.widgetId}__rpt__${element.id}`
+    // Compute a simple hash of query-affecting fields so ChartCard remounts
+    // and re-fetches whenever the source widget config changes.
+    const cfgHash = (() => {
+      try {
+        const s = JSON.stringify([w.sql, w.queryMode, w.datasourceId, w.querySpec, w.pivot, w.customColumns, w.chartType, w.options])
+        let h = 0
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+        return h.toString(36)
+      } catch { return '0' }
+    })()
+    return (
+      <ChartCard
+        key={`${embeddedWidgetId}-${cfgHash}`}
+        title={w.title}
+        sql={w.sql || ''}
+        datasourceId={w.datasourceId}
+        type={w.chartType as any}
+        options={w.options}
+        queryMode={w.queryMode}
+        querySpec={w.querySpec as any}
+        customColumns={w.customColumns}
+        pivot={w.pivot as any}
+        widgetId={embeddedWidgetId}
+        layout="flex"
+      />
+    )
+  }
+
   return null
 }
 
@@ -564,12 +616,14 @@ export default function ReportCard({
   widgetId,
   datasourceId,
   snap,
+  allWidgets,
 }: {
   title: string
   options?: WidgetConfig['options']
   widgetId?: string
   datasourceId?: string
   snap?: boolean
+  allWidgets?: Record<string, WidgetConfig>
 }) {
   const { user } = useAuth()
   const { filters } = useFilters()
@@ -842,6 +896,7 @@ ${styles}
                 element={el}
                 variables={variables}
                 resolvedValues={resolvedValues}
+                allWidgets={allWidgets}
               />
             </ErrorBoundary>
           </div>

@@ -1799,6 +1799,8 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                 sql_native = inner_qm
             elif _ob_pos >= 0:
                 _ob_clause = inner_qm[_ob_pos + len(' ORDER BY '):].strip()
+                # Strip any embedded LIMIT/OFFSET from the ORDER BY clause to prevent double LIMIT
+                _ob_clause = re.sub(r'\s+LIMIT\s+\d+.*$', '', _ob_clause, flags=re.IGNORECASE).strip()
                 _ob_base = inner_qm[:_ob_pos].rstrip()
                 sql_native = f"SELECT * FROM ({_ob_base}) AS _q ORDER BY {_ob_clause} LIMIT {limit_lit} OFFSET {offset_lit}"
             else:
@@ -2032,6 +2034,8 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                     sql_text = text(_si)
                 elif _ob_pos2 >= 0:
                     _ob_clause2 = _si[_ob_pos2 + len(' ORDER BY '):].strip()
+                    # Strip any embedded LIMIT/OFFSET from the ORDER BY clause to prevent double LIMIT
+                    _ob_clause2 = re.sub(r'\s+LIMIT\s+\d+.*$', '', _ob_clause2, flags=re.IGNORECASE).strip()
                     _ob_base2 = _si[:_ob_pos2].rstrip()
                     sql_text = text(f"SELECT * FROM ({_ob_base2}) AS _q ORDER BY {_ob_clause2} LIMIT {limit_lit} OFFSET {offset_lit}")
                 else:
@@ -2820,10 +2824,17 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     # avg_wday   → numerator / COUNT(DISTINCT CASE WHEN is_workday THEN DATE(date_col) END)
     # avg_weekly → numerator / COUNT(DISTINCT DATE_TRUNC('week', date_col))
     # avg_monthly→ numerator / COUNT(DISTINCT DATE_TRUNC('month', date_col))
-    _PERIOD_AGG = frozenset({'avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly', 'last_daily_sum', 'ma7', 'ma14', 'ma30', 'ma60'})
+    _PERIOD_AGG = frozenset({'avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly', 'last_daily_sum'})
     if agg in _PERIOD_AGG:
         val_field = getattr(spec, 'y', None)
         date_field = getattr(spec, 'avgDateField', None)
+        # Fall back to the first x-axis field when avgDateField was not explicitly set
+        if not date_field:
+            _x = getattr(spec, 'x', None)
+            if isinstance(_x, list) and _x:
+                date_field = _x[0]
+            elif isinstance(_x, str) and _x:
+                date_field = _x
         if not val_field or not date_field:
             raise HTTPException(status_code=400, detail="avg_daily/avg_wday/avg_weekly/avg_monthly/last_daily_sum/ma* require both 'y' (value column) and 'avgDateField' (date column)")
         d = (ds_type or '').lower()
@@ -3142,6 +3153,13 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         _ma_window = {'ma7': 7, 'ma14': 14, 'ma30': 30, 'ma60': 60}[agg]
         val_field = getattr(spec, 'y', None)
         date_field = getattr(spec, 'avgDateField', None)
+        # Fall back to the first x-axis field when avgDateField was not explicitly set
+        if not date_field:
+            _x = getattr(spec, 'x', None)
+            if isinstance(_x, list) and _x:
+                date_field = _x[0]
+            elif isinstance(_x, str) and _x:
+                date_field = _x
         if not val_field or not date_field:
             raise HTTPException(status_code=400, detail=f"{agg} requires both 'y' (value column) and 'avgDateField' (date column)")
         d = (ds_type or '').lower()
@@ -3203,26 +3221,52 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         else:
             _ma_num_expr = f"SUM({vcol})"
 
-        # ── Final SQL: SUM all rows in [max_date-(N-1), max_date] then divide by N ──
-        # Use the outer WHERE filters to restrict to the user's date range first,
-        # then further restrict to the trailing N-day window from that range's max date.
-        if _ma_where_parts:
-            _ma_inner_where = f" WHERE {' AND '.join(_ma_where_parts)} AND {_ma_date_expr} >= {_ma_sub_expr}"
+        _ma_group_by = (getattr(spec, 'groupBy', None) or '').strip().lower()
+        _ma_is_series = bool(_ma_group_by and _ma_group_by not in ('none', ''))
+
+        if _ma_is_series:
+            # ── Time-series MA: rolling N-day average per day ──────────────────
+            # CTE aggregates daily totals first, then window AVG gives the
+            # per-day N-day trailing moving average.
+            _ma_where_clause_inner = f" WHERE {' AND '.join(_ma_where_parts)}" if _ma_where_parts else ""
+            if 'duckdb' in d:
+                _ma_xd_expr = f"CAST({dcol_raw} AS DATE)"
+            elif 'mysql' in d:
+                _ma_xd_expr = f"DATE({dcol_raw})"
+            else:  # mssql / postgres / default
+                _ma_xd_expr = f"CAST({dcol_raw} AS DATE)"
+
+            sql_ma = (
+                f"WITH _ma_daily AS ("
+                f"SELECT {_ma_xd_expr} AS _xd, {_ma_num_expr} AS _yv "
+                f"FROM {_ma_from_sql}{_ma_where_clause_inner} "
+                f"GROUP BY {_ma_xd_expr}"
+                f") "
+                f"SELECT _xd, "
+                f"AVG(_yv) OVER (ORDER BY _xd ROWS BETWEEN {_ma_window - 1} PRECEDING AND CURRENT ROW) AS value "
+                f"FROM _ma_daily ORDER BY _xd"
+            )
+            _ma_limit = int(getattr(spec, 'limit', None) or payload.limit or 5000)
         else:
-            _ma_inner_where = f" WHERE {_ma_date_expr} >= {_ma_sub_expr}"
+            # ── Scalar MA: SUM of last N days / N (KPI use case) ──────────────
+            if _ma_where_parts:
+                _ma_inner_where = f" WHERE {' AND '.join(_ma_where_parts)} AND {_ma_date_expr} >= {_ma_sub_expr}"
+            else:
+                _ma_inner_where = f" WHERE {_ma_date_expr} >= {_ma_sub_expr}"
 
-        sql_ma = (
-            f"SELECT {_ma_num_expr} * 1.0 / {_ma_window} AS value "
-            f"FROM {_ma_from_sql}{_ma_inner_where}"
-        )
+            sql_ma = (
+                f"SELECT {_ma_num_expr} * 1.0 / {_ma_window} AS value "
+                f"FROM {_ma_from_sql}{_ma_inner_where}"
+            )
+            _ma_limit = 1
 
-        print(f"[MovingAvg] agg={agg}, N={_ma_window}, val={val_field}, date={date_field}", flush=True)
+        print(f"[MovingAvg] agg={agg}, N={_ma_window}, series={_ma_is_series}, val={val_field}, date={date_field}", flush=True)
         print(f"[MovingAvg] SQL: {sql_ma[:800]}", flush=True)
         if _ma_params:
             print(f"[MovingAvg] params: { {k: v for k, v in list(_ma_params.items())[:10]} }", flush=True)
 
         _ma_ds_id = None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId
-        _ma_req   = QueryRequest(sql=sql_ma, datasourceId=_ma_ds_id, limit=1, offset=0, includeTotal=False, params=_ma_params or None)
+        _ma_req   = QueryRequest(sql=sql_ma, datasourceId=_ma_ds_id, limit=_ma_limit, offset=0, includeTotal=False, params=_ma_params or None)
         return run_query(_ma_req, db)
     # ── End moving-average early exit ─────────────────────────────────────────
 
@@ -8071,16 +8115,6 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             sys.stderr.write(f"  - effective_source contains '_base': {'_base' in effective_source}\n")
             sys.stderr.flush()
             
-            # Calculate effective limit to push down to SQLGlot (prevents massive sorts)
-            effective_limit = payload.limit
-            if effective_limit is None:
-                try:
-                    pivot_default_limit = int(os.environ.get("PIVOT_DEFAULT_LIMIT", "2000") or "2000")
-                except Exception:
-                    pivot_default_limit = 2000
-                if pivot_default_limit > 0:
-                    effective_limit = pivot_default_limit
-
             inner = builder.build_pivot_query(
                 source=effective_source,
                 rows=r_dims,
@@ -8090,7 +8124,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 where=resolved_where,
                 group_by=payload.groupBy if hasattr(payload, 'groupBy') else None,
                 week_start=payload.weekStart if hasattr(payload, 'weekStart') else 'mon',
-                limit=effective_limit,
+                limit=None,  # Do NOT pass limit here — run_query wraps with LIMIT/OFFSET to avoid double LIMIT
                 expr_map=use_expr_map,
                 ds_type=ds_type,
                 date_format=payload.dateFormat if hasattr(payload, 'dateFormat') else None,
@@ -8182,6 +8216,88 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
     finally:
         _HEAVY_SEM.release()
 
+
+
+@router.post("/pivot/sql")
+def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+    """Return the SQL that would be executed by /pivot without running it. Used for SQL preview."""
+    import sys
+    try:
+        if getattr(payload, 'where', None):
+            payload.where = _resolve_date_presets(payload.where)
+        engine = _engine_for_datasource(db, payload.datasourceId, actorId)
+        try:
+            ds_type = (engine.dialect.name or "").lower()
+        except Exception:
+            ds_type = "duckdb"
+        try:
+            if settings.prefer_local_duckdb and _duck_has_table(getattr(payload, 'source', None)):
+                ds_type = "duckdb"
+        except Exception:
+            pass
+
+        # Resolve datasource transforms
+        ds_transforms: dict = {}
+        try:
+            ds_obj = db.get(Datasource, payload.datasourceId)
+            if ds_obj and getattr(ds_obj, 'transforms_json', None):
+                import json as _json
+                ds_transforms = _json.loads(ds_obj.transforms_json) or {}
+        except Exception:
+            pass
+
+        source = getattr(payload, 'source', '')
+        # Build plain source quoted
+        def _q_src(s: str) -> str:
+            parts = str(s or '').strip().split('.')
+            d = ds_type.lower()
+            if 'mssql' in d or 'sqlserver' in d:
+                return '.'.join([f"[{p}]" if not (p.startswith('[') and p.endswith(']')) else p for p in parts])
+            if 'mysql' in d:
+                return '.'.join([f"`{p}`" if not (p.startswith('`') and p.endswith('`')) else p for p in parts])
+            return '.'.join([f'"{p}"' if not ((p.startswith('"') and p.endswith('"'))) else p for p in parts])
+
+        effective_source = _q_src(source)
+
+        # Build expr_map from custom columns
+        expr_map: dict = {}
+        try:
+            for cc in (ds_transforms.get('customColumns') or []):
+                name = (cc or {}).get('name') or ''
+                expr = (cc or {}).get('expr') or (cc or {}).get('expression') or ''
+                if name and expr:
+                    expr_map[name] = expr
+        except Exception:
+            pass
+
+        r_dims = [d for d in (payload.rows or []) if str(d or '').strip().lower() not in {'__metric__', 'value'}]
+        c_dims = [d for d in (payload.cols or []) if str(d or '').strip().lower() not in {'__metric__', 'value'}]
+        agg = (payload.aggregator or 'count').lower()
+        val_field = (payload.valueField or '').strip()
+        if agg in ('sum', 'avg', 'min', 'max', 'distinct') and not val_field:
+            agg = 'count'
+
+        builder = SQLGlotBuilder(dialect=ds_type)
+        sql = builder.build_pivot_query(
+            source=effective_source,
+            rows=r_dims,
+            cols=c_dims,
+            value_field=val_field or None,
+            agg=agg,
+            where=payload.where,
+            group_by=payload.groupBy if hasattr(payload, 'groupBy') else None,
+            week_start=payload.weekStart if hasattr(payload, 'weekStart') else 'mon',
+            limit=None,
+            expr_map=expr_map or None,
+            ds_type=ds_type,
+            date_format=payload.dateFormat if hasattr(payload, 'dateFormat') else None,
+            date_columns=payload.dateColumns if hasattr(payload, 'dateColumns') else None,
+        )
+        return {"sql": sql}
+    except Exception as e:
+        sys.stderr.write(f"[pivot/sql] Error generating SQL: {e}\n")
+        sys.stderr.flush()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/period-totals")

@@ -160,7 +160,7 @@ export type ReportTableCell = {
 
 export type ReportElement = {
   id: string
-  type: 'label' | 'table' | 'spaceholder' | 'image'
+  type: 'label' | 'table' | 'spaceholder' | 'image' | 'chart'
   // Grid position (snap-to-grid coordinates)
   gridX: number
   gridY: number
@@ -217,6 +217,12 @@ export type ReportElement = {
   }
   // Spaceholder: references a variable
   variableId?: string
+  // Chart: references a dashboard chart/kpi widget by id and stores a config snapshot
+  chart?: {
+    widgetId: string      // id of the linked dashboard widget
+    title?: string        // snapshot of widget title for display
+    widgetType?: string   // 'chart' | 'kpi' | 'table'
+  }
 }
 
 export type ReportVariable = {

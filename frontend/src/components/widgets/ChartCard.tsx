@@ -4619,7 +4619,7 @@ export default function ChartCard({
         animationDurationUpdate: isSnap ? 0 : 300,
         tooltip: advTooltip,
         legend: { show: false },
-        grid: { left: margins.left, right: margins.right, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (isMultiLevelX ? 16 : 0) + (dataZoom && type !== 'bar' ? 48 : 0), containLabel: false },
+        grid: { left: 10, right: margins.right, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (isMultiLevelX ? 16 : 0) + (dataZoom && type !== 'bar' ? 48 : 0), containLabel: true },
         xAxis: (type === 'bar')
           ? (hasSecondaryXBar
               ? [
@@ -5255,7 +5255,7 @@ export default function ChartCard({
           }
         },
         legend: { show: false },
-        grid: { left: marginsSingle.left, right: marginsSingle.right, top: 10, bottom: 24 + (dataZoom ? 48 : 0), containLabel: false },
+        grid: { left: 10, right: marginsSingle.right, top: 10, bottom: 24 + (dataZoom ? 48 : 0), containLabel: true },
         xAxis: isTime
           ? { type: 'time', axisLabel: { fontSize: ((options as any)?.xAxisFontSize ?? fontSize), fontWeight: (((options as any)?.xAxisFontWeight || 'normal') === 'bold') ? 'bold' : 'normal', color: ((options as any)?.xAxisFontColor || axisTextColor), formatter: (val: any) => {
                 const s = String(val ?? '')
@@ -6135,7 +6135,7 @@ export default function ChartCard({
           }
         },
         legend: { show: false },
-        grid: { left: marginsCombo.left, right: marginsCombo.right, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (dataZoomCombo ? 48 : 0), containLabel: false },
+        grid: { left: 10, right: marginsCombo.right, top: 10 + gridTopPad, bottom: 24 + gridBottomPad + (dataZoomCombo ? 48 : 0), containLabel: true },
         xAxis: { type: 'category', data: (() => { const fmt = (val:any)=>{ const s = String(val ?? ''); const d = parseDateLoose(s); const f = (options as any)?.xDateFormat
               || (((querySpec as any)?.groupBy === 'year') ? 'YYYY'
                 : ((querySpec as any)?.groupBy === 'quarter') ? 'YYYY-[Q]q'

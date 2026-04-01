@@ -208,15 +208,19 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
   const dateLikeFields = useMemo(() => {
     const isDate = (t?: string | null) =>
       t ? /(date|time|timestamp)/i.test(String(t)) : false
-    // Prefer schema types; fall back to sample-value heuristic
-    if (schemaColumns.length > 0) {
-      const fromSchema = schemaColumns.filter(c => isDate(c.type)).map(c => c.name)
-      if (fromSchema.length > 0) return fromSchema
-    }
-    return columnNames.filter(c => {
+    const nameLooksDate = (n: string) =>
+      /(date|time|timestamp|_at$|created|updated)/i.test(n)
+    const set = new Set<string>()
+    // 1) Schema types
+    schemaColumns.forEach(c => { if (isDate(c.type)) set.add(c.name) })
+    // 2) Sample value heuristic
+    columnNames.forEach(c => {
       const vals = samplesByField[c] || []
-      return vals.length > 0 && vals.some(v => /\d{4}-\d{2}/.test(String(v)))
+      if (vals.length > 0 && vals.some(v => /\d{4}-\d{2}/.test(String(v)))) set.add(c)
     })
+    // 3) Name heuristics (catches created_at, updated_at, etc. even when typed as VARCHAR)
+    columnNames.forEach(c => { if (nameLooksDate(c)) set.add(c) })
+    return Array.from(set)
   }, [schemaColumns, columnNames, samplesByField])
 
   const tabCounts = useTabCounts(local)

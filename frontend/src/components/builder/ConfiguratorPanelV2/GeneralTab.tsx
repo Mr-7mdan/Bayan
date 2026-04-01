@@ -187,6 +187,7 @@ export function GeneralTab({ local, setLocal, updateConfig, search = '', allWidg
             onCloseAction={()=>setReportOpen(false)}
             config={local}
             onSaveAction={(next: WidgetConfig)=>{ setLocal(next); updateConfig(next) }}
+            allWidgets={allWidgets}
           />
         </SectionCard>
       )}

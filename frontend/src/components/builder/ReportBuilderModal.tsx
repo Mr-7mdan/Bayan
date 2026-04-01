@@ -7,7 +7,7 @@ import { Api, QueryApi } from '@/lib/api'
 import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, presetConfigToLabel, LEGACY_PRESET_MAP, usePresetPreview } from '@/lib/datePresets'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
-import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine } from '@remixicon/react'
+import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine, RiBarChart2Line } from '@remixicon/react'
 import DataExplorerDialogV2 from './DataExplorerDialogV2'
 
 const genId = () => Math.random().toString(36).slice(2, 10)
@@ -1678,10 +1678,12 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
 function ElementProps({
   element,
   variables,
+  allWidgets,
   onUpdate,
 }: {
   element: ReportElement
   variables: ReportVariable[]
+  allWidgets?: Record<string, WidgetConfig>
   onUpdate: (el: ReportElement) => void
 }) {
   if (element.type === 'label') {
@@ -1769,6 +1771,50 @@ function ElementProps({
             <input type="number" className="w-full h-6 text-[11px] rounded border bg-secondary/60 px-1" value={lbl.padding ?? 4} onChange={(e) => patch({ padding: +e.target.value })} />
           </div>
         </div>
+      </div>
+    )
+  }
+
+  if (element.type === 'chart') {
+    const chartWidgets = Object.values(allWidgets || {}).filter(w => w.type === 'chart' || w.type === 'kpi')
+    const current = element.chart
+    return (
+      <div className="space-y-3">
+        <div>
+          <label className="block text-[11px] text-muted-foreground mb-1">Link to Dashboard Widget</label>
+          <select
+            className="w-full h-7 text-xs rounded border bg-secondary/60 px-2 focus:ring-1 focus:ring-primary/40 outline-none"
+            value={current?.widgetId || ''}
+            onChange={(e) => {
+              const wid = e.target.value
+              const w = allWidgets?.[wid]
+              onUpdate({ ...element, chart: w ? { widgetId: wid, title: w.title, widgetType: w.type } : undefined })
+            }}
+          >
+            <option value="">— Select a widget —</option>
+            {chartWidgets.map(w => (
+              <option key={w.id} value={w.id}>{w.title} ({w.type})</option>
+            ))}
+          </select>
+          {chartWidgets.length === 0 && (
+            <p className="text-[10px] text-muted-foreground/70 mt-1">No chart or KPI widgets found on this dashboard.</p>
+          )}
+        </div>
+        {current?.widgetId && (
+          <div className="rounded-md border bg-primary/5 px-3 py-2 flex items-start gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] text-primary font-medium truncate">Linked: {current.title || current.widgetId}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Renders live inside the report.</p>
+            </div>
+            <button
+              title="Unlink widget"
+              className="shrink-0 text-destructive/70 hover:text-destructive hover:bg-destructive/10 rounded p-0.5 transition-colors"
+              onClick={() => onUpdate({ ...element, chart: undefined })}
+            >
+              <RiDeleteBinLine className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -2960,6 +3006,12 @@ function GridCanvas({
             >
               {/* Element preview */}
               <div className="h-full w-full overflow-hidden rounded-sm bg-card/80 border border-border/60">
+                {el.type === 'chart' && (
+                  <div className="h-full flex flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground">
+                    <RiBarChart2Line className="h-5 w-5 text-[hsl(var(--chart-2))]" />
+                    <span className="text-[10px] text-center px-1 truncate w-full text-center">{el.chart?.title || 'Unlinked Chart'}</span>
+                  </div>
+                )}
                 {el.type === 'label' && (
                   <div className="h-full flex px-1" style={{
                     backgroundColor: el.label?.backgroundColor || undefined,
@@ -3111,11 +3163,13 @@ export default function ReportBuilderModal({
   onCloseAction,
   config,
   onSaveAction,
+  allWidgets,
 }: {
   open: boolean
   onCloseAction: () => void
   config: WidgetConfig
   onSaveAction: (next: WidgetConfig) => void
+  allWidgets?: Record<string, WidgetConfig>
 }) {
   const report = config.options?.report
   const [state, setState] = useState<ReportState>({
@@ -3197,6 +3251,8 @@ export default function ReportBuilderModal({
     } else if (type === 'image') {
       base.gridW = 4; base.gridH = 3
       base.image = { url: '', objectFit: 'contain' }
+    } else if (type === 'chart') {
+      base.gridW = 6; base.gridH = 6
     }
     setState((s) => ({ ...s, elements: [...s.elements, base] }))
     setSelectedId(id)
@@ -3326,6 +3382,10 @@ export default function ReportBuilderModal({
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--accent)/0.1)] group-hover:bg-[hsl(var(--accent)/0.2)] transition-colors"><RiHashtag className="h-3.5 w-3.5 text-accent" /></div>
                     <span className="text-muted-foreground group-hover:text-foreground transition-colors">Var Slot</span>
                   </button>
+                  <button className="flex flex-col items-center gap-1 text-[11px] px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('chart')}>
+                    <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--chart-2)/0.1)] group-hover:bg-[hsl(var(--chart-2)/0.2)] transition-colors"><RiBarChart2Line className="h-3.5 w-3.5 text-[hsl(var(--chart-2))]" /></div>
+                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">Chart</span>
+                  </button>
                 </div>
               </div>
               <div className="flex items-center justify-between px-3 py-2 border-b bg-card/60 shrink-0">
@@ -3346,7 +3406,8 @@ export default function ReportBuilderModal({
                     {el.type === 'image' && <RiImageLine className="h-3 w-3 shrink-0 text-[hsl(var(--chart-3))]" />}
                     {el.type === 'table' && <RiTableLine className="h-3 w-3 shrink-0 text-success" />}
                     {el.type === 'spaceholder' && <RiHashtag className="h-3 w-3 shrink-0 text-accent" />}
-                    <span className="truncate flex-1 text-[10px]">{el.type === 'label' ? (el.label?.text?.slice(0, 20) || 'Label') : el.type === 'image' ? 'Image' : el.type === 'table' ? `Table ${el.table?.rows}×${el.table?.cols}` : `{{${state.variables.find(v => v.id === el.variableId)?.name || '?'}}}`}</span>
+                    {el.type === 'chart' && <RiBarChart2Line className="h-3 w-3 shrink-0 text-[hsl(var(--chart-2))]" />}
+                    <span className="truncate flex-1 text-[10px]">{el.type === 'label' ? (el.label?.text?.slice(0, 20) || 'Label') : el.type === 'image' ? 'Image' : el.type === 'table' ? `Table ${el.table?.rows}×${el.table?.cols}` : el.type === 'chart' ? (el.chart?.title || 'Chart (unlinked)') : `{{${state.variables.find(v => v.id === el.variableId)?.name || '?'}}}`}</span>
                     <button className="text-destructive hover:bg-destructive/10 rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => { e.stopPropagation(); deleteElement(el.id) }}>
                       <RiDeleteBinLine className="h-3 w-3" />
                     </button>
@@ -3481,11 +3542,12 @@ export default function ReportBuilderModal({
             <div className="px-4 py-2.5 border-b bg-card/60 shrink-0">
               {selectedEl ? (
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${selectedEl.type === 'label' ? 'bg-[hsl(var(--chart-1)/0.1)] text-[hsl(var(--chart-1))] border-[hsl(var(--chart-1)/0.25)]' : selectedEl.type === 'image' ? 'bg-[hsl(var(--chart-3)/0.1)] text-[hsl(var(--chart-3))] border-[hsl(var(--chart-3)/0.25)]' : selectedEl.type === 'table' ? 'bg-success/10 text-success border-success/25' : 'bg-accent/10 text-accent border-accent/25'}`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${selectedEl.type === 'label' ? 'bg-[hsl(var(--chart-1)/0.1)] text-[hsl(var(--chart-1))] border-[hsl(var(--chart-1)/0.25)]' : selectedEl.type === 'image' ? 'bg-[hsl(var(--chart-3)/0.1)] text-[hsl(var(--chart-3))] border-[hsl(var(--chart-3)/0.25)]' : selectedEl.type === 'table' ? 'bg-success/10 text-success border-success/25' : selectedEl.type === 'chart' ? 'bg-[hsl(var(--chart-2)/0.1)] text-[hsl(var(--chart-2))] border-[hsl(var(--chart-2)/0.25)]' : 'bg-accent/10 text-accent border-accent/25'}`}>
                     {selectedEl.type === 'label' && <RiText className="h-3 w-3" />}
                     {selectedEl.type === 'image' && <RiImageLine className="h-3 w-3" />}
                     {selectedEl.type === 'table' && <RiTableLine className="h-3 w-3" />}
                     {selectedEl.type === 'spaceholder' && <RiHashtag className="h-3 w-3" />}
+                    {selectedEl.type === 'chart' && <RiBarChart2Line className="h-3 w-3" />}
                     <span className="capitalize">{selectedEl.type}</span>
                   </span>
                   <button className="ml-auto text-destructive/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-1 transition-colors" onClick={() => deleteElement(selectedEl.id)} title="Delete">
@@ -3536,7 +3598,7 @@ export default function ReportBuilderModal({
                     </div>
                   </div>
                   <div className="border-t pt-3">
-                    <ElementProps element={selectedEl} variables={state.variables} onUpdate={(el) => updateElement(el.id, el)} />
+                    <ElementProps element={selectedEl} variables={state.variables} allWidgets={allWidgets} onUpdate={(el) => updateElement(el.id, el)} />
                   </div>
                 </div>
               )}

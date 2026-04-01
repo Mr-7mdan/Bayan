@@ -284,13 +284,69 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
     const hasSecondaryAxis = (['combo','line','area','column','scatter','bar'] as string[]).includes(local.chartType||'')
     return (
       <div className="space-y-2">
-        {!isMeasure && (
-          <FormRow label="Aggregation">
-            <select className={selectCls()} value={ve?.agg||'sum'} onChange={e=>patchValue({agg:e.target.value})}>
-              {['none','sum','count','distinct','avg','min','max'].map(a=><option key={a} value={a}>{a}</option>)}
-            </select>
-          </FormRow>
-        )}
+        {!isMeasure && (() => {
+          const xField = Array.isArray(pivot.x) ? pivot.x[0] : pivot.x
+          const xIsDate = !!xField && dateLikeFields.includes(xField)
+          const curAgg = ve?.agg || 'sum'
+          const isPeriodicAgg = ['avg_daily','avg_wday','avg_weekly','avg_monthly'].includes(curAgg)
+          const isMaAgg = ['ma7','ma14','ma30','ma60'].includes(curAgg)
+          const isLastAgg = curAgg === 'last_daily_sum'
+          const needsDateField = isPeriodicAgg || isMaAgg || isLastAgg
+          return (
+            <>
+              <FormRow label="Aggregation">
+                <select className={selectCls()} value={curAgg} onChange={e => {
+                  const agg = e.target.value
+                  const autoDate = xField || undefined
+                  patchValue({ agg, avgDateField: (ve as any)?.avgDateField || autoDate })
+                }}>
+                  <optgroup label="Standard">
+                    {(['none','sum','count','distinct','avg','min','max'] as const).map(a => <option key={a} value={a}>{a}</option>)}
+                  </optgroup>
+                  {xIsDate && (<>
+                    <optgroup label="Period Average">
+                      <option value="avg_daily">Avg / Day</option>
+                      <option value="avg_wday">Avg / WDay (working days)</option>
+                      <option value="avg_weekly">Avg / Week</option>
+                      <option value="avg_monthly">Avg / Month</option>
+                    </optgroup>
+                    <optgroup label="Last Period">
+                      <option value="last_daily_sum">Last Daily Sum</option>
+                    </optgroup>
+                    <optgroup label="Moving Average">
+                      <option value="ma7">MA-7 (7-day)</option>
+                      <option value="ma14">MA-14 (14-day)</option>
+                      <option value="ma30">MA-30 (30-day)</option>
+                      <option value="ma60">MA-60 (60-day)</option>
+                    </optgroup>
+                  </>)}
+                </select>
+              </FormRow>
+              {needsDateField && (
+                <FormRow label="Date column">
+                  <select className={selectCls()} value={(ve as any)?.avgDateField || xField || ''} onChange={e => patchValue({ avgDateField: e.target.value || undefined })}>
+                    <option value="">— select —</option>
+                    {dateLikeFields.map(f => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </FormRow>
+              )}
+              {isPeriodicAgg && (
+                <FormRow label="Numerator">
+                  <select className={selectCls()} value={(ve as any)?.avgNumerator || 'sum'} onChange={e => patchValue({ avgNumerator: e.target.value })}>
+                    <option value="sum">sum</option>
+                    <option value="count">count</option>
+                    <option value="distinct">distinct</option>
+                  </select>
+                </FormRow>
+              )}
+              {curAgg === 'avg_wday' && (
+                <FormRow label="Exclude holidays">
+                  <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={!!(ve as any)?.applyHolidays} onChange={e => patchValue({ applyHolidays: e.target.checked })} />
+                </FormRow>
+              )}
+            </>
+          )
+        })()}
         <FormRow label="Format">
           <select className={selectCls()} value={ve?.format||'none'} onChange={e=>patchValue({format:e.target.value})}>
             {FORMAT_OPTIONS.map(f=><option key={f} value={f}>{f}</option>)}

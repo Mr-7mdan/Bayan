@@ -7,6 +7,11 @@ export type PivotValue = {
   field?: string
   measureId?: string
   agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'
+    | 'avg_daily'|'avg_wday'|'avg_weekly'|'avg_monthly'|'last_daily_sum'
+    | 'ma7'|'ma14'|'ma30'|'ma60'
+  avgDateField?: string
+  avgNumerator?: 'sum'|'count'|'distinct'
+  applyHolidays?: boolean
   label?: string
   format?: 'none'|'short'|'abbrev'|'currency'|'percent'|'bytes'|'wholeNumber'|'number'|'thousands'|'millions'|'billions'|'oneDecimal'|'twoDecimals'|'percentWhole'|'percentOneDecimal'|'timeHours'|'timeMinutes'|'distance-km'|'distance-mi'
   colorToken?: 1|2|3|4|5
@@ -679,9 +684,16 @@ export function PivotBuilder({
               ? (measures.find(m => m.id === v.measureId)?.name || v.label || 'Measure')
               : (v.label || v.field || (v.agg ? String(v.agg) : 'value'))
             // Allow full aggregator set regardless of numeric inference; backend will enforce types
-            const allowedAggs = ['none','count','distinct','sum','avg','min','max'] as const
+            const baseAggs = ['none','count','distinct','sum','avg','min','max'] as const
+            const xFieldBadge = Array.isArray(assignments.x) ? assignments.x[0] : assignments.x
+            const xIsDateBadge = !!xFieldBadge && Array.isArray(dateLikeFields) && dateLikeFields.includes(xFieldBadge)
+            const datetimeAggs = ['avg_daily','avg_wday','avg_weekly','avg_monthly','last_daily_sum','ma7','ma14','ma30','ma60'] as const
+            // Always accept datetime aggs in the validity check — dateLikeFields may still be
+            // loading when the panel first opens, and we must not reset a saved datetime agg to
+            // 'count' just because xIsDateBadge is transiently false.
+            const allAllowedAggs = [...baseAggs, ...datetimeAggs]
             const currentAgg = (v.agg || 'count') as any
-            const safeAgg = (allowedAggs as readonly string[]).includes(currentAgg) ? currentAgg : 'count'
+            const safeAgg = (allAllowedAggs as readonly string[]).includes(currentAgg) ? currentAgg : 'count'
             if (!v.measureId && currentAgg !== safeAgg) {
               // Auto-correct invalid aggregator; schedule to avoid render updates
               setTimeout(() => {
@@ -729,13 +741,33 @@ export function PivotBuilder({
                   <select
                     className="text-[11px] px-1 py-0.5 rounded border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] shrink-0 focus:outline-none focus:ring-1 focus:ring-[hsl(var(--border))] focus:border-[hsl(var(--border))]"
                     value={safeAgg}
+                    onClick={(e) => e.stopPropagation()}
                     onChange={(e) => {
-                      const agg = e.target.value as 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'
+                      const agg = e.target.value as any
                       const nextVals = assignments.values.map((it, j) => j === idx ? { ...it, agg } : it)
                       update({ ...assignments, values: nextVals })
                     }}
                   >
-                    {(allowedAggs as readonly string[]).map(a => (<option key={a} value={a}>{a}</option>))}
+                    <optgroup label="Standard">
+                      {(baseAggs as readonly string[]).map(a => (<option key={a} value={a}>{a}</option>))}
+                    </optgroup>
+                    {xIsDateBadge && (<>
+                      <optgroup label="Period Average">
+                        <option value="avg_daily">Avg / Day</option>
+                        <option value="avg_wday">Avg / WDay</option>
+                        <option value="avg_weekly">Avg / Week</option>
+                        <option value="avg_monthly">Avg / Month</option>
+                      </optgroup>
+                      <optgroup label="Last Period">
+                        <option value="last_daily_sum">Last Daily Sum</option>
+                      </optgroup>
+                      <optgroup label="Moving Avg">
+                        <option value="ma7">MA-7</option>
+                        <option value="ma14">MA-14</option>
+                        <option value="ma30">MA-30</option>
+                        <option value="ma60">MA-60</option>
+                      </optgroup>
+                    </>)}
                   </select>
                 </span>
               </Chip>

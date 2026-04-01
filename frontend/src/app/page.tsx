@@ -1588,6 +1588,7 @@ export default function HomePage() {
                             options={cfg.options}
                             widgetId={cfg.id}
                             datasourceId={cfg.datasourceId}
+                            allWidgets={configs}
                           />
                         </ErrorBoundary>
                       )}
