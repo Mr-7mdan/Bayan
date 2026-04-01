@@ -635,7 +635,7 @@ export default function HomePage() {
         queryClient.invalidateQueries({
           predicate: (q) => {
             const key0 = Array.isArray(q.queryKey) ? (q.queryKey[0] as any) : undefined
-            return key0 === 'chart' || key0 === 'table' || key0 === 'kpi' || key0 === 'heatmap' || key0 === 'delta'
+            return key0 === 'chart' || key0 === 'table' || key0 === 'kpi' || key0 === 'heatmap' || key0 === 'delta' || key0 === 'report-var'
           },
           refetchType: 'inactive',
         })

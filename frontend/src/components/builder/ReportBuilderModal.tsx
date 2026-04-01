@@ -317,6 +317,25 @@ function VariableEditor({
     if (Array.isArray(raw)) return raw.map((t: any) => t.name || String(t))
     return []
   }, [tablesQ.data])
+
+  // Normalize source when tables load:
+  // - Promotes short name to qualified name (e.g. 'mt5_deals' → 'mt5.mt5_deals')
+  // - Preserves table when switching datasources if the same table exists
+  // - Resets source (and stored variable) if table not found in the new datasource
+  useEffect(() => {
+    if (!source || !tables.length) return
+    if (tables.includes(source)) return  // exact match, nothing to do
+    const shortName = source.split('.').pop()
+    const match = tables.find((t: string) => t.split('.').pop() === shortName)
+    if (match) {
+      setSource(match)
+    } else {
+      // Table doesn't exist in this datasource — reset
+      setSource('')
+      handleChange({ source: '' })
+    }
+  }, [tables])
+
   const columnsQ = useQuery({
     queryKey: ['columns', dsId, source, variable.id],
     queryFn: async () => {
@@ -666,7 +685,7 @@ function VariableEditor({
               <div className="relative z-10">
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Datasource</label>
                 <div className="flex gap-1">
-                  <select className="flex-1 h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={dsId} onChange={(e) => { setDsId(e.target.value); handleChange({ datasourceId: e.target.value, source: '' }) }}>
+                  <select className="flex-1 h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={dsId} onChange={(e) => { setDsId(e.target.value); handleChange({ datasourceId: e.target.value }) }}>
                     <option value="">Select…</option>
                     {datasources.map((ds: any) => <option key={ds.id} value={ds.id}>{ds.name || ds.id}</option>)}
                   </select>
@@ -712,6 +731,12 @@ function VariableEditor({
                   <optgroup label="Last Period">
                     <option value="last_daily_sum">Last Daily Sum</option>
                   </optgroup>
+                  <optgroup label="Moving Average (MA)">
+                    <option value="ma7">MA-7 (7-day)</option>
+                    <option value="ma14">MA-14 (14-day)</option>
+                    <option value="ma30">MA-30 (30-day)</option>
+                    <option value="ma60">MA-60 (60-day)</option>
+                  </optgroup>
                 </select>
               </div>
             </div>
@@ -753,6 +778,20 @@ function VariableEditor({
                     <span className="text-muted-foreground">Exclude holidays from working days</span>
                   </label>
                 )}
+              </div>
+            )}
+            {['ma7','ma14','ma30','ma60'].includes(variable.value?.agg || '') && (
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Date column <span className="text-primary">*</span></label>
+                  <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.avgDateField || ''} onChange={(e) => handleChange({ value: { ...variable.value, avgDateField: e.target.value } })}>
+                    <option value="">Select…</option>
+                    {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <p className="text-[9px] text-muted-foreground">
+                  Average of daily SUM({variable.value?.field || 'column'}) over the last {variable.value?.agg === 'ma7' ? '7' : variable.value?.agg === 'ma14' ? '14' : variable.value?.agg === 'ma30' ? '30' : '60'} days ending at the last date in the filtered window.
+                </p>
               </div>
             )}
           </>
@@ -895,7 +934,7 @@ function detectKindFromDbType(dbType?: string | null): 'date' | 'number' | 'stri
 // Detect field kind from sample values (fallback when DB type is unavailable)
 function detectFieldKind(samples: string[]): 'date' | 'number' | 'string' {
   if (!samples.length) return 'string'
-  const dateRe = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?$/
+  const dateRe = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/
   const dateLike = samples.filter(s => dateRe.test(String(s || '').trim())).length
   if (dateLike >= Math.ceil(samples.length / 2)) return 'date'
   const numLike = samples.filter(s => s !== '' && !isNaN(Number(s))).length
@@ -907,6 +946,7 @@ function detectFieldKind(samples: string[]): 'date' | 'number' | 'string' {
 function ManualFilterValues({ field, source, datasourceId, widgetId, selected, onApply }: {
   field: string; source: string; datasourceId?: string; widgetId?: string; selected: any[]; onApply: (vals: any[]) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
   const [sel, setSel] = useState<any[]>(selected || [])
   const [search, setSearch] = useState('')
   const [samples, setSamples] = useState<string[]>([])
@@ -914,8 +954,9 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
 
   useEffect(() => { setSel(selected || []) }, [JSON.stringify(selected)])
 
-  // Fetch distinct values
+  // Fetch distinct values only when expanded
   useEffect(() => {
+    if (!expanded) return
     let abort = false
     async function run() {
       if (!source || !field) return
@@ -942,46 +983,64 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
     }
     run()
     return () => { abort = true }
-  }, [field, source, datasourceId, widgetId])
+  }, [expanded, field, source, datasourceId, widgetId])
 
   const filtered = samples.filter(v => String(v).toLowerCase().includes(search.toLowerCase()))
   const toggle = (v: any) => setSel(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])
+  const activeCount = selected.length
 
   return (
-    <div className="rounded-md border bg-card p-2 space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] font-medium">Filter values: {field}</div>
-        <div className="flex items-center gap-1.5">
-          <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setSel([]); onApply([]) }}>Clear</button>
-          <button className="text-[10px] px-1.5 py-0.5 rounded border bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => onApply(sel)}>Apply</button>
+    <div className="rounded-md border bg-card">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-medium hover:bg-muted/40 transition-colors rounded-md"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <span className="flex items-center gap-1.5">
+          <svg className={`size-2.5 transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" /></svg>
+          Filter: {field}
+        </span>
+        {activeCount > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium">{activeCount} active</span>
+        )}
+      </button>
+      {expanded && (
+        <div className="px-2.5 pb-2.5 border-t space-y-2 pt-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] text-muted-foreground">Select values</div>
+            <div className="flex items-center gap-1.5">
+              <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setSel([]); onApply([]) }}>Clear</button>
+              <button className="text-[10px] px-1.5 py-0.5 rounded border bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => onApply(sel)}>Apply</button>
+            </div>
+          </div>
+          <input className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" placeholder="Search values" value={search} onChange={e => setSearch(e.target.value)} />
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>{sel.length} of {samples.length} selected{loading && <span className="ml-1 opacity-60">(loading…)</span>}</span>
+            <div className="flex gap-2">
+              <button className="hover:text-foreground" onClick={() => setSel([...filtered])}>Select All</button>
+              <button className="hover:text-foreground" onClick={() => setSel([])}>Deselect All</button>
+            </div>
+          </div>
+          <div className="max-h-44 overflow-auto">
+            <ul className="space-y-0.5">
+              {filtered.map((v, i) => (
+                <li key={i} className="flex items-center gap-2 text-[11px]">
+                  <input type="checkbox" className="rounded" checked={sel.includes(v)} onChange={() => toggle(v)} />
+                  <span className="truncate max-w-[200px]" title={String(v)}>{String(v)}</span>
+                </li>
+              ))}
+              {sel.filter(v => !filtered.includes(v)).map((v, i) => (
+                <li key={`s-${i}`} className="flex items-center gap-2 text-[11px] opacity-60">
+                  <input type="checkbox" className="rounded" checked onChange={() => toggle(v)} />
+                  <span className="truncate max-w-[200px]">{String(v)} (selected)</span>
+                </li>
+              ))}
+              {filtered.length === 0 && !loading && <li className="text-[10px] text-muted-foreground">No values available</li>}
+              {loading && filtered.length === 0 && <li className="text-[10px] text-muted-foreground">Loading…</li>}
+            </ul>
+          </div>
         </div>
-      </div>
-      <input className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" placeholder="Search values" value={search} onChange={e => setSearch(e.target.value)} />
-      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-        <span>{sel.length} of {samples.length} selected{loading && <span className="ml-1 opacity-60">(loading…)</span>}</span>
-        <div className="flex gap-2">
-          <button className="hover:text-foreground" onClick={() => setSel([...filtered])}>Select All</button>
-          <button className="hover:text-foreground" onClick={() => setSel([])}>Deselect All</button>
-        </div>
-      </div>
-      <div className="max-h-44 overflow-auto">
-        <ul className="space-y-0.5">
-          {filtered.map((v, i) => (
-            <li key={i} className="flex items-center gap-2 text-[11px]">
-              <input type="checkbox" className="rounded" checked={sel.includes(v)} onChange={() => toggle(v)} />
-              <span className="truncate max-w-[200px]" title={String(v)}>{String(v)}</span>
-            </li>
-          ))}
-          {sel.filter(v => !filtered.includes(v)).map((v, i) => (
-            <li key={`s-${i}`} className="flex items-center gap-2 text-[11px] opacity-60">
-              <input type="checkbox" className="rounded" checked onChange={() => toggle(v)} />
-              <span className="truncate max-w-[200px]">{String(v)} (selected)</span>
-            </li>
-          ))}
-          {filtered.length === 0 && !loading && <li className="text-[10px] text-muted-foreground">No values available</li>}
-          {loading && filtered.length === 0 && <li className="text-[10px] text-muted-foreground">Loading…</li>}
-        </ul>
-      </div>
+      )}
     </div>
   )
 }
@@ -1330,12 +1389,24 @@ function ReportFieldFilter({ field, source, datasourceId, widgetId, dbType, wher
   field: string; source: string; datasourceId?: string; widgetId?: string; dbType?: string | null
   where: Record<string, any>; onWhereChange: (w: Record<string, any>) => void; onRemove: () => void
 }) {
-  const [tab, setTab] = useState<'manual'|'rule'>('manual')
+  const initialTab: 'manual'|'rule' = Array.isArray(where?.[field]) && (where[field] as any[]).length > 0 ? 'manual' : 'rule'
+  const [tab, setTab] = useState<'manual'|'rule'>(initialTab)
   const [samples, setSamples] = useState<string[]>([])
 
-  // Only fetch samples for type detection when DB type is unavailable
+  // Only fetch samples for type detection when DB type is unavailable AND the field name
+  // gives no signal — avoids a /distinct call for obvious date/number field names like "Time"
+  const _nameKind = (() => {
+    const hasDateOps = ['__gte', '__lte', '__gt', '__lt'].some(op => where[`${field}${op}`] != null)
+    const nameLooksDate = /(date|time|timestamp|_at$|created$|updated$)/i.test(field)
+    if (hasDateOps || nameLooksDate) return 'date'
+    const nameLooksNum = /(amount|price|qty|quantity|count|total|sum|avg|rate|value|balance|profit|volume|commission|fee|margin|score|age|year|month|week|day|hour|minute|second)/i.test(field)
+    if (nameLooksNum) return 'number'
+    return null
+  })()
   useEffect(() => {
     if (dbType) return  // DB type known — skip sample fetch for type detection
+    if (_nameKind) return  // field name is sufficient — skip fetch
+    if (tab === 'rule') return  // don't detect kind eagerly — wait until user opens manual tab
     let abort = false
     async function run() {
       if (!source || !field) return
@@ -1356,9 +1427,9 @@ function ReportFieldFilter({ field, source, datasourceId, widgetId, dbType, wher
     }
     run()
     return () => { abort = true }
-  }, [field, source, datasourceId, dbType])
+  }, [field, source, datasourceId, dbType, _nameKind, tab])
 
-  const kind = detectKindFromDbType(dbType) ?? detectFieldKind(samples)
+  let kind: 'date' | 'number' | 'string' = detectKindFromDbType(dbType) ?? _nameKind ?? detectFieldKind(samples)
 
   // Extract current selected values for manual tab (field key with array value)
   const currentSelected = Array.isArray(where?.[field]) ? (where[field] as any[]) : []
@@ -2034,8 +2105,8 @@ function ElementProps({
             {tbl.headers.map((h, ci) => {
               const header = typeof h === 'string' ? { text: h, colspan: 1 } : h
               return (
-                <>
-                  <div key={ci} className="flex items-center gap-1">
+                <React.Fragment key={ci}>
+                  <div className="flex items-center gap-1">
                     <input 
                       className="h-6 text-[11px] rounded border bg-secondary/60 px-1 flex-1" 
                       value={header.text} 
@@ -2061,7 +2132,7 @@ function ElementProps({
                       >+ insert</button>
                     </div>
                   )}
-                </>
+                </React.Fragment>
               )
             })}
           </div>

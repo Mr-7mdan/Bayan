@@ -635,7 +635,12 @@ def build_sql(
         # Ensure base alias for bare columns
         if "." not in token:
             token = f"{base_alias}.{token}"
-        qtok = _qcol(d, token)
+        # If token is already quoted (e.g. "s"."Time" from a prior build_sql _actual_cols),
+        # pass it through as-is to avoid double-quoting corruption.
+        if ('"' in token or '`' in token or '[' in token) and '.' in token:
+            qtok = token
+        else:
+            qtok = _qcol(d, token)
         # Deduplicate identical quoted columns
         lk = qtok.strip().lower()
         if lk in seen_qcols:

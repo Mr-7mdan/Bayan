@@ -46,6 +46,7 @@ from ..schemas import (
 from ..sqlgen import build_sql
 from ..config import settings
 import re
+import time
 from datetime import datetime, timezone
 from ..security import encrypt_text, decrypt_text
 from ..metrics import counter_inc
@@ -53,6 +54,10 @@ import logging
 import os
 
 router = APIRouter(prefix="/datasources", tags=["datasources"])
+
+# 1-minute in-memory cache for schema introspection (key -> (timestamp, IntrospectResponse))
+_SCHEMA_CACHE_TTL = 60  # seconds
+_schema_cache: dict[str, tuple[float, Any]] = {}
 
 # local logger for sync runs (prints to console)
 _log = logging.getLogger("app.sync")
@@ -1837,6 +1842,10 @@ def introspect_local_schema():
     """Introspect the default local DuckDB without a datasource record.
     Uses duckdb_columns() which covers all attached catalogs (local + persistently-attached MySQL/Postgres).
     """
+    _ck = '_local'
+    _cached = _schema_cache.get(_ck)
+    if _cached and (time.monotonic() - _cached[0]) < _SCHEMA_CACHE_TTL:
+        return _cached[1]
     if _duckdb is None:
         raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
     try:
@@ -1863,7 +1872,9 @@ def introspect_local_schema():
                 ])
                 for sch, tables_dict in by_sch.items()
             ]
-            return IntrospectResponse(schemas=schemas)
+            result = IntrospectResponse(schemas=schemas)
+            _schema_cache['_local'] = (time.monotonic(), result)
+            return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Introspection failed: {e}")
 
@@ -2014,6 +2025,14 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
 
 @router.get("/{ds_id}/schema", response_model=IntrospectResponse)
 def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
+    _cached = _schema_cache.get(ds_id)
+    if _cached and (time.monotonic() - _cached[0]) < _SCHEMA_CACHE_TTL:
+        return _cached[1]
+
+    def _cache_and_return(result: IntrospectResponse) -> IntrospectResponse:
+        _schema_cache[ds_id] = (time.monotonic(), result)
+        return result
+
     print(f"[/schema] Called for datasource {ds_id}")
     try:
         ds: Datasource | None = db.get(Datasource, ds_id)
@@ -2066,7 +2085,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                             ])
                             for sch, tables_dict in by_sch.items()
                         ]
-                        return IntrospectResponse(schemas=schemas)
+                        return _cache_and_return(IntrospectResponse(schemas=schemas))
                 except HTTPException:
                     raise
                 except Exception as e:
@@ -2135,13 +2154,13 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
 
         try:
             with open_duck_native(path) as conn:
-                return _duck_introspect_conn(conn)
+                return _cache_and_return(_duck_introspect_conn(conn))
         except Exception as e:
             # Try falling back to the default local store path
             try:
                 fallback = os.path.abspath(os.path.expanduser(settings.duckdb_path))
                 with open_duck_native(fallback) as conn:
-                    return _duck_introspect_conn(conn)
+                    return _cache_and_return(_duck_introspect_conn(conn))
             except Exception as e2:
                 raise HTTPException(status_code=500, detail=f"DuckDB introspection failed for path '{path}': {e2}")
     # Non-duckdb: use SQLAlchemy
@@ -2219,7 +2238,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                     tables.append(TableInfo(name=name, columns=cols))
                 print(f"[/schema]   Created {len(tables)} table info objects")
                 schemas.append(SchemaInfo(name=sch, tables=tables))
-        return IntrospectResponse(schemas=schemas)
+        return _cache_and_return(IntrospectResponse(schemas=schemas))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Introspection failed: {e}")
 

@@ -1014,7 +1014,6 @@ export default function TableCard({
                 className="hidden"
               />
               {fieldsExposed.map((field) => {
-                if (!distinctCache[field]) { void loadDistinct(field) }
                 const sample = (distinctCache[field] || []).slice(0, 12)
                 let kind: 'string'|'number'|'date' = 'string'
                 const numHits = sample.filter((s) => Number.isFinite(Number(s))).length

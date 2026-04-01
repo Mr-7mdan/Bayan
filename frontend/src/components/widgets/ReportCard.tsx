@@ -184,7 +184,7 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
       }
       // For period-average vars: map global startDate/endDate onto avgDateField as gte/lt bounds.
       // This wires the dashboard date range picker into the period-average calculation.
-      const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly' || agg === 'last_daily_sum'
+      const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly' || agg === 'last_daily_sum' || agg === 'ma7' || agg === 'ma14' || agg === 'ma30' || agg === 'ma60'
       if (isPeriodAvg && variable.value?.avgDateField) {
         const dc = variable.value.avgDateField
         if (globalFilters?.startDate && !where[`${dc}__gte`]) where[`${dc}__gte`] = globalFilters.startDate
@@ -216,7 +216,7 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
           where: hasWhere ? where : undefined,
         }
         // Period-average agg types need the date field for COUNT(DISTINCT period)
-        const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly' || agg === 'last_daily_sum'
+        const isPeriodAvg = agg === 'avg_daily' || agg === 'avg_wday' || agg === 'avg_weekly' || agg === 'avg_monthly' || agg === 'last_daily_sum' || agg === 'ma7' || agg === 'ma14' || agg === 'ma30' || agg === 'ma60'
         if (isPeriodAvg && variable.value?.avgDateField) {
           spec.avgDateField = variable.value.avgDateField
           if (variable.value.avgNumerator) spec.avgNumerator = variable.value.avgNumerator
@@ -301,8 +301,8 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
     staleTime: 30_000,
     placeholderData: undefined,
     retry: 2,
-    refetchOnMount: 'always' as const,
-    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
   }
 }
 
@@ -696,31 +696,60 @@ export default function ReportCard({
       rv[v.id] = { value: val, loading: false }
     }
 
-    // Expression-based variables
-    for (const v of variables) {
-      if (v.type !== 'expression' || !v.expression) continue
-      try {
-        let expr = v.expression
-        let anyLoading = false
-        // Only substitute variables that are actually referenced in the expression
-        for (const refVar of variables) {
-          if (refVar.id === v.id) continue
-          if (!new RegExp(`\\b${refVar.name}\\b`).test(v.expression)) continue
-          const ref = rv[refVar.id]
-          if (!ref || ref.loading) { anyLoading = true; break }
-          const val = typeof ref.value === 'number' ? ref.value : parseFloat(String(ref.value || 0))
-          expr = expr.replace(new RegExp(`\\b${refVar.name}\\b`, 'g'), String(val))
+    // Expression-based variables — multi-pass so that expressions referencing
+    // other expression variables (e.g. NetRevenue = GrossRevenue - Cost) resolve
+    // correctly regardless of declaration order.
+    // Build a regex that matches the exact variable name with proper boundaries.
+    // \b doesn't work when the name contains '-' (non-word char), so we use
+    // lookahead/lookbehind for non-alphanumeric-underscore characters instead.
+    const varRegex = (name: string) => {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      return new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'g')
+    }
+    // Sort by name length descending so longer names (e.g. 'NetDepositsYTD-DA')
+    // are substituted before shorter sub-parts (e.g. 'DA') that share a suffix.
+    const sortedVars = (variables as ReportVariable[]).slice().sort((a, b) => b.name.length - a.name.length)
+    const exprVars = sortedVars.filter(v => v.type === 'expression' && !!v.expression)
+    // Track which expression vars are still pending resolution
+    const pendingExpr = new Set(exprVars.map(v => v.id))
+    let progress = true
+    while (progress && pendingExpr.size > 0) {
+      progress = false
+      for (const v of exprVars) {
+        if (!pendingExpr.has(v.id)) continue
+        try {
+          let expr = v.expression!
+          let anyLoading = false
+          for (const refVar of sortedVars) {
+            if (refVar.id === v.id) continue
+            if (!varRegex(refVar.name).test(v.expression!)) continue
+            const ref = rv[refVar.id]
+            if (!ref || ref.loading) { anyLoading = true; break }
+            const val = typeof ref.value === 'number' ? ref.value : parseFloat(String(ref.value || 0))
+            expr = expr.replace(varRegex(refVar.name), String(val))
+          }
+          // Check if any variable names remain unsubstituted
+          const unresolvedRef = sortedVars.some(
+            (refVar) => refVar.id !== v.id && varRegex(refVar.name).test(expr)
+          )
+          if (!anyLoading && !unresolvedRef) {
+            const result = Function('"use strict"; return (' + expr + ')')() as number
+            rv[v.id] = { value: v.reverseSign && typeof result === 'number' ? -result : result, loading: false }
+            pendingExpr.delete(v.id)
+            progress = true
+          }
+          // If still waiting (anyLoading or unresolvedRef), leave in pendingExpr for next pass
+        } catch (err) {
+          console.error(`Expression evaluation error for ${v.name}:`, err)
+          rv[v.id] = { value: null, loading: false }
+          pendingExpr.delete(v.id)
+          progress = true
         }
-        if (!anyLoading) {
-          const result = Function('"use strict"; return (' + expr + ')')() as number
-          rv[v.id] = { value: v.reverseSign && typeof result === 'number' ? -result : result, loading: false }
-        } else {
-          rv[v.id] = { value: null, loading: true }
-        }
-      } catch (err) {
-        console.error(`Expression evaluation error for ${v.name}:`, err)
-        rv[v.id] = { value: null, loading: false }
       }
+    }
+    // Any expression vars still pending after no more progress = mark as loading
+    for (const id of pendingExpr) {
+      rv[id] = { value: null, loading: true }
     }
 
     return rv

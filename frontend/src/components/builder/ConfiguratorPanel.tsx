@@ -1498,6 +1498,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
   sampleRows?: Array<Record<string, any>>;
   customColumns?: Array<{ name: string; formula: string; type?: string }>;
 }) {
+  const [expanded, setExpanded] = useState(false)
   const [selected, setSelected] = useState<any[]>(values || [])
   const [filterQuery, setFilterQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -1517,6 +1518,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
   const [extraSamples, setExtraSamples] = useState<string[]>([])
   const [loadingSamples, setLoadingSamples] = useState(false)
   useEffect(() => {
+    if (!expanded) return
     let abort = false
     async function run() {
       console.log('[FilterEditor] Starting sample fetch for field:', field, 'source:', source, 'datasourceId:', datasourceId)
@@ -1594,7 +1596,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
       // Don't set loadingSamples(false) here - let the derived/custom handlers manage loading state
     }
     return () => { abort = true }
-  }, [field, source, datasourceId, customColumns])
+  }, [expanded, field, source, datasourceId, customColumns])
   // Helpers to detect derived date part fields
   const DERIVED_RE = /^(.*) \((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$/
   const isDerived = DERIVED_RE.test(field)
@@ -1680,6 +1682,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
   // Fetch base field values for derived date fields (Year, Month, etc.)
   const derivedFetchedRef = useRef<string | null>(null)
   useEffect(() => {
+    if (!expanded) return
     // Skip if already fetched for this field
     if (derivedFetchedRef.current === field) return
     
@@ -1754,11 +1757,12 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
       // Don't set loadingSamples(false) - let custom column effect handle it if needed
     }
     return () => { abort = true }
-  }, [field, source, datasourceId, isDerived, baseField, partName])
+  }, [expanded, field, source, datasourceId, isDerived, baseField, partName])
   
   // Client-side fallback to compute distinct values for custom columns when no sampleRows
   // (moved outside conditional to comply with React Hooks rules)
   useEffect(() => {
+    if (!expanded) return
     let abort = false
     async function runCustom() {
       console.log('[FilterEditor] runCustom called for field:', field, 'custom found:', !!custom, 'formula:', custom?.formula)
@@ -1807,7 +1811,7 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
       setLoadingSamples(false)
     }
     return () => { abort = true }
-  }, [custom?.formula, source, datasourceId, Array.isArray(sampleRows) ? sampleRows.length : 0, customColumns, isDerived])
+  }, [expanded, custom?.formula, source, datasourceId, Array.isArray(sampleRows) ? sampleRows.length : 0, customColumns, isDerived])
   const baseSamples = (samplesByField?.[field] || []) as string[]
   // Merge fallback distinct values with existing samples/computed
   const mergedPool = Array.from(new Set<string>([...computedSamples, ...baseSamples, ...extraSamples]))
@@ -1896,10 +1900,27 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
     }
   }
   
+  const activeCount = (values || []).length
+
   return (
-    <div className="rounded-lg border bg-card p-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="text-xs font-semibold text-foreground">Filter values: {field}</div>
+    <div className="rounded-lg border bg-card">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/40 transition-colors rounded-lg"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <span className="flex items-center gap-1.5">
+          <svg className={`size-3 transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" /></svg>
+          Filter: {field}
+        </span>
+        {activeCount > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium">{activeCount} active</span>
+        )}
+      </button>
+      {expanded && (
+      <div className="px-3 pb-3 border-t">
+      <div className="flex items-center justify-between mt-2 mb-1">
+        <div className="text-xs font-medium text-muted-foreground">Select values</div>
         <div className="flex items-center gap-1.5">
           <button
             className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer"
@@ -1959,7 +1980,9 @@ function FilterEditor({ field, source, datasourceId, values, where, onChange, wi
             <li className="text-xs text-muted-foreground">Loading available values...</li>
           )}
         </ul>
-    </div>
+      </div>
+      </div>
+      )}
     </div>
   )
 }
