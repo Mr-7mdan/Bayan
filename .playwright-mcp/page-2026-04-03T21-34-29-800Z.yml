@@ -1,0 +1,33 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e7] [cursor=pointer]:
+    - img [ref=e8]
+  - alert [ref=e11]: AMAN · AMAN · Bayan
+  - generic [ref=e13]:
+    - generic [ref=e14]:
+      - button "Toggle color scheme" [ref=e16] [cursor=pointer]:
+        - img
+      - generic [ref=e17]:
+        - img "Bayan" [ref=e18]
+        - paragraph [ref=e19]: Sign in
+        - paragraph [ref=e20]: Use your account to continue.
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - paragraph [ref=e23]: Email
+          - textbox [ref=e24]
+        - generic [ref=e25]:
+          - paragraph [ref=e26]: Password
+          - textbox [ref=e27]
+        - generic [ref=e28]:
+          - generic [ref=e29]:
+            - checkbox "Remember me" [checked] [ref=e30]
+            - generic [ref=e31]: Remember me
+          - button "Forgot password?" [ref=e32] [cursor=pointer]
+        - button "Continue" [ref=e33] [cursor=pointer]
+      - generic [ref=e34]:
+        - text: Don't have an account?
+        - button "Create one" [ref=e35] [cursor=pointer]
+    - generic [ref=e37]:
+      - img "Bayan" [ref=e38]
+      - generic [ref=e39]:
+        - generic [ref=e40]: All rights reserved to Bayan © 2026
+        - generic [ref=e41]: Frontend 0.2 · Backend 0.1

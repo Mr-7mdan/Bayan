@@ -1,0 +1,31 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - button "Toggle color scheme" [ref=e7] [cursor=pointer]:
+        - img
+      - generic [ref=e8]:
+        - img "Bayan" [ref=e9]
+        - paragraph [ref=e10]: Sign in
+        - paragraph [ref=e11]: Use your account to continue.
+      - generic [ref=e12]:
+        - generic [ref=e13]:
+          - paragraph [ref=e14]: Email
+          - textbox [ref=e15]: admin@example.com
+        - generic [ref=e16]:
+          - paragraph [ref=e17]: Password
+          - textbox [ref=e18]
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - checkbox "Remember me" [checked] [ref=e21]
+            - generic [ref=e22]: Remember me
+          - button "Forgot password?" [ref=e23] [cursor=pointer]
+        - button "Continue" [ref=e24] [cursor=pointer]
+      - generic [ref=e25]:
+        - text: Don't have an account?
+        - button "Create one" [ref=e26] [cursor=pointer]
+    - generic [ref=e28]:
+      - img "Bayan" [ref=e29]
+      - generic [ref=e30]:
+        - generic [ref=e31]: All rights reserved to Bayan © 2026
+        - generic [ref=e32]: Frontend 0.2 · Backend 0.1

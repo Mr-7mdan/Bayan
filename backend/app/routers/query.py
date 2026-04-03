@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import functools
 import time
 from typing import Optional, Any, Dict, Tuple
 import decimal
@@ -11,6 +13,9 @@ import os
 import sys
 import math
 import threading
+
+from ..query_pool import query_executor, QUERY_MAX_QUEUED, shutdown_query_pool as _shutdown_qp
+import app.query_pool as _qpool
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +171,12 @@ def _build_expr_map_helper(ds: Any, source_name: str, ds_type: str, _apply_scope
                         logger.debug(f"[expr_map] Skipping custom column '{col['name']}': references missing columns {missing}")
                         continue
                 
+                # Strip leading '=' from Excel-style formula notation (e.g., "=Volume/10000" -> "Volume/10000")
+                raw_expr = str(col["expr"] or "")
+                if raw_expr.startswith("="):
+                    raw_expr = raw_expr[1:]
                 # Normalize bracket identifiers for target dialect
-                expr = _normalize_expr_idents(ds_type, col["expr"])
+                expr = _normalize_expr_idents(ds_type, raw_expr)
                 expr_map[col["name"]] = expr
                 # Debug: Log full expression for CASE statements
                 if "CASE" in expr.upper():
@@ -1587,7 +1596,21 @@ def _resolve_table_name(ds: Any, source_table_id: str | None, source_name: str |
     return {"sql": inner}
 
 @router.post("", response_model=QueryResponse)
-def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
+async def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
+    if _qpool._inflight >= QUERY_MAX_QUEUED:
+        raise HTTPException(status_code=503, detail="Server busy: too many concurrent queries", headers={"Retry-After": "3"})
+    _qpool._inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            query_executor,
+            functools.partial(_run_query_sync, payload, db, actorId, publicId, token),
+        )
+    finally:
+        _qpool._inflight -= 1
+
+
+def _run_query_sync(payload: QueryRequest, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
     try:
         touch_actor(actorId)
     except Exception:
@@ -2153,7 +2176,36 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
 
 
 @router.post("/spec", response_model=QueryResponse)
-def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _guard: None = Depends(_spec_concurrency_guard)) -> QueryResponse:
+async def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
+    if _qpool._inflight >= QUERY_MAX_QUEUED:
+        raise HTTPException(status_code=503, detail="Server busy: too many concurrent queries", headers={"Retry-After": "3"})
+    _qpool._inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            query_executor,
+            functools.partial(_run_query_spec_guarded, payload, db, actorId, publicId, token),
+        )
+    finally:
+        _qpool._inflight -= 1
+
+
+def _run_query_spec_guarded(payload: QuerySpecRequest, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
+    """Acquire the spec concurrency semaphore on the query pool thread, then delegate."""
+    acquired = _SPEC_SEM.acquire(blocking=True, timeout=45)
+    if not acquired:
+        raise HTTPException(
+            status_code=503,
+            detail="Server busy: too many concurrent queries. Please retry in a moment.",
+            headers={"Retry-After": "5"},
+        )
+    try:
+        return _run_query_spec_sync(payload, db, actorId, publicId, token)
+    finally:
+        _SPEC_SEM.release()
+
+
+def _run_query_spec_sync(payload: QuerySpecRequest, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
     """Compile a QuerySpec to SQL and execute via the standard path.
 
     - DuckDB: use Ibis to compile.
@@ -2794,12 +2846,17 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     legend_orig = spec.legend
     
     # Extract agg and y from series[0] if not present at root level
+    # IMPORTANT: Only fall back to series[0] for single-series specs.
+    # For multi-series (2+), do NOT promote series[0].agg to root level
+    # because it causes order-dependent behavior (e.g. MA-7 first vs avg first
+    # produces different results). Multi-series specs are handled by the
+    # mixed-multi-series CTE path below.
     agg_eff = spec.agg
     y_eff = spec.y
     measure_eff = getattr(spec, 'measure', None)
     
     series_arr = getattr(spec, 'series', None)
-    if series_arr and isinstance(series_arr, list) and len(series_arr) > 0:
+    if series_arr and isinstance(series_arr, list) and len(series_arr) == 1:
         s0 = series_arr[0]
         if isinstance(s0, dict):
             if not agg_eff and s0.get('agg'):
@@ -2818,6 +2875,196 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         })
     
     agg = (spec.agg or "none").lower()
+
+    # ── Mixed multi-series: 2+ series where at least one has MA/period-avg agg ─
+    # When series[0].agg is standard (avg/sum/etc.) but series[1].agg is MA,
+    # the MA early exit below never fires. This path handles that case via CTEs.
+    _SPECIAL_AGGS_MIX = frozenset({
+        'avg_daily', 'avg_wday', 'avg_weekly', 'avg_monthly', 'last_daily_sum',
+        'ma7', 'ma14', 'ma30', 'ma60'
+    })
+    _MA_WIN = {'ma7': 7, 'ma14': 14, 'ma30': 30, 'ma60': 60}
+    _AGG_DISPLAY = {
+        'avg': 'avg', 'sum': 'sum', 'count': 'count', 'distinct': 'distinct',
+        'min': 'min', 'max': 'max',
+        'avg_daily': 'daily avg', 'avg_wday': 'wday avg',
+        'avg_weekly': 'weekly avg', 'avg_monthly': 'monthly avg',
+        'last_daily_sum': 'last sum',
+        'ma7': 'MA-7', 'ma14': 'MA-14', 'ma30': 'MA-30', 'ma60': 'MA-60',
+    }
+    if (
+        isinstance(series_arr, list) and len(series_arr) >= 2 and
+        any(str(s.get('agg', '')).lower() in _SPECIAL_AGGS_MIX for s in series_arr if isinstance(s, dict))
+    ):
+        _d_mix = (ds_type or '').lower()
+        if True:
+            if ds is None and payload.datasourceId:
+                ds = db.get(Datasource, payload.datasourceId)
+            _mix_source = _q_source(payload.spec.source)
+
+            # Build WHERE clause from spec.where
+            _mix_where_parts: list = []
+            _mix_params: dict = {}
+            for _wk, _wv in (getattr(payload.spec, 'where', None) or {}).items():
+                if _wv is None:
+                    continue
+                _wbase = _wk.split('__')[0] if '__' in _wk else _wk
+                _wop   = _wk.split('__', 1)[1] if '__' in _wk else 'eq'
+                # Resolve custom/computed columns in WHERE
+                _w_resolved = _mix_expr_map.get(_wbase) or _mix_expr_map.get(_wbase.lower() if _wbase else '')
+                if _w_resolved:
+                    _wcol = f"({_w_resolved})"
+                elif _wbase.startswith('('):
+                    _wcol = _wbase
+                else:
+                    _wcol = _q_ident(_wbase)
+                _pn    = _pname(_wbase, f"_{_wop}")
+                if isinstance(_wv, list):
+                    phs = ', '.join([f':{_pn}_{_i}' for _i in range(len(_wv))])
+                    _mix_where_parts.append(f"{_wcol} IN ({phs})")
+                    for _i, _v in enumerate(_wv):
+                        _mix_params[f'{_pn}_{_i}'] = _v
+                elif _wop == 'gte': _mix_where_parts.append(f"{_wcol} >= :{_pn}"); _mix_params[_pn] = _wv
+                elif _wop == 'gt':  _mix_where_parts.append(f"{_wcol} > :{_pn}");  _mix_params[_pn] = _wv
+                elif _wop == 'lte': _mix_where_parts.append(f"{_wcol} <= :{_pn}"); _mix_params[_pn] = _wv
+                elif _wop == 'lt':  _mix_where_parts.append(f"{_wcol} < :{_pn}");  _mix_params[_pn] = _wv
+                elif _wop == 'ne':  _mix_where_parts.append(f"{_wcol} != :{_pn}"); _mix_params[_pn] = _wv
+                else:               _mix_where_parts.append(f"{_wcol} = :{_pn}");  _mix_params[_pn] = _wv
+            _mix_where_sql = f" WHERE {' AND '.join(_mix_where_parts)}" if _mix_where_parts else ""
+
+            def _mix_date_expr(raw_col: str) -> str:
+                if 'mysql' in _d_mix:
+                    return f"DATE({raw_col})"
+                return f"CAST({raw_col} AS DATE)"
+
+            def _mix_y_clean(vcol: str) -> str:
+                if 'duckdb' in _d_mix:
+                    return (f"COALESCE(try_cast(regexp_replace(CAST({vcol} AS VARCHAR),"
+                            f"'[^0-9.-]','') AS DOUBLE),try_cast({vcol} AS DOUBLE),0.0)")
+                return vcol
+
+            # Deduplicate series labels (add agg suffix when same label appears twice)
+            _raw_labels = [
+                (s.get('label') or s.get('name') or s.get('y') or '')
+                for s in series_arr if isinstance(s, dict)
+            ]
+            _lbl_count: dict = {}
+            for _lbl in _raw_labels:
+                _lbl_count[_lbl] = _lbl_count.get(_lbl, 0) + 1
+            _final_labels = []
+            for _i2, _s2 in enumerate(s for s in series_arr if isinstance(s, dict)):
+                _raw = _raw_labels[_i2]
+                if _lbl_count[_raw] > 1:
+                    _agg_disp = _AGG_DISPLAY.get(str(_s2.get('agg', 'sum')).lower(), str(_s2.get('agg', '')))
+                    _final_labels.append(f"{_raw} [{_agg_disp}]")
+                else:
+                    _final_labels.append(_raw)
+
+            cte_parts: list = []
+            select_cols: list = []
+            join_parts: list = []
+            all_dates_srcs: list = []
+            _cte_idx = 0
+
+            # Resolve custom column expressions for value fields in mixed-multi-series
+            _mix_expr_map: dict = {}
+            try:
+                _mix_expr_map = _build_expr_map(ds, payload.spec.source, ds_type)
+            except Exception:
+                pass
+
+            for _s3 in (s for s in series_arr if isinstance(s, dict)):
+                _sa  = str(_s3.get('agg', 'sum')).lower()
+                _sy  = _s3.get('y') or ''
+                # Resolve custom column if applicable
+                _sy_expr = _mix_expr_map.get(_sy) or (_mix_expr_map.get(_sy.lower()) if _sy else None)
+                _sv  = f"({_sy_expr})" if _sy_expr else (_q_ident(_sy) if _sy else "''")
+                _col_lbl = _final_labels[_cte_idx]
+                _col_alias = f'"{str(_col_lbl).replace(chr(34), chr(34)+chr(34))}"'
+                cte_name = f"_mix_s{_cte_idx}"
+
+                # Resolve date field for this series
+                _sdf = _s3.get('avgDateField') or getattr(payload.spec, 'avgDateField', None)
+                if not _sdf:
+                    _sx2 = getattr(payload.spec, 'x', None)
+                    if isinstance(_sx2, list) and _sx2:
+                        _sdf = _sx2[0]
+                    elif isinstance(_sx2, str) and _sx2:
+                        _sdf = _sx2
+                if not _sdf:
+                    _cte_idx += 1
+                    continue
+                _sdcol = _q_ident(_sdf)
+                _sdate_expr = _mix_date_expr(_sdcol)
+
+                if _sa in _MA_WIN:
+                    _maw = _MA_WIN[_sa]
+                    _num_str = str(_s3.get('avgNumerator') or 'sum').lower()
+                    _inner = _mix_y_clean(_sv) if _num_str in ('sum', 'avg') else _sv
+                    if _num_str == 'count':
+                        _num_expr = f"COUNT({_inner})"
+                    elif _num_str == 'distinct':
+                        _num_expr = f"COUNT(DISTINCT {_inner})"
+                    elif _num_str == 'avg':
+                        _num_expr = f"AVG({_inner})"
+                    else:
+                        _num_expr = f"SUM({_inner})"
+                    _base_cte = f"_mix_s{_cte_idx}_b"
+                    cte_parts.append(
+                        f"{_base_cte} AS (SELECT {_sdate_expr} AS _xd, {_num_expr} AS _yv"
+                        f" FROM {_mix_source}{_mix_where_sql} GROUP BY {_sdate_expr})"
+                    )
+                    cte_parts.append(
+                        f"{cte_name} AS (SELECT _xd,"
+                        f" AVG(_yv) OVER (ORDER BY _xd ROWS BETWEEN {_maw - 1} PRECEDING AND CURRENT ROW) AS _val"
+                        f" FROM {_base_cte})"
+                    )
+                else:
+                    # Standard agg (sum/avg/count/etc.) or period-avg (simplified to daily agg)
+                    _fn_map = {'sum': 'SUM', 'avg': 'AVG', 'min': 'MIN', 'max': 'MAX'}
+                    if _sa in ('count', 'none'):
+                        _s_expr = "COUNT(*)"
+                    elif _sa == 'distinct':
+                        _s_expr = f"COUNT(DISTINCT {_sv})"
+                    elif _sa in _fn_map:
+                        _fn = _fn_map[_sa]
+                        _s_expr = f"{_fn}({_mix_y_clean(_sv)})" if ('duckdb' in _d_mix and _sa in ('sum','avg','min','max')) else f"{_fn}({_sv})"
+                    else:
+                        # period-avg aggs – use AVG per day as simplified fallback
+                        _s_expr = f"AVG({_mix_y_clean(_sv)})" if 'duckdb' in _d_mix else f"AVG({_sv})"
+                    cte_parts.append(
+                        f"{cte_name} AS (SELECT {_sdate_expr} AS _xd, {_s_expr} AS _val"
+                        f" FROM {_mix_source}{_mix_where_sql} GROUP BY {_sdate_expr})"
+                    )
+
+                all_dates_srcs.append(f"SELECT _xd FROM {cte_name}")
+                select_cols.append(f"{cte_name}._val AS {_col_alias}")
+                join_parts.append(f"LEFT JOIN {cte_name} ON _all_dates._xd = {cte_name}._xd")
+                _cte_idx += 1
+
+            if cte_parts and select_cols:
+                cte_parts.append(f"_all_dates AS (SELECT DISTINCT _xd FROM ({' UNION ALL '.join(all_dates_srcs)}) _u)")
+                sql_mix = (
+                    f"WITH {', '.join(cte_parts)} "
+                    f"SELECT _all_dates._xd AS x, {', '.join(select_cols)} "
+                    f"FROM _all_dates {' '.join(join_parts)} ORDER BY x"
+                )
+                print(f"[MixedMultiSeries] SQL: {sql_mix[:1200]}", flush=True)
+                _mix_ds_id = None if (prefer_local and _duck_has_table(payload.spec.source)) else payload.datasourceId
+                _mix_req = QueryRequest(
+                    sql=sql_mix, datasourceId=_mix_ds_id,
+                    limit=int(payload.limit or 5000), offset=0,
+                    includeTotal=False, params=_mix_params or None,
+                    preferLocalDuck=prefer_local, preferLocalTable=payload.spec.source,
+                )
+                try:
+                    _mix_result = _run_query_sync(_mix_req, db)
+                    print(f"[MixedMultiSeries] OK: {len(_mix_result.rows)} rows, cols={_mix_result.columns}", flush=True)
+                    return _mix_result
+                except Exception as _mix_err:
+                    print(f"[MixedMultiSeries] FAILED: {_mix_err}", flush=True)
+                    raise
+    # ── End mixed multi-series ─────────────────────────────────────────────────
 
     # ── Period-average early exit ──────────────────────────────────────────────
     # avg_daily  → numerator / COUNT(DISTINCT DATE(date_col))
@@ -2911,7 +3158,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     + (f" AND TABLE_SCHEMA = '{_sch_name}'" if _sch_name else "")
                     + " LIMIT 1"
                 )
-                _probe_res = run_query(QueryRequest(sql=_probe_sql, datasourceId=payload.datasourceId, limit=1), db)
+                _probe_res = _run_query_sync(QueryRequest(sql=_probe_sql, datasourceId=payload.datasourceId, limit=1), db)
                 if _probe_res.rows:
                     _col_dtype = str(_probe_res.rows[0][0]).lower()
                     _avg_is_unix = _col_dtype in ('int', 'bigint', 'tinyint', 'smallint', 'mediumint', 'integer')
@@ -2948,6 +3195,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             num_expr = f"COUNT({vcol})"
         elif avg_numerator == 'distinct':
             num_expr = f"COUNT(DISTINCT {vcol})"
+        elif avg_numerator == 'avg':
+            if 'duckdb' in d:
+                y_clean = f"COALESCE(try_cast(regexp_replace(CAST({vcol} AS VARCHAR), '[^0-9.-]', '') AS DOUBLE), try_cast({vcol} AS DOUBLE), 0.0)"
+                num_expr = f"AVG({y_clean})"
+            else:
+                num_expr = f"AVG({vcol})"
         else:  # sum (default)
             if 'duckdb' in d:
                 y_clean = f"COALESCE(try_cast(regexp_replace(CAST({vcol} AS VARCHAR), '[^0-9.-]', '') AS DOUBLE), try_cast({vcol} AS DOUBLE), 0.0)"
@@ -3081,8 +3334,62 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 print(f"[LastDailySum] params: { {k: v for k, v in list(params_avg.items())[:10]} }", flush=True)
             _lds_ds_id = None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId
             _lds_req = QueryRequest(sql=sql_lds, datasourceId=_lds_ds_id, limit=1, offset=0, includeTotal=False, params=params_avg or None)
-            return run_query(_lds_req, db)
+            return _run_query_sync(_lds_req, db)
         # ── End last_daily_sum ─────────────────────────────────────────────────
+
+        # ── Time-series path: return per-period SUM when groupBy is set ────────
+        # When the widget is a chart (groupBy != none), avg_daily/wday/weekly/monthly
+        # should produce a time-series rather than a single scalar.
+        _pts_group_by = (getattr(spec, 'groupBy', None) or '').strip().lower()
+        _pts_is_series = bool(_pts_group_by and _pts_group_by not in ('none', ''))
+        if _pts_is_series:
+            if 'mysql' in d:
+                _pts_gb_map = {
+                    'day':     f"DATE({dcol})",
+                    'week':    f"DATE(DATE_SUB({dcol}, INTERVAL (DAYOFWEEK({dcol}) - 2 + 7) % 7 DAY))",
+                    'month':   f"DATE_FORMAT({dcol}, '%Y-%m-01')",
+                    'quarter': f"CONCAT(YEAR({dcol}), '-Q', QUARTER({dcol}))",
+                    'year':    f"YEAR({dcol})",
+                }
+            elif 'mssql' in d or 'sqlserver' in d:
+                _pts_gb_map = {
+                    'day':     f"CAST({dcol} AS DATE)",
+                    'week':    f"DATEADD(week, DATEDIFF(week, 0, {dcol}), 0)",
+                    'month':   f"DATEFROMPARTS(YEAR({dcol}), MONTH({dcol}), 1)",
+                    'quarter': f"DATEFROMPARTS(YEAR({dcol}), ((MONTH({dcol})-1)/3)*3+1, 1)",
+                    'year':    f"DATEFROMPARTS(YEAR({dcol}), 1, 1)",
+                }
+            else:  # duckdb / postgres
+                _pts_gb_map = {
+                    'day':     f"CAST({dcol} AS DATE)",
+                    'week':    f"DATE_TRUNC('week', {dcol})",
+                    'month':   f"DATE_TRUNC('month', {dcol})",
+                    'quarter': f"DATE_TRUNC('quarter', {dcol})",
+                    'year':    f"DATE_TRUNC('year', {dcol})",
+                }
+            _pts_xd = _pts_gb_map.get(_pts_group_by, f"CAST({dcol} AS DATE)")
+
+            # For avg_wday also exclude weekends in WHERE
+            _pts_where_parts = list(where_parts)
+            if agg == 'avg_wday' and _wday_dow_expr and _wday_wknd_days:
+                _pts_where_parts.append(f"{_wday_dow_expr} NOT IN {_wday_wknd_days}")
+            _pts_where_clause = f" WHERE {' AND '.join(_pts_where_parts)}" if _pts_where_parts else ""
+
+            sql_pts = (
+                f"SELECT {_pts_xd} AS x_val, {num_expr} AS value "
+                f"FROM {_period_from_sql}{_pts_where_clause} "
+                f"GROUP BY {_pts_xd} "
+                f"ORDER BY x_val"
+            )
+            _pts_limit = int(getattr(spec, 'limit', None) or payload.limit or 5000)
+            print(f"[PeriodAvg-Series] agg={agg}, groupBy={_pts_group_by}, val={val_field}, date={date_field}", flush=True)
+            print(f"[PeriodAvg-Series] SQL: {sql_pts[:800]}", flush=True)
+            if params_avg:
+                print(f"[PeriodAvg-Series] params: { {k: v for k, v in list(params_avg.items())[:10]} }", flush=True)
+            _pts_ds_id = None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId
+            _pts_req = QueryRequest(sql=sql_pts, datasourceId=_pts_ds_id, limit=_pts_limit, offset=0, includeTotal=False, params=params_avg or None)
+            return _run_query_sync(_pts_req, db)
+        # ── End time-series path ───────────────────────────────────────────────
 
         # ── Build final SQL (3 columns for debug logging) ──────────────────────
         if avg_numerator == 'distinct':
@@ -3121,7 +3428,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
         _avg_ds_id = None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId
         _avg_req   = QueryRequest(sql=sql_avg, datasourceId=_avg_ds_id, limit=1, offset=0, includeTotal=False, params=params_avg or None)
-        _avg_res   = run_query(_avg_req, db)
+        _avg_res   = _run_query_sync(_avg_req, db)
 
         # ── Log component values ───────────────────────────────────────────────
         try:
@@ -3163,12 +3470,24 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         if not val_field or not date_field:
             raise HTTPException(status_code=400, detail=f"{agg} requires both 'y' (value column) and 'avgDateField' (date column)")
         d = (ds_type or '').lower()
-        vcol = _q_ident(val_field)
-        dcol_raw = _q_ident(date_field)
 
         # Load datasource if needed
         if ds is None and payload.datasourceId:
             ds = db.get(Datasource, payload.datasourceId)
+
+        # Resolve custom column expressions for the value field
+        # (e.g. "Lots" -> "Volume/10000" when Lots is a custom column)
+        _ma_expr_map = {}
+        try:
+            _ma_expr_map = _build_expr_map(ds, spec.source, ds_type)
+        except Exception:
+            pass
+        _ma_val_expr = _ma_expr_map.get(val_field) or _ma_expr_map.get(val_field.lower() if val_field else '')
+        if _ma_val_expr:
+            vcol = f"({_ma_val_expr})"
+        else:
+            vcol = _q_ident(val_field)
+        dcol_raw = _q_ident(date_field)
 
         _ma_from_sql = _q_source(spec.source)
 
@@ -3181,7 +3500,14 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 continue
             _wbase = _wk.split('__')[0] if '__' in _wk else _wk
             _wop   = _wk.split('__', 1)[1] if '__' in _wk else 'eq'
-            _wcol  = _wbase if _wbase.startswith('(') else _q_ident(_wbase)
+            # Resolve custom/computed columns in WHERE (e.g. ClientType -> Left(CAST(Login AS CHAR), 2))
+            _w_resolved = _ma_expr_map.get(_wbase) or _ma_expr_map.get(_wbase.lower() if _wbase else '')
+            if _w_resolved:
+                _wcol = f"({_w_resolved})"
+            elif _wbase.startswith('('):
+                _wcol = _wbase
+            else:
+                _wcol = _q_ident(_wbase)
             _pn    = _pname(_wbase, f"_{_wop}")
             if isinstance(_wv, list):
                 phs = ', '.join([f':{_pn}_{i}' for i in range(len(_wv))])
@@ -3212,17 +3538,29 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             _ma_sub_expr   = f"((SELECT MAX({_ma_date_expr}) FROM {_ma_from_sql}{_ma_where_clause}) - INTERVAL '{_ma_window - 1}' DAY)"
 
         # ── Numeric value expression ───────────────────────────────────────────
+        _ma_numerator = (getattr(spec, 'avgNumerator', None) or 'sum').lower()
+        _ma_agg_fn = {'count': 'COUNT', 'distinct': 'COUNT DISTINCT', 'sum': 'SUM', 'avg': 'AVG'}.get(_ma_numerator, 'SUM')
+        if _ma_agg_fn == 'COUNT DISTINCT':
+            _ma_agg_fn_open = f'COUNT(DISTINCT '
+            _ma_agg_fn_close = ')'
+        else:
+            _ma_agg_fn_open = f'{_ma_agg_fn}('
+            _ma_agg_fn_close = ')'
         if 'duckdb' in d:
             _ma_y_clean = (
                 f"COALESCE(try_cast(regexp_replace(CAST({vcol} AS VARCHAR), '[^0-9.-]', '') AS DOUBLE), "
                 f"try_cast({vcol} AS DOUBLE), 0.0)"
             )
-            _ma_num_expr = f"SUM({_ma_y_clean})"
+            _ma_inner_val = _ma_y_clean if _ma_numerator in ('sum', 'avg') else vcol
+            _ma_num_expr = f"{_ma_agg_fn_open}{_ma_inner_val}{_ma_agg_fn_close}"
         else:
-            _ma_num_expr = f"SUM({vcol})"
+            _ma_num_expr = f"{_ma_agg_fn_open}{vcol}{_ma_agg_fn_close}"
 
         _ma_group_by = (getattr(spec, 'groupBy', None) or '').strip().lower()
-        _ma_is_series = bool(_ma_group_by and _ma_group_by not in ('none', ''))
+        # MA is a time-series if groupBy is set OR if there's an x-axis field
+        # (charts with x-axis always want per-date MA values, not a single scalar)
+        _has_x_axis = bool(getattr(spec, 'x', None))
+        _ma_is_series = bool((_ma_group_by and _ma_group_by not in ('none', '')) or _has_x_axis)
 
         if _ma_is_series:
             # ── Time-series MA: rolling N-day average per day ──────────────────
@@ -3267,7 +3605,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
         _ma_ds_id = None if (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId
         _ma_req   = QueryRequest(sql=sql_ma, datasourceId=_ma_ds_id, limit=_ma_limit, offset=0, includeTotal=False, params=_ma_params or None)
-        return run_query(_ma_req, db)
+        return _run_query_sync(_ma_req, db)
     # ── End moving-average early exit ─────────────────────────────────────────
 
     # ── End period-average early exit ─────────────────────────────────────────
@@ -3533,7 +3871,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             preferLocalDuck=prefer_local,
             preferLocalTable=spec.source,
         )
-        return run_query(q, db)
+        return _run_query_sync(q, db)
 
     if has_chart_semantics:
         # Load datasource-level transforms if any; prepare a FROM fragment
@@ -4152,7 +4490,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         preferLocalDuck=prefer_local,
                         preferLocalTable=spec.source,
                     )
-                    return run_query(q, db)
+                    return _run_query_sync(q, db)
 
             # Fallback: simple total aggregation without x and without legend; label as 'total'
             # Build value_expr robustly (support measure and DuckDB numeric-cleaning)
@@ -4245,7 +4583,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 preferLocalDuck=prefer_local,
                 preferLocalTable=spec.source,
             )
-            result = run_query(q, db)
+            result = _run_query_sync(q, db)
             print(f"[SCALAR_AGG_RESULT] rows={len(result.rows)}, data={result.rows[:3]}", flush=True)
             return result
 
@@ -4452,7 +4790,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         preferLocalDuck=prefer_local,
                         preferLocalTable=spec.source,
                     )
-                    return run_query(q, db)
+                    return _run_query_sync(q, db)
             
             # Build SQL: For legend-only, return x='Total', legend=<category>, value=<count>
             # This allows the frontend to render as a bar/column chart with legend series
@@ -4474,7 +4812,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 preferLocalDuck=prefer_local,
                 preferLocalTable=spec.source,
             )
-            return run_query(q, db)
+            return _run_query_sync(q, db)
 
         # Aggregated query when agg != 'none' (with optional legend)
         if agg and agg != "none":
@@ -4599,7 +4937,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         preferLocalTable=spec.source,
                     )
                     counter_inc("sqlglot_queries_total", {"dialect": ds_type})
-                    return run_query(q, db)
+                    return _run_query_sync(q, db)
                     
                 except Exception as e:
                     # SQLGlot failed, fall back to legacy
@@ -5236,7 +5574,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 preferLocalDuck=prefer_local,
                 preferLocalTable=spec.source,
             )
-            return run_query(q, db)
+            return _run_query_sync(q, db)
 
         # agg == 'none': passthrough raw columns via select/x/y, but derive/quote when needed
         def _select_part(c: str) -> str:
@@ -5376,11 +5714,25 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             includeTotal=payload.includeTotal,
             params=params or None,
         )
-        return run_query(q, db)
+        return _run_query_sync(q, db)
 
 
 @router.post("/distinct")
-def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> DistinctResponse:
+async def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> DistinctResponse:
+    if _qpool._inflight >= QUERY_MAX_QUEUED:
+        raise HTTPException(status_code=503, detail="Server busy: too many concurrent queries", headers={"Retry-After": "3"})
+    _qpool._inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            query_executor,
+            functools.partial(_distinct_values_sync, payload, db, actorId, publicId, token),
+        )
+    finally:
+        _qpool._inflight -= 1
+
+
+def _distinct_values_sync(payload: DistinctRequest, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> DistinctResponse:
     # Resolve date presets at execution time
     if getattr(payload, 'where', None):
         payload.where = _resolve_date_presets(payload.where)
@@ -6019,7 +6371,21 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
 
 
 @router.post("/pivot", response_model=QueryResponse)
-def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
+async def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
+    if _qpool._inflight >= QUERY_MAX_QUEUED:
+        raise HTTPException(status_code=503, detail="Server busy: too many concurrent queries", headers={"Retry-After": "3"})
+    _qpool._inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            query_executor,
+            functools.partial(_run_pivot_sync, payload, db, actorId, publicId, token),
+        )
+    finally:
+        _qpool._inflight -= 1
+
+
+def _run_pivot_sync(payload: PivotRequest, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
     """Server-side pivot aggregation.
     Returns long-form grouped rows: [row_dims..., col_dims..., value].
     """
@@ -8195,7 +8561,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             )
             sys.stderr.write(f"[DEBUG] Calling run_query with limit={payload.limit}...\n")
             sys.stderr.flush()
-            return run_query(q, db, actorId=actorId, publicId=publicId, token=token)
+            return _run_query_sync(q, db, actorId=actorId, publicId=publicId, token=token)
 
         # Default behavior: cap pivot results when limit is omitted to avoid buffering large results.
         try:
@@ -8212,14 +8578,28 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             includeTotal=False,
             params=params or None,
         )
-        return run_query(q, db, actorId=actorId, publicId=publicId, token=token)
+        return _run_query_sync(q, db, actorId=actorId, publicId=publicId, token=token)
     finally:
         _HEAVY_SEM.release()
 
 
 
 @router.post("/pivot/sql")
-def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+async def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+    if _qpool._inflight >= QUERY_MAX_QUEUED:
+        raise HTTPException(status_code=503, detail="Server busy: too many concurrent queries", headers={"Retry-After": "3"})
+    _qpool._inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            query_executor,
+            functools.partial(_pivot_sql_sync, payload, db, actorId, publicId, token),
+        )
+    finally:
+        _qpool._inflight -= 1
+
+
+def _pivot_sql_sync(payload: PivotRequest, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     """Return the SQL that would be executed by /pivot without running it. Used for SQL preview."""
     import sys
     try:
@@ -8301,7 +8681,21 @@ def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
 
 
 @router.post("/period-totals")
-def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+async def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+    if _qpool._inflight >= QUERY_MAX_QUEUED:
+        raise HTTPException(status_code=503, detail="Server busy: too many concurrent queries", headers={"Retry-After": "3"})
+    _qpool._inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            query_executor,
+            functools.partial(_period_totals_sync, payload, db, actorId, publicId, token),
+        )
+    finally:
+        _qpool._inflight -= 1
+
+
+def _period_totals_sync(payload: dict, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     # Resolve date presets at execution time
     if payload.get("where"):
         payload["where"] = _resolve_date_presets(payload["where"])
@@ -9419,7 +9813,21 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
 
 # --- Period totals batch: accept multiple requests and return a keyed map ---
 @router.post("/period-totals/batch")
-def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+async def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+    if _qpool._inflight >= QUERY_MAX_QUEUED:
+        raise HTTPException(status_code=503, detail="Server busy: too many concurrent queries", headers={"Retry-After": "3"})
+    _qpool._inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            query_executor,
+            functools.partial(_period_totals_batch_sync, payload, db, actorId, publicId, token),
+        )
+    finally:
+        _qpool._inflight -= 1
+
+
+def _period_totals_batch_sync(payload: dict, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     try:
         touch_actor(actorId)
     except Exception:
@@ -9460,7 +9868,7 @@ def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: O
             continue
         key = str(item.get("key") or i)
         # Reuse the same logic as single endpoint
-        results[key] = period_totals(item, db, actorId)
+        results[key] = _period_totals_sync(item, db, actorId)
     try:
         summary_observe("query_duration_ms", int((time.perf_counter() - _bt_start) * 1000), {"endpoint": "period_totals_batch"})
     except Exception:
@@ -9474,7 +9882,21 @@ def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: O
 
 # --- Period totals compare: return cur and prev in one call ---
 @router.post("/period-totals/compare")
-def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+async def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+    if _qpool._inflight >= QUERY_MAX_QUEUED:
+        raise HTTPException(status_code=503, detail="Server busy: too many concurrent queries", headers={"Retry-After": "3"})
+    _qpool._inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            query_executor,
+            functools.partial(_period_totals_compare_sync, payload, db, actorId, publicId, token),
+        )
+    finally:
+        _qpool._inflight -= 1
+
+
+def _period_totals_compare_sync(payload: dict, db: Session, actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     # Resolve date presets at execution time
     if payload.get("where"):
         payload["where"] = _resolve_date_presets(payload["where"])
@@ -9523,8 +9945,8 @@ def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId:
     except Exception:
         pass
     _cmp_start = time.perf_counter()
-    cur = period_totals(cur_payload, db, actorId)
-    prev = period_totals(prev_payload, db, actorId)
+    cur = _period_totals_sync(cur_payload, db, actorId)
+    prev = _period_totals_sync(prev_payload, db, actorId)
     try:
         summary_observe("query_duration_ms", int((time.perf_counter() - _cmp_start) * 1000), {"endpoint": "period_totals_compare"})
     except Exception:

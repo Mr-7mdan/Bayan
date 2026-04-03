@@ -1,0 +1,246 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e38] [cursor=pointer]:
+    - img [ref=e39]
+  - alert [ref=e2]: AMAN · AMAN · Bayan
+  - generic [ref=e42]:
+    - complementary [ref=e43]:
+      - link "Home" [ref=e45] [cursor=pointer]:
+        - /url: /home
+        - img "AMAN" [ref=e46]
+      - generic [ref=e47]:
+        - link "Home" [ref=e48] [cursor=pointer]:
+          - /url: /home
+          - generic [ref=e49]:
+            - img [ref=e51]
+            - generic [ref=e53]: Home
+        - generic [ref=e54]:
+          - generic [ref=e55]: Dashboards
+          - generic [ref=e56]:
+            - link "Build New Dashboard" [ref=e57] [cursor=pointer]:
+              - /url: /builder
+              - generic [ref=e58]:
+                - img [ref=e60]
+                - generic [ref=e62]: Build New Dashboard
+            - link "My Dashboards 3" [ref=e63] [cursor=pointer]:
+              - /url: /dashboards/mine
+              - generic [ref=e64]:
+                - img [ref=e66]
+                - generic [ref=e68]: My Dashboards
+                - generic [ref=e69]: "3"
+            - link "Shared With Me 1" [ref=e70] [cursor=pointer]:
+              - /url: /dashboards/shared
+              - generic [ref=e71]:
+                - img [ref=e73]
+                - generic [ref=e75]: Shared With Me
+                - generic [ref=e76]: "1"
+        - generic [ref=e77]:
+          - generic [ref=e78]: Datasources
+          - generic [ref=e79]:
+            - link "Add Datasource" [ref=e80] [cursor=pointer]:
+              - /url: /datasources/sources?add=1
+              - generic [ref=e81]:
+                - img [ref=e83]
+                - generic [ref=e85]: Add Datasource
+            - link "My Datasources 4" [ref=e86] [cursor=pointer]:
+              - /url: /datasources/sources
+              - generic [ref=e87]:
+                - img [ref=e89]
+                - generic [ref=e91]: My Datasources
+                - generic [ref=e92]: "4"
+            - link "Data Model" [ref=e93] [cursor=pointer]:
+              - /url: /datasources/data-model
+              - generic [ref=e94]:
+                - img [ref=e96]
+                - generic [ref=e98]: Data Model
+        - generic [ref=e99]:
+          - generic [ref=e100]: Tools
+          - generic [ref=e101]:
+            - link "Alerts & Notifications 11" [ref=e102] [cursor=pointer]:
+              - /url: /alerts
+              - generic [ref=e103]:
+                - img [ref=e105]
+                - generic [ref=e107]: Alerts & Notifications
+                - generic [ref=e108]: "11"
+            - link "Contacts Manager" [ref=e109] [cursor=pointer]:
+              - /url: /contacts
+              - generic [ref=e110]:
+                - img [ref=e112]
+                - generic [ref=e114]: Contacts Manager
+        - generic [ref=e115]:
+          - generic [ref=e116]: Admin
+          - generic [ref=e117]:
+            - link "Users" [ref=e118] [cursor=pointer]:
+              - /url: /admin/users
+              - generic [ref=e119]:
+                - img [ref=e121]
+                - generic [ref=e123]: Users
+            - link "Environment" [ref=e124] [cursor=pointer]:
+              - /url: /admin/environment
+              - generic [ref=e125]:
+                - img [ref=e127]
+                - generic [ref=e129]: Environment
+            - link "Schedule Workers" [ref=e130] [cursor=pointer]:
+              - /url: /admin/schedules
+              - generic [ref=e131]:
+                - img [ref=e133]
+                - generic [ref=e135]: Schedule Workers
+            - link "Holidays" [ref=e136] [cursor=pointer]:
+              - /url: /admin/holidays
+              - generic [ref=e137]:
+                - img [ref=e139]
+                - generic [ref=e141]: Holidays
+      - button "AD Admin" [ref=e143] [cursor=pointer]:
+        - generic [ref=e144]: AD
+        - generic [ref=e145]: Admin
+        - img [ref=e146]
+    - generic [ref=e148]:
+      - banner [ref=e149]:
+        - generic [ref=e150]:
+          - generic [ref=e151]:
+            - button "Hide sidebar" [ref=e152] [cursor=pointer]:
+              - img [ref=e153]
+            - navigation [ref=e156]:
+              - generic [ref=e158]: Home
+          - button "Toggle color scheme" [ref=e160] [cursor=pointer]:
+            - img
+      - main [ref=e161]:
+        - generic [ref=e163]:
+          - generic [ref=e165]:
+            - paragraph [ref=e166]: Welcome back, Admin
+            - paragraph [ref=e167]: Pick up where you left off or explore your recent work
+          - generic [ref=e168]:
+            - generic [ref=e169]:
+              - generic [ref=e170]: Favourites
+              - link "See all" [ref=e171] [cursor=pointer]:
+                - /url: /dashboards/mine
+            - 'button "New Dashboard In progress Unfavorite Actions Data sources (0) Tables (0) Widgets (0) Created by: Admin on 10/24/2025 Updated 161d ago" [ref=e174] [cursor=pointer]':
+              - generic [ref=e175]:
+                - generic [ref=e176]:
+                  - generic [ref=e177]:
+                    - heading "New Dashboard" [level=4] [ref=e178]
+                    - generic [ref=e179]: In progress
+                  - generic [ref=e181]:
+                    - button "Unfavorite" [ref=e182]:
+                      - img [ref=e183]
+                    - button "Actions" [ref=e185]:
+                      - img [ref=e186]
+                - generic [ref=e188]:
+                  - generic [ref=e189]:
+                    - img [ref=e190]
+                    - paragraph [ref=e192]: Data sources (0)
+                  - generic [ref=e193]:
+                    - img [ref=e194]
+                    - paragraph [ref=e196]: Tables (0)
+                  - generic [ref=e197]:
+                    - img [ref=e198]
+                    - paragraph [ref=e200]: Widgets (0)
+              - generic [ref=e202]:
+                - generic [ref=e205]: "Created by: Admin on 10/24/2025"
+                - paragraph [ref=e206]: Updated 161d ago
+          - generic [ref=e208]:
+            - generic [ref=e209]:
+              - generic [ref=e210]: Recent Dashboards
+              - link "See all" [ref=e211] [cursor=pointer]:
+                - /url: /dashboards/mine
+            - generic [ref=e213]:
+              - 'button "New Dashboard Published Favorite Actions Data sources (1) Tables (0) Widgets (1) Created by: Admin on 10/24/2025 Updated 146d ago" [ref=e214] [cursor=pointer]':
+                - generic [ref=e215]:
+                  - generic [ref=e216]:
+                    - generic [ref=e217]:
+                      - heading "New Dashboard" [level=4] [ref=e218]
+                      - generic [ref=e219]: Published
+                    - generic [ref=e221]:
+                      - button "Favorite" [ref=e222]:
+                        - img [ref=e223]
+                      - button "Actions" [ref=e225]:
+                        - img [ref=e226]
+                  - generic [ref=e228]:
+                    - generic [ref=e229]:
+                      - img [ref=e230]
+                      - paragraph [ref=e232]: Data sources (1)
+                    - generic [ref=e233]:
+                      - img [ref=e234]
+                      - paragraph [ref=e236]: Tables (0)
+                    - generic [ref=e237]:
+                      - img [ref=e238]
+                      - paragraph [ref=e240]: Widgets (1)
+                - generic [ref=e242]:
+                  - generic [ref=e245]: "Created by: Admin on 10/24/2025"
+                  - paragraph [ref=e246]: Updated 146d ago
+              - 'button "Vault Balances table In progress Favorite Actions Data sources (1) Tables (1) Widgets (1) Created by: Admin on 10/14/2025 Updated 155d ago" [ref=e247] [cursor=pointer]':
+                - generic [ref=e248]:
+                  - generic [ref=e249]:
+                    - generic [ref=e250]:
+                      - heading "Vault Balances table" [level=4] [ref=e251]
+                      - generic [ref=e252]: In progress
+                    - generic [ref=e254]:
+                      - button "Favorite" [ref=e255]:
+                        - img [ref=e256]
+                      - button "Actions" [ref=e258]:
+                        - img [ref=e259]
+                  - generic [ref=e261]:
+                    - generic [ref=e262]:
+                      - img [ref=e263]
+                      - paragraph [ref=e265]: Data sources (1)
+                    - generic [ref=e266]:
+                      - img [ref=e267]
+                      - paragraph [ref=e269]: Tables (1)
+                    - generic [ref=e270]:
+                      - img [ref=e271]
+                      - paragraph [ref=e273]: Widgets (1)
+                - generic [ref=e275]:
+                  - generic [ref=e278]: "Created by: Admin on 10/14/2025"
+                  - paragraph [ref=e279]: Updated 155d ago
+              - 'button "New Dashboard Published Unfavorite Actions Data sources (2) Tables (0) Widgets (3) Created by: Admin on 09/29/2025 Updated 161d ago" [ref=e280] [cursor=pointer]':
+                - generic [ref=e281]:
+                  - generic [ref=e282]:
+                    - generic [ref=e283]:
+                      - heading "New Dashboard" [level=4] [ref=e284]
+                      - generic [ref=e285]: Published
+                    - generic [ref=e287]:
+                      - button "Unfavorite" [ref=e288]:
+                        - img [ref=e289]
+                      - button "Actions" [ref=e291]:
+                        - img [ref=e292]
+                  - generic [ref=e294]:
+                    - generic [ref=e295]:
+                      - img [ref=e296]
+                      - paragraph [ref=e298]: Data sources (2)
+                    - generic [ref=e299]:
+                      - img [ref=e300]
+                      - paragraph [ref=e302]: Tables (0)
+                    - generic [ref=e303]:
+                      - img [ref=e304]
+                      - paragraph [ref=e306]: Widgets (3)
+                - generic [ref=e308]:
+                  - generic [ref=e311]: "Created by: Admin on 09/29/2025"
+                  - paragraph [ref=e312]: Updated 161d ago
+          - generic [ref=e314]:
+            - generic [ref=e315]:
+              - generic [ref=e316]: Recent Collections
+              - link "See all" [ref=e317] [cursor=pointer]:
+                - /url: /dashboards/shared
+            - 'button "New Dashboard Read‑only Unfavorite Actions Data sources (0) Tables (0) Widgets (0) Shared by: Admin on 10/23/2025 Shared 162d ago" [ref=e320] [cursor=pointer]':
+              - generic [ref=e321]:
+                - generic [ref=e322]:
+                  - generic [ref=e323]:
+                    - heading "New Dashboard" [level=4] [ref=e324]
+                    - generic [ref=e325]: Read‑only
+                  - generic [ref=e327]:
+                    - button "Unfavorite" [ref=e328]:
+                      - img [ref=e329]
+                    - button "Actions" [ref=e331]:
+                      - img [ref=e332]
+                - generic [ref=e334]:
+                  - generic [ref=e335]:
+                    - img [ref=e336]
+                    - paragraph [ref=e338]: Data sources (0)
+                  - generic [ref=e339]:
+                    - img [ref=e340]
+                    - paragraph [ref=e342]: Tables (0)
+                  - generic [ref=e343]:
+                    - img [ref=e344]
+                    - paragraph [ref=e346]: Widgets (0)
+              - generic [ref=e348]:
+                - generic [ref=e351]: "Shared by: Admin on 10/23/2025"
+                - paragraph [ref=e352]: Shared 162d ago

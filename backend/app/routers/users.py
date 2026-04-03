@@ -66,7 +66,7 @@ def _require_admin(db: Session, actor_id: str) -> None:
 
 
 @router.get("/{user_id}/counts", response_model=SidebarCountsResponse)
-def get_sidebar_counts(user_id: str, db: Session = Depends(get_db)) -> SidebarCountsResponse:
+async def get_sidebar_counts(user_id: str, db: Session = Depends(get_db)) -> SidebarCountsResponse:
     uid = (user_id or "").strip()
     if uid.lower() in {"", "undefined", "null"}:
         uid = "dev_user"
@@ -85,13 +85,22 @@ def get_sidebar_counts(user_id: str, db: Session = Depends(get_db)) -> SidebarCo
 
 
 @router.post("/{user_id}/collections", response_model=AddToCollectionResponse)
-def add_dashboard_collection(
+async def add_dashboard_collection(
     user_id: str,
     payload: AddToCollectionRequest,
     db: Session = Depends(get_db),
 ) -> AddToCollectionResponse:
-    if payload.userId and payload.userId != user_id:
+    # Resolve email → UUID so collections/permissions are stored under the canonical user ID
+    resolved_uid = user_id.strip()
+    if "@" in resolved_uid:
+        u = db.query(User).filter(User.email == resolved_uid).first()
+        if u:
+            resolved_uid = u.id
+        else:
+            raise HTTPException(status_code=404, detail=f"User not found: {resolved_uid}")
+    if payload.userId and payload.userId != user_id and payload.userId != resolved_uid:
         raise HTTPException(status_code=400, detail="Body userId mismatch with path")
+    user_id = resolved_uid
     dashboard_id = (payload.dashboardId or "").strip()
     if not dashboard_id:
         raise HTTPException(status_code=400, detail="dashboardId is required")
@@ -127,14 +136,14 @@ def add_dashboard_collection(
 
 
 @router.get("/{user_id}/notifications", response_model=list[NotificationOut])
-def get_notifications(user_id: str, db: Session = Depends(get_db)):
+async def get_notifications(user_id: str, db: Session = Depends(get_db)):
     # Return and clear notifications (pop semantics)
     items = pop_notifications(db, user_id)
     return [NotificationOut(id=n.id, message=n.message, created_at=n.created_at) for n in items]
 
 
 @router.get("/{user_id}/collections/items", response_model=list[CollectionItemOut])
-def list_collection_items(user_id: str, db: Session = Depends(get_db)):
+async def list_collection_items(user_id: str, db: Session = Depends(get_db)):
     # List all dashboards added to any of the user's collections, with permission and publish info
     colls = db.query(Collection).filter(Collection.user_id == user_id).all()
     if not colls:
@@ -170,7 +179,7 @@ def list_collection_items(user_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{user_id}/collections/{collection_id}/{dashboard_id}", response_model=AddToCollectionResponse)
-def remove_dashboard_collection(
+async def remove_dashboard_collection(
     user_id: str,
     collection_id: str,
     dashboard_id: str,
@@ -197,7 +206,7 @@ def remove_dashboard_collection(
 
 # --- Auth endpoints ---
 @router.post("/signup", response_model=UserOut)
-def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
+async def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
     email = (payload.email or "").strip().lower()
     name = (payload.name or "").strip() or email.split("@")[0]
     role = "user"
@@ -212,7 +221,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
 
 
 @router.post("/login", response_model=UserOut)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> UserOut:
+async def login(payload: LoginRequest, db: Session = Depends(get_db)) -> UserOut:
     email = (payload.email or "").strip().lower()
     u = db.query(User).filter(User.email == email).first()
     if not u or not verify_password(payload.password, u.password_hash):
@@ -221,7 +230,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> UserOut:
 
 
 @router.post("/change-password", response_model=dict)
-def change_password(payload: ChangePasswordRequest, db: Session = Depends(get_db)):
+async def change_password(payload: ChangePasswordRequest, db: Session = Depends(get_db)):
     uid = (payload.userId or "").strip()
     u = db.get(User, uid)
     if not u:
@@ -235,7 +244,7 @@ def change_password(payload: ChangePasswordRequest, db: Session = Depends(get_db
 
 
 @router.post("/reset-password", response_model=dict)
-def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     email = (payload.email or "").strip().lower()
     u = db.query(User).filter(User.email == email).first()
     if not u:
@@ -247,7 +256,7 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
 
 
 @router.post("/bootstrap-admin", response_model=UserOut)
-def bootstrap_admin(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
+async def bootstrap_admin(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
     """Create the very first admin user if none exists.
     Subsequent calls are blocked once an admin exists.
     """
@@ -268,7 +277,7 @@ def bootstrap_admin(payload: SignupRequest, db: Session = Depends(get_db)) -> Us
 
 # --- Admin: users management ---
 @router.get("/admin/list", response_model=list[UserRowOut])
-def admin_list_users(actorId: str, db: Session = Depends(get_db)):
+async def admin_list_users(actorId: str, db: Session = Depends(get_db)):
     _require_admin(db, actorId)
     rows = db.query(User).order_by(User.created_at.desc()).all()
     out: list[UserRowOut] = []
@@ -278,7 +287,7 @@ def admin_list_users(actorId: str, db: Session = Depends(get_db)):
 
 
 @router.post("/admin", response_model=UserOut)
-def admin_create_user(payload: AdminCreateUserRequest, actorId: str, db: Session = Depends(get_db)):
+async def admin_create_user(payload: AdminCreateUserRequest, actorId: str, db: Session = Depends(get_db)):
     _require_admin(db, actorId)
     email = (payload.email or "").strip().lower()
     name = (payload.name or "").strip() or email.split("@")[0]
@@ -296,7 +305,7 @@ def admin_create_user(payload: AdminCreateUserRequest, actorId: str, db: Session
 
 
 @router.post("/admin/{target_id}/set-active", response_model=dict)
-def admin_set_active(target_id: str, payload: SetActiveRequest, actorId: str, db: Session = Depends(get_db)):
+async def admin_set_active(target_id: str, payload: SetActiveRequest, actorId: str, db: Session = Depends(get_db)):
     _require_admin(db, actorId)
     u = db.get(User, target_id)
     if not u:
@@ -308,7 +317,7 @@ def admin_set_active(target_id: str, payload: SetActiveRequest, actorId: str, db
 
 
 @router.post("/admin/{target_id}/set-password", response_model=dict)
-def admin_set_password(target_id: str, payload: AdminSetPasswordRequest, actorId: str, db: Session = Depends(get_db)):
+async def admin_set_password(target_id: str, payload: AdminSetPasswordRequest, actorId: str, db: Session = Depends(get_db)):
     _require_admin(db, actorId)
     u = db.get(User, target_id)
     if not u:
@@ -321,7 +330,7 @@ def admin_set_password(target_id: str, payload: AdminSetPasswordRequest, actorId
 
 # --- Favorites (stored as the default "Favorites" collection) ---
 @router.get("/{user_id}/favorites", response_model=list[FavoriteOut])
-def list_favorites(user_id: str, db: Session = Depends(get_db)):
+async def list_favorites(user_id: str, db: Session = Depends(get_db)):
     # Ensure the default Favorites collection exists
     coll = ensure_collection(db, user_id)
     # Join items with dashboards for names and timestamps
@@ -346,7 +355,7 @@ def list_favorites(user_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{user_id}/favorites", response_model=dict)
-def add_favorite(user_id: str, payload: AddFavoriteRequest, db: Session = Depends(get_db)):
+async def add_favorite(user_id: str, payload: AddFavoriteRequest, db: Session = Depends(get_db)):
     dash_id = (payload.dashboardId or "").strip()
     if not dash_id:
         raise HTTPException(status_code=400, detail="dashboardId is required")
@@ -356,7 +365,7 @@ def add_favorite(user_id: str, payload: AddFavoriteRequest, db: Session = Depend
 
 
 @router.delete("/{user_id}/favorites/{dashboard_id}", response_model=dict)
-def remove_favorite(user_id: str, dashboard_id: str, db: Session = Depends(get_db)):
+async def remove_favorite(user_id: str, dashboard_id: str, db: Session = Depends(get_db)):
     coll = ensure_collection(db, user_id)
     removed = remove_dashboard_from_collection(db, coll.id, dashboard_id)
     return {"ok": bool(removed)}

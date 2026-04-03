@@ -45,12 +45,12 @@ class HolidayRuleResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[HolidayRuleResponse])
-def list_holidays(db: Session = Depends(_get_db)):
+async def list_holidays(db: Session = Depends(_get_db)):
     return db.query(HolidayRule).order_by(HolidayRule.name).all()
 
 
 @router.post("", response_model=HolidayRuleResponse)
-def create_holiday(body: HolidayRuleCreate, db: Session = Depends(_get_db)):
+async def create_holiday(body: HolidayRuleCreate, db: Session = Depends(_get_db)):
     rule = HolidayRule(id=str(uuid4()), **body.model_dump())
     db.add(rule)
     db.commit()
@@ -59,7 +59,7 @@ def create_holiday(body: HolidayRuleCreate, db: Session = Depends(_get_db)):
 
 
 @router.put("/{rule_id}", response_model=HolidayRuleResponse)
-def update_holiday(rule_id: str, body: HolidayRuleCreate, db: Session = Depends(_get_db)):
+async def update_holiday(rule_id: str, body: HolidayRuleCreate, db: Session = Depends(_get_db)):
     rule = db.query(HolidayRule).filter(HolidayRule.id == rule_id).first()
     if not rule:
         raise HTTPException(404, "Holiday rule not found")
@@ -71,7 +71,7 @@ def update_holiday(rule_id: str, body: HolidayRuleCreate, db: Session = Depends(
 
 
 @router.delete("/{rule_id}")
-def delete_holiday(rule_id: str, db: Session = Depends(_get_db)):
+async def delete_holiday(rule_id: str, db: Session = Depends(_get_db)):
     rule = db.query(HolidayRule).filter(HolidayRule.id == rule_id).first()
     if not rule:
         raise HTTPException(404, "Holiday rule not found")

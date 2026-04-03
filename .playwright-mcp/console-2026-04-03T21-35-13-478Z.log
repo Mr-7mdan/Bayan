@@ -1,0 +1,54 @@
+[     202ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js:25630
+[     287ms] [LOG] [Sidebar] Badge for "My Dashboards": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     287ms] [LOG] [Sidebar] Badge for "Shared With Me": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     287ms] [LOG] [Sidebar] Badge for "My Datasources": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     287ms] [LOG] [Sidebar] Badge for "Alerts & Notifications": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     287ms] [LOG] [Sidebar] Badge for "My Dashboards": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     287ms] [LOG] [Sidebar] Badge for "Shared With Me": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     287ms] [LOG] [Sidebar] Badge for "My Datasources": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     287ms] [LOG] [Sidebar] Badge for "Alerts & Notifications": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     289ms] [LOG] [Item] My Dashboards: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     289ms] [LOG] [Item] My Dashboards: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     290ms] [LOG] [Item] Shared With Me: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     290ms] [LOG] [Item] Shared With Me: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     290ms] [LOG] [Item] My Datasources: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     290ms] [LOG] [Item] My Datasources: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     291ms] [LOG] [Item] Alerts & Notifications: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     291ms] [LOG] [Item] Alerts & Notifications: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     308ms] [LOG] [Sidebar] Badge for "My Dashboards": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     308ms] [LOG] [Sidebar] Badge for "Shared With Me": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     309ms] [LOG] [Sidebar] Badge for "My Datasources": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     309ms] [LOG] [Sidebar] Badge for "Alerts & Notifications": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     309ms] [LOG] [Sidebar] Badge for "My Dashboards": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     309ms] [LOG] [Sidebar] Badge for "Shared With Me": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     309ms] [LOG] [Sidebar] Badge for "My Datasources": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     309ms] [LOG] [Sidebar] Badge for "Alerts & Notifications": 0 counts: {dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     310ms] [LOG] [Item] My Dashboards: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     310ms] [LOG] [Item] My Dashboards: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     311ms] [LOG] [Item] Shared With Me: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     311ms] [LOG] [Item] Shared With Me: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     311ms] [LOG] [Item] My Datasources: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     311ms] [LOG] [Item] My Datasources: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     312ms] [LOG] [Item] Alerts & Notifications: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     312ms] [LOG] [Item] Alerts & Notifications: badge=0, type=number, shouldShow=false @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     362ms] [LOG] [Sidebar] API response: {dashboardCount: 3, datasourceCount: 4, sharedCount: 1, collectionCount: 1} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:329
+[     362ms] [LOG] [Sidebar] Setting counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:330
+[     362ms] [LOG] [Sidebar] Badge for "My Dashboards": 3 counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     362ms] [LOG] [Sidebar] Badge for "Shared With Me": 1 counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     362ms] [LOG] [Sidebar] Badge for "My Datasources": 4 counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     362ms] [LOG] [Sidebar] Badge for "Alerts & Notifications": 11 counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     363ms] [LOG] [Sidebar] Badge for "My Dashboards": 3 counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     363ms] [LOG] [Sidebar] Badge for "Shared With Me": 1 counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     363ms] [LOG] [Sidebar] Badge for "My Datasources": 4 counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     363ms] [LOG] [Sidebar] Badge for "Alerts & Notifications": 11 counts: {dashboards: 3, datasources: 4, shared: 1, collections: 1, alerts: 11} @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:391
+[     364ms] [LOG] [Item] My Dashboards: badge=3, type=number, shouldShow=true @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     364ms] [LOG] [Item] My Dashboards: badge=3, type=number, shouldShow=true @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     364ms] [LOG] [Item] Shared With Me: badge=1, type=number, shouldShow=true @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     364ms] [LOG] [Item] Shared With Me: badge=1, type=number, shouldShow=true @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     364ms] [LOG] [Item] My Datasources: badge=4, type=number, shouldShow=true @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     364ms] [LOG] [Item] My Datasources: badge=4, type=number, shouldShow=true @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     365ms] [LOG] [Item] Alerts & Notifications: badge=11, type=number, shouldShow=true @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[     365ms] [LOG] [Item] Alerts & Notifications: badge=11, type=number, shouldShow=true @ webpack-internal:///(app-pages-browser)/./src/components/shell/Sidebar.tsx:172
+[   19417ms] [LOG] [Fast Refresh] rebuilding @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/hot-reloader/app/hot-reloader-app.js:196
+[   20445ms] [LOG] [Fast Refresh] done in 1028ms @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/report-hmr-latency.js:13
+[   21295ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3000/api/dashboards/public/c186573af1:0

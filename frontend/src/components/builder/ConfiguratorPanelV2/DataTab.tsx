@@ -102,7 +102,30 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
     const p = local.pivot || { values:[], filters:[] }
     return { x:p.x, values:Array.isArray(p.values)?p.values:[], legend:p.legend, filters:Array.isArray(p.filters)?p.filters:[] }
   }, [local.pivot])
-  const applyPivot = (p: PivotAssignments) => { const next={...local,pivot:p as any}; setLocal(next); updateConfig(next) }
+  const applyPivot = (p: PivotAssignments) => {
+    const next = { ...local, pivot: p as any }
+    // Sync per-chip visual overrides into querySpec.series so ChartCard picks them up
+    // (V2 updates pivot directly; without this, querySpec.series stays stale)
+    if (next.querySpec && Array.isArray((next.querySpec as any).series)) {
+      const qs = { ...next.querySpec, series: ((next.querySpec as any).series as any[]).map((si: any, i: number) => {
+        const pi = (p.values[i] || {}) as any
+        return {
+          ...si,
+          ...(pi.seriesType != null ? { seriesType: pi.seriesType } : {}),
+          ...(pi.colorToken != null ? { colorToken: pi.colorToken } : {}),
+          ...(pi.colorKey != null ? { colorKey: pi.colorKey } : {}),
+          ...(pi.style != null ? { style: pi.style } : {}),
+          ...(pi.stackId != null ? { stackId: pi.stackId } : {}),
+          ...(pi.secondaryAxis != null ? { secondaryAxis: pi.secondaryAxis } : {}),
+          ...(pi.avgNumerator != null ? { avgNumerator: pi.avgNumerator } : {}),
+          ...(pi.avgDateField != null ? { avgDateField: pi.avgDateField } : {}),
+          ...(pi.applyHolidays != null ? { applyHolidays: pi.applyHolidays } : {}),
+        }
+      }) }
+      next.querySpec = qs as any
+    }
+    setLocal(next); updateConfig(next)
+  }
 
   const activeFilterCount = useMemo(() =>
     local.querySpec?.where ? Object.values(local.querySpec.where).filter(v=>v!=null).length : 0

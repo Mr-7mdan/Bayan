@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import type { WidgetConfig } from '@/types/widgets'
 import type { PivotAssignments } from '@/components/builder/PivotBuilder'
 import { Switch } from '@/components/Switch'
-import { FormRow, inputCls, selectCls } from './shared'
+import { FormRow, FormGrid, inputCls, selectCls } from './shared'
 import { chartColors, tokenToColorKey, colorKeyToToken, type AvailableChartColorsKeys } from '@/lib/chartUtils'
 import { Api } from '@/lib/api'
 import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, usePresetPreview } from '@/lib/datePresets'
@@ -255,7 +255,8 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
     return () => { aborted = true; window.removeEventListener('table-sample-values-change', handler) }
   }, [kind, field, local.id, (local.querySpec as any)?.source, (local as any).datasourceId])
 
-  const ve = pivot.values.find(v => (v.measureId || v.field) === field)
+  const _veIdx = /^v\d+$/.test(String(field)) ? Number(String(field).slice(1)) : -1
+  const ve = _veIdx >= 0 ? (pivot.values[_veIdx] ?? undefined) : pivot.values.find(v => (v.measureId || v.field) === field)
   const isNum = numericFields.includes(field)
   const isDate = dateLikeFields.includes(field)
   const samples = localSamples.length > 0 ? localSamples : (samplesByField[field] || [])
@@ -269,7 +270,7 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
     setLocal(next); updateConfig(next)
   }
   const patchValue = (p: object) =>
-    applyPivot({ ...pivot, values: pivot.values.map(v => (v.measureId||v.field) === field ? { ...v, ...p } : v) })
+    applyPivot({ ...pivot, values: pivot.values.map((v, i) => (_veIdx >= 0 ? i === _veIdx : (v.measureId||v.field) === field) ? { ...v, ...p } : v) })
   const patchOpt = (p: Partial<NonNullable<WidgetConfig['options']>>) => {
     const next = { ...local, options: { ...(local.options || {}), ...p } }
     setLocal(next); updateConfig(next)
@@ -330,10 +331,11 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
                   </select>
                 </FormRow>
               )}
-              {isPeriodicAgg && (
-                <FormRow label="Numerator">
+              {(isPeriodicAgg || isMaAgg) && (
+                <FormRow label="Daily base agg">
                   <select className={selectCls()} value={(ve as any)?.avgNumerator || 'sum'} onChange={e => patchValue({ avgNumerator: e.target.value })}>
                     <option value="sum">sum</option>
+                    <option value="avg">avg</option>
                     <option value="count">count</option>
                     <option value="distinct">distinct</option>
                   </select>
@@ -347,62 +349,78 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
             </>
           )
         })()}
-        <FormRow label="Format">
-          <select className={selectCls()} value={ve?.format||'none'} onChange={e=>patchValue({format:e.target.value})}>
-            {FORMAT_OPTIONS.map(f=><option key={f} value={f}>{f}</option>)}
-          </select>
-        </FormRow>
         <FormRow label="Label" full>
           <input className={inputCls()} placeholder={field} value={ve?.label||''} onChange={e=>patchValue({label:e.target.value||undefined})} />
         </FormRow>
-        <FormRow label="Prefix">
-          <input className={inputCls('w-24')} value={(ve as any)?.prefix||''} onChange={e=>patchValue({prefix:e.target.value||undefined})} />
-        </FormRow>
-        <FormRow label="Suffix">
-          <input className={inputCls('w-24')} value={(ve as any)?.suffix||''} onChange={e=>patchValue({suffix:e.target.value||undefined})} />
-        </FormRow>
-        {isChart && (
-          <FormRow label="Color">
-            <select className={selectCls()} value={currentColor}
-              onChange={e=>{ const k=e.target.value as AvailableChartColorsKeys; patchValue({colorToken:colorKeyToToken(k)}) }}>
-              {chartColors.slice(0,5).map(c=><option key={c} value={c}>{c}</option>)}
+        <FormGrid>
+          <FormRow label="Format" half>
+            <select className={selectCls()} value={ve?.format||'none'} onChange={e=>patchValue({format:e.target.value})}>
+              {FORMAT_OPTIONS.map(f=><option key={f} value={f}>{f}</option>)}
             </select>
           </FormRow>
-        )}
-        {hasSecondaryAxis && (
-          <FormRow label="Secondary axis">
-            <Switch checked={!!ve?.secondaryAxis} onChangeAction={v=>patchValue({secondaryAxis:v})} />
-          </FormRow>
-        )}
-        <FormRow label="Sort by">
-          <select className={selectCls()} value={(ve as any)?.sort?.by||''}
-            onChange={e=>{ const by=e.target.value; patchValue({sort:by?{by,direction:(ve as any)?.sort?.direction||'desc'}:undefined}) }}>
-            <option value="">None</option>
-            <option value="x">X label</option>
-            <option value="value">Value</option>
-          </select>
-        </FormRow>
-        {(ve as any)?.sort?.by && (
-          <FormRow label="Direction">
-            <select className={selectCls()} value={(ve as any)?.sort?.direction||'desc'}
-              onChange={e=>patchValue({sort:{...((ve as any)?.sort||{by:'value'}),direction:e.target.value}})}>
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
-            </select>
-          </FormRow>
-        )}
-        {advancedMode && (
-          <>
-            <FormRow label="Stack group">
-              <input className={inputCls('w-24')} placeholder="e.g. A" value={ve?.stackId||''}
-                onChange={e=>patchValue({stackId:e.target.value||undefined})} />
-            </FormRow>
-            <FormRow label="Fill style">
-              <select className={selectCls()} value={ve?.style||'solid'} onChange={e=>patchValue({style:e.target.value})}>
-                <option value="solid">Solid</option>
-                <option value="gradient">Gradient</option>
+          {isChart && (
+            <FormRow label="Color" half>
+              <select className={selectCls()} value={currentColor}
+                onChange={e=>{ const k=e.target.value as AvailableChartColorsKeys; patchValue({colorToken:colorKeyToToken(k)}) }}>
+                {chartColors.slice(0,5).map(c=><option key={c} value={c}>{c}</option>)}
               </select>
             </FormRow>
+          )}
+          <FormRow label="Prefix" half>
+            <input className={inputCls()} value={(ve as any)?.prefix||''} onChange={e=>patchValue({prefix:e.target.value||undefined})} />
+          </FormRow>
+          <FormRow label="Suffix" half>
+            <input className={inputCls()} value={(ve as any)?.suffix||''} onChange={e=>patchValue({suffix:e.target.value||undefined})} />
+          </FormRow>
+        </FormGrid>
+        {hasSecondaryAxis && (
+          <FormGrid>
+            <FormRow label="Series type" half>
+              <select className={selectCls()} value={(ve as any)?.seriesType || 'default'} onChange={e => patchValue({ seriesType: e.target.value === 'default' ? undefined : e.target.value })}>
+                <option value="default">Follow chart type</option>
+                <option value="line">Line</option>
+                <option value="bar">Bar</option>
+                <option value="area">Area</option>
+              </select>
+            </FormRow>
+            <FormRow label="Secondary axis" half>
+              <div className="pt-1"><Switch checked={!!ve?.secondaryAxis} onChangeAction={v=>patchValue({secondaryAxis:v})} /></div>
+            </FormRow>
+          </FormGrid>
+        )}
+        <FormGrid>
+          <FormRow label="Sort by" half>
+            <select className={selectCls()} value={(ve as any)?.sort?.by||''}
+              onChange={e=>{ const by=e.target.value; patchValue({sort:by?{by,direction:(ve as any)?.sort?.direction||'desc'}:undefined}) }}>
+              <option value="">None</option>
+              <option value="x">X label</option>
+              <option value="value">Value</option>
+            </select>
+          </FormRow>
+          {(ve as any)?.sort?.by && (
+            <FormRow label="Direction" half>
+              <select className={selectCls()} value={(ve as any)?.sort?.direction||'desc'}
+                onChange={e=>patchValue({sort:{...((ve as any)?.sort||{by:'value'}),direction:e.target.value}})}>
+                <option value="desc">Descending</option>
+                <option value="asc">Ascending</option>
+              </select>
+            </FormRow>
+          )}
+        </FormGrid>
+        {advancedMode && (
+          <>
+            <FormGrid>
+              <FormRow label="Stack group" half>
+                <input className={inputCls()} placeholder="e.g. A" value={ve?.stackId||''}
+                  onChange={e=>patchValue({stackId:e.target.value||undefined})} />
+              </FormRow>
+              <FormRow label="Fill style" half>
+                <select className={selectCls()} value={ve?.style||'solid'} onChange={e=>patchValue({style:e.target.value})}>
+                  <option value="solid">Solid</option>
+                  <option value="gradient">Gradient</option>
+                </select>
+              </FormRow>
+            </FormGrid>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">Conditional rules</span>

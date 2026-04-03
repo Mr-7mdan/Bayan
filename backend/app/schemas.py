@@ -171,7 +171,7 @@ class DashboardDefinition(BaseModel):
 
 class DashboardSaveRequest(BaseModel):
     id: Optional[str] = None
-    name: str
+    name: Optional[str] = None
     userId: Optional[str] = None
     definition: DashboardDefinition
 

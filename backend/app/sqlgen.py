@@ -685,6 +685,9 @@ def build_sql(
     for cc in (custom_columns or []):
         name = str(cc.get("name") or "")
         expr = str(cc.get("expr") or "")
+        # Strip leading '=' from Excel-style formula notation (e.g., "=Volume/10000" -> "Volume/10000")
+        if expr.startswith("="):
+            expr = expr[1:]
         ctype = str(cc.get("type") or "").lower()
         
         # Always include custom columns in the expression map so dependencies can be resolved

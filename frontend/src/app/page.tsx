@@ -671,7 +671,7 @@ export default function HomePage() {
             ? { ...wcfg, querySpec: { ...wcfg.querySpec, where: cleaned } }
             : wcfg
         }
-        await Api.saveDashboard({ id: dashboardId, name: dashboardName || 'New Dashboard', userId: user?.id || 'dev_user', definition: { ...(def as any), widgets: sanitizedWidgets, options } })
+        await Api.saveDashboard({ id: dashboardId, userId: user?.id || 'dev_user', definition: { ...(def as any), widgets: sanitizedWidgets, options } })
         userEditedRef.current = false
       } catch {
         // ignore autosave errors
