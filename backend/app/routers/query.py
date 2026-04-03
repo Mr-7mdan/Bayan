@@ -14,7 +14,7 @@ import sys
 import math
 import threading
 
-from ..query_pool import query_executor, QUERY_MAX_QUEUED, shutdown_query_pool as _shutdown_qp
+from ..query_pool import get_query_executor, QUERY_MAX_QUEUED
 import app.query_pool as _qpool
 
 logger = logging.getLogger(__name__)
@@ -1603,7 +1603,7 @@ async def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorI
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            query_executor,
+            get_query_executor(),
             functools.partial(_run_query_sync, payload, db, actorId, publicId, token),
         )
     finally:
@@ -2183,7 +2183,7 @@ async def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            query_executor,
+            get_query_executor(),
             functools.partial(_run_query_spec_guarded, payload, db, actorId, publicId, token),
         )
     finally:
@@ -5725,7 +5725,7 @@ async def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            query_executor,
+            get_query_executor(),
             functools.partial(_distinct_values_sync, payload, db, actorId, publicId, token),
         )
     finally:
@@ -6378,7 +6378,7 @@ async def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorI
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            query_executor,
+            get_query_executor(),
             functools.partial(_run_pivot_sync, payload, db, actorId, publicId, token),
         )
     finally:
@@ -8592,7 +8592,7 @@ async def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorI
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            query_executor,
+            get_query_executor(),
             functools.partial(_pivot_sql_sync, payload, db, actorId, publicId, token),
         )
     finally:
@@ -8688,7 +8688,7 @@ async def period_totals(payload: dict, db: Session = Depends(get_db), actorId: O
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            query_executor,
+            get_query_executor(),
             functools.partial(_period_totals_sync, payload, db, actorId, publicId, token),
         )
     finally:
@@ -9820,7 +9820,7 @@ async def period_totals_batch(payload: dict, db: Session = Depends(get_db), acto
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            query_executor,
+            get_query_executor(),
             functools.partial(_period_totals_batch_sync, payload, db, actorId, publicId, token),
         )
     finally:
@@ -9889,7 +9889,7 @@ async def period_totals_compare(payload: dict, db: Session = Depends(get_db), ac
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            query_executor,
+            get_query_executor(),
             functools.partial(_period_totals_compare_sync, payload, db, actorId, publicId, token),
         )
     finally:

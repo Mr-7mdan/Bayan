@@ -30,7 +30,7 @@ from .routers import ai as ai_router
 from .routers import users as users_router
 from .routers import admin as admin_router
 from .scheduler import ensure_scheduler_started, schedule_all_jobs, schedule_all_alert_jobs, shutdown_scheduler
-from .query_pool import shutdown_query_pool
+from .query_pool import shutdown_query_pool, get_query_executor
 from .routers import alerts as alerts_router
 from .routers import snapshot as snapshot_router
 from .routers import contacts as contacts_router
