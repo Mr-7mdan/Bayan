@@ -40,6 +40,21 @@ from .routers import holidays as holidays_router
 from .routers import date_presets as date_presets_router
 from .metrics import counter_inc, gauge_inc, gauge_dec, summary_observe, render_prometheus
 
+# --- Security: refuse to start with placeholder secret key ---
+_PLACEHOLDER_KEYS = {"BayanSecretKey", "BayanSecretKey-CHANGE-ME", "change-me", ""}
+if (settings.secret_key or "").strip() in _PLACEHOLDER_KEYS:
+    import sys
+    print(
+        "\n[SECURITY] FATAL: SECRET_KEY is not set or still uses a placeholder value.\n"
+        "  Set a strong random SECRET_KEY in your .env file or environment.\n"
+        "  Example: SECRET_KEY=$(python3 -c \"import secrets; print(secrets.token_urlsafe(48))\")\n",
+        file=sys.stderr,
+    )
+    if (settings.environment or "").lower() not in ("dev", "development", "test"):
+        raise SystemExit(1)
+    else:
+        print("[SECURITY] WARNING: Continuing with placeholder key in dev mode.\n", file=sys.stderr)
+
 app = FastAPI(title=settings.app_name)
 
 # CORS: always use explicit origins to ensure ACAO is set with credentials

@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     # CORS (comma-separated string)
     cors_origins: str = Field(default="http://localhost:3000,http://127.0.0.1:3000")
 
-    # Secrets
-    secret_key: str = Field(default="BayanSecretKey")
+    # Secrets — MUST be set via SECRET_KEY env var; app refuses to start with the placeholder
+    secret_key: str = Field(default="BayanSecretKey-CHANGE-ME")
 
     # Local analytical store (DuckDB)
     duckdb_path: str = Field(default=".data/local.duckdb")

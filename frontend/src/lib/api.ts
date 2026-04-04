@@ -822,6 +822,10 @@ export const Api = {
     http<{ ok: boolean }>('/users/change-password', { method: 'POST', body: JSON.stringify(payload) }),
   resetPassword: (payload: { email: string; newPassword: string }) =>
     http<{ ok: boolean }>('/users/reset-password', { method: 'POST', body: JSON.stringify(payload) }),
+  requestPasswordReset: (email: string) =>
+    http<{ ok: boolean }>('/users/request-password-reset', { method: 'POST', body: JSON.stringify({ email }) }),
+  confirmPasswordReset: (token: string, newPassword: string) =>
+    http<{ ok: boolean }>('/users/confirm-password-reset', { method: 'POST', body: JSON.stringify({ token, newPassword }) }),
   // --- Admin ---
   adminListUsers: (actorId: string) => http<UserRowOut[]>(`/users/admin/list?actorId=${encodeURIComponent(actorId)}`),
   adminCreateUser: (actorId: string, payload: { name: string; email: string; password: string; role: 'admin'|'user' }) =>

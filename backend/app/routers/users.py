@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -38,6 +38,8 @@ from ..schemas import (
     LoginRequest,
     ChangePasswordRequest,
     ResetPasswordRequest,
+    RequestPasswordResetPayload,
+    ConfirmPasswordResetPayload,
     UserOut,
     UserRowOut,
     AdminCreateUserRequest,
@@ -45,7 +47,7 @@ from ..schemas import (
     AdminSetPasswordRequest,
 )
 from uuid import uuid4
-from ..security import hash_password, verify_password
+from ..security import hash_password, verify_password, needs_rehash, sign_reset_token, verify_reset_token
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -228,6 +230,11 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> UserOut:
     u = db.query(User).filter(User.email == email).first()
     if not u or not verify_password(payload.password, u.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    # Transparently upgrade legacy SHA256 hashes to argon2id on successful login
+    if needs_rehash(u.password_hash):
+        u.password_hash = hash_password(payload.password)
+        db.add(u)
+        db.commit()
     return UserOut(id=u.id, name=u.name, email=u.email, role=u.role)
 
 
@@ -245,8 +252,56 @@ def change_password(payload: ChangePasswordRequest, db: Session = Depends(get_db
     return {"ok": True}
 
 
+@router.post("/request-password-reset", response_model=dict)
+def request_password_reset(payload: RequestPasswordResetPayload, db: Session = Depends(get_db)):
+    """Step 1: User enters email. If valid, send a reset link via email."""
+    from ..config import settings as _cfg
+    email = (payload.email or "").strip().lower()
+    u = db.query(User).filter(User.email == email).first()
+    if not u:
+        # Always return ok to prevent email enumeration
+        return {"ok": True}
+    token = sign_reset_token(u.id, ttl_seconds=3600)
+    reset_url = f"{_cfg.frontend_base_url}/reset-password?token={token}"
+    # Send email using existing infrastructure
+    try:
+        from ..alerts_service import send_email
+        html = (
+            f"<h2>Password Reset</h2>"
+            f"<p>You requested a password reset for your Bayan account.</p>"
+            f"<p><a href=\"{reset_url}\" style=\"display:inline-block;padding:10px 24px;"
+            f"background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;"
+            f"font-weight:600;\">Reset Password</a></p>"
+            f"<p style=\"margin-top:16px;font-size:13px;color:#666;\">This link expires in 1 hour. "
+            f"If you didn't request this, ignore this email.</p>"
+            f"<p style=\"font-size:12px;color:#999;margin-top:24px;word-break:break-all;\">"
+            f"Or copy this link: {reset_url}</p>"
+        )
+        send_email(db, subject="Password Reset - Bayan", to=[u.email], html=html)
+    except Exception:
+        pass  # email failure should not block the response
+    return {"ok": True}
+
+
+@router.post("/confirm-password-reset", response_model=dict)
+def confirm_password_reset(payload: ConfirmPasswordResetPayload, db: Session = Depends(get_db)):
+    """Step 2: User clicks link, enters new password. Token is verified and password updated."""
+    user_id = verify_reset_token(payload.token)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    u = db.get(User, user_id)
+    if not u:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    u.password_hash = hash_password(payload.newPassword)
+    db.add(u)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/reset-password", response_model=dict)
-def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db), actorId: str = Query(...)):
+    """Admin-only direct password reset (legacy endpoint)."""
+    _require_admin(db, actorId)
     email = (payload.email or "").strip().lower()
     u = db.query(User).filter(User.email == email).first()
     if not u:

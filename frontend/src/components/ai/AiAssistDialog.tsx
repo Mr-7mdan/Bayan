@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import DOMPurify from 'dompurify'
 import { createPortal } from 'react-dom'
 import { Api, QueryApi, type IntrospectResponse, type TablesOnlyResponse } from '@/lib/api'
 import * as SchemaCache from '@/lib/schemaCache'
@@ -560,7 +561,7 @@ export default function AiAssistDialog({
         <div className="mb-3">
           <div className="relative">
             {/* Highlight overlay for inline badges */}
-            <div className="pointer-events-none absolute inset-0 px-3 py-3 pr-32 rounded-xl whitespace-pre-wrap break-words text-sm" dangerouslySetInnerHTML={{ __html: highlightedPromptHtml || '&nbsp;' }} />
+            <div className="pointer-events-none absolute inset-0 px-3 py-3 pr-32 rounded-xl whitespace-pre-wrap break-words text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightedPromptHtml || '&nbsp;') }} />
             <textarea
               ref={promptRef}
               className="w-full min-h-[120px] px-3 py-3 pr-32 rounded-xl border bg-transparent text-transparent text-sm"

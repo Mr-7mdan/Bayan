@@ -30,7 +30,6 @@ export default function LoginPage() {
   // Reset password dialog state
   const [resetOpen, setResetOpen] = useState(false)
   const [rpEmail, setRpEmail] = useState('')
-  const [rpNew, setRpNew] = useState('')
   const [rpBusy, setRpBusy] = useState(false)
   const [rpMsg, setRpMsg] = useState<string | null>(null)
   const { resolved, darkVariant, setDarkVariant } = useTheme()
@@ -213,26 +212,24 @@ export default function LoginPage() {
             <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[hsl(var(--border))] bg-card p-4 shadow-card">
               <Dialog.Title className="text-lg font-semibold">Reset password</Dialog.Title>
               <div className="mt-3 space-y-3">
+                <p className="text-sm text-muted-foreground">Enter your email address and we'll send you a link to reset your password.</p>
                 <label className="text-sm block">Email
                   <input type="email" className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-background" value={rpEmail} onChange={(e) => setRpEmail(e.target.value)} />
-                </label>
-                <label className="text-sm block">New Password
-                  <input type="password" className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-background" value={rpNew} onChange={(e) => setRpNew(e.target.value)} />
                 </label>
                 {rpMsg && <div className="text-sm text-emerald-600">{rpMsg}</div>}
                 <div className="flex items-center justify-end gap-2">
                   <Dialog.Close asChild>
                     <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Close</button>
                   </Dialog.Close>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" disabled={rpBusy || !rpEmail || !rpNew} onClick={async () => {
+                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" disabled={rpBusy || !rpEmail} onClick={async () => {
                     setRpBusy(true); setRpMsg(null);
                     try {
-                      await Api.resetPassword({ email: rpEmail, newPassword: rpNew })
-                      setRpMsg('Password has been reset. You can now sign in with your new password.')
+                      await Api.requestPasswordReset(rpEmail)
+                      setRpMsg('If an account exists with that email, a reset link has been sent. Check your inbox.')
                     } catch (e: any) {
-                      setRpMsg(e?.message || 'Failed to reset password')
+                      setRpMsg(e?.message || 'Failed to send reset email')
                     } finally { setRpBusy(false) }
-                  }}>{rpBusy ? 'Resetting…' : 'Reset password'}</button>
+                  }}>{rpBusy ? 'Sending…' : 'Send reset link'}</button>
                 </div>
               </div>
             </Dialog.Content>

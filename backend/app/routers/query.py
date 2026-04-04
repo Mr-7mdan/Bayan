@@ -38,6 +38,23 @@ try:
 except Exception:  # pragma: no cover
     _duckdb = None
 
+import re as _re_mod
+
+_SAFE_SOURCE_RE = _re_mod.compile(r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$')
+
+def _validate_source(source: str) -> str:
+    """Validate that a source table name contains only safe identifier characters.
+    Allows 1-3 dot-separated parts (table, schema.table, catalog.schema.table).
+    Raises HTTPException 400 if invalid."""
+    s = (source or '').strip()
+    if not s:
+        raise HTTPException(status_code=400, detail="source is required")
+    # Strip any existing quoting before validation
+    clean = s.replace('"', '').replace('`', '').replace('[', '').replace(']', '')
+    if not _SAFE_SOURCE_RE.match(clean):
+        raise HTTPException(status_code=400, detail=f"Invalid source table name: {s}")
+    return s
+
 
 def get_db():
     db = SessionLocal()
@@ -2186,6 +2203,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     """
     # Debug: Log WHERE clause and incoming X at the start
     spec = payload.spec
+    _validate_source(spec.source)
     x_raw = spec.x if hasattr(spec, 'x') else None
     y_raw = spec.y if hasattr(spec, 'y') else None
     agg_raw = spec.agg if hasattr(spec, 'agg') else None
@@ -5481,6 +5499,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
 @router.post("/distinct")
 def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> DistinctResponse:
+    _validate_source(payload.source)
     # Resolve date presets at execution time
     if getattr(payload, 'where', None):
         payload.where = _resolve_date_presets(payload.where)
@@ -6130,6 +6149,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
     """Server-side pivot aggregation.
     Returns long-form grouped rows: [row_dims..., col_dims..., value].
     """
+    _validate_source(payload.source)
     import sys
     sys.stderr.write(f"[PIVOT_START] datasourceId={payload.datasourceId}, widgetId={payload.widgetId}, source={payload.source}\n")
     sys.stderr.flush()

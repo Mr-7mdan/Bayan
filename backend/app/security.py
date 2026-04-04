@@ -6,8 +6,12 @@ from typing import Optional, Tuple
 import hmac
 import time
 from cryptography.fernet import Fernet, InvalidToken
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 
 from .config import settings
+
+_ph = PasswordHasher()
 
 
 def _derive_key(secret: str) -> bytes:
@@ -33,23 +37,86 @@ def decrypt_text(token: str) -> Optional[str]:
         return None
 
 
-# --- Simple password hashing helpers (for demo/local use) ---
+# --- Password hashing (argon2id with automatic per-user salt) ---
 def hash_password(password: str) -> str:
-    """Deterministically hash a password using the app secret.
+    """Hash a password using argon2id with a random per-user salt."""
+    return _ph.hash(password or "")
 
-    NOTE: For production systems, use a dedicated password hashing algorithm
-    like argon2 or bcrypt with per-user salts. This helper is intentionally
-    simple for local/demo environments.
-    """
+
+def _is_legacy_hash(password_hash: str) -> bool:
+    """Detect old SHA256 hex-digest hashes (64 hex chars, no $ prefix)."""
+    return bool(password_hash and len(password_hash) == 64 and not password_hash.startswith("$"))
+
+
+def _verify_legacy(password: str, password_hash: str) -> bool:
+    """Verify against old SHA256+secret scheme for migration."""
     digest = hashlib.sha256((settings.secret_key + ":" + (password or "")).encode("utf-8")).hexdigest()
-    return digest
+    return hmac.compare_digest(digest, password_hash or "")
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    """Verify a password against its hash.
+
+    Supports both new argon2id hashes and legacy SHA256 hashes for
+    transparent migration. When a legacy hash matches, the caller should
+    re-hash with hash_password() and update the stored hash.
+    """
+    if not password_hash:
+        return False
+    # Legacy SHA256 hashes: 64-char hex without $ prefix
+    if _is_legacy_hash(password_hash):
+        return _verify_legacy(password, password_hash)
+    # Argon2id hash
     try:
-        return hash_password(password) == (password_hash or "")
+        return _ph.verify(password_hash, password or "")
+    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return False
     except Exception:
         return False
+
+
+def needs_rehash(password_hash: str) -> bool:
+    """Check if a password hash should be upgraded (legacy or weak params)."""
+    if _is_legacy_hash(password_hash):
+        return True
+    try:
+        return _ph.check_needs_rehash(password_hash)
+    except Exception:
+        return False
+
+
+# --- Password reset tokens (HMAC-signed, time-limited) ---
+def sign_reset_token(user_id: str, ttl_seconds: int = 3600) -> str:
+    """Create a signed password-reset token valid for ttl_seconds (default 1h)."""
+    now = int(time.time())
+    exp = now + ttl_seconds
+    payload = f"reset:{user_id}:{exp}".encode("utf-8")
+    sig = hmac.new(settings.secret_key.encode("utf-8"), payload, hashlib.sha256).digest()
+    return f"{_b64url_encode(payload)}.{_b64url_encode(sig)}"
+
+
+def verify_reset_token(token: str) -> Optional[str]:
+    """Verify a reset token. Returns user_id if valid, None otherwise."""
+    try:
+        if not token:
+            return None
+        parts = token.split(".")
+        if len(parts) != 2:
+            return None
+        payload_b = _b64url_decode(parts[0])
+        sig_b = _b64url_decode(parts[1])
+        expected = hmac.new(settings.secret_key.encode("utf-8"), payload_b, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig_b, expected):
+            return None
+        payload = payload_b.decode("utf-8")
+        prefix, user_id, exp_s = payload.split(":", 2)
+        if prefix != "reset":
+            return None
+        if int(time.time()) > int(exp_s):
+            return None
+        return user_id
+    except Exception:
+        return None
 
 
 # --- Server-signed short-lived embed tokens ---

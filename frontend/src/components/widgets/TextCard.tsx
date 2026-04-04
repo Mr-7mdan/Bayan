@@ -1,6 +1,7 @@
 "use client"
 
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
+import DOMPurify from 'dompurify'
 import type { WidgetConfig } from '@/types/widgets'
 
 export default function TextCard({
@@ -94,7 +95,7 @@ export default function TextCard({
           )}
           {/* Rich HTML or Labels */}
           {text?.html ? (
-            <div className="prose dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitize ? sanitizeHtml(text.html) : text.html }} />
+            <div className="prose dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(sanitize ? sanitizeHtml(text.html) : text.html) }} />
           ) : (
             <div className="space-y-1">
               {(text?.labels || []).map((lbl) => {

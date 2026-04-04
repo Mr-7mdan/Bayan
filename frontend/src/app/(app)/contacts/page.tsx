@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import DOMPurify from 'dompurify'
 import * as Tabs from '@radix-ui/react-tabs'
 import { Select, SelectItem, Card, Title, Text } from '@tremor/react'
 import { Switch } from '@/components/Switch'
@@ -620,7 +621,7 @@ export default function ContactsPage() {
                 <Tabs.Content value="preview" className="mt-2">
                   <div className="rounded-md border bg-background p-2 max-h-64 overflow-auto">
                     <div className="text-[11px] mb-1 opacity-70">Preview</div>
-                    <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: bulkEmailDraft.html || '<div style=\"opacity:.6\">(Empty)</div>' }} />
+                    <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bulkEmailDraft.html || '<div style=\"opacity:.6\">(Empty)</div>') }} />
                   </div>
                 </Tabs.Content>
               </Tabs.Root>

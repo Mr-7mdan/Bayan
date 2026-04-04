@@ -414,6 +414,15 @@ class ChangePasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     email: str
+    newPassword: str = ""  # kept for admin-reset compat
+
+
+class RequestPasswordResetPayload(BaseModel):
+    email: str
+
+
+class ConfirmPasswordResetPayload(BaseModel):
+    token: str
     newPassword: str
 
 

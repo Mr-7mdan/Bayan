@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useState } from 'react'
+import DOMPurify from 'dompurify'
 import { createPortal } from 'react-dom'
 import { PivotBuilder, type PivotAssignments } from '@/components/builder/PivotBuilder'
 import type { WidgetConfig } from '@/types/widgets'
@@ -1994,7 +1995,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                     return (
                       <div className="rounded-md border bg-[hsl(var(--card))] p-3 text-sm">
                         {msgKind==='email' ? (
-                          <div dangerouslySetInnerHTML={{ __html: rendered.replace(/\n/g,'<br/>') }} />
+                          <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rendered.replace(/\n/g,'<br/>')) }} />
                         ) : (
                           <pre className="whitespace-pre-wrap font-sans">{rendered}</pre>
                         )}
