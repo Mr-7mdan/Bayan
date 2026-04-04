@@ -1,8 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useState, useRef } from 'react'
-import { Api, cancelAllQueries, type NotificationOut } from '@/lib/api'
-import { resetReportQueryQueue } from '@/components/widgets/ReportCard'
+import { Api, type NotificationOut } from '@/lib/api'
 import { RiCheckLine } from '@remixicon/react'
 import { usePathname, useRouter } from 'next/navigation'
 import Sidebar from '@/components/shell/Sidebar'
@@ -29,15 +28,6 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
     // allow unauthenticated access to public view pages
     if (!user) router.replace('/login')
   }, [loading, user, router])
-
-  // Cancel all in-flight queries when navigating to a different page —
-  // prevents report variable queries from saturating browser connections
-  useEffect(() => {
-    return () => {
-      cancelAllQueries()
-      resetReportQueryQueue()
-    }
-  }, [pathname])
 
   // Fetch one-shot notifications after login (popped server-side)
   useEffect(() => {

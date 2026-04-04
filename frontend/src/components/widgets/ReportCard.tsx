@@ -35,11 +35,6 @@ function _reportQueryRelease(): void {
     next()
   }
 }
-/** Reset the report query concurrency queue — called on navigation to prevent leaked slots. */
-export function resetReportQueryQueue(): void {
-  _reportQueryActive = 0
-  while (_reportQueryQueue.length) _reportQueryQueue.shift()
-}
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Format date using a pattern like "dd MMM yyyy", "dd/MM/yyyy", "MMM yyyy", "HH:mm"
@@ -174,7 +169,7 @@ function formatValue(raw: unknown, variable: ReportVariable): string {
 function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<string, any>) {
   return {
     queryKey: ['report-var', variable.id, variable.datasourceId, variable.source, variable.value?.field, variable.value?.agg, variable.value?.avgDateField, variable.value?.avgNumerator, variable.value?.applyHolidays, JSON.stringify(variable.where), JSON.stringify(globalFilters), variable.multiplyBy, variable.divideBy, variable.roundMode, variable.roundDecimals],
-    queryFn: async ({ signal }: { signal?: AbortSignal }) => {
+    queryFn: async () => {
       if (!variable.source || !variable.value?.field) return null
       await _reportQueryAcquire()
       try {
@@ -231,7 +226,7 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
           if (variable.value.applyHolidays) spec.applyHolidays = true
         }
         console.log(`[ReportCard] Querying var=${variable.name}, agg=${agg}, field=${field}, where=`, where)
-        const r = await QueryApi.querySpec({ spec, datasourceId: variable.datasourceId, limit: 1000, offset: 0, includeTotal: false }, signal)
+        const r = await QueryApi.querySpec({ spec, datasourceId: variable.datasourceId, limit: 1000, offset: 0, includeTotal: false })
         console.log(`[ReportCard] Response for var=${variable.name}:`, { columns: r?.columns, rows: r?.rows, rowCount: r?.rows?.length })
         if (!r?.rows?.length) {
           console.log(`[ReportCard] No rows for var=${variable.name}, returning null`)
@@ -264,7 +259,7 @@ function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<st
           limit: 1,
           offset: 0,
         }
-        const r = await QueryApi.querySpec({ spec, datasourceId: variable.datasourceId, limit: 1, offset: 0, includeTotal: false }, signal)
+        const r = await QueryApi.querySpec({ spec, datasourceId: variable.datasourceId, limit: 1, offset: 0, includeTotal: false })
         if (!r?.rows?.length) return null
         rawValue = Number(r.rows[0]?.[0] ?? 0)
       }

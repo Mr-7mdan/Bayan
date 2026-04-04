@@ -341,34 +341,6 @@ async function _acquireWidgetSlot(): Promise<() => void> {
   })
 }
 
-// ── Direct backend routing for query endpoints ─────────────────────────────
-// Bypasses the Next.js proxy (getApiBase) so query traffic uses a separate
-// browser connection pool, preventing report variable queries from starving
-// page navigation and dashboard saves.
-const _DIRECT_API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '')
-function _canUseDirect(): boolean {
-  if (!_DIRECT_API_BASE) return false
-  if (typeof window !== 'undefined') {
-    const isHttps = (window.location.protocol || '').toLowerCase() === 'https:'
-    if (isHttps && /^http:\/\//i.test(_DIRECT_API_BASE)) return false
-  }
-  return true
-}
-async function httpDirect<T>(path: string, init?: RequestInit, timeoutMs = 15000): Promise<T> {
-  if (!_canUseDirect()) return http<T>(path, init, timeoutMs)
-  return http<T>(path, init, timeoutMs, _DIRECT_API_BASE)
-}
-
-// ── Cancel all in-flight widget queries (called on navigation) ──────────────
-export function cancelAllQueries(): void {
-  for (const [, controller] of _widgetControllers) {
-    try { controller.abort('navigation') } catch {}
-  }
-  _widgetControllers.clear()
-  _widgetRunning = 0
-  while (_widgetQueue.length) _widgetQueue.shift()
-}
-
 let _offlineUntil = 0
 const _inflightGet = new Map<string, Promise<any>>()
 const _recentGetCache = new Map<string, { exp: number; promise: Promise<any> }>()
@@ -386,7 +358,7 @@ function _cacheTtlForPath(p: string): number {
   return GET_CACHE_MS
 }
 
-async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000, _baseOverride?: string): Promise<T> {
+async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Promise<T> {
   const controller = new AbortController()
   const externalSignal: AbortSignal | undefined = (init as any)?.signal as AbortSignal | undefined
   const onExternalAbort = externalSignal ? () => { try { controller.abort((externalSignal as any).reason) } catch { controller.abort() } } : undefined
@@ -442,7 +414,7 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000, _bas
         const max429 = 2
         let res: Response
         while (true) {
-          res = await fetch(`${_baseOverride || getApiBase()}${finalPath}`.replace(/\/$/, ''), {
+          res = await fetch(`${getApiBase()}${finalPath}`.replace(/\/$/, ''), {
             ...restInit,
             headers,
             cache: 'no-store',
@@ -501,7 +473,7 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000, _bas
     const max429 = 2
     let res: Response
     while (true) {
-      res = await fetch(`${_baseOverride || getApiBase()}${finalPath}`.replace(/\/$/, ''), {
+      res = await fetch(`${getApiBase()}${finalPath}`.replace(/\/$/, ''), {
         ...restInit,
         headers,
         cache: 'no-store',
@@ -600,7 +572,7 @@ export const Api = {
     http<ShareEntryOut[]>(`/dashboards/${encodeURIComponent(dashId)}/shares${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`),
   deleteShare: (dashId: string, userId: string, actorId?: string) =>
     http<{ deleted: number }>(`/dashboards/${encodeURIComponent(dashId)}/shares/${encodeURIComponent(userId)}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'DELETE' }),
-  getDatasource: (id: string, actorId?: string) => httpDirect<DatasourceDetailOut>(`/datasources/${id}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`),
+  getDatasource: (id: string, actorId?: string) => http<DatasourceDetailOut>(`/datasources/${id}${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`),
   listDatasourceShares: (id: string, actorId?: string) =>
     http<DatasourceShareOut[]>(`/datasources/${encodeURIComponent(id)}/shares${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`),
   addDatasourceShare: (id: string, payload: { userId: string; permission?: 'ro'|'rw' }, actorId?: string) =>
@@ -709,14 +681,14 @@ export const Api = {
   dashboardsClose: (kind: 'builder'|'public', dashboardId: string, sessionId: string) => (
     http<{ ok: boolean }>(`/metrics/dashboards/close`, { method: 'POST', body: JSON.stringify({ kind, dashboardId, sessionId }) })
   ),
-  introspect: (id: string, signal?: AbortSignal) => httpDirect<IntrospectResponse>(`/datasources/${id}/schema`, { signal }, 60000),
-  introspectLocal: (signal?: AbortSignal) => httpDirect<IntrospectResponse>(`/datasources/_local/schema`, { signal }, 60000),
+  introspect: (id: string, signal?: AbortSignal) => http<IntrospectResponse>(`/datasources/${id}/schema`, { signal }, 60000),
+  introspectLocal: (signal?: AbortSignal) => http<IntrospectResponse>(`/datasources/_local/schema`, { signal }, 60000),
   deleteDatasource: (id: string) => http<void>(`/datasources/${id}`, { method: 'DELETE' }),
   health: () => http<{ status: string; app: string; env: string }>(`/healthz`),
-  query: (payload: QueryRequest) => httpDirect<QueryResponse>('/query', { method: 'POST', body: JSON.stringify(payload) }),
-  pivot: (payload: PivotRequest) => httpDirect<QueryResponse>('/query/pivot', { method: 'POST', body: JSON.stringify(payload) }),
+  query: (payload: QueryRequest) => http<QueryResponse>('/query', { method: 'POST', body: JSON.stringify(payload) }),
+  pivot: (payload: PivotRequest) => http<QueryResponse>('/query/pivot', { method: 'POST', body: JSON.stringify(payload) }),
   // SQL preview generation may also be slow with complex transforms; extend timeout a bit
-  pivotSql: (payload: PivotRequest) => httpDirect<PivotSqlResponse>('/query/pivot/sql', { method: 'POST', body: JSON.stringify(payload) }, 30000),
+  pivotSql: (payload: PivotRequest) => http<PivotSqlResponse>('/query/pivot/sql', { method: 'POST', body: JSON.stringify(payload) }, 30000),
   queryForWidget: (widgetId: string, payload: QueryRequest, actorId?: string) => {
     const rid = _newRequestId()
     const prev = _widgetControllers.get(widgetId)
@@ -730,7 +702,7 @@ export const Api = {
       if (ctr.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       const release = await _acquireWidgetSlot()
       try {
-        return await httpDirect<QueryResponse>(path, { method: 'POST', body: JSON.stringify({ ...payload, requestId: rid }), signal: ctr.signal })
+        return await http<QueryResponse>(path, { method: 'POST', body: JSON.stringify({ ...payload, requestId: rid }), signal: ctr.signal })
       } finally {
         release()
       }
@@ -745,7 +717,7 @@ export const Api = {
     const promise = (async () => {
       const release = await _acquireWidgetSlot()
       try {
-        return await httpDirect<QueryResponse>(path, { method: 'POST', body: JSON.stringify({ ...payload, requestId: rid as any }), signal }, 60000)
+        return await http<QueryResponse>(path, { method: 'POST', body: JSON.stringify({ ...payload, requestId: rid as any }), signal }, 60000)
       } finally {
         release()
       }
@@ -793,7 +765,7 @@ export const Api = {
   // Datasource-level transforms (Advanced SQL Mode)
   getDatasourceTransforms: async (id: string) => {
     try {
-      const res = await httpDirect<DatasourceTransforms>(`/datasources/${id}/transforms`)
+      const res = await http<DatasourceTransforms>(`/datasources/${id}/transforms`)
       return (res ?? ({ customColumns: [], transforms: [], joins: [] } as DatasourceTransforms))
     } catch {
       return { customColumns: [], transforms: [], joins: [] } as DatasourceTransforms
@@ -835,12 +807,12 @@ export const Api = {
       { method: 'POST', body: JSON.stringify(payload) }
     ),
   periodTotals: (payload: { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' }) =>
-    httpDirect<{ total?: number; totals?: Record<string, number> }>('/query/period-totals', { method: 'POST', body: JSON.stringify(payload) }),
+    http<{ total?: number; totals?: Record<string, number> }>('/query/period-totals', { method: 'POST', body: JSON.stringify(payload) }),
   periodTotalsBatch: (payload: { requests: Array<({ key?: string } & { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' })> }) =>
-    httpDirect<{ results: Record<string, { total?: number; totals?: Record<string, number> }> }>('/query/period-totals/batch', { method: 'POST', body: JSON.stringify(payload) }),
+    http<{ results: Record<string, { total?: number; totals?: Record<string, number> }> }>('/query/period-totals/batch', { method: 'POST', body: JSON.stringify(payload) }),
   periodTotalsCompare: (payload: { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; prevStart: string; prevEnd: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' }) =>
-    httpDirect<{ cur: { total?: number; totals?: Record<string, number> }; prev: { total?: number; totals?: Record<string, number> } }>('/query/period-totals/compare', { method: 'POST', body: JSON.stringify(payload) }),
-  distinct: (payload: DistinctRequest) => httpDirect<DistinctResponse>('/query/distinct', { method: 'POST', body: JSON.stringify(payload) }),
+    http<{ cur: { total?: number; totals?: Record<string, number> }; prev: { total?: number; totals?: Record<string, number> } }>('/query/period-totals/compare', { method: 'POST', body: JSON.stringify(payload) }),
+  distinct: (payload: DistinctRequest) => http<DistinctResponse>('/query/distinct', { method: 'POST', body: JSON.stringify(payload) }),
   // --- Auth / Users ---
   signup: (payload: { name: string; email: string; password: string; role?: 'admin'|'user' }) =>
     http<UserOut>('/users/signup', { method: 'POST', body: JSON.stringify(payload) }),
@@ -874,8 +846,8 @@ export const Api = {
   putAiConfig: (payload: { provider?: string; model?: string; apiKey?: string; baseUrl?: string }, actorId?: string) =>
     http<{ ok: boolean }>(`/ai/config${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'PUT', body: JSON.stringify(payload) }),
   // Lightweight schema endpoints (tables only)
-  tablesOnly: (id: string, signal?: AbortSignal) => httpDirect<TablesOnlyResponse>(`/datasources/${id}/tables`, { signal }, 30000),
-  tablesOnlyLocal: (signal?: AbortSignal) => httpDirect<TablesOnlyResponse>(`/datasources/_local/tables`, { signal }, 30000),
+  tablesOnly: (id: string, signal?: AbortSignal) => http<TablesOnlyResponse>(`/datasources/${id}/tables`, { signal }, 30000),
+  tablesOnlyLocal: (signal?: AbortSignal) => http<TablesOnlyResponse>(`/datasources/_local/tables`, { signal }, 30000),
   // --- Import Table (SQL / file) ---
   importSqlPreview: (dsId: string, payload: { sql: string; sourceDsId: string; limit?: number }) =>
     http<{ columns: string[]; rows: Record<string, unknown>[]; rowCount: number }>(
@@ -1071,7 +1043,7 @@ export type DashboardDefinition = {
 
 export type DashboardSaveRequest = {
   id?: string
-  name?: string
+  name: string
   userId?: string
   definition: DashboardDefinition
 }
@@ -1131,7 +1103,7 @@ export type QuerySpecRequest = {
 }
 
 export const QueryApi = {
-  querySpec: async (payload: QuerySpecRequest, signal?: AbortSignal) => {
+  querySpec: async (payload: QuerySpecRequest) => {
     try {
       const specAny: any = payload?.spec
       // Require a spec and a non-empty source; otherwise, return empty result to avoid 422 spam
@@ -1142,8 +1114,8 @@ export const QueryApi = {
       const spec: any = { ...specAny }
       // Preserve x as string | string[] for multi-level X support; only normalize legend
       if (Array.isArray(spec.legend)) spec.legend = spec.legend[0]
-      // Forward the normalized payload — route through httpDirect for connection isolation
-      return await httpDirect<QueryResponse>('/query/spec', { method: 'POST', body: JSON.stringify({ ...payload, spec }), signal }, 60000)
+      // Forward the normalized payload
+      return await http<QueryResponse>('/query/spec', { method: 'POST', body: JSON.stringify({ ...payload, spec }) }, 60000)
     } catch (e) {
       throw e
     }

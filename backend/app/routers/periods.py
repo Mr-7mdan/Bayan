@@ -78,7 +78,7 @@ def _week_start(dt: datetime, start: WeekStart) -> datetime:
 
 
 @router.post("/resolve", response_model=ResolvePeriodsResponse)
-async def resolve_periods(payload: ResolvePeriodsRequest) -> ResolvePeriodsResponse:
+def resolve_periods(payload: ResolvePeriodsRequest) -> ResolvePeriodsResponse:
     # Use UTC as base
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     if payload.now:

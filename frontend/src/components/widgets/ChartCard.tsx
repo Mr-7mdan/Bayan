@@ -97,29 +97,6 @@ function extractBaseLabel(label: string): string {
   return splitLegend(label).base
 }
 
-// Helper: deduplicate series labels by appending agg suffix when base labels collide
-// (e.g. two series on "Equity" with different aggs become "Equity [MA-7]" and "Equity [avg]")
-const _AGG_DISPLAY: Record<string,string> = {
-  avg:'avg', sum:'sum', count:'count', distinct:'distinct', min:'min', max:'max',
-  avg_daily:'daily avg', avg_wday:'wday avg', avg_weekly:'weekly avg', avg_monthly:'monthly avg',
-  last_daily_sum:'last sum', ma7:'MA-7', ma14:'MA-14', ma30:'MA-30', ma60:'MA-60', none:'raw',
-}
-function deduplicateSeriesLabels(seriesArr: any[]): string[] {
-  const baseFor = (s: any, idx: number) => s?.label || s?.y || s?.measure || `series_${idx + 1}`
-  const bases = seriesArr.map((s, i) => baseFor(s, i))
-  const counts: Record<string, number> = {}
-  bases.forEach(b => { counts[b] = (counts[b] || 0) + 1 })
-  return seriesArr.map((s, i) => {
-    const base = bases[i]
-    if (counts[base] > 1) {
-      const aggKey = String(s?.agg || 'sum').toLowerCase()
-      const suffix = _AGG_DISPLAY[aggKey] || aggKey
-      return `${base} [${suffix}]`
-    }
-    return base
-  })
-}
-
 // Fallback string values from current query result rows
 function fallbackStringsFor(field: string, qdata?: any): string[] {
   try {
@@ -622,30 +599,9 @@ export default function ChartCard({
   }
   const series = useMemo(() => {
     const s = (querySpec as any)?.series as Array<{ label?: string; x?: string; y?: string; agg?: string; groupBy?: string; measure?: string; colorToken?: number }> | undefined
-    const pv = ((pivot as any)?.values || []) as Array<{ field?: string; agg?: any; label?: string; secondaryAxis?: boolean; avgDateField?: string; avgNumerator?: string; applyHolidays?: boolean; colorToken?: number; colorKey?: string; seriesType?: string; style?: string; stackId?: string }>
-    const px = (pivot as any)?.x as string | undefined
-    // When both querySpec.series and pivot.values exist, merge per-chip visual overrides
-    // from pivot.values (V2 panel updates pivot directly without rebuilding querySpec.series)
-    if (Array.isArray(s) && s.length > 0 && Array.isArray(pv) && pv.length > 0) {
-      return s.map((si: any, i: number) => {
-        const pi = (pv[i] || {}) as any
-        return {
-          ...si,
-          // Pivot is the source of truth for per-chip visual settings
-          ...(pi.seriesType != null ? { seriesType: pi.seriesType } : {}),
-          ...(pi.colorToken != null ? { colorToken: pi.colorToken } : {}),
-          ...(pi.colorKey != null ? { colorKey: pi.colorKey } : {}),
-          ...(pi.style != null ? { style: pi.style } : {}),
-          ...(pi.stackId != null ? { stackId: pi.stackId } : {}),
-          ...(pi.secondaryAxis != null ? { secondaryAxis: pi.secondaryAxis } : {}),
-          ...(pi.avgNumerator != null ? { avgNumerator: pi.avgNumerator } : {}),
-          ...(pi.avgDateField != null ? { avgDateField: pi.avgDateField } : {}),
-          ...(pi.applyHolidays != null ? { applyHolidays: pi.applyHolidays } : {}),
-        }
-      })
-    }
     if (Array.isArray(s) && s.length > 0) return s
-    // Fallback: build series entirely from pivot.values when querySpec.series is absent
+    const pv = ((pivot as any)?.values || []) as Array<{ field?: string; agg?: any; label?: string; secondaryAxis?: boolean }>
+    const px = (pivot as any)?.x as string | undefined
     if (Array.isArray(pv) && pv.length > 0) {
       return pv.filter((v) => !!v?.field).map((v, i) => ({
         x: ((querySpec as any)?.x || px) as any,
@@ -653,14 +609,6 @@ export default function ChartCard({
         agg: (v.agg as any) || ((querySpec as any)?.agg as any) || 'count',
         label: (v.label as any) || String(v.field) || `series_${i + 1}`,
         secondaryAxis: !!v.secondaryAxis,
-        ...(v.avgDateField ? { avgDateField: v.avgDateField } : {}),
-        ...(v.avgNumerator ? { avgNumerator: v.avgNumerator } : {}),
-        ...(v.applyHolidays ? { applyHolidays: v.applyHolidays } : {}),
-        ...(v.colorToken ? { colorToken: v.colorToken } : {}),
-        ...(v.colorKey ? { colorKey: v.colorKey } : {}),
-        ...(v.seriesType ? { seriesType: v.seriesType } : {}),
-        ...(v.style ? { style: v.style } : {}),
-        ...(v.stackId ? { stackId: v.stackId } : {}),
       })) as any
     }
     return s
@@ -1504,8 +1452,7 @@ export default function ChartCard({
           }
           // Multi-series WITH legend (client path): virtualize categories per series -> "Category - Series"
           if (legendField && seriesArr.length > 0) {
-            const _dedupLabels1 = deduplicateSeriesLabels(seriesArr)
-            const labelFor = (s: any, idx: number) => _dedupLabels1[idx] || s.label || s.y || s.measure || `series_${idx + 1}`
+            const labelFor = (s: any, idx: number) => s.label || s.y || s.measure || `series_${idx + 1}`
             const outMap = new Map<any, any>()
             const catsSet = new Set<string>()
             const virtualMeta: Record<string, { baseSeriesIndex: number; baseSeriesLabel: string; categoryLabel: string; agg?: string }> = {}
@@ -1543,8 +1490,7 @@ export default function ChartCard({
           // Multi-series values mode (no legend)
           if (!hasLegend && seriesArr.length > 0) {
             // Multi-series values mode
-            const _dedupLabels2 = deduplicateSeriesLabels(seriesArr)
-            const labelFor = (s: any, idx: number) => _dedupLabels2[idx] || s.label || s.y || s.measure || `series_${idx + 1}`
+            const labelFor = (s: any, idx: number) => s.label || s.y || s.measure || `series_${idx + 1}`
             const cats = seriesArr.map((s, i) => labelFor(s, i))
             const virtualMeta: Record<string, { baseSeriesIndex: number; baseSeriesLabel: string; agg?: string }> = {}
             seriesArr.forEach((s, i) => {
@@ -1652,10 +1598,6 @@ export default function ChartCard({
               // Respect Top-N ranking on the server
               orderBy: ((querySpec as any)?.orderBy as any),
               order: ((querySpec as any)?.order as any),
-              // Forward MA/period-avg fields so backend can use correct daily base agg
-              ...((s as any).avgDateField ? { avgDateField: (s as any).avgDateField } : {}),
-              ...((s as any).avgNumerator ? { avgNumerator: (s as any).avgNumerator } : {}),
-              ...((s as any).applyHolidays ? { applyHolidays: (s as any).applyHolidays } : {}),
             }
             if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
               try { console.debug('[ChartCard] branch=multi-series/agg REQUEST', { spec: merged, where: mergedWhere, y: s.y, agg, legend: merged.legend, x: merged.x }) } catch {}
@@ -1679,8 +1621,7 @@ export default function ChartCard({
           }
           const map = new Map<string | number, any>()
           const catsSet = new Set<string>()
-          const _dedupLabels3 = deduplicateSeriesLabels(series || [])
-          const labelFor = (s: any, idx: number) => _dedupLabels3[idx] || s?.label || s?.y || s?.measure || `series_${idx + 1}`
+          const labelFor = (s: any, idx: number) => s?.label || s?.y || s?.measure || `series_${idx + 1}`
           const legendPresent = results.some((res) => {
             const cols: string[] = ((res?.columns || []) as string[])
             return cols.indexOf('legend') >= 0
@@ -1813,18 +1754,13 @@ export default function ChartCard({
               offset: (querySpec.offset ?? 0),
               orderBy: ((querySpec as any)?.orderBy as any),
               order: ((querySpec as any)?.order as any),
-              // Forward MA/period-avg fields so backend can use correct daily base agg
-              ...((s as any).avgDateField ? { avgDateField: (s as any).avgDateField } : {}),
-              ...((s as any).avgNumerator ? { avgNumerator: (s as any).avgNumerator } : {}),
-              ...((s as any).applyHolidays ? { applyHolidays: (s as any).applyHolidays } : {}),
             }
             // Send merged spec as-is; QueryApi will preserve x as string | string[]
             return QueryApi.querySpec({ spec: merged as any, datasourceId, limit: merged.limit ?? 1000, offset: merged.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
           })
           const results = await Promise.all(promises)
           const map = new Map<string | number, any>()
-          const _dedupLabels4 = deduplicateSeriesLabels(series || [])
-          const labelFor = (s: any, idx: number) => _dedupLabels4[idx] || s?.label || s?.y || s?.measure || `series_${idx + 1}`
+          const labelFor = (s: any, idx: number) => s?.label || s?.y || s?.measure || `series_${idx + 1}`
           const categories = (series || []).map((s, i) => labelFor(s, i))
           results.forEach((res, idx) => {
             const label = labelFor((series || [])[idx], idx)
@@ -3338,36 +3274,15 @@ export default function ChartCard({
         return h >>> 0
       }
       if (cats.length > 0) {
-        if (!hasLegend) {
-          // Non-legend multi-series: use explicit colorTokens; for series without one,
-          // pick from the palette EXCLUDING colors already claimed by explicit tokens so
-          // that changing one series's color never accidentally matches another's fallback.
-          const claimedColors = new Set<string>()
-          for (const s of (series || [])) {
-            const ss = s as any
-            if (ss?.colorKey) claimedColors.add(ss.colorKey as string)
-            else if (ss?.colorToken) claimedColors.add(tokenToColorKey(ss.colorToken as any) as string)
-          }
-          const availPal = (base as string[]).filter(c => !claimedColors.has(c))
-          const safePal = availPal.length > 0 ? availPal : (base as string[])
-          let _palIdx = 0
-          return cats.map((_label, i) => {
-            const s = series?.[i] as any
-            if (s?.colorKey) return s.colorKey as string
-            if (s?.colorToken) return tokenToColorKey(s.colorToken as any) as string
-            const c = safePal[_palIdx % safePal.length]
-            _palIdx++
-            return c as string
-          })
-        }
-        // Legend mode: positional or hash-based palette (no per-series colorToken)
-        const resolveSeriesColor = (i: number, fallback: string): string => fallback
+        // Use sequential assignment when we have fewer categories than colors for guaranteed distinction
+        // Use hash-based assignment for many categories to maintain consistency across charts
         if (cats.length <= N) {
-          return cats.map((label, i) => resolveSeriesColor(i, base[i % N] as any))
+          return cats.map((label, i) => base[i % N] as any)
         }
+        // For many categories, use hash-based assignment
         return cats.map((label, i) => {
           const idx = ((hash(String(label)) * step) % N)
-          return resolveSeriesColor(i, base[idx] as any)
+          return base[idx] as any
         })
       }
       const count = Math.max(1, (series?.length ?? 0))
@@ -3379,7 +3294,7 @@ export default function ChartCard({
     }
     const single = options?.colorToken ? tokenToColorKey(options.colorToken as any) : ((options?.color as any) || 'blue')
     return [single] as any[]
-  }, [series, options, isMulti, categories, hasLegend])
+  }, [series, options, isMulti, categories])
   const legendHexColors = useMemo(() => {
     const count = Math.max(1, (categories?.length ?? 1))
     // Value gradient: legend shows base color (series points vary by value)
@@ -3394,20 +3309,10 @@ export default function ChartCard({
     const denseX = autoCondense && ((Array.isArray(data) ? (data as any[]).length : 0) > denseThreshold)
     const hasRotate = Math.max(-90, Math.min(90, Number((options as any)?.xTickAngle ?? 0))) !== 0
     const wantSecondaryAxis = Array.isArray(series) && series.some((s: any) => !!(s as any)?.secondaryAxis)
-    // Detect mixed series types (e.g. one bar + one line) which require ECharts advanced mode
-    // Also triggers when any series overrides the chart's base type (e.g. chart=line but one series=bar)
-    const hasMixedSeriesTypes = (() => {
-      if (!Array.isArray(series) || series.length < 2) return false
-      const types = series.map((s: any) => (s as any)?.seriesType).filter(Boolean)
-      if (types.length === 0) return false
-      // Mixed if 2+ different explicit types, or any explicit type differs from chart base type
-      const baseType = (type === 'column') ? 'bar' : type
-      return new Set(types).size > 1 || types.some(t => t !== baseType)
-    })()
     const typeIsAdvanced = (type === 'bar' || type === 'column' || type === 'line' || type === 'area')
     // If Rich Tooltip is explicitly off, don't force advanced just for dense/rotate; allow simple Tremor tooltip
     const ignoreDenseRotate = ((options as any)?.richTooltip === false)
-    const forceAdvanced = ((((options as any)?.colorMode === 'valueGradient') || (ignoreDenseRotate ? false : (denseX || hasRotate)) || ((type === 'column') && !!(options as any)?.dataLabelsShow) || wantSecondaryAxis || hasMixedSeriesTypes) && typeIsAdvanced)
+    const forceAdvanced = ((((options as any)?.colorMode === 'valueGradient') || (ignoreDenseRotate ? false : (denseX || hasRotate)) || ((type === 'column') && !!(options as any)?.dataLabelsShow) || wantSecondaryAxis) && typeIsAdvanced)
     const advanced = ((((options as any)?.advancedMode) || forceAdvanced) && typeIsAdvanced)
     if (!advanced) {
       return chartColorsTokens.map((t: any) => tremorNameToHex(t as any))
@@ -3549,16 +3454,8 @@ export default function ChartCard({
     const wantSecondaryAxis = Array.isArray(series) && series.some((s: any) => !!(s as any)?.secondaryAxis)
     // Also force advanced when column charts show data labels so we can rotate labels vertically via labelLayout
     const ignoreDenseRotate2 = ((options as any)?.richTooltip === false)
-    // Detect mixed series types (e.g. bar + line) that require ECharts
-    const hasMixedSeriesTypes2 = (() => {
-      if (!Array.isArray(series) || series.length < 2) return false
-      const types = series.map((s: any) => (s as any)?.seriesType).filter(Boolean)
-      if (types.length === 0) return false
-      const baseType = (type === 'column') ? 'bar' : type
-      return new Set(types).size > 1 || types.some(t => t !== baseType)
-    })()
     const forceAdvanced = (
-      (((options as any)?.colorMode === 'valueGradient') || (ignoreDenseRotate2 ? false : (denseX || hasRotate)) || ((type === 'column') && !!(options as any)?.dataLabelsShow) || wantSecondaryAxis || hasMixedSeriesTypes2)
+      (((options as any)?.colorMode === 'valueGradient') || (ignoreDenseRotate2 ? false : (denseX || hasRotate)) || ((type === 'column') && !!(options as any)?.dataLabelsShow) || wantSecondaryAxis)
     ) && (type === 'bar' || type === 'column' || type === 'line' || type === 'area')
     if ((((options as any)?.advancedMode) || forceAdvanced) && (type === 'bar' || type === 'column' || type === 'line' || type === 'area')) {
       const xLabels = (displayData as any[]).map((d) => d.x)
@@ -3658,14 +3555,9 @@ export default function ChartCard({
         const nameC = String(c)
         const baseHex = wantValueGrad ? baseHexVG : tremorNameToHex(chartColorsTokens[idx % chartColorsTokens.length])
         const rounded = options?.barRounded ? (type === 'bar' ? [0, 6, 6, 0] : [6, 6, 0, 0]) : 0
-        // Per-series overrides: prefer positional (idx) in non-legend mode to handle two
-        // series with the same base label (e.g. "Equity [MA-7]" vs "Equity [avg]").
+        // Per-series overrides: resolve by base series label when categories are virtualized
         const baseLabelForMeta = (vmetaColor[nameC]?.baseSeriesLabel || extractBaseLabel(String(nameC)))
-        const sMeta: any = Array.isArray(series)
-          ? (!hasLegend
-              ? (series?.[idx] || metaByName.get(String(baseLabelForMeta)))
-              : (metaByName.get(String(baseLabelForMeta)) || series?.[idx]))
-          : undefined
+        const sMeta: any = Array.isArray(series) ? (metaByName.get(String(baseLabelForMeta)) || series?.[idx]) : undefined
         const gradientWanted = ((type === 'bar' || type === 'column') ? !!options?.barGradient : false)
         const style = (sMeta?.style as any) || (gradientWanted ? 'gradient' : 'solid')
         const gradient = style === 'gradient'
@@ -3697,17 +3589,14 @@ export default function ChartCard({
           return undefined
         }
 
-        const perSeriesType = sMeta?.seriesType as 'line' | 'bar' | 'area' | undefined
-        const seriesType = perSeriesType || ((type === 'line' || type === 'area') ? 'line' : 'bar')
+        const seriesType = (type === 'line' || type === 'area') ? 'line' : 'bar'
         // For line/area charts, preserve null values so lines stop at last data point instead of dropping to zero
         const rawValues = (displayData as any[]).map((d) => {
           const val = (d as any)[c] ?? (c === 'value' ? (d as any).value : undefined)
           if (val === null || val === undefined) {
             return (seriesType === 'line') ? null : 0
           }
-          const num = toNum(val, 0)
-          if (num === 0 && options?.tooltipHideZeros && seriesType === 'line') return null
-          return num
+          return toNum(val, 0)
         })
         // Check if we're using time-series mode
         const gb = String(((querySpec as any)?.groupBy || 'none') as any).toLowerCase()
@@ -3798,9 +3687,9 @@ export default function ChartCard({
           name: c,
           type: seriesType,
           data: seriesData,
-          areaStyle: (type === 'area' || perSeriesType === 'area') ? { opacity: 0.2, color: gradient } : undefined,
+          areaStyle: (type === 'area') ? { opacity: 0.2, color: gradient } : undefined,
           itemStyle: (seriesType === 'bar') ? { color: gradient, borderRadius: rounded } : { color: baseHex },
-          ...(seriesType === 'line' ? { lineStyle: { width: (options?.lineWidth ?? 2), color: baseHex }, connectNulls: true } : {}),
+          ...(seriesType === 'line' ? { lineStyle: { width: (options?.lineWidth ?? 2) }, connectNulls: false } : {}),
           // Secondary axis: for horizontal bars, use xAxis; otherwise yAxis
           ...((type === 'bar')
             ? ((sMeta?.secondaryAxis) ? { xAxisIndex: 1 } : {})
@@ -6044,18 +5933,15 @@ export default function ChartCard({
           return Number(val)
         })
         
-        // Extract series label and lookup metadata; prefer positional (idx) in non-legend
-        // mode so two series with the same base label each get their own metadata.
+        // Extract series label and lookup metadata
         const seriesLabel = extractSeriesLabel(String(c))
-        const sMeta = !hasLegend
-          ? ((Array.isArray(series) ? series?.[idx] : null) || (seriesLabel ? metaByName.get(seriesLabel) : null))
-          : (seriesLabel ? metaByName.get(seriesLabel) : null)
+        const sMeta = seriesLabel ? metaByName.get(seriesLabel) : null
         
-        // Determine type: per-series override > secondary axis rule > fallback
-        const perSeriesTypeCombo = sMeta?.seriesType as 'line' | 'bar' | 'area' | undefined
-        const isLine = perSeriesTypeCombo === 'line' || perSeriesTypeCombo === 'area' || (!perSeriesTypeCombo && (sMeta?.secondaryAxis === true || (defaultLastAsLine && idx === cats.length - 1)))
+        // Determine type: secondary axis series are lines, primary axis are bars
+        // Fallback: last series as line if no series metadata
+        const isLine = sMeta?.secondaryAxis === true || (defaultLastAsLine && idx === cats.length - 1)
         
-        const seriesType = perSeriesTypeCombo || (isLine ? 'line' : 'bar')
+        const seriesType = isLine ? 'line' : 'bar'
         
         if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
           try { 
@@ -6068,20 +5954,17 @@ export default function ChartCard({
           } catch {}
         }
         
-        const hideZeroLine = options?.tooltipHideZeros && (seriesType === 'line' || seriesType === 'area')
-        const valuesFiltered = hideZeroLine ? values.map(v => (v === 0 ? null : v)) : values
         const seriesData = wantValueGrad
-          ? valuesFiltered.map((v, i) => (v === null ? null : { value: v, itemStyle: { color: saturateHexBy(baseHexVG, Math.max(0, Math.min(1, rowTotals[i] > 0 ? (v / rowTotals[i]) : 0))) } }))
-          : valuesFiltered
+          ? values.map((v, i) => (v === null ? null : { value: v, itemStyle: { color: saturateHexBy(baseHexVG, Math.max(0, Math.min(1, rowTotals[i] > 0 ? (v / rowTotals[i]) : 0))) } }))
+          : values
         
-        if (seriesType === 'line' || seriesType === 'area') {
+        if (seriesType === 'line') {
           baseSeries.push({ 
             name: c, 
             type: 'line', 
             data: seriesData, 
             smooth: true, 
-            connectNulls: true,
-            areaStyle: seriesType === 'area' ? { opacity: 0.2 } : undefined,
+            connectNulls: false,
             lineStyle: { width: (options?.lineWidth ?? 2), color: baseHex }, 
             itemStyle: { color: baseHex },
             emphasis: { focus: 'series' },
@@ -7426,7 +7309,7 @@ export default function ChartCard({
                       const col = legendHexColors[idx % legendHexColors.length]
                       const label = displayLabel(String(c))
                       return (
-                        <div key={`${String(c)}_${idx}`} className="flex items-center gap-2">
+                        <div key={String(c)} className="flex items-center gap-2">
                           <span className={`inline-block ${swatchClass}`} style={{ backgroundColor: col as any }} />
                           <span className="text-muted-foreground">{label}</span>
                         </div>
@@ -7445,7 +7328,7 @@ export default function ChartCard({
     return (
       <div className={`flex flex-wrap items-center justify-center gap-3 text-[11px]`}>
         {shownCats.map((c, i) => (
-          <div key={`${String(c)}_${i}`} className="flex items-center gap-2">
+          <div key={String(c)} className="flex items-center gap-2">
             <span className={`inline-block ${swatchClass}`} style={{ backgroundColor: legendHexColors[i % legendHexColors.length] as any }} />
             <span className="text-muted-foreground">{displayLabel(String(c))}</span>
           </div>

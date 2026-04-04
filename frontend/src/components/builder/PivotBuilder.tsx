@@ -10,9 +10,8 @@ export type PivotValue = {
     | 'avg_daily'|'avg_wday'|'avg_weekly'|'avg_monthly'|'last_daily_sum'
     | 'ma7'|'ma14'|'ma30'|'ma60'
   avgDateField?: string
-  avgNumerator?: 'sum'|'count'|'distinct'|'avg'
+  avgNumerator?: 'sum'|'count'|'distinct'
   applyHolidays?: boolean
-  seriesType?: 'line' | 'bar' | 'area'
   label?: string
   format?: 'none'|'short'|'abbrev'|'currency'|'percent'|'bytes'|'wholeNumber'|'number'|'thousands'|'millions'|'billions'|'oneDecimal'|'twoDecimals'|'percentWhole'|'percentOneDecimal'|'timeHours'|'timeMinutes'|'distance-km'|'distance-mi'
   colorToken?: 1|2|3|4|5
@@ -356,6 +355,7 @@ export function PivotBuilder({
         if (data.kind === 'field') {
           const field = data.field as string
           const vals = Array.isArray(assignments.values) ? assignments.values : []
+          if (vals.some(v => v.field === field)) return
           const base = baseForDisplay(field)
           const isNumeric = Array.isArray(numericFields) ? (numericFields.includes(field) || numericFields.includes(base)) : false
           const agg: PivotValue['agg'] = isNumeric ? 'sum' : 'count'
@@ -679,7 +679,7 @@ export function PivotBuilder({
         </Zone>
         <Zone title="Values" kind="value" onDrop={onDrop('value')} disabled={!!disableValues}>
           {assignments.values.map((v, idx) => {
-            const key = v.measureId ? v.measureId : `v${idx}`
+            const key = v.measureId ? v.measureId : (v.field || `v${idx}`)
             const label = v.measureId
               ? (measures.find(m => m.id === v.measureId)?.name || v.label || 'Measure')
               : (v.label || v.field || (v.agg ? String(v.agg) : 'value'))

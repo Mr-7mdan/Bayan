@@ -685,9 +685,6 @@ def build_sql(
     for cc in (custom_columns or []):
         name = str(cc.get("name") or "")
         expr = str(cc.get("expr") or "")
-        # Strip leading '=' from Excel-style formula notation (e.g., "=Volume/10000" -> "Volume/10000")
-        if expr.startswith("="):
-            expr = expr[1:]
         ctype = str(cc.get("type") or "").lower()
         
         # Always include custom columns in the expression map so dependencies can be resolved
@@ -738,8 +735,21 @@ def build_sql(
                     # (e.g., 'Type 1 Markup') so custom columns can reference either
                     cc_expr_map[alias_col] = expr
                     if cname != alias_col:
-                        cc_expr_map[cname] = expr
-                        print(f"[build_sql] Added joined column '{alias_col}' and '{cname}' -> '{expr}' to cc_expr_map", flush=True)
+                        # Only map the raw column name if it doesn't conflict with a base table column.
+                        # If "Price" is already a base table column, adding "Price" -> j1.Price would
+                        # cause expressions that reference the base "Price" to incorrectly use the
+                        # join's price (which may be NULL for most rows).
+                        _base_lower = {c.lower() for c in (base_cols or set())}
+                        if _base_lower and cname.lower() in _base_lower:
+                            # Map the raw name to the base-table-qualified reference (s.col)
+                            # so expressions that use "Price" resolve to s.Price, not j1.Price,
+                            # and remain unambiguous in the presence of a JOIN.
+                            base_expr = _qcol(d, f"s.{cname}")
+                            cc_expr_map[cname] = base_expr
+                            print(f"[build_sql] Added joined column alias '{alias_col}' -> '{expr}' to cc_expr_map; mapped '{cname}' -> '{base_expr}' (base table, conflicts with join column)", flush=True)
+                        else:
+                            cc_expr_map[cname] = expr
+                            print(f"[build_sql] Added joined column '{alias_col}' and '{cname}' -> '{expr}' to cc_expr_map", flush=True)
                     else:
                         print(f"[build_sql] Added joined column '{alias_col}' -> '{expr}' to cc_expr_map", flush=True)
 

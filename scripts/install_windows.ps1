@@ -8,7 +8,12 @@ param(
   [int]$FrontendPort = 3000,
   [string]$AdminEmail = "admin@example.com",
   [string]$AdminPassword = "StrongPass123!",
-  [string]$AdminName = "Admin"
+  [string]$AdminName = "Admin",
+  # Specify a tag, branch, or commit hash to install a specific version.
+  # Use this to downgrade when the repo has been rolled back.
+  # Examples: -Version "v3.2.0"  or  -Version "abc1234"  or  -Version "release/3.1"
+  # Leave empty to always track the latest origin/main.
+  [string]$Version = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -120,9 +125,45 @@ if (-not (Test-Path $InstallDir)) { Ensure-Dir $InstallDir }
 if (-not (Test-Path (Join-Path $InstallDir '.git'))) {
   git clone "https://github.com/$RepoOwner/$RepoName.git" "$InstallDir"
 } else {
-  git -C "$InstallDir" fetch --all --prune
-  git -C "$InstallDir" checkout main
-  git -C "$InstallDir" reset --hard origin/main
+  git -C "$InstallDir" fetch --all --prune --tags --force
+}
+
+# ── Version selection (supports downgrade / rollback) ────────────────────────
+if ($Version) {
+  Write-Host "Requested version: $Version" -ForegroundColor Yellow
+  # List available tags for reference
+  $tags = @(git -C "$InstallDir" tag --sort=-version:refname 2>$null)
+  if ($tags.Count -gt 0) {
+    Write-Host "Available tags (newest first):" -ForegroundColor DarkGray
+    $tags | Select-Object -First 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    if ($tags.Count -gt 20) { Write-Host "  ... and $($tags.Count - 20) more" -ForegroundColor DarkGray }
+  }
+  # Verify the requested version exists as a tag, branch, or commit
+  $refExists = $false
+  try { git -C "$InstallDir" rev-parse --verify "$Version^{commit}" 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) { $refExists = $true } } catch {}
+  if (-not $refExists) {
+    # Also check remote branches (e.g. origin/release/3.1)
+    try { git -C "$InstallDir" rev-parse --verify "origin/$Version^{commit}" 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) { $Version = "origin/$Version"; $refExists = $true } } catch {}
+  }
+  if (-not $refExists) {
+    Write-Error "Version '$Version' not found as a tag, branch, or commit in the repository. Use -Version with a valid tag (e.g. v3.2.0), branch, or commit hash."
+    exit 1
+  }
+  # Git writes informational messages (e.g. "HEAD is now at ...") to stderr.
+  # Temporarily relax ErrorActionPreference so PowerShell doesn't treat them as terminating errors.
+  $prevEA = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  git -C "$InstallDir" checkout --detach "$Version" 2>&1 | Out-Null
+  git -C "$InstallDir" reset --hard "$Version" 2>&1 | Out-Null
+  $ErrorActionPreference = $prevEA
+  $resolvedHash = git -C "$InstallDir" rev-parse --short HEAD
+  Write-Host "Checked out version: $Version ($resolvedHash)" -ForegroundColor Green
+} else {
+  # Default: track latest origin/main
+  $prevEA = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  git -C "$InstallDir" checkout main 2>&1 | Out-Null
+  git -C "$InstallDir" reset --hard origin/main 2>&1 | Out-Null
+  $ErrorActionPreference = $prevEA
+  Write-Host "Updated to latest origin/main" -ForegroundColor Green
 }
 
 $backendDir = Join-Path $InstallDir 'backend'

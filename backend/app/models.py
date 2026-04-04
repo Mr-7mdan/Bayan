@@ -307,13 +307,12 @@ def create_datasource(db, payload: NewDatasourceInput) -> Datasource:
     return ds
 
 
-def save_dashboard(db, user_id: Optional[str], name: Optional[str], definition: dict, dash_id: Optional[str] = None) -> Dashboard:
+def save_dashboard(db, user_id: Optional[str], name: str, definition: dict, dash_id: Optional[str] = None) -> Dashboard:
     if dash_id:
         d: Dashboard | None = db.get(Dashboard, dash_id)
         if not d:
             raise ValueError("Dashboard not found")
-        if name is not None:
-            d.name = name
+        d.name = name
         d.definition_json = json.dumps(definition)
     else:
         d = Dashboard(id=str(uuid4()), user_id=user_id, name=name, definition_json=json.dumps(definition))

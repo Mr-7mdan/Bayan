@@ -96,7 +96,7 @@ def _load_holidays() -> frozenset[str]:
 # ── Endpoint ──────────────────────────────────────────────────────────────
 
 @router.post("/preview", response_model=PreviewResponse)
-async def preview_preset(req: PreviewRequest):
+def preview_preset(req: PreviewRequest):
     """Resolve a PresetConfig to concrete date bounds for UI preview."""
     config: PresetConfig = {
         "period": req.period,  # type: ignore[typeddict-item]
