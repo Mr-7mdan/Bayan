@@ -3402,7 +3402,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             except Exception:
                 opts = {}
             ds_transforms = _apply_scope((opts or {}).get("transforms") or {}, spec.source)
-            ds_transforms = _resolve_join_catalog(ds_transforms)
+            # Only resolve catalog prefixes for DuckDB — MySQL/Postgres can't handle 3-part names
+            if (ds_type or '').lower().startswith('duckdb'):
+                ds_transforms = _resolve_join_catalog(ds_transforms)
 
         # Build base SELECT with transforms/joins/defaults
         # Important: if WHERE references columns that are not in spec.select, include them so the outer WHERE can bind.
@@ -3662,7 +3664,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             except Exception:
                 opts = {}
             ds_transforms = _apply_scope((opts or {}).get("transforms") or {}, spec.source)
-            ds_transforms = _resolve_join_catalog(ds_transforms)
+            # Only resolve catalog prefixes for DuckDB — MySQL/Postgres can't handle 3-part names
+            if (ds_type or '').lower().startswith('duckdb'):
+                ds_transforms = _resolve_join_catalog(ds_transforms)
         base_from_sql = f" FROM {_q_source(spec.source)}"
         expr_map = None
         if ds_transforms:
