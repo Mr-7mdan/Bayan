@@ -2318,6 +2318,18 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     if not (payload.spec.source and str(payload.spec.source).strip()):
         raise HTTPException(status_code=400, detail="spec.source is required for /query/spec")
 
+    # Normalize: strip stale catalog prefixes from stored 3-part sources (e.g. pcma.mt5.mt5_deals -> mt5.mt5_deals).
+    # CatalogResolve below will re-add the prefix if needed for this specific DuckDB session.
+    # This prevents permanently-saved 3-part names from breaking on deployments where the
+    # catalog ATTACH is unavailable (different server, MySQL not running, etc.).
+    try:
+        _pre_parts = str(payload.spec.source or '').split('.')
+        if len(_pre_parts) == 3:
+            payload.spec.source = f"{_pre_parts[1]}.{_pre_parts[2]}"
+            print(f"[CatalogResolve] Stripped catalog prefix: {'.'.join(_pre_parts)} -> {payload.spec.source}", flush=True)
+    except Exception:
+        pass
+
     # Resolve 2-part source (schema.table) to 3-part (catalog.schema.table) for
     # MySQL-attached catalogs in DuckDB. Without this, "mt5"."mt5_deals_lp" fails
     # because the mt5 schema lives under a non-current catalog (e.g. pcma).

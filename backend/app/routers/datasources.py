@@ -1074,10 +1074,26 @@ def run_sync_now(
                 st.started_at = None  # type: ignore[attr-defined]
             except Exception:
                 pass
-            db.add(st)
-            db.add(run)
-            db.commit()
-            print(f"[ABORT] Committed in_progress=False for state_id={st.id}", flush=True)
+            try:
+                db.add(st)
+                db.add(run)
+                db.commit()
+                print(f"[ABORT] Committed in_progress=False for state_id={st.id}", flush=True)
+            except Exception as _commit_err:
+                print(f"[ABORT] Commit failed in finally block: {_commit_err}. Attempting rollback+retry.", flush=True)
+                try:
+                    db.rollback()
+                    # Retry with a fresh query to reset in_progress
+                    _st2 = db.query(SyncState).filter(SyncState.id == st.id).first()
+                    if _st2:
+                        _st2.in_progress = False
+                        _st2.progress_phase = None
+                        _st2.started_at = None
+                        db.add(_st2)
+                        db.commit()
+                        print(f"[ABORT] Retry commit succeeded for state_id={st.id}", flush=True)
+                except Exception as _retry_err:
+                    print(f"[ABORT] CRITICAL: Could not reset in_progress for state_id={st.id}: {_retry_err}", flush=True)
 
     # Release locks
     try:
@@ -1099,6 +1115,7 @@ def _update_progress(db: Session, state_id: str, cur: int | None, tot: int | Non
             return
         st.progress_current = int(cur or 0)
         st.progress_total = (int(tot) if tot is not None else None)
+        st.progress_updated_at = datetime.now(timezone.utc)
         db.add(st)
         db.commit()
     except Exception:

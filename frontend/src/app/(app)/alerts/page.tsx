@@ -102,7 +102,9 @@ function nextRunFromCron(cron: string, now?: Date): string | null {
     }
     const domSet = parseList(domS)
     const monSet = parseList(monS)
-    const dowSet = parseList(dowS)
+    // Convert APScheduler DOW (0=Mon..6=Sun) in cron to JS DOW (0=Sun..6=Sat) for comparison
+    const dowSetRaw = parseList(dowS)
+    const dowSet = dowSetRaw ? new Set([...dowSetRaw].map(d => d === 6 ? 0 : d + 1)) : null
     const base = now ? new Date(now) : new Date()
     for (let i = 0; i < 370; i++) {
       const d = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hh, mm, 0, 0)
@@ -110,7 +112,7 @@ function nextRunFromCron(cron: string, now?: Date): string | null {
       if (monSet && !monSet.has(d.getMonth() + 1)) continue
       const dayOkDom = !domSet || domSet.has(d.getDate())
       const dow = d.getDay() // 0..6, Sun=0
-      const dayOkDow = !dowSet || dowSet.has(dow) || dowSet.has(dow === 0 ? 7 : -1)
+      const dayOkDow = !dowSet || dowSet.has(dow)
       const dayOk = (domSet && dowSet) ? (dayOkDom || dayOkDow) : (dayOkDom && dayOkDow)
       if (!dayOk) continue
       if (i === 0 && d <= base) continue

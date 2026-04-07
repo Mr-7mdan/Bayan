@@ -107,10 +107,73 @@ def schedule_all_jobs() -> dict:
     return {"added": added, "updated": updated, "removed": removed, "total": len(desired)}
 
 
+def _auto_reset_stuck(db, ds_id: str, stale_threshold_minutes: int = 30) -> int:
+    """Auto-reset sync states that are in_progress but have stopped making progress.
+
+    A sync is considered stuck when progress_updated_at (or started_at as fallback)
+    is older than stale_threshold_minutes. This allows long-running syncs that are
+    actively fetching rows to continue, while resetting ones that crashed mid-sync.
+    Returns the number of states reset."""
+    from .models import SyncState, SyncTask
+    try:
+        in_progress = (
+            db.query(SyncState)
+            .join(SyncTask, SyncTask.id == SyncState.task_id)
+            .filter(SyncTask.datasource_id == ds_id, SyncState.in_progress == True)
+            .all()
+        )
+        if not in_progress:
+            return 0
+        reset_count = 0
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        for st in in_progress:
+            # Use the most recent activity timestamp: progress_updated_at (set on each batch),
+            # falling back to started_at, then last_run_at
+            last_activity = (
+                getattr(st, 'progress_updated_at', None)
+                or getattr(st, 'started_at', None)
+                or getattr(st, 'last_run_at', None)
+            )
+            if last_activity is None:
+                is_stuck = True
+                reason = "no activity timestamp"
+            else:
+                elapsed = now - last_activity.replace(tzinfo=None)
+                is_stuck = elapsed > timedelta(minutes=stale_threshold_minutes)
+                reason = f"no progress for {elapsed.total_seconds()/60:.0f}min (threshold={stale_threshold_minutes}min)"
+            if is_stuck:
+                print(f"[AUTO_RESET_STUCK] Resetting stuck sync: task_id={st.task_id}, progress={st.progress_current}/{st.progress_total}, {reason}", flush=True)
+                st.in_progress = False
+                st.cancel_requested = False
+                st.progress_current = None
+                st.progress_total = None
+                st.progress_phase = None
+                st.progress_updated_at = None
+                db.add(st)
+                reset_count += 1
+            else:
+                elapsed_str = f"{(now - last_activity.replace(tzinfo=None)).total_seconds()/60:.0f}min" if last_activity else "?"
+                print(f"[AUTO_RESET_STUCK] Sync still active: task_id={st.task_id}, progress={st.progress_current}/{st.progress_total}, last_activity={elapsed_str} ago", flush=True)
+        if reset_count:
+            db.commit()
+            print(f"[AUTO_RESET_STUCK] Reset {reset_count} stuck syncs for datasource {ds_id}", flush=True)
+        return reset_count
+    except Exception as e:
+        print(f"[AUTO_RESET_STUCK] Error: {e}", flush=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return 0
+
+
 def run_task_job(ds_id: str, task_id: str) -> None:
     """Scheduler job wrapper to execute a single SyncTask."""
     db = SessionLocal()
     try:
+        # Auto-reset any syncs stuck for >60 minutes before attempting a new run
+        _auto_reset_stuck(db, ds_id, stuck_threshold_minutes=60)
+
         ds: Optional[Datasource] = db.get(Datasource, ds_id)
         actor = (ds.user_id if ds and ds.user_id else None)
         # Use the same business logic as the API endpoint

@@ -228,6 +228,8 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE sync_states ADD COLUMN progress_phase TEXT"))
             if "started_at" not in cols_sync:
                 conn.execute(text("ALTER TABLE sync_states ADD COLUMN started_at DATETIME"))
+            if "progress_updated_at" not in cols_sync:
+                conn.execute(text("ALTER TABLE sync_states ADD COLUMN progress_updated_at DATETIME"))
             # ensure sync_runs table exists
             conn.execute(text(
                 """
@@ -768,6 +770,8 @@ class SyncState(Base):
     progress_phase: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # When current in-progress run started (reset each run)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Last time progress_current was updated (for stuck detection)
+    progress_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class SyncLock(Base):

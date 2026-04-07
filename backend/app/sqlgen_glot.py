@@ -843,7 +843,7 @@ class SQLGlotBuilder:
                 col_expr = sqlglot.parse_one(y_field, dialect=self.dialect)
             else:
                 col_expr = exp.Column(this=exp.Identifier(this=y_field, quoted=True))
-            return exp.Count(this=col_expr, distinct=True)
+            return exp.Count(this=exp.Distinct(expressions=[col_expr]))
         elif agg_lower in ("sum", "avg", "min", "max") and y_field:
             # Handle numeric cleaning for DuckDB (try casting)
             if is_expr:
@@ -1745,7 +1745,7 @@ class SQLGlotBuilder:
             elif agg_lower == "distinct":
                 if value_field:
                     val_resolved, _ = resolve_field(value_field)
-                    value_expr = exp.Count(this=exp.column(val_resolved or value_field), distinct=True)
+                    value_expr = exp.Count(this=exp.Distinct(expressions=[exp.column(val_resolved or value_field)]))
                 else:
                     value_expr = exp.Count(this=exp.Star())
             elif agg_lower in ("sum", "avg", "min", "max"):

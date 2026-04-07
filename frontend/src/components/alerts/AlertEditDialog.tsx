@@ -27,9 +27,11 @@ function buildCron(time: string, opts: { mode: 'weekly'|'monthly'; dows: number[
       const domList = (opts.doms||[]).join(',') || '*'
       return `${isNaN(mm)?0:mm} ${isNaN(hh)?0:hh} ${domList} * *`
     }
-    const dowList = (opts.dows||[]).join(',') || '*'
+    // Convert from standard cron DOW (0=Sun,1=Mon..6=Sat) to APScheduler DOW (0=Mon..6=Sun)
+    const apsDows = (opts.dows||[]).map(d => d === 0 ? 6 : d - 1)
+    const dowList = apsDows.join(',') || '*'
     return `${isNaN(mm)?0:mm} ${isNaN(hh)?0:hh} * * ${dowList}`
-  } catch { return '0 9 * * 1,2,3,4,5' }
+  } catch { return '0 9 * * 0,1,2,3,4' }
 }
 
 export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAction }: { open: boolean; alert: AlertOut | null; onCloseAction: () => void; onSavedAction: (a: AlertOut) => void }) {
