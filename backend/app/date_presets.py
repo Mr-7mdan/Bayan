@@ -253,8 +253,12 @@ def resolve_preset(
     if period == "day":
         this_start = anchor
         this_end = anchor + timedelta(days=1)
-        prev_start = anchor - timedelta(days=1)
-        prev_end = anchor
+        if not include_weekends:
+            # Previous day should be the previous working day, not just -1 calendar day
+            prev_start = _prev_workday(anchor, weekend_days, active_holidays)
+        else:
+            prev_start = anchor - timedelta(days=1)
+        prev_end = prev_start + timedelta(days=1)
     elif period == "week":
         this_start = _week_start(anchor, week_start_dow)
         this_end = this_start + timedelta(days=7)
@@ -342,24 +346,24 @@ LEGACY_PRESET_MAP: dict[str, PresetConfig] = {
     # Days
     "today":                          PresetConfig(period="day", offset="this",     as_of="today",            range_mode="full",          include_weekends=True,  apply_holidays=False),
     "yesterday":                      PresetConfig(period="day", offset="previous", as_of="today",            range_mode="full",          include_weekends=True,  apply_holidays=False),
-    "day_before_yesterday":           PresetConfig(period="day", offset="previous", as_of="today",            range_mode="full",          include_weekends=True,  apply_holidays=False),
+    # "day_before_yesterday" removed — handled by _BEFORE_LAST_PRESETS + _shift_one_period_back
     "last_working_day":               PresetConfig(period="day", offset="this",     as_of="last_working_day", range_mode="full",          include_weekends=False, apply_holidays=False),
     "day_before_last_working_day":    PresetConfig(period="day", offset="previous", as_of="last_working_day", range_mode="full",          include_weekends=False, apply_holidays=False),
     # Working Weeks
     "twwtlwd":                        PresetConfig(period="week", offset="this",     as_of="last_working_day", range_mode="to_date",      include_weekends=False, apply_holidays=False),
     "last_working_week":              PresetConfig(period="week", offset="previous", as_of="last_working_day", range_mode="full",          include_weekends=False, apply_holidays=False),
-    "week_before_last_working_week":  PresetConfig(period="week", offset="previous", as_of="last_working_day", range_mode="full",          include_weekends=False, apply_holidays=False),
+    # "week_before_last_working_week" removed — handled by _BEFORE_LAST_PRESETS + _shift_one_period_back
     "lwwtlwd":                        PresetConfig(period="week", offset="previous", as_of="last_working_day", range_mode="to_date",       include_weekends=False, apply_holidays=False),
     # Calendar Weeks
     "this_week":                      PresetConfig(period="week", offset="this",     as_of="today",            range_mode="full",          include_weekends=True,  apply_holidays=False),
     "last_week":                      PresetConfig(period="week", offset="previous", as_of="today",            range_mode="full",          include_weekends=True,  apply_holidays=False),
-    "week_before_last":               PresetConfig(period="week", offset="previous", as_of="today",            range_mode="full",          include_weekends=True,  apply_holidays=False),
+    # "week_before_last" removed — handled by _BEFORE_LAST_PRESETS + _shift_one_period_back
     # Months
     "this_month":                     PresetConfig(period="month", offset="this",     as_of="today",            range_mode="full",         include_weekends=True,  apply_holidays=False),
     "tmtlwd":                         PresetConfig(period="month", offset="this",     as_of="last_working_day", range_mode="to_date",      include_weekends=False, apply_holidays=False),
     "last_month":                     PresetConfig(period="month", offset="previous", as_of="today",            range_mode="full",         include_weekends=True,  apply_holidays=False),
     "last_working_month":             PresetConfig(period="month", offset="previous", as_of="last_working_day", range_mode="full",         include_weekends=False, apply_holidays=False),
-    "month_before_last_working_month":PresetConfig(period="month", offset="previous", as_of="last_working_day", range_mode="full",         include_weekends=False, apply_holidays=False),
+    # "month_before_last_working_month" removed — handled by _BEFORE_LAST_PRESETS + _shift_one_period_back
     "lwmtlwd":                        PresetConfig(period="month", offset="previous", as_of="last_working_day", range_mode="to_date",      include_weekends=False, apply_holidays=False),
     # Year
     "ytlwd":                          PresetConfig(period="year", offset="this",     as_of="last_working_day", range_mode="to_date",       include_weekends=False, apply_holidays=False),
@@ -373,7 +377,7 @@ LEGACY_PRESET_MAP: dict[str, PresetConfig] = {
     "last_year":                      PresetConfig(period="year", offset="previous", as_of="today", range_mode="full", include_weekends=True,  apply_holidays=False),
     # EOF Weeks
     "eof_last_working_week":             PresetConfig(period="week", offset="previous", as_of="last_working_day", range_mode="end_of_period", include_weekends=False, apply_holidays=False),
-    "eof_week_before_last_working_week": PresetConfig(period="week", offset="previous", as_of="last_working_day", range_mode="end_of_period", include_weekends=False, apply_holidays=False),
+    # "eof_week_before_last_working_week" removed — handled by _BEFORE_LAST_PRESETS + _shift_one_period_back
     "eof_lwwtlwd":                       PresetConfig(period="week", offset="previous", as_of="last_working_day", range_mode="end_of_period", include_weekends=False, apply_holidays=False),
     "eof_this_week":                     PresetConfig(period="week", offset="this",     as_of="today",            range_mode="end_of_period", include_weekends=True,  apply_holidays=False),
     "eof_last_week":                     PresetConfig(period="week", offset="previous", as_of="today",            range_mode="end_of_period", include_weekends=True,  apply_holidays=False),
@@ -381,7 +385,7 @@ LEGACY_PRESET_MAP: dict[str, PresetConfig] = {
     "eof_this_month":                       PresetConfig(period="month", offset="this",     as_of="today",            range_mode="end_of_period", include_weekends=True,  apply_holidays=False),
     "eof_last_month":                       PresetConfig(period="month", offset="previous", as_of="today",            range_mode="end_of_period", include_weekends=True,  apply_holidays=False),
     "eof_last_working_month":               PresetConfig(period="month", offset="previous", as_of="last_working_day", range_mode="end_of_period", include_weekends=False, apply_holidays=False),
-    "eof_month_before_last_working_month":  PresetConfig(period="month", offset="previous", as_of="last_working_day", range_mode="end_of_period", include_weekends=False, apply_holidays=False),
+    # "eof_month_before_last_working_month" removed — handled by _BEFORE_LAST_PRESETS + _shift_one_period_back
     "eof_lwmtlwd":                          PresetConfig(period="month", offset="previous", as_of="last_working_day", range_mode="end_of_period", include_weekends=False, apply_holidays=False),
 }
 
@@ -553,7 +557,10 @@ def resolve_date_presets(
                 preset_key = v.lower().strip()
                 if not preset_key:  # empty after strip
                     continue
-                config = LEGACY_PRESET_MAP.get(preset_key)
+                is_before_last = preset_key in _BEFORE_LAST_PRESETS
+                # For "before last" presets, look up the base preset config
+                lookup_key = _BEFORE_LAST_PRESETS.get(preset_key, preset_key) if is_before_last else preset_key
+                config = LEGACY_PRESET_MAP.get(lookup_key)
                 if config is None:
                     # Check for last_N_days pattern (e.g. last_7_days, last_30_days)
                     m = _LAST_N_DAYS_RE.match(preset_key)
@@ -570,7 +577,6 @@ def resolve_date_presets(
                     # Unknown legacy preset — pass through
                     expanded[k] = v
                     continue
-                is_before_last = preset_key in _BEFORE_LAST_PRESETS
             elif isinstance(v, dict):
                 # Guard: require at least 'period' key for structured presets
                 if "period" not in v:

@@ -139,6 +139,18 @@ async def _startup():
             ensure_scheduler_started()
             schedule_all_jobs()
             schedule_all_alert_jobs()
+            # Start a background watchdog that checks scheduler health every 5 minutes
+            import threading
+            def _scheduler_watchdog():
+                import time as _time
+                while True:
+                    _time.sleep(300)  # 5 minutes
+                    try:
+                        ensure_scheduler_started()  # self-heals if dead
+                    except Exception as _we:
+                        print(f"[SCHEDULER_WATCHDOG] Error: {_we}", flush=True)
+            _wd = threading.Thread(target=_scheduler_watchdog, daemon=True, name="scheduler-watchdog")
+            _wd.start()
     except Exception:
         # Non-fatal; admin can refresh via API later
         pass

@@ -24,6 +24,22 @@ def ensure_scheduler_started() -> BackgroundScheduler:
     if _scheduler is None:
         _scheduler = BackgroundScheduler(timezone=_SCHEDULER_TZ)
         _scheduler.start()
+    elif not _scheduler.running:
+        # Scheduler daemon thread died — restart it and reload all jobs
+        print("[SCHEDULER] WARNING: Scheduler was not running — restarting!", flush=True)
+        try:
+            _scheduler.shutdown(wait=False)
+        except Exception:
+            pass
+        _scheduler = BackgroundScheduler(timezone=_SCHEDULER_TZ)
+        _scheduler.start()
+        # Reload jobs into the fresh scheduler
+        try:
+            schedule_all_jobs()
+            schedule_all_alert_jobs()
+            print("[SCHEDULER] Reloaded all jobs after restart", flush=True)
+        except Exception as e:
+            print(f"[SCHEDULER] Failed to reload jobs: {e}", flush=True)
     return _scheduler
 
 
@@ -94,7 +110,7 @@ def schedule_all_jobs() -> dict:
                 kwargs={"ds_id": t.datasource_id, "task_id": t.id},
                 max_instances=1,
                 coalesce=True,
-                misfire_grace_time=300,
+                misfire_grace_time=3600,  # 1 hour — sync jobs run hourly, 5min was too tight
             )
             if jid in existing:
                 updated += 1
@@ -103,6 +119,58 @@ def schedule_all_jobs() -> dict:
         except Exception:
             # Ignore and continue
             continue
+
+    # --- Catch-up: fire any sync job missed since the last run ---
+    # Handles server restarts where APScheduler recalculates next_run_time into the
+    # future, skipping today's already-due slot.
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo as _ZI  # type: ignore
+        _tz = _ZI(_SCHEDULER_TZ)
+        _now_local = datetime.now(_tz)
+        _window_start = _now_local - timedelta(hours=24)
+        _catchup_db = SessionLocal()
+        try:
+            for jid, t in desired.items():
+                try:
+                    _trig = CronTrigger.from_crontab(t.schedule_cron, timezone=_SCHEDULER_TZ)
+                    _candidate = _trig.get_next_fire_time(None, _window_start)
+                    if _candidate is None or _candidate >= _now_local:
+                        continue
+                    # Check last successful run from SyncState
+                    from .models import SyncState
+                    _st = _catchup_db.query(SyncState).filter(SyncState.task_id == t.id).first()
+                    if _st and _st.last_run_at is not None:
+                        _last = _st.last_run_at
+                        if _last.tzinfo is None:
+                            from datetime import timezone as _tz_mod
+                            _last = _last.replace(tzinfo=_tz_mod.utc)
+                        if _last.astimezone(_tz) >= _candidate:
+                            continue  # Already ran for this slot
+                    # Fire catch-up
+                    print(f"[SYNC_CATCHUP] Firing catch-up for task={t.id} (missed {_candidate})", flush=True)
+                    sched.add_job(
+                        func=run_task_job,
+                        trigger='date',
+                        run_date=datetime.now(_tz) + timedelta(seconds=10),
+                        id=f"sync_catchup:{t.id}",
+                        replace_existing=True,
+                        kwargs={"ds_id": t.datasource_id, "task_id": t.id},
+                        max_instances=1,
+                        coalesce=True,
+                        misfire_grace_time=600,
+                    )
+                except Exception as _ce:
+                    print(f"[SYNC_CATCHUP] Error for task {t.id}: {_ce}", flush=True)
+        finally:
+            try:
+                _catchup_db.close()
+            except Exception:
+                pass
+    except Exception as _catchup_err:
+        print(f"[SYNC_CATCHUP] Catch-up failed: {_catchup_err}", flush=True)
 
     return {"added": added, "updated": updated, "removed": removed, "total": len(desired)}
 
@@ -168,16 +236,23 @@ def _auto_reset_stuck(db, ds_id: str, stale_threshold_minutes: int = 30) -> int:
 
 
 def run_task_job(ds_id: str, task_id: str) -> None:
-    """Scheduler job wrapper to execute a single SyncTask."""
+    """Scheduler job wrapper to execute a single SyncTask.
+
+    IMPORTANT: This runs inside APScheduler's daemon thread. Unhandled exceptions
+    here can kill the scheduler, stopping ALL future jobs permanently.
+    """
     db = SessionLocal()
     try:
-        # Auto-reset any syncs stuck for >60 minutes before attempting a new run
-        _auto_reset_stuck(db, ds_id, stuck_threshold_minutes=60)
+        # Auto-reset any syncs with no progress for >30 minutes
+        _auto_reset_stuck(db, ds_id, stale_threshold_minutes=30)
 
         ds: Optional[Datasource] = db.get(Datasource, ds_id)
         actor = (ds.user_id if ds and ds.user_id else None)
-        # Use the same business logic as the API endpoint
         ds_router.run_sync_now(ds_id, response=Response(), taskId=task_id, execute=True, actorId=actor, db=db)
+    except Exception as e:
+        # Catch ALL exceptions to prevent killing the scheduler daemon thread.
+        # APScheduler silently dies if the job function raises.
+        print(f"[SYNC_JOB] FAILED task={task_id} ds={ds_id}: {e}", flush=True)
     finally:
         try:
             db.close()

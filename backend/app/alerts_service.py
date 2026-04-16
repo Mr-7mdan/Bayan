@@ -546,41 +546,63 @@ def _resolve_report_variables(db: Session, variables: list[dict], global_filters
                 logger.warning("Failed to resolve report variable %s: %s", vid, e)
                 resolved[vid] = None
 
-    # Pass 2: expression variables
-    var_by_name: dict[str, dict] = {str(v.get('name') or ''): v for v in variables}
-    for v in variables:
-        vid = str(v.get('id') or '')
-        if str(v.get('type') or '') != 'expression':
-            continue
-        expr = str(v.get('expression') or '')
-        if not expr:
-            resolved[vid] = None
-            continue
-        try:
-            eval_expr = expr
-            for ref in variables:
-                if ref.get('id') == vid:
-                    continue
-                ref_val = resolved.get(str(ref.get('id') or ''))
-                if ref_val is None:
-                    ref_val = 0
-                ref_name = str(ref.get('name') or '')
-                if ref_name:
+    # Pass 2: expression variables — iterate until stable to handle nested dependencies
+    # (e.g. NetRevenueYTDDA = GrossRevenueYTDDA - CostYTDDA, where both are also expressions)
+    expr_vars = [v for v in variables if str(v.get('type') or '') == 'expression']
+    unresolved_ids = {str(v.get('id') or '') for v in expr_vars}
+    max_passes = 5  # prevent infinite loops
+    for pass_num in range(max_passes):
+        newly_resolved = 0
+        for v in expr_vars:
+            vid = str(v.get('id') or '')
+            if vid not in unresolved_ids:
+                continue
+            expr = str(v.get('expression') or '')
+            if not expr:
+                resolved[vid] = None
+                unresolved_ids.discard(vid)
+                continue
+            try:
+                eval_expr = expr
+                has_unresolved_dep = False
+                for ref in variables:
+                    if ref.get('id') == vid:
+                        continue
+                    ref_name = str(ref.get('name') or '')
+                    if not ref_name:
+                        continue
+                    # Check if this ref name appears in the expression
+                    if not _re.search(r'\b' + _re.escape(ref_name) + r'\b', eval_expr):
+                        continue
+                    ref_val = resolved.get(str(ref.get('id') or ''))
+                    if ref_val is None and str(ref.get('id') or '') in unresolved_ids:
+                        has_unresolved_dep = True
+                        break
                     try:
-                        num_val = float(ref_val)
+                        num_val = float(ref_val if ref_val is not None else 0)
                     except (TypeError, ValueError):
                         num_val = 0.0
                     eval_expr = _re.sub(r'\b' + _re.escape(ref_name) + r'\b', str(num_val), eval_expr)
-            # Safe eval: only allow numbers and arithmetic
-            allowed = set('0123456789.+-*/() ')
-            if all(c in allowed for c in eval_expr.strip()):
-                expr_result = float(eval(eval_expr))  # nosec
-                # Expression variables: only apply reverseSign (mirrors frontend ReportCard.tsx line 615)
-                resolved[vid] = -expr_result if v.get('reverseSign') else expr_result
-            else:
+                if has_unresolved_dep:
+                    continue  # retry in next pass
+                # Safe eval: only allow numbers and arithmetic
+                allowed = set('0123456789.+-*/() ')
+                if all(c in allowed for c in eval_expr.strip()):
+                    expr_result = float(eval(eval_expr))  # nosec
+                    resolved[vid] = -expr_result if v.get('reverseSign') else expr_result
+                else:
+                    resolved[vid] = None
+                unresolved_ids.discard(vid)
+                newly_resolved += 1
+            except Exception as e:
+                logger.warning("Failed to evaluate expression variable %s: %s", vid, e)
                 resolved[vid] = None
-        except Exception as e:
-            logger.warning("Failed to evaluate expression variable %s: %s", vid, e)
+                unresolved_ids.discard(vid)
+        if not unresolved_ids or newly_resolved == 0:
+            break
+    # Any remaining unresolved expressions default to None
+    for vid in unresolved_ids:
+        if vid not in resolved:
             resolved[vid] = None
 
     return resolved

@@ -887,14 +887,14 @@ class SQLGlotBuilder:
     ) -> exp.Expression:
         """
         Build time bucketing expression based on dialect.
-        
-        Handles: day, week, month, quarter, year
+
+        Handles: hour, day, week, month, quarter, year
         """
         col = exp.Column(this=exp.Identifier(this=field, quoted=True))
         group_by_lower = group_by.lower()
-        
+
         if self.dialect == "duckdb":
-            # DuckDB: DATE_TRUNC('month', field)
+            # DuckDB: DATE_TRUNC supports all granularities including 'hour'
             return exp.func("DATE_TRUNC", exp.Literal.string(group_by_lower), col)
             
         elif self.dialect == "postgres":
@@ -903,7 +903,15 @@ class SQLGlotBuilder:
             
         elif self.dialect == "tsql":  # MSSQL
             # MSSQL: Use DATEFROMPARTS for bucketing
-            if group_by_lower == "day":
+            if group_by_lower == "hour":
+                # MSSQL: DATETIMEFROMPARTS(YEAR, MONTH, DAY, HOUR, 0, 0, 0)
+                return exp.func(
+                    "DATETIMEFROMPARTS",
+                    exp.func("YEAR", col), exp.func("MONTH", col), exp.func("DAY", col),
+                    exp.func("DATEPART", exp.Literal.string("hour"), col),
+                    exp.Literal.number(0), exp.Literal.number(0), exp.Literal.number(0),
+                )
+            elif group_by_lower == "day":
                 return exp.Cast(this=col, to=exp.DataType.Type.DATE)
             elif group_by_lower == "month":
                 return exp.func(
@@ -912,6 +920,10 @@ class SQLGlotBuilder:
                     exp.func("MONTH", col),
                     exp.Literal.number(1),
                 )
+            elif group_by_lower == "week":
+                return sqlglot.parse_one(f"DATEADD(week, DATEDIFF(week, 0, [{field}]), 0)", dialect="tsql")
+            elif group_by_lower == "quarter":
+                return sqlglot.parse_one(f"DATEADD(quarter, DATEDIFF(quarter, 0, [{field}]), 0)", dialect="tsql")
             elif group_by_lower == "year":
                 return exp.func(
                     "DATEFROMPARTS",
@@ -924,10 +936,21 @@ class SQLGlotBuilder:
             
         elif self.dialect == "mysql":
             # MySQL: DATE_FORMAT for bucketing
-            if group_by_lower == "day":
+            if group_by_lower == "hour":
+                return exp.func("DATE_FORMAT", col, exp.Literal.string("%Y-%m-%d %H:00:00"))
+            elif group_by_lower == "day":
                 return exp.func("DATE", col)
+            elif group_by_lower == "week":
+                # Monday-based week start
+                week_start_lower = (week_start or "mon").lower()
+                if week_start_lower == "sun":
+                    return sqlglot.parse_one(f"DATE_SUB(DATE(`{field}`), INTERVAL (DAYOFWEEK(`{field}`)-1) DAY)", dialect="mysql")
+                else:
+                    return sqlglot.parse_one(f"DATE_SUB(DATE(`{field}`), INTERVAL WEEKDAY(`{field}`) DAY)", dialect="mysql")
             elif group_by_lower == "month":
                 return exp.func("DATE_FORMAT", col, exp.Literal.string("%Y-%m-01"))
+            elif group_by_lower == "quarter":
+                return sqlglot.parse_one(f"DATE_ADD(MAKEDATE(YEAR(`{field}`), 1), INTERVAL QUARTER(`{field}`)*3 - 3 MONTH)", dialect="mysql")
             elif group_by_lower == "year":
                 return exp.func("DATE_FORMAT", col, exp.Literal.string("%Y-01-01"))
             # Fallback

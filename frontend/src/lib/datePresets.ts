@@ -129,19 +129,19 @@ export const LEGACY_PRESET_MAP: Record<string, PresetConfig> = {
   yesterday:                      { period: "day", offset: "previous", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
   last_working_day:               { period: "day", offset: "this", as_of: "last_working_day", range_mode: "full", include_weekends: false, apply_holidays: false },
   day_before_last_working_day:    { period: "day", offset: "previous", as_of: "last_working_day", range_mode: "full", include_weekends: false, apply_holidays: false },
-  day_before_yesterday:           { period: "day", offset: "previous", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
+  // day_before_yesterday: handled by _BEFORE_LAST_PRESETS on backend
   twwtlwd:                        { period: "week", offset: "this", as_of: "last_working_day", range_mode: "to_date", include_weekends: false, apply_holidays: false },
   last_working_week:              { period: "week", offset: "previous", as_of: "last_working_day", range_mode: "full", include_weekends: false, apply_holidays: false },
-  week_before_last_working_week:  { period: "week", offset: "previous", as_of: "last_working_day", range_mode: "full", include_weekends: false, apply_holidays: false },
+  // week_before_last_working_week: handled by _BEFORE_LAST_PRESETS on backend
   lwwtlwd:                        { period: "week", offset: "previous", as_of: "last_working_day", range_mode: "to_date", include_weekends: false, apply_holidays: false },
   this_week:                      { period: "week", offset: "this", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
   last_week:                      { period: "week", offset: "previous", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
-  week_before_last:               { period: "week", offset: "previous", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
+  // week_before_last: handled by _BEFORE_LAST_PRESETS on backend
   this_month:                     { period: "month", offset: "this", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
   tmtlwd:                         { period: "month", offset: "this", as_of: "last_working_day", range_mode: "to_date", include_weekends: false, apply_holidays: false },
   last_month:                     { period: "month", offset: "previous", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
   last_working_month:             { period: "month", offset: "previous", as_of: "last_working_day", range_mode: "full", include_weekends: false, apply_holidays: false },
-  month_before_last_working_month:{ period: "month", offset: "previous", as_of: "last_working_day", range_mode: "full", include_weekends: false, apply_holidays: false },
+  // month_before_last_working_month: handled by _BEFORE_LAST_PRESETS on backend
   lwmtlwd:                        { period: "month", offset: "previous", as_of: "last_working_day", range_mode: "to_date", include_weekends: false, apply_holidays: false },
   ytlwd:                          { period: "year", offset: "this", as_of: "last_working_day", range_mode: "to_date", include_weekends: false, apply_holidays: false },
   ytd:                            { period: "year", offset: "this", as_of: "today", range_mode: "to_date", include_weekends: true, apply_holidays: false },
@@ -151,14 +151,14 @@ export const LEGACY_PRESET_MAP: Record<string, PresetConfig> = {
   this_year:                      { period: "year", offset: "this", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
   last_year:                      { period: "year", offset: "previous", as_of: "today", range_mode: "full", include_weekends: true, apply_holidays: false },
   eof_last_working_week:          { period: "week", offset: "previous", as_of: "last_working_day", range_mode: "end_of_period", include_weekends: false, apply_holidays: false },
-  eof_week_before_last_working_week: { period: "week", offset: "previous", as_of: "last_working_day", range_mode: "end_of_period", include_weekends: false, apply_holidays: false },
+  // eof_week_before_last_working_week: handled by _BEFORE_LAST_PRESETS on backend
   eof_lwwtlwd:                    { period: "week", offset: "previous", as_of: "last_working_day", range_mode: "end_of_period", include_weekends: false, apply_holidays: false },
   eof_this_week:                  { period: "week", offset: "this", as_of: "today", range_mode: "end_of_period", include_weekends: true, apply_holidays: false },
   eof_last_week:                  { period: "week", offset: "previous", as_of: "today", range_mode: "end_of_period", include_weekends: true, apply_holidays: false },
   eof_this_month:                 { period: "month", offset: "this", as_of: "today", range_mode: "end_of_period", include_weekends: true, apply_holidays: false },
   eof_last_month:                 { period: "month", offset: "previous", as_of: "today", range_mode: "end_of_period", include_weekends: true, apply_holidays: false },
   eof_last_working_month:         { period: "month", offset: "previous", as_of: "last_working_day", range_mode: "end_of_period", include_weekends: false, apply_holidays: false },
-  eof_month_before_last_working_month: { period: "month", offset: "previous", as_of: "last_working_day", range_mode: "end_of_period", include_weekends: false, apply_holidays: false },
+  // eof_month_before_last_working_month: handled by _BEFORE_LAST_PRESETS on backend
   eof_lwmtlwd:                    { period: "month", offset: "previous", as_of: "last_working_day", range_mode: "end_of_period", include_weekends: false, apply_holidays: false },
 };
 
