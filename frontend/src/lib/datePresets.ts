@@ -9,7 +9,7 @@ import { Api } from "./api";
 // ── Dimension types ──────────────────────────────────────────────────────
 
 export type Period = "day" | "week" | "month" | "quarter" | "year";
-export type OffsetType = "this" | "previous";
+export type OffsetType = "this" | "previous" | "last_year_this" | "last_year_previous";
 export type AsOfType = "today" | "last_working_day";
 export type RangeModeType = "full" | "to_date" | "end_of_period";
 
@@ -44,6 +44,8 @@ export const PERIOD_OPTIONS: { value: Period; label: string }[] = [
 export const OFFSET_OPTIONS: { value: OffsetType; label: string }[] = [
   { value: "this", label: "This / Current" },
   { value: "previous", label: "Previous" },
+  { value: "last_year_this", label: "Last Year's Current" },
+  { value: "last_year_previous", label: "Last Year's Previous" },
 ];
 
 export const AS_OF_OPTIONS: { value: AsOfType; label: string }[] = [

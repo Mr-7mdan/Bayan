@@ -462,6 +462,7 @@ async def ai_suggest(payload: AiSuggestRequest, request: Request, db: Session = 
     prov = payload.provider
     mdl = payload.model
     key = payload.apiKey
+    base_url = (payload.baseUrl or None)
     if not key:
         cfg = db.query(AiConfig).first()
         if cfg:
@@ -469,6 +470,8 @@ async def ai_suggest(payload: AiSuggestRequest, request: Request, db: Session = 
                 prov = cfg.provider
             if not mdl and cfg.model:
                 mdl = cfg.model
+            if (not base_url) and cfg.base_url:
+                base_url = cfg.base_url
             if cfg.api_key_encrypted:
                 key = decrypt_text(cfg.api_key_encrypted)
     if not key:

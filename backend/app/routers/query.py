@@ -405,6 +405,11 @@ def _spec_concurrency_guard():
     finally:
         _SPEC_SEM.release()
 
+try:
+    _ACTOR_CAP = int(os.environ.get('USER_QUERY_CONCURRENCY', '1') or '1')
+except Exception:
+    _ACTOR_CAP = 1
+if _ACTOR_CAP <= 0:
     _ACTOR_CAP = 1
 _ACTOR_LOCK = threading.Lock()
 _ACTOR_SEMS: Dict[str, threading.BoundedSemaphore] = {}

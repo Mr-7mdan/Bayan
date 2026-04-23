@@ -250,6 +250,18 @@ export type ReportVariable = {
   divideBy?: number // post-query calculation
   roundMode?: 'none' | 'round' | 'roundup' | 'rounddown' // rounding method
   roundDecimals?: number // decimal places for rounding
+  conditionalFormat?: {
+    enabled?: boolean
+    rules: Array<{
+      op: '>' | '>=' | '<' | '<=' | '==' | '!=' | 'between'
+      value: number
+      value2?: number
+      icon?: 'none' | 'arrow_up' | 'arrow_down' | 'arrow_flat' | 'circle'
+      iconColor?: string
+      textColor?: string
+      bgColor?: string
+    }>
+  }
 }
 
 export type WidgetConfig = {

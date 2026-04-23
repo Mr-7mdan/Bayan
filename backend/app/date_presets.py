@@ -15,9 +15,18 @@ from typing import Any, Literal, Optional, Sequence, TypedDict
 # ── Type definitions ─────────────────────────────────────────────────────
 
 Period = Literal["day", "week", "month", "quarter", "year"]
-Offset = Literal["this", "previous"]
+Offset = Literal["this", "previous", "last_year_this", "last_year_previous"]
 AsOf = Literal["today", "last_working_day"]
 RangeMode = Literal["full", "to_date", "end_of_period"]
+
+
+def _shift_years(d: datetime, years: int) -> datetime:
+    """Subtract *years* from *d*, handling Feb 29 by falling back to Feb 28."""
+    try:
+        return d.replace(year=d.year - years)
+    except ValueError:
+        # Feb 29 in a leap source year → Feb 28 in the target year
+        return d.replace(year=d.year - years, day=28)
 
 
 class PresetConfig(TypedDict, total=False):
@@ -248,6 +257,14 @@ def resolve_preset(
         anchor = _prev_workday(today, weekend_days, active_holidays)
     else:
         anchor = today
+
+    # ── Step 1b: Year offsets — shift anchor back 1 year, collapse to this/previous ──
+    if offset == "last_year_this":
+        anchor = _shift_years(anchor, 1)
+        offset = "this"
+    elif offset == "last_year_previous":
+        anchor = _shift_years(anchor, 1)
+        offset = "previous"
 
     # ── Step 2: Determine "this" period boundaries (always calendar) ──
     if period == "day":

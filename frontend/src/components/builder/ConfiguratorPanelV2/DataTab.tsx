@@ -113,13 +113,13 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
     const next={...local,options:{...(local.options||{}),...p}}; setLocal(next); updateConfig(next)
   }
 
-  if (['composition','report','text','spacer'].includes(local.type))
-    return <div className="text-xs text-muted-foreground p-2">No data configuration for this widget type.</div>
-
   const dsEntry = useMemo(() => {
     const list = (dsQ.data as DatasourceOut[]|undefined)||[]
     return list.find(d => d.id === (local.datasourceId||''))
   }, [dsQ.data, local.datasourceId])
+
+  if (['composition','report','text','spacer'].includes(local.type))
+    return <div className="text-xs text-muted-foreground p-2">No data configuration for this widget type.</div>
 
   const schemaForAdv = schemaQ.data as IntrospectResponse|undefined
 

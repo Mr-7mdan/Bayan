@@ -332,8 +332,77 @@ def _apply_var_post_calc(raw: Any, variable: dict) -> Any:
     return num
 
 
-def _format_report_value(raw: Any, variable: dict) -> str:
-    """Format a resolved variable value — mirrors frontend formatValue()."""
+_ICON_GLYPH = {
+    'none': '',
+    'arrow_up': '\u25B2',    # ▲
+    'arrow_down': '\u25BC',  # ▼
+    'arrow_flat': '\u25AC',  # ▬
+    'circle': '\u25CF',      # ●
+}
+
+
+def _match_conditional_rule(num: float, cf: Optional[dict]) -> Optional[dict]:
+    """Return the first rule in cf['rules'] that matches *num*, else None.
+
+    Mirrors frontend/src/lib/conditionalFormat.ts:matchConditionalRule().
+    """
+    if not cf or not cf.get('enabled', False):
+        return None
+    rules = cf.get('rules') or []
+    if not rules:
+        return None
+    try:
+        n = float(num)
+    except (TypeError, ValueError):
+        return None
+    for r in rules:
+        if not isinstance(r, dict):
+            continue
+        op = str(r.get('op') or '')
+        try:
+            v = float(r.get('value'))
+        except (TypeError, ValueError):
+            continue
+        matched = False
+        if op == '>':   matched = n > v
+        elif op == '>=': matched = n >= v
+        elif op == '<':  matched = n < v
+        elif op == '<=': matched = n <= v
+        elif op == '==': matched = n == v
+        elif op == '!=': matched = n != v
+        elif op == 'between':
+            try:
+                v2 = float(r.get('value2') if r.get('value2') is not None else v)
+            except (TypeError, ValueError):
+                v2 = v
+            lo, hi = (v, v2) if v <= v2 else (v2, v)
+            matched = lo <= n <= hi
+        if matched:
+            return r
+    return None
+
+
+def _conditional_style_for(raw: Any, variable: dict) -> Optional[dict]:
+    """Evaluate conditional formatting for *raw* against *variable*.
+
+    Returns the matched rule dict or None.
+    """
+    cf = variable.get('conditionalFormat') if isinstance(variable, dict) else None
+    if not cf:
+        return None
+    try:
+        num = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return _match_conditional_rule(num, cf)
+
+
+def _format_report_value(raw: Any, variable: dict, format_override: Optional[str] = None) -> str:
+    """Format a resolved variable value — mirrors frontend formatValue().
+
+    If *format_override* is provided and not 'none', it takes precedence over
+    ``variable['format']`` (used for per-cell numberFormat overrides).
+    """
     prefix = str(variable.get('prefix') or '')
     suffix = str(variable.get('suffix') or '')
     vtype = str(variable.get('type') or 'query')
@@ -353,9 +422,14 @@ def _format_report_value(raw: Any, variable: dict) -> str:
     try:
         num = float(raw)
     except (TypeError, ValueError):
-        return f"{prefix}{str(raw or '\u2014')}{suffix}"
+        em_dash = '\u2014'
+        return f"{prefix}{str(raw or em_dash)}{suffix}"
 
-    fmt = str(variable.get('format') or 'none')
+    fmt_override = str(format_override or '').strip()
+    if fmt_override and fmt_override != 'none':
+        fmt = fmt_override
+    else:
+        fmt = str(variable.get('format') or 'none')
     if fmt == 'short':
         if num >= 1e9:
             s = f"{num/1e9:.1f}B"
@@ -694,7 +768,25 @@ def _render_report_element_html(el: dict, variables: list[dict], resolved: dict[
             return "<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;'>\u2014</div>"
         val = resolved.get(vid)
         formatted = _html_escape(_format_report_value(val, v))
-        return f"<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:{_fs(18)}px;font-weight:600;font-family:Inter,Arial,sans-serif;'>{formatted}</div>"
+        cond = _conditional_style_for(val, v)
+        wrap_bg = ''
+        wrap_color = ''
+        icon_html = ''
+        if cond:
+            if cond.get('bgColor'):
+                wrap_bg = f"background-color:{cond.get('bgColor')};"
+            if cond.get('textColor'):
+                wrap_color = f"color:{cond.get('textColor')};"
+            if cond.get('icon') and cond.get('icon') != 'none':
+                glyph = _ICON_GLYPH.get(str(cond.get('icon') or 'none'), '')
+                ic = str(cond.get('iconColor') or '')
+                ic_style = f"color:{ic};margin-right:6px;" if ic else "margin-right:6px;"
+                icon_html = f"<span style='{ic_style}'>{glyph}</span>"
+        return (
+            f"<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;"
+            f"font-size:{_fs(18)}px;font-weight:600;font-family:Inter,Arial,sans-serif;{wrap_bg}{wrap_color}'>"
+            f"{icon_html}{formatted}</div>"
+        )
 
     if etype == 'table':
         tbl = el.get('table') or {}
@@ -821,12 +913,24 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
 
             # Resolve cell content
             cell_type = str(cell.get('type') or 'text') if isinstance(cell, dict) else 'text'
+            cond_rule: Optional[dict] = None
             if cell_type == 'spaceholder':
                 vid = cell.get('variableId') if isinstance(cell, dict) else None
                 v = next((v for v in variables if str(v.get('id') or '') == vid), None)
                 if v:
                     raw_val = resolved.get(vid)
-                    content = _html_escape(_format_report_value(raw_val, v))
+                    cell_fmt = cs.get('numberFormat') if isinstance(cs, dict) else None
+                    cond_rule = _conditional_style_for(raw_val, v)
+                    formatted = _html_escape(_format_report_value(raw_val, v, cell_fmt))
+                    if cond_rule and cond_rule.get('icon') and cond_rule.get('icon') != 'none':
+                        glyph = _ICON_GLYPH.get(str(cond_rule.get('icon') or 'none'), '')
+                        icon_color = str(cond_rule.get('iconColor') or '')
+                        style_bits = 'margin-right:4px;'
+                        if icon_color:
+                            style_bits = f"color:{icon_color};{style_bits}"
+                        content = f"<span style='{style_bits}'>{glyph}</span>{formatted}"
+                    else:
+                        content = formatted
                 else:
                     content = '\u2014'
             elif cell_type == 'period':
@@ -875,6 +979,14 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
             else:
                 content = _resolve_text(_html_escape(str(cell.get('text') or '') if isinstance(cell, dict) else ''), variables, resolved)
 
+            # Conditional formatting: override bg/text color when a rule matched
+            if cond_rule:
+                cond_bg = cond_rule.get('bgColor')
+                if cond_bg:
+                    bg_style = f"background:{cond_bg};"
+                cond_text = cond_rule.get('textColor')
+                if cond_text:
+                    color = cond_text
             tds.append(
                 f"<td style='{border}{bg_style}font-size:{fs}px;font-weight:{fw};{fi}"
                 f"color:{color};text-align:{ta};vertical-align:{va};padding:{_pad(4)}px {_pad(8)}px;white-space:nowrap;'>{content}</td>"

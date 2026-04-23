@@ -5,9 +5,10 @@ import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Api, QueryApi } from '@/lib/api'
 import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, presetConfigToLabel, LEGACY_PRESET_MAP, usePresetPreview } from '@/lib/datePresets'
+import { ConditionalRule, ConditionalFormat, OP_OPTIONS, ICON_OPTIONS, ICON_GLYPH, describeRule, presetTrendArrows, preset4CircleSet, presetHeatmap3 } from '@/lib/conditionalFormat'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
-import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine, RiBarChart2Line } from '@remixicon/react'
+import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine, RiArrowUpLine, RiArrowDownLine, RiBarChart2Line } from '@remixicon/react'
 import DataExplorerDialogV2 from './DataExplorerDialogV2'
 
 const genId = () => Math.random().toString(36).slice(2, 10)
@@ -819,6 +820,177 @@ function VariableEditor({
                 <label className="block text-[10px] font-medium text-muted-foreground mb-1">Suffix</label>
                 <input className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={variable.suffix || ''} onChange={(e) => handleChange({ suffix: e.target.value })} placeholder="%" />
               </div>
+            </div>
+          </details>
+        )}
+
+        {/* Conditional Formatting - collapsible */}
+        {varType !== 'datetime' && (
+          <details className="group/cond">
+            <summary className="text-[10px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1 py-1 hover:text-foreground transition-colors">
+              <span className="transition-transform duration-150 group-open/cond:rotate-90 text-[8px]">&#9654;</span>
+              Conditional Formatting
+              {variable.conditionalFormat?.enabled && variable.conditionalFormat.rules?.length > 0 && (
+                <span className="ml-auto text-[9px] text-primary/70">{variable.conditionalFormat.rules.length} rule{variable.conditionalFormat.rules.length === 1 ? '' : 's'}</span>
+              )}
+            </summary>
+            <div className="space-y-2 pt-1.5">
+              {/* Enable toggle + preset buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="flex items-center gap-1 text-[10px] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!variable.conditionalFormat?.enabled}
+                    onChange={(e) => {
+                      const cf = variable.conditionalFormat || { enabled: false, rules: [] }
+                      handleChange({ conditionalFormat: { ...cf, enabled: e.target.checked, rules: cf.rules || [] } })
+                    }}
+                  />
+                  Enabled
+                </label>
+                <span className="text-[9px] text-muted-foreground">Presets:</span>
+                <button type="button" className="text-[9px] px-2 py-0.5 rounded border hover:bg-muted transition-colors"
+                  onClick={() => handleChange({ conditionalFormat: presetTrendArrows() })}>
+                  ▲▼ Arrows
+                </button>
+                <button type="button" className="text-[9px] px-2 py-0.5 rounded border hover:bg-muted transition-colors"
+                  onClick={() => handleChange({ conditionalFormat: preset4CircleSet() })}>
+                  ●●●● 4-Circle
+                </button>
+                <button type="button" className="text-[9px] px-2 py-0.5 rounded border hover:bg-muted transition-colors"
+                  onClick={() => handleChange({ conditionalFormat: presetHeatmap3() })}>
+                  Heatmap
+                </button>
+              </div>
+
+              {/* Rules list */}
+              <div className="space-y-1.5">
+                {(variable.conditionalFormat?.rules || []).map((rule, idx) => {
+                  const rules = variable.conditionalFormat?.rules || []
+                  const patchRule = (p: Partial<ConditionalRule>) => {
+                    const next = rules.map((r, i) => i === idx ? { ...r, ...p } : r)
+                    handleChange({ conditionalFormat: { ...(variable.conditionalFormat || { enabled: true }), rules: next } })
+                  }
+                  const removeRule = () => {
+                    const next = rules.filter((_, i) => i !== idx)
+                    handleChange({ conditionalFormat: { ...(variable.conditionalFormat || { enabled: true }), rules: next } })
+                  }
+                  const moveRule = (dir: -1 | 1) => {
+                    const j = idx + dir
+                    if (j < 0 || j >= rules.length) return
+                    const next = rules.slice()
+                    ;[next[idx], next[j]] = [next[j], next[idx]]
+                    handleChange({ conditionalFormat: { ...(variable.conditionalFormat || { enabled: true }), rules: next } })
+                  }
+                  return (
+                    <div key={idx} className="border rounded-md p-1.5 bg-secondary/20 space-y-1">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] text-muted-foreground">#{idx + 1}</span>
+                        <div className="flex-1" />
+                        <button type="button" className="text-[9px] px-1 py-0.5 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                          disabled={idx === 0} onClick={() => moveRule(-1)} title="Move up">▲</button>
+                        <button type="button" className="text-[9px] px-1 py-0.5 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                          disabled={idx === rules.length - 1} onClick={() => moveRule(1)} title="Move down">▼</button>
+                        <button type="button" className="text-[9px] px-1 py-0.5 rounded text-destructive hover:bg-destructive/10"
+                          onClick={removeRule} title="Delete rule">×</button>
+                      </div>
+
+                      {/* Row 1: operator + value(s) */}
+                      <div className="flex items-center gap-1">
+                        <select className="h-6 text-[10px] rounded border bg-secondary/40 px-1 cursor-pointer"
+                          value={rule.op}
+                          onChange={(e) => patchRule({ op: e.target.value as any })}>
+                          {OP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                        <input type="number" step="any" className="h-6 text-[10px] rounded border bg-secondary/40 px-1 w-20"
+                          value={Number.isFinite(rule.value) ? rule.value : ''}
+                          onChange={(e) => patchRule({ value: parseFloat(e.target.value) })}
+                          placeholder="value" />
+                        {rule.op === 'between' && (
+                          <>
+                            <span className="text-[9px] text-muted-foreground">and</span>
+                            <input type="number" step="any" className="h-6 text-[10px] rounded border bg-secondary/40 px-1 w-20"
+                              value={rule.value2 != null && Number.isFinite(rule.value2) ? rule.value2 : ''}
+                              onChange={(e) => patchRule({ value2: parseFloat(e.target.value) })}
+                              placeholder="value" />
+                          </>
+                        )}
+                      </div>
+
+                      {/* Row 2: icon + colors */}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <select className="h-6 text-[10px] rounded border bg-secondary/40 px-1 cursor-pointer"
+                          value={rule.icon || 'none'}
+                          onChange={(e) => patchRule({ icon: e.target.value as any })}>
+                          {ICON_OPTIONS.map(i => <option key={i.value} value={i.value}>{i.glyph ? `${i.glyph} ${i.label}` : i.label}</option>)}
+                        </select>
+                        {rule.icon && rule.icon !== 'none' && (
+                          <div className="flex items-center gap-0.5" title="Icon color">
+                            <span className="text-[9px] text-muted-foreground">Icon</span>
+                            <input type="color" className="w-5 h-5 rounded border cursor-pointer"
+                              value={rule.iconColor || '#16a34a'}
+                              onChange={(e) => patchRule({ iconColor: e.target.value })} />
+                          </div>
+                        )}
+                        <div className="flex items-center gap-0.5" title="Text color">
+                          <span className="text-[9px] text-muted-foreground">Text</span>
+                          <input type="color" className="w-5 h-5 rounded border cursor-pointer"
+                            value={rule.textColor || '#111827'}
+                            onChange={(e) => patchRule({ textColor: e.target.value })} />
+                          {rule.textColor && (
+                            <button type="button" className="text-[8px] text-muted-foreground hover:text-foreground"
+                              onClick={() => patchRule({ textColor: undefined })}>clear</button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-0.5" title="Background color">
+                          <span className="text-[9px] text-muted-foreground">Bg</span>
+                          <input type="color" className="w-5 h-5 rounded border cursor-pointer"
+                            value={rule.bgColor || '#ffffff'}
+                            onChange={(e) => patchRule({ bgColor: e.target.value })} />
+                          {rule.bgColor && (
+                            <button type="button" className="text-[8px] text-muted-foreground hover:text-foreground"
+                              onClick={() => patchRule({ bgColor: undefined })}>clear</button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Preview */}
+                      <div className="text-[9px] text-muted-foreground flex items-center gap-1">
+                        <span>When value is {describeRule(rule)} →</span>
+                        <span
+                          className="inline-flex items-center gap-0.5 px-1 rounded"
+                          style={{
+                            color: rule.textColor || undefined,
+                            backgroundColor: rule.bgColor || undefined,
+                          }}
+                        >
+                          {rule.icon && rule.icon !== 'none' && (
+                            <span style={{ color: rule.iconColor || undefined }}>{ICON_GLYPH[rule.icon]}</span>
+                          )}
+                          <span>123</span>
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Add rule */}
+              <button type="button"
+                className="w-full text-[10px] py-1 rounded border border-dashed hover:bg-muted transition-colors flex items-center justify-center gap-1"
+                onClick={() => {
+                  const cf = variable.conditionalFormat || { enabled: true, rules: [] }
+                  const newRule: ConditionalRule = { op: '>', value: 0, icon: 'none' }
+                  handleChange({ conditionalFormat: { ...cf, enabled: cf.enabled ?? true, rules: [...(cf.rules || []), newRule] } })
+                }}>
+                + Add Rule
+              </button>
+
+              {(variable.conditionalFormat?.rules?.length || 0) > 0 && (
+                <p className="text-[9px] text-muted-foreground leading-tight">
+                  Rules are evaluated top-to-bottom; the first match wins. Order rules from most-specific (highest threshold) to least-specific (catch-all) for continuous coverage.
+                </p>
+              )}
             </div>
           </details>
         )}
@@ -2396,6 +2568,7 @@ function InlineTableEditor({
 
   const [cellMenuOpen, setCellMenuOpen] = useState<{ row: number; col: number } | null>(null)
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<number | null>(null)
+  const [deleteConfirmCol, setDeleteConfirmCol] = useState<number | null>(null)
   const [normalized, setNormalized] = useState(false)
   const tableRef = useRef<HTMLTableElement | null>(null)
   const resizeDragRef = useRef<{ col: number; startX: number; startWidths: number[] } | null>(null)
@@ -2456,7 +2629,21 @@ function InlineTableEditor({
   }
 
   const updateCell = (ri: number, ci: number, patch: Partial<ReportTableCell>) => {
-    const cells = table.cells.map((row, r) => row.map((cell, c) => (r === ri && c === ci) ? { ...cell, ...patch } : cell))
+    const cells = table.cells.map((row, r) => row.map((cell, c) => {
+      if (!(r === ri && c === ci)) return cell
+      // If patch.style is explicitly undefined (reset), clear it.
+      // If patch.style is provided, deep-merge onto the current cell.style so
+      // partial style patches don't overwrite sibling fields (e.g. setting
+      // numberFormat doesn't drop a previously-set fontSize).
+      if ('style' in patch) {
+        if (patch.style === undefined) {
+          const { style: _omit, ...rest } = cell
+          return { ...rest, ...patch, style: undefined }
+        }
+        return { ...cell, ...patch, style: { ...(cell.style || {}), ...patch.style } }
+      }
+      return { ...cell, ...patch }
+    }))
     onChange({ ...table, cells })
   }
 
@@ -2479,6 +2666,75 @@ function InlineTableEditor({
     const newRowStyles = table.rowStyles ? [...table.rowStyles.slice(0, ri), {}, ...table.rowStyles.slice(ri)] : undefined
     onChange({ ...table, rows: table.rows + 1, cells: newCells, ...(newRowStyles ? { rowStyles: newRowStyles } : {}) })
     setCellMenuOpen(null)
+  }
+
+  const swapRows = (a: number, b: number) => {
+    if (a === b || a < 0 || b < 0 || a >= table.cells.length || b >= table.cells.length) return
+    const newCells = table.cells.slice()
+    ;[newCells[a], newCells[b]] = [newCells[b], newCells[a]]
+    let newRowStyles: typeof table.rowStyles | undefined = undefined
+    if (table.rowStyles) {
+      newRowStyles = table.rowStyles.slice()
+      const sa = newRowStyles[a] || {}
+      const sb = newRowStyles[b] || {}
+      newRowStyles[a] = sb
+      newRowStyles[b] = sa
+    }
+    onChange({ ...table, cells: newCells, ...(newRowStyles ? { rowStyles: newRowStyles } : {}) })
+    setCellMenuOpen(null)
+  }
+
+  const moveRowUp = (ri: number) => swapRows(ri, ri - 1)
+  const moveRowDown = (ri: number) => swapRows(ri, ri + 1)
+
+  const deleteColumn = (ci: number) => {
+    if (table.cols <= 1) return
+    // Walk headers to find which header owns absolute column ci
+    let hiOwner = -1
+    let runningStart = 0
+    for (let hi = 0; hi < table.headers.length; hi++) {
+      const h = table.headers[hi]
+      const header = typeof h === 'string' ? { text: h, colspan: 1 } : h
+      const span = header.colspan || 1
+      if (ci >= runningStart && ci < runningStart + span) {
+        hiOwner = hi
+        break
+      }
+      runningStart += span
+    }
+    if (hiOwner < 0) return
+
+    const ownerHdr = (() => {
+      const h = table.headers[hiOwner]
+      return typeof h === 'string' ? { text: h, colspan: 1 } : h
+    })()
+    const ownerSpan = ownerHdr.colspan || 1
+
+    let newHeaders
+    if (ownerSpan > 1) {
+      newHeaders = table.headers.map((h, i) => {
+        if (i !== hiOwner) return h
+        const hdr = typeof h === 'string' ? { text: h, colspan: 1 } : h
+        return { ...hdr, colspan: (hdr.colspan || 1) - 1 }
+      })
+    } else {
+      newHeaders = table.headers.filter((_, i) => i !== hiOwner)
+    }
+
+    const newCells = table.cells.map(row => row.filter((_, c) => c !== ci))
+    const newSubheaders = table.subheaders ? table.subheaders.filter((_, c) => c !== ci) : undefined
+    const newColWidths = table.colWidths ? table.colWidths.filter((_, c) => c !== ci) : undefined
+
+    onChange({
+      ...table,
+      cols: table.cols - 1,
+      headers: newHeaders,
+      cells: newCells,
+      ...(newSubheaders ? { subheaders: newSubheaders } : {}),
+      ...(newColWidths ? { colWidths: newColWidths } : {}),
+    })
+    setCellMenuOpen(null)
+    setDeleteConfirmCol(null)
   }
 
   const actualCols = table.headers.reduce((sum, h) => {
@@ -2831,6 +3087,18 @@ function InlineTableEditor({
 
                       {/* Row actions */}
                       <div className="border-t pt-2 mt-1 space-y-1">
+                        <button
+                          className={`w-full text-[9px] text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri === 0 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
+                          disabled={ri === 0}
+                          onClick={() => { moveRowUp(ri); setDeleteConfirmRow(null) }}>
+                          <RiArrowUpLine className="h-3 w-3 shrink-0" />Move row up
+                        </button>
+                        <button
+                          className={`w-full text-[9px] text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri >= table.rows - 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
+                          disabled={ri >= table.rows - 1}
+                          onClick={() => { moveRowDown(ri); setDeleteConfirmRow(null) }}>
+                          <RiArrowDownLine className="h-3 w-3 shrink-0" />Move row down
+                        </button>
                         <button className="w-full text-[9px] text-left px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1.5"
                           onClick={() => { insertRowAbove(ri); setDeleteConfirmRow(null) }}>
                           <RiAddLine className="h-3 w-3 shrink-0" />Insert row above
@@ -2853,6 +3121,38 @@ function InlineTableEditor({
                             <RiDeleteBinLine className="h-3 w-3 shrink-0" />Delete row
                           </button>
                         )}
+                        {(() => {
+                          // Determine what deleting this col means: whole column vs. subheader only
+                          let runningStart = 0
+                          let ownerSpan = 1
+                          for (const h of table.headers) {
+                            const hdr = typeof h === 'string' ? { text: h, colspan: 1 } : h
+                            const span = hdr.colspan || 1
+                            if (ci >= runningStart && ci < runningStart + span) { ownerSpan = span; break }
+                            runningStart += span
+                          }
+                          const isWhole = ownerSpan <= 1
+                          const confirmMsg = isWhole ? 'Delete this column?' : 'Delete this sub-column?'
+                          const btnLabel = isWhole ? 'Delete column' : 'Delete sub-column'
+                          return deleteConfirmCol === ci ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] text-destructive flex-1">{confirmMsg}</span>
+                              <button className="text-[9px] px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+                                onClick={() => deleteColumn(ci)}>Yes</button>
+                              <button className="text-[9px] px-1.5 py-0.5 rounded border hover:bg-muted transition-colors"
+                                onClick={() => setDeleteConfirmCol(null)}>No</button>
+                            </div>
+                          ) : (
+                            <button
+                              className={`w-full text-[9px] text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                                table.cols <= 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-destructive/10 text-destructive'
+                              }`}
+                              disabled={table.cols <= 1}
+                              onClick={() => { setDeleteConfirmCol(ci); setDeleteConfirmRow(null) }}>
+                              <RiDeleteBinLine className="h-3 w-3 shrink-0" />{btnLabel}
+                            </button>
+                          )
+                        })()}
                       </div>
                     </div>
                   )}

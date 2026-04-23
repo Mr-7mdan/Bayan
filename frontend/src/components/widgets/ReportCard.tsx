@@ -9,6 +9,7 @@ import { useFilters } from '@/components/providers/FiltersProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
 import { PresetConfig, presetConfigToLabel, LEGACY_PRESET_MAP } from '@/lib/datePresets'
+import { matchConditionalRule, ICON_GLYPH } from '@/lib/conditionalFormat'
 
 const ChartCard = dynamic(() => import('@/components/widgets/ChartCard'), { ssr: false })
 
@@ -129,7 +130,7 @@ function resolveDatetimeExprToString(expr: string | PresetConfig): string {
 }
 
 // Format a resolved numeric value according to the variable's format setting
-function formatValue(raw: unknown, variable: ReportVariable): string {
+function formatValue(raw: unknown, variable: ReportVariable, formatOverride?: string): string {
   // Handle datetime variables
   if (variable.type === 'datetime') {
     const prefix = variable.prefix || ''
@@ -150,7 +151,7 @@ function formatValue(raw: unknown, variable: ReportVariable): string {
   const prefix = variable.prefix || ''
   const suffix = variable.suffix || ''
   if (raw == null || raw === '' || isNaN(num)) return `${prefix}${String(raw ?? '—')}${suffix}`
-  const fmt = variable.format || 'none'
+  const fmt = (formatOverride && formatOverride !== 'none') ? formatOverride : (variable.format || 'none')
   let str: string
   switch (fmt) {
     case 'short': str = num >= 1e9 ? `${(num/1e9).toFixed(1)}B` : num >= 1e6 ? `${(num/1e6).toFixed(1)}M` : num >= 1e3 ? `${(num/1e3).toFixed(1)}K` : num.toFixed(0); break
@@ -379,9 +380,24 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
     if (!v) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">No variable</div>
     const rv = resolvedValues[v.id]
     if (!rv || rv.loading) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs animate-pulse">Loading…</div>
+    let condRule: ReturnType<typeof matchConditionalRule> = null
+    if (v.conditionalFormat?.enabled) {
+      const num = Number(rv.value)
+      if (Number.isFinite(num)) condRule = matchConditionalRule(num, v.conditionalFormat)
+    }
+    const txt = formatValue(rv.value, v)
     return (
-      <div className="h-full w-full flex items-center justify-center text-lg font-semibold">
-        {formatValue(rv.value, v)}
+      <div
+        className="h-full w-full flex items-center justify-center text-lg font-semibold gap-1"
+        style={{
+          color: condRule?.textColor || undefined,
+          backgroundColor: condRule?.bgColor || undefined,
+        }}
+      >
+        {condRule?.icon && condRule.icon !== 'none' && (
+          <span style={{ color: condRule.iconColor }}>{ICON_GLYPH[condRule.icon]}</span>
+        )}
+        {txt}
       </div>
     )
   }
@@ -518,7 +534,18 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                     height: tbl.rowHeights?.[ri] ? `${tbl.rowHeights[ri]}px` : undefined,
                   }}
                 >
-                  {row.map((cell, ci) => (
+                  {row.map((cell, ci) => {
+                    // Resolve conditional formatting for variable cells (applies to cell bg/color + icon)
+                    let condRule: ReturnType<typeof matchConditionalRule> = null
+                    if (cell.type === 'spaceholder') {
+                      const vCell = variables.find(vv => vv.id === cell.variableId)
+                      const rvCell = vCell ? resolvedValues[vCell.id] : undefined
+                      if (vCell?.conditionalFormat?.enabled && rvCell && !rvCell.loading) {
+                        const num = Number(rvCell.value)
+                        if (Number.isFinite(num)) condRule = matchConditionalRule(num, vCell.conditionalFormat)
+                      }
+                    }
+                    return (
                     <td
                       key={ci}
                       className="px-2 py-1"
@@ -526,8 +553,8 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                         fontSize: rs?.fontSize ? `${rs.fontSize}px` : cell.style?.fontSize ? `${cell.style.fontSize}px` : '12px',
                         fontWeight: rs?.fontWeight === 'bold' ? 700 : rs?.fontWeight === 'semibold' ? 600 : cell.style?.fontWeight === 'bold' ? 700 : cell.style?.fontWeight === 'semibold' ? 600 : 400,
                         fontStyle: cell.style?.fontStyle === 'italic' ? 'italic' : undefined,
-                        color: rs?.color || cell.style?.color || undefined,
-                        backgroundColor: cell.style?.backgroundColor || undefined,
+                        color: condRule?.textColor || rs?.color || cell.style?.color || undefined,
+                        backgroundColor: condRule?.bgColor || cell.style?.backgroundColor || undefined,
                         textAlign: cell.style?.align || 'left',
                         verticalAlign: cell.style?.verticalAlign || 'middle',
                         borderStyle: bStyle,
@@ -543,12 +570,22 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                             if (!v) return <span className="text-muted-foreground">—</span>
                             const rv = resolvedValues[v.id]
                             if (!rv || rv.loading) return <span className="text-muted-foreground animate-pulse">…</span>
-                            return formatValue(rv.value, v)
+                            const txt = formatValue(rv.value, v, cell.style?.numberFormat)
+                            if (condRule?.icon && condRule.icon !== 'none') {
+                              return (
+                                <>
+                                  <span style={{ color: condRule.iconColor, marginRight: 4 }}>{ICON_GLYPH[condRule.icon]}</span>
+                                  {txt}
+                                </>
+                              )
+                            }
+                            return txt
                           })()
                         : resolveText(cell.text || '')
                       }
                     </td>
-                  ))}
+                    )
+                  })}
                 </tr>
               )
             })}
