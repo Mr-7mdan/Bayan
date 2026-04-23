@@ -835,7 +835,7 @@ function VariableEditor({
               )}
             </summary>
             <div className="space-y-2 pt-1.5">
-              {/* Enable toggle + preset buttons */}
+              {/* Enable toggle + icon position + preset buttons */}
               <div className="flex items-center gap-2 flex-wrap">
                 <label className="flex items-center gap-1 text-[10px] cursor-pointer">
                   <input
@@ -848,6 +848,25 @@ function VariableEditor({
                   />
                   Enabled
                 </label>
+                <div className="flex items-center gap-1" title="Icon alignment within the cell">
+                  <span className="text-[9px] text-muted-foreground">Icon</span>
+                  {(['left', 'right'] as const).map(pos => {
+                    const current = variable.conditionalFormat?.iconPosition || 'left'
+                    return (
+                      <button
+                        key={pos}
+                        type="button"
+                        className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${current === pos ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
+                        onClick={() => {
+                          const cf = variable.conditionalFormat || { enabled: true, rules: [] }
+                          handleChange({ conditionalFormat: { ...cf, iconPosition: pos, rules: cf.rules || [] } })
+                        }}
+                      >
+                        {pos === 'left' ? '⇤ Left' : 'Right ⇥'}
+                      </button>
+                    )
+                  })}
+                </div>
                 <span className="text-[9px] text-muted-foreground">Presets:</span>
                 <button type="button" className="text-[9px] px-2 py-0.5 rounded border hover:bg-muted transition-colors"
                   onClick={() => handleChange({ conditionalFormat: presetTrendArrows() })}>

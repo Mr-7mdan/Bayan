@@ -24,6 +24,7 @@ export interface ConditionalRule {
 
 export interface ConditionalFormat {
   enabled?: boolean
+  iconPosition?: 'left' | 'right'
   rules: ConditionalRule[]
 }
 

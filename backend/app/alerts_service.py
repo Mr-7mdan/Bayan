@@ -769,6 +769,10 @@ def _render_report_element_html(el: dict, variables: list[dict], resolved: dict[
         val = resolved.get(vid)
         formatted = _html_escape(_format_report_value(val, v))
         cond = _conditional_style_for(val, v)
+        cf_el = v.get('conditionalFormat') if isinstance(v, dict) else None
+        icon_pos = str((cf_el or {}).get('iconPosition') or 'left').lower()
+        if icon_pos not in ('left', 'right'):
+            icon_pos = 'left'
         wrap_bg = ''
         wrap_color = ''
         icon_html = ''
@@ -780,12 +784,16 @@ def _render_report_element_html(el: dict, variables: list[dict], resolved: dict[
             if cond.get('icon') and cond.get('icon') != 'none':
                 glyph = _ICON_GLYPH.get(str(cond.get('icon') or 'none'), '')
                 ic = str(cond.get('iconColor') or '')
-                ic_style = f"color:{ic};margin-right:6px;" if ic else "margin-right:6px;"
+                ic_style = f"color:{ic};display:inline-block;min-width:1em;text-align:center;" if ic else "display:inline-block;min-width:1em;text-align:center;"
                 icon_html = f"<span style='{ic_style}'>{glyph}</span>"
+        if icon_pos == 'left':
+            inner = f"{icon_html}<span>{formatted}</span>"
+        else:
+            inner = f"<span>{formatted}</span>{icon_html}"
         return (
-            f"<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;"
+            f"<div style='width:100%;height:100%;display:flex;align-items:center;justify-content:center;gap:6px;"
             f"font-size:{_fs(18)}px;font-weight:600;font-family:Inter,Arial,sans-serif;{wrap_bg}{wrap_color}'>"
-            f"{icon_html}{formatted}</div>"
+            f"{inner}</div>"
         )
 
     if etype == 'table':
@@ -922,15 +930,35 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
                     cell_fmt = cs.get('numberFormat') if isinstance(cs, dict) else None
                     cond_rule = _conditional_style_for(raw_val, v)
                     formatted = _html_escape(_format_report_value(raw_val, v, cell_fmt))
-                    if cond_rule and cond_rule.get('icon') and cond_rule.get('icon') != 'none':
+                    cf = v.get('conditionalFormat') if isinstance(v, dict) else None
+                    icon_pos = str((cf or {}).get('iconPosition') or 'left').lower()
+                    if icon_pos not in ('left', 'right'):
+                        icon_pos = 'left'
+                    has_icon = bool(cond_rule and cond_rule.get('icon') and cond_rule.get('icon') != 'none')
+                    if has_icon:
                         glyph = _ICON_GLYPH.get(str(cond_rule.get('icon') or 'none'), '')
                         icon_color = str(cond_rule.get('iconColor') or '')
-                        style_bits = 'margin-right:4px;'
-                        if icon_color:
-                            style_bits = f"color:{icon_color};{style_bits}"
-                        content = f"<span style='{style_bits}'>{glyph}</span>{formatted}"
+                        icon_color_css = f"color:{icon_color};" if icon_color else ''
+                        icon_html = (
+                            f"<span style='{icon_color_css}display:inline-block;min-width:1em;text-align:center;'>{glyph}</span>"
+                        )
                     else:
-                        content = formatted
+                        # Empty slot so alignment matches cells that do have an icon
+                        icon_html = "<span style='display:inline-block;min-width:1em;'></span>"
+                    # Map cell horizontal alignment → flexbox justification
+                    justify = 'flex-start'
+                    if ta == 'center':
+                        justify = 'center'
+                    elif ta == 'right':
+                        justify = 'flex-end'
+                    wrap_open = (
+                        f"<span style='display:inline-flex;align-items:center;gap:4px;width:100%;"
+                        f"justify-content:{justify};'>"
+                    )
+                    if icon_pos == 'left':
+                        content = f"{wrap_open}{icon_html}<span>{formatted}</span></span>"
+                    else:
+                        content = f"{wrap_open}<span>{formatted}</span>{icon_html}</span>"
                 else:
                     content = '\u2014'
             elif cell_type == 'period':

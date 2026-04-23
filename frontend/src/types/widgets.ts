@@ -252,6 +252,7 @@ export type ReportVariable = {
   roundDecimals?: number // decimal places for rounding
   conditionalFormat?: {
     enabled?: boolean
+    iconPosition?: 'left' | 'right'
     rules: Array<{
       op: '>' | '>=' | '<' | '<=' | '==' | '!=' | 'between'
       value: number

@@ -386,6 +386,13 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
       if (Number.isFinite(num)) condRule = matchConditionalRule(num, v.conditionalFormat)
     }
     const txt = formatValue(rv.value, v)
+    const iconPos = (v.conditionalFormat?.iconPosition || 'left') as 'left' | 'right'
+    const hasIcon = !!(condRule?.icon && condRule.icon !== 'none')
+    const iconSlot = hasIcon ? (
+      <span style={{ color: condRule!.iconColor, display: 'inline-block', minWidth: '1em', textAlign: 'center' }}>
+        {ICON_GLYPH[condRule!.icon!]}
+      </span>
+    ) : null
     return (
       <div
         className="h-full w-full flex items-center justify-center text-lg font-semibold gap-1"
@@ -394,10 +401,9 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
           backgroundColor: condRule?.bgColor || undefined,
         }}
       >
-        {condRule?.icon && condRule.icon !== 'none' && (
-          <span style={{ color: condRule.iconColor }}>{ICON_GLYPH[condRule.icon]}</span>
-        )}
-        {txt}
+        {iconPos === 'left' && iconSlot}
+        <span>{txt}</span>
+        {iconPos === 'right' && iconSlot}
       </div>
     )
   }
@@ -545,6 +551,11 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                         if (Number.isFinite(num)) condRule = matchConditionalRule(num, vCell.conditionalFormat)
                       }
                     }
+                    // Determine icon position from the variable's conditionalFormat (defaults to 'left')
+                    const vCellForIcon = cell.type === 'spaceholder' ? variables.find(vv => vv.id === cell.variableId) : undefined
+                    const iconPos = (vCellForIcon?.conditionalFormat?.iconPosition || 'left') as 'left' | 'right'
+                    const hasIcon = !!(condRule?.icon && condRule.icon !== 'none')
+                    const cellAlign = cell.style?.align || 'left'
                     return (
                     <td
                       key={ci}
@@ -555,7 +566,7 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                         fontStyle: cell.style?.fontStyle === 'italic' ? 'italic' : undefined,
                         color: condRule?.textColor || rs?.color || cell.style?.color || undefined,
                         backgroundColor: condRule?.bgColor || cell.style?.backgroundColor || undefined,
-                        textAlign: cell.style?.align || 'left',
+                        textAlign: cellAlign,
                         verticalAlign: cell.style?.verticalAlign || 'middle',
                         borderStyle: bStyle,
                         borderWidth: bWidth,
@@ -571,15 +582,50 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                             const rv = resolvedValues[v.id]
                             if (!rv || rv.loading) return <span className="text-muted-foreground animate-pulse">…</span>
                             const txt = formatValue(rv.value, v, cell.style?.numberFormat)
-                            if (condRule?.icon && condRule.icon !== 'none') {
-                              return (
-                                <>
-                                  <span style={{ color: condRule.iconColor, marginRight: 4 }}>{ICON_GLYPH[condRule.icon]}</span>
-                                  {txt}
-                                </>
-                              )
-                            }
-                            return txt
+                            // Icon in fixed-width slot so icons align vertically across rows,
+                            // independent of the value text. When no icon present we still
+                            // render an empty slot to keep text positions consistent within the column.
+                            const iconSlot = (
+                              <span
+                                aria-hidden
+                                style={{
+                                  display: 'inline-block',
+                                  width: '1em',
+                                  minWidth: '1em',
+                                  textAlign: 'center',
+                                  color: hasIcon ? condRule!.iconColor : undefined,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {hasIcon ? ICON_GLYPH[condRule!.icon!] : ''}
+                              </span>
+                            )
+                            return (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35em',
+                                  width: '100%',
+                                  justifyContent:
+                                    cellAlign === 'center' ? 'center' :
+                                    cellAlign === 'right'  ? 'flex-end' :
+                                    'flex-start',
+                                }}
+                              >
+                                {iconPos === 'left' ? (
+                                  <>
+                                    {iconSlot}
+                                    <span>{txt}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>{txt}</span>
+                                    {iconSlot}
+                                  </>
+                                )}
+                              </span>
+                            )
                           })()
                         : resolveText(cell.text || '')
                       }
