@@ -549,8 +549,15 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       const acts = Array.isArray(cfg.actions) ? cfg.actions : []
       const email = acts.find((a: any) => String(a?.type) === 'email') || {}
       const sms = acts.find((a: any) => String(a?.type) === 'sms') || {}
-      setEmailTo(Array.isArray(email.to) ? (email.to as string[]).join(',') : '')
-      setSmsTo(Array.isArray(sms.to) ? (sms.to as string[]).join(',') : '')
+      // Do NOT seed the raw "Email To" / "SMS To" text fields from the saved
+      // recipient arrays — those entries are already shown as removable token
+      // chips below (recipTokens). If we mirrored them into the text fields,
+      // removing a token would only shrink recipTokens while the text field
+      // still held the original comma-joined list, and buildPayload would
+      // silently re-add the removed addresses on save (regression fix).
+      // The text fields are reserved for ad-hoc manual additions.
+      setEmailTo('')
+      setSmsTo('')
       setChanEmail(Array.isArray(email.to) ? email.to.length > 0 : (Object.prototype.hasOwnProperty.call(email, 'type')))
       // Persist toggle if an SMS action exists, even if it has empty 'to'
       const hasSmsAction = (acts || []).some((a: any) => String(a?.type) === 'sms')

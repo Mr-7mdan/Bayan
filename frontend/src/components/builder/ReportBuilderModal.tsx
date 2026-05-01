@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Api, QueryApi } from '@/lib/api'
 import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, presetConfigToLabel, LEGACY_PRESET_MAP, usePresetPreview } from '@/lib/datePresets'
 import { ConditionalRule, ConditionalFormat, OP_OPTIONS, ICON_OPTIONS, ICON_GLYPH, describeRule, presetTrendArrows, preset4CircleSet, presetHeatmap3 } from '@/lib/conditionalFormat'
+import TableCellsEditorModal from './TableCellsEditorModal'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
 import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine, RiArrowUpLine, RiArrowDownLine, RiBarChart2Line } from '@remixicon/react'
@@ -1877,6 +1878,8 @@ function ElementProps({
   allWidgets?: Record<string, WidgetConfig>
   onUpdate: (el: ReportElement) => void
 }) {
+  const [cellsEditorOpen, setCellsEditorOpen] = useState(false)
+
   if (element.type === 'label') {
     const lbl = element.label || { text: '' }
     const patch = (p: Partial<typeof lbl>) => onUpdate({ ...element, label: { ...lbl, ...p } })
@@ -2429,52 +2432,33 @@ function ElementProps({
           </div>
         </details>
 
-        {/* Cell editor */}
-        <div>
-          <label className="block text-[11px] text-muted-foreground mb-1">Cells</label>
-          <div className="space-y-1 max-h-48 overflow-auto">
-            {tbl.cells.map((row, ri) => {
-              const rowStyle = tbl.rowStyles?.[ri]
-              return (
-                <div key={ri} className="flex items-center gap-1">
-                  <span className="text-[10px] text-muted-foreground w-4 text-right">{ri + 1}</span>
-                  <input
-                    type="color"
-                    className="w-4 h-4 rounded border cursor-pointer shrink-0"
-                    title="Row background"
-                    value={rowStyle?.bg || '#ffffff'}
-                    onChange={(e) => {
-                      const styles = [...(tbl.rowStyles || Array(tbl.rows).fill({}))]
-                      while (styles.length <= ri) styles.push({})
-                      styles[ri] = { ...styles[ri], bg: e.target.value === '#ffffff' ? undefined : e.target.value }
-                      patchTbl({ rowStyles: styles })
-                    }}
-                  />
-                  {row.map((cell, ci) => (
-                    <div key={ci} className="flex-1 flex items-center gap-0.5 min-w-0">
-                      <select className="h-5 text-[10px] rounded border bg-secondary/60 px-0.5 w-12 shrink-0" value={cell.type} onChange={(e) => updateCell(ri, ci, { type: e.target.value as any })}>
-                        <option value="text">Text</option>
-                        <option value="spaceholder">Var</option>
-                      </select>
-                      {cell.type === 'text' ? (
-                        <input className="h-5 text-[10px] rounded border bg-secondary/60 px-1 flex-1 min-w-0" value={cell.text || ''} onChange={(e) => updateCell(ri, ci, { text: e.target.value })} />
-                      ) : (
-                        <div className="flex-1 min-w-0 h-5 flex items-center border rounded bg-secondary/60 px-0.5">
-                          <CellVarSelect
-                            value={cell.variableId || ''}
-                            variables={variables}
-                            onChange={(id) => updateCell(ri, ci, { variableId: id })}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {tbl.rows > 1 && <button className="text-destructive hover:bg-destructive/10 rounded p-0.5 shrink-0" onClick={() => removeRow(ri)}><RiCloseLine className="h-3 w-3" /></button>}
-                </div>
-              )
-            })}
+        {/* Cell editor — opens in a spacious modal for merging, row reorder, and row-level borders */}
+        <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-2.5">
+          <div className="flex items-center justify-between mb-1.5">
+            <div>
+              <label className="block text-[11px] font-medium">Cells</label>
+              <p className="text-[10px] text-muted-foreground leading-tight">{tbl.rows} row{tbl.rows === 1 ? '' : 's'} × {tbl.cols} col{tbl.cols === 1 ? '' : 's'}</p>
+            </div>
+            <button
+              type="button"
+              className="text-[11px] px-2.5 py-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--muted))] flex items-center gap-1.5 cursor-pointer transition-colors"
+              onClick={() => setCellsEditorOpen(true)}
+            >
+              <RiTableLine className="h-3.5 w-3.5" /> Open editor
+            </button>
           </div>
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            Edit cell content, merge cells, reorder rows, and tune row backgrounds + borders in a full-screen editor.
+          </p>
         </div>
+
+        <TableCellsEditorModal
+          open={cellsEditorOpen}
+          table={tbl}
+          variables={variables}
+          onCloseAction={() => setCellsEditorOpen(false)}
+          onChangeAction={(next) => onUpdate({ ...element, table: next })}
+        />
       </div>
     )
   }
@@ -2915,17 +2899,31 @@ function InlineTableEditor({
         {table.cells.map((row, ri) => (
           <tr key={ri}>
             {row.map((cell, ci) => {
+              if (cell._merged) return null
               const cs = cell.style
+              const rs = table.rowStyles?.[ri]
               const isMenuOpen = cellMenuOpen?.row === ri && cellMenuOpen?.col === ci
+              const cspan = cell.colspan || 1
+              const rspan = cell.rowspan || 1
+              const defBStyle = table.borderStyle || 'solid'
+              const defBColor = table.borderColor || 'hsl(var(--border))'
               return (
               <td
                 key={ci}
+                colSpan={cspan}
+                rowSpan={rspan}
                 className="px-1 py-0.5"
                 style={{
                   borderWidth: '1px',
-                  borderStyle: table.borderStyle || 'solid',
-                  borderColor: table.borderColor || 'hsl(var(--border))',
-                  backgroundColor: cs?.backgroundColor || table.rowStyles?.[ri]?.bg || (table.stripedRows && ri % 2 === 1 ? 'hsl(var(--secondary)/0.4)' : undefined),
+                  borderStyle: defBStyle,
+                  borderColor: defBColor,
+                  borderTopStyle: rs?.borderTopStyle || defBStyle,
+                  borderTopColor: rs?.borderTopColor || defBColor,
+                  ...(rs?.borderTopWidth != null ? { borderTopWidth: `${rs.borderTopWidth}px` } : {}),
+                  borderBottomStyle: rs?.borderBottomStyle || defBStyle,
+                  borderBottomColor: rs?.borderBottomColor || defBColor,
+                  ...(rs?.borderBottomWidth != null ? { borderBottomWidth: `${rs.borderBottomWidth}px` } : {}),
+                  backgroundColor: cs?.backgroundColor || rs?.bg || (table.stripedRows && ri % 2 === 1 ? 'hsl(var(--secondary)/0.4)' : undefined),
                   fontSize: cs?.fontSize ? `${cs.fontSize}px` : undefined,
                   fontWeight: cs?.fontWeight === 'bold' ? 700 : cs?.fontWeight === 'semibold' ? 600 : undefined,
                   fontStyle: cs?.fontStyle === 'italic' ? 'italic' : undefined,
@@ -3411,11 +3409,23 @@ function GridCanvas({
                         {el.table.cells.map((row, ri) => (
                           <tr key={ri}>
                             {row.map((cell, ci) => {
+                              if (cell._merged) return null
                               const cs = cell.style
+                              const rs = el.table!.rowStyles?.[ri]
+                              const cspan = cell.colspan || 1
+                              const rspan = cell.rowspan || 1
+                              const defBStyle = el.table!.borderStyle || 'solid'
+                              const defBColor = el.table!.borderColor || 'hsl(var(--border))'
                               return (
-                              <td key={ci} className="px-1 py-0.5 text-[10px]" style={{
-                                borderWidth: '1px', borderStyle: el.table!.borderStyle || 'solid', borderColor: el.table!.borderColor || 'hsl(var(--border))',
-                                backgroundColor: cs?.backgroundColor || el.table!.rowStyles?.[ri]?.bg || (el.table!.stripedRows && ri % 2 === 1 ? 'hsl(var(--secondary)/0.4)' : undefined),
+                              <td key={ci} colSpan={cspan} rowSpan={rspan} className="px-1 py-0.5 text-[10px]" style={{
+                                borderWidth: '1px', borderStyle: defBStyle, borderColor: defBColor,
+                                ...(rs?.borderTopStyle ? { borderTopStyle: rs.borderTopStyle } : {}),
+                                ...(rs?.borderTopColor ? { borderTopColor: rs.borderTopColor } : {}),
+                                ...(rs?.borderTopWidth != null ? { borderTopWidth: `${rs.borderTopWidth}px` } : {}),
+                                ...(rs?.borderBottomStyle ? { borderBottomStyle: rs.borderBottomStyle } : {}),
+                                ...(rs?.borderBottomColor ? { borderBottomColor: rs.borderBottomColor } : {}),
+                                ...(rs?.borderBottomWidth != null ? { borderBottomWidth: `${rs.borderBottomWidth}px` } : {}),
+                                backgroundColor: cs?.backgroundColor || rs?.bg || (el.table!.stripedRows && ri % 2 === 1 ? 'hsl(var(--secondary)/0.4)' : undefined),
                                 fontSize: cs?.fontSize ? `${cs.fontSize}px` : undefined,
                                 fontWeight: cs?.fontWeight === 'bold' ? 700 : cs?.fontWeight === 'semibold' ? 600 : undefined,
                                 fontStyle: cs?.fontStyle === 'italic' ? 'italic' : undefined,

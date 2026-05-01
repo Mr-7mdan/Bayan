@@ -909,6 +909,9 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
 
         tds = []
         for ci, cell in enumerate(row if isinstance(row, list) else []):
+            # Skip cells covered by another cell's colspan/rowspan
+            if isinstance(cell, dict) and cell.get('_merged'):
+                continue
             cs = cell.get('style') or {} if isinstance(cell, dict) else {}
             cell_bg = cs.get('backgroundColor') or ''
             bg_style = f"background:{cell_bg};" if cell_bg else f"background:{row_bg};"
@@ -918,6 +921,27 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
             color = cs.get('color') or (rs.get('color') if isinstance(rs, dict) else None) or '#111827'
             ta = cs.get('align') or 'left'
             va = cs.get('verticalAlign') or 'middle'
+            cspan = int((cell.get('colspan') if isinstance(cell, dict) else None) or 1)
+            rspan = int((cell.get('rowspan') if isinstance(cell, dict) else None) or 1)
+            # Per-row top/bottom border overrides
+            row_border_extra = ''
+            if isinstance(rs, dict):
+                bts = rs.get('borderTopStyle')
+                btc = rs.get('borderTopColor')
+                btw = rs.get('borderTopWidth')
+                if bts or btc or btw is not None:
+                    s = bts or b_style
+                    c = btc or b_color
+                    w = f"{int(btw)}px" if btw is not None else b_width
+                    row_border_extra += f"border-top:{w} {s} {c};"
+                bbs = rs.get('borderBottomStyle')
+                bbc = rs.get('borderBottomColor')
+                bbw = rs.get('borderBottomWidth')
+                if bbs or bbc or bbw is not None:
+                    s = bbs or b_style
+                    c = bbc or b_color
+                    w = f"{int(bbw)}px" if bbw is not None else b_width
+                    row_border_extra += f"border-bottom:{w} {s} {c};"
 
             # Resolve cell content
             cell_type = str(cell.get('type') or 'text') if isinstance(cell, dict) else 'text'
@@ -1015,8 +1039,10 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
                 cond_text = cond_rule.get('textColor')
                 if cond_text:
                     color = cond_text
+            colspan_attr = f" colspan='{cspan}'" if cspan > 1 else ''
+            rowspan_attr = f" rowspan='{rspan}'" if rspan > 1 else ''
             tds.append(
-                f"<td style='{border}{bg_style}font-size:{fs}px;font-weight:{fw};{fi}"
+                f"<td{colspan_attr}{rowspan_attr} style='{border}{row_border_extra}{bg_style}font-size:{fs}px;font-weight:{fw};{fi}"
                 f"color:{color};text-align:{ta};vertical-align:{va};padding:{_pad(4)}px {_pad(8)}px;white-space:nowrap;'>{content}</td>"
             )
         tbody_rows.append(f"<tr style='{row_height}'>{''.join(tds)}</tr>")
@@ -1077,7 +1103,9 @@ def _render_report_html(widget_cfg: dict, db: Session, global_filters: Optional[
     covered: set[tuple[int, int]] = set()
     rendered_el_ids: set[int] = set()  # id(el) already emitted
 
-    # Determine the last row that has any content so we don't emit trailing empty rows
+    # Determine the last row that has any content so we don't emit trailing empty rows.
+    # Clamp to grid_rows - 1 so an element with stale gridY+gridH that extends beyond
+    # the (possibly shrunk) grid never advances the loop past the occupancy bounds.
     last_content_row = 0
     for r in range(grid_rows):
         for c in range(grid_cols):
@@ -1085,13 +1113,18 @@ def _render_report_html(widget_cfg: dict, db: Session, global_filters: Optional[
                 el = occupancy[r][c]
                 gh = max(1, int(el.get('gridH') or 1))
                 gy = max(0, int(el.get('gridY') or 0))
-                last_content_row = max(last_content_row, gy + gh - 1)
+                bottom = min(grid_rows - 1, gy + gh - 1)
+                last_content_row = max(last_content_row, bottom)
+    if last_content_row >= grid_rows:
+        last_content_row = grid_rows - 1
 
     # Column width declarations
     col_tags = ''.join(f"<col style='width:{col_w_px}px;'>" for _ in range(grid_cols))
 
     tr_list: list[str] = []
     for r in range(last_content_row + 1):
+        if r >= len(occupancy):
+            break
         td_list: list[str] = []
         c = 0
         while c < grid_cols:
@@ -1099,7 +1132,7 @@ def _render_report_html(widget_cfg: dict, db: Session, global_filters: Optional[
                 c += 1
                 continue
 
-            el = occupancy[r][c]
+            el = occupancy[r][c] if c < len(occupancy[r]) else None
             if el is None:
                 # Empty grid cell — emit a spacer td (border:none overrides template global th,td CSS)
                 td_list.append(

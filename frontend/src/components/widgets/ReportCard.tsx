@@ -541,6 +541,7 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                   }}
                 >
                   {row.map((cell, ci) => {
+                    if (cell._merged) return null
                     // Resolve conditional formatting for variable cells (applies to cell bg/color + icon)
                     let condRule: ReturnType<typeof matchConditionalRule> = null
                     if (cell.type === 'spaceholder') {
@@ -556,9 +557,13 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                     const iconPos = (vCellForIcon?.conditionalFormat?.iconPosition || 'left') as 'left' | 'right'
                     const hasIcon = !!(condRule?.icon && condRule.icon !== 'none')
                     const cellAlign = cell.style?.align || 'left'
+                    const cspan = cell.colspan || 1
+                    const rspan = cell.rowspan || 1
                     return (
                     <td
                       key={ci}
+                      colSpan={cspan}
+                      rowSpan={rspan}
                       className="px-2 py-1"
                       style={{
                         fontSize: rs?.fontSize ? `${rs.fontSize}px` : cell.style?.fontSize ? `${cell.style.fontSize}px` : '12px',
@@ -571,6 +576,12 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                         borderStyle: bStyle,
                         borderWidth: bWidth,
                         borderColor: bColor,
+                        ...(rs?.borderTopStyle ? { borderTopStyle: rs.borderTopStyle } : {}),
+                        ...(rs?.borderTopColor ? { borderTopColor: rs.borderTopColor } : {}),
+                        ...(rs?.borderTopWidth != null ? { borderTopWidth: `${rs.borderTopWidth}px` } : {}),
+                        ...(rs?.borderBottomStyle ? { borderBottomStyle: rs.borderBottomStyle } : {}),
+                        ...(rs?.borderBottomColor ? { borderBottomColor: rs.borderBottomColor } : {}),
+                        ...(rs?.borderBottomWidth != null ? { borderBottomWidth: `${rs.borderBottomWidth}px` } : {}),
                       }}
                     >
                       {cell.type === 'period'

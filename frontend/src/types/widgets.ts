@@ -146,6 +146,9 @@ export type ReportTableCell = {
   text?: string
   variableId?: string
   datetimeExpr?: string // for period type — resolved at render time without creating a variable
+  colspan?: number // horizontal merge anchor (>1 = merged across N cols)
+  rowspan?: number // vertical merge anchor (>1 = merged across N rows)
+  _merged?: boolean // covered by another cell's merge — renderers skip this cell
   style?: {
     fontSize?: number
     fontWeight?: 'normal' | 'bold' | 'semibold'
@@ -195,7 +198,19 @@ export type ReportElement = {
     cells: ReportTableCell[][]
     colWidths?: number[] // actual column widths (sum of colspans), in pixels or percentages
     rowHeights?: number[] // px
-    rowStyles?: Array<{ bg?: string; color?: string; fontWeight?: 'normal' | 'bold' | 'semibold'; fontSize?: number }> // per-row formatting
+    rowStyles?: Array<{
+      bg?: string
+      color?: string
+      fontWeight?: 'normal' | 'bold' | 'semibold'
+      fontSize?: number
+      // Optional per-row top/bottom border overrides (override table.borderStyle/borderColor)
+      borderTopStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'none'
+      borderTopColor?: string
+      borderTopWidth?: number // px
+      borderBottomStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'none'
+      borderBottomColor?: string
+      borderBottomWidth?: number // px
+    }> // per-row formatting
     borderStyle?: 'solid' | 'dashed' | 'none'
     borderColor?: string
     borderRadius?: number // corner radius in px
