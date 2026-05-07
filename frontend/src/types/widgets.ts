@@ -196,8 +196,16 @@ export type ReportElement = {
     headers: Array<{ text: string; colspan?: number; fontSize?: number; fontWeight?: 'normal' | 'bold' | 'semibold'; color?: string; italic?: boolean }>
     subheaders?: string[]
     cells: ReportTableCell[][]
-    colWidths?: number[] // actual column widths (sum of colspans), in pixels or percentages
-    rowHeights?: number[] // px
+    // Per-column fixed widths in pixels. A value of 0 or undefined means
+    // "auto-fit content" — that column sizes to its contents.
+    colWidths?: number[]
+    // Per-row fixed heights in pixels. Only meaningful when wrapText is enabled
+    // (with wrap off, every row is single-line and content sizes the height).
+    rowHeights?: number[]
+    // When true, cell text wraps to multiple lines (white-space: normal).
+    // When false/undefined, text stays on a single line (white-space: nowrap)
+    // and overflows are hidden.
+    wrapText?: boolean
     rowStyles?: Array<{
       bg?: string
       color?: string
