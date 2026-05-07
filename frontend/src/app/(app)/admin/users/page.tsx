@@ -167,7 +167,7 @@ export default function AdminUsersPage() {
             <Title className="text-gray-500 dark:text-white">Users</Title>
             <Text className="mt-0 text-gray-500 dark:text-white">Manage system users</Text>
           </div>
-          <button className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setCreateOpen(true)}>Create User</button>
+          <button className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium" onClick={() => setCreateOpen(true)}>Create User</button>
         </div>
         <div className="p-3 space-y-3">
           <div className="flex items-center py-2 gap-2">
@@ -237,7 +237,7 @@ export default function AdminUsersPage() {
                 <Dialog.Close asChild>
                   <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" disabled={cuBusy || !cuEmail || !cuPassword} onClick={onCreate}>{cuBusy ? 'Creating…' : 'Create'}</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={cuBusy || !cuEmail || !cuPassword} onClick={onCreate}>{cuBusy ? 'Creating…' : 'Create'}</button>
               </div>
             </div>
           </Dialog.Content>

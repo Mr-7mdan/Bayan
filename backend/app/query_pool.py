@@ -13,7 +13,10 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-QUERY_POOL_SIZE = int(os.environ.get("QUERY_POOL_SIZE", "8") or "8")
+# Default pool size needs headroom for: HEAVY_QUERY_CONCURRENCY (8) +
+# SPEC_QUERY_CONCURRENCY (7) + a few light queries that go through the
+# same /query path. 16 is comfortable; tune via QUERY_POOL_SIZE.
+QUERY_POOL_SIZE = int(os.environ.get("QUERY_POOL_SIZE", "16") or "16")
 
 # Lazy-initialized — do NOT create at import time (crashes on Windows)
 _query_executor: ThreadPoolExecutor | None = None

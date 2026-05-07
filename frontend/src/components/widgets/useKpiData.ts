@@ -91,7 +91,7 @@ export function useKpiData({
     queryKey: ['kpi', title, datasourceId, querySpec, activeDeltaMode, deltaDateField, deltaWeekStart, env.weekStart, debouncedWhereKey],
     enabled: enabledFlag && !!visible,
     placeholderData: (prev) => prev as any,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const mode = activeDeltaMode as any
       const source = (querySpec as any).source as string
       const df = deltaDateField as string | undefined
@@ -161,7 +161,7 @@ export function useKpiData({
               requests.push({ key: `s${idx}_prev`, source, datasourceId, dateField: df, start: prevStartIso, end: prevEndIso, where: stripDateFromWhere(effectiveWhere), legend: legend as any, measure: measureS })
             }
           })
-          const batch = await Api.periodTotalsBatch({ requests })
+          const batch = await Api.periodTotalsBatch({ requests }, signal)
           
           // Collect all legend keys across all series
           const allLegendKeys = new Set<string>()
@@ -235,7 +235,7 @@ export function useKpiData({
             requests.push({ key: `s${idx}_cur`, source, datasourceId, dateField: df, start: startIso, end: endIso, where: stripDateFromWhere(effectiveWhere), agg: aggS, y: (s.y as any), measure: (s.measure as any) })
             requests.push({ key: `s${idx}_prev`, source, datasourceId, dateField: df, start: prevStartIso, end: prevEndIso, where: stripDateFromWhere(effectiveWhere), agg: aggS, y: (s.y as any), measure: (s.measure as any) })
           })
-          const batch = await Api.periodTotalsBatch({ requests })
+          const batch = await Api.periodTotalsBatch({ requests }, signal)
           const pairs = seriesArr.map((s, idx) => {
             const label = s.label || s.y || s.measure || `series_${idx + 1}`
             const cur = batch.results[`s${idx}_cur`] || {}
@@ -273,7 +273,7 @@ export function useKpiData({
             agg: aggEff,
             y: (reqBase.y as any),
             measure: (reqBase.measure as any),
-          })
+          }, signal)
           const cur = (cmp.cur || {}) as any
           const prev = (cmp.prev || {}) as any
           const keys = new Set<string>([...Object.keys(cur.totals || {}), ...Object.keys(prev.totals || {})])
@@ -306,7 +306,7 @@ export function useKpiData({
             })
             return Object.keys(out).length ? out : undefined
           }
-          const cmpAll = await Api.periodTotalsCompare({ source, datasourceId, dateField: df, start: startIso, end: endIso, prevStart: prevStartIso, prevEnd: prevEndIso, where: stripLegend(effectiveWhere), agg: reqBase.agg as any, y: (reqBase.y as any), measure: (reqBase.measure as any) })
+          const cmpAll = await Api.periodTotalsCompare({ source, datasourceId, dateField: df, start: startIso, end: endIso, prevStart: prevStartIso, prevEnd: prevEndIso, where: stripLegend(effectiveWhere), agg: reqBase.agg as any, y: (reqBase.y as any), measure: (reqBase.measure as any) }, signal)
           const curOverall = Number((cmpAll.cur || {}).total || 0)
           const prevOverall = Number((cmpAll.prev || {}).total || 0)
           const safeDiv = (num: number, den: number) => (den === 0 ? (num !== 0 ? 100 : 0) : ((num / Math.abs(den)) * 100))
@@ -322,7 +322,7 @@ export function useKpiData({
         }
 
         // Single series/value path (fallback for hasGlobalWindow without series or legend)
-        const cmp = await Api.periodTotalsCompare({ source, datasourceId, dateField: df, start: startIso, end: endIso, prevStart: prevStartIso, prevEnd: prevEndIso, where: stripDateFromWhere(effectiveWhere), agg: (reqBase.agg as any), y: (reqBase.y as any), measure: (reqBase.measure as any) })
+        const cmp = await Api.periodTotalsCompare({ source, datasourceId, dateField: df, start: startIso, end: endIso, prevStart: prevStartIso, prevEnd: prevEndIso, where: stripDateFromWhere(effectiveWhere), agg: (reqBase.agg as any), y: (reqBase.y as any), measure: (reqBase.measure as any) }, signal)
         const c = Number((cmp.cur || {}).total || 0)
         const p = Number((cmp.prev || {}).total || 0)
         return { mode, single: { current: c, previous: p, absoluteDelta: c - p, percentChange: pctChange(c, p) } }

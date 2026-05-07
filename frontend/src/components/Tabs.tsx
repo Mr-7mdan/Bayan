@@ -37,9 +37,20 @@ export function TabsTrigger(
 ) {
   const base = clsx(
     "px-3 py-1 text-xs rounded-md mx-0.5 h-7 leading-5 shrink-0",
-    "data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:font-semibold",
-    "data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-[hsl(var(--border))]",
-    // Light: muted; Dark: closer to foreground for legibility
+    // Active tab — branded with the Bayan cyan. We use a soft accent tint
+    // background + primary text + a 2px inset bottom border that reads as
+    // the active indicator. This works for both `line` and `solid` variants
+    // without making tabs look like CTA buttons (which would happen with
+    // `bg-primary` solid-fill).
+    "data-[state=active]:bg-[hsl(var(--accent)/0.18)]",
+    "data-[state=active]:text-[hsl(var(--primary-deep))]",
+    "data-[state=active]:font-semibold",
+    "data-[state=active]:border data-[state=active]:border-[hsl(var(--primary)/0.28)]",
+    "data-[state=active]:shadow-[inset_0_-2px_0_hsl(var(--primary))]",
+    "dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)]",
+    "dark:data-[state=active]:text-[hsl(var(--primary))]",
+    "dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]",
+    // Inactive: muted; hover lifts toward foreground
     "text-muted-foreground dark:text-[hsl(var(--foreground)/0.9)] hover:text-foreground hover:bg-[hsl(var(--secondary)/0.55)] transition-colors",
     // Truncate only when not active; active auto-fits to content
     "whitespace-nowrap min-w-[84px]",

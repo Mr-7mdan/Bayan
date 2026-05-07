@@ -32,14 +32,18 @@
   --popover-foreground: var(--foreground);
   --border: 220 13% 90%;
   --input: 220 13% 90%;
-  --ring: 224 70% 50%;
-  /* Desaturated accents in light */
-  --primary: 224 72% 52%;
-  --primary-foreground: 210 0% 98%;
+  /* Bayan cyan ramp — primary action color across the app.
+     #29B5E8 → 197 80% 54% (primary)
+     #7DD3F3 → 196 84% 72% (accent / soft cyan tint)
+     #0598CC → 195 96% 41% (deep cyan, used for hover-press) */
+  --ring: 197 80% 54%;
+  --primary: 197 80% 54%;
+  --primary-foreground: 0 0% 100%;
+  --primary-deep: 195 96% 41%;
   --secondary: var(--surface-3);
   --secondary-foreground: var(--foreground);
-  --accent: 262 60% 54%;
-  --accent-foreground: 210 0% 98%;
+  --accent: 196 84% 72%;
+  --accent-foreground: 192 92% 12%;
   /* Status tokens (muted vs. light) */
   --success: 152 45% 44%;
   --warning: 38 90% 50%;
@@ -86,14 +90,17 @@
   --popover-foreground: var(--foreground);
   --border: 199 20% 32%;     /* slightly brighter border */
   --input: 199 20% 32%;
-  --ring: 224 60% 55%;
-  /* Desaturated accents in dark */
-  --primary: 224 60% 56%;
-  --primary-foreground: 210 18% 96%;
+  /* Bayan cyan ramp — slightly brighter for dark surfaces (better contrast on
+     #011419 background). Same hue family as the chrome — primary harmonises
+     with --background instead of fighting it. */
+  --ring: 196 84% 60%;
+  --primary: 196 84% 60%;
+  --primary-foreground: 192 92% 8%;
+  --primary-deep: 195 96% 48%;
   --secondary: var(--surface-2);
   --secondary-foreground: var(--foreground);
-  --accent: 262 48% 60%;
-  --accent-foreground: 210 18% 96%;
+  --accent: 196 84% 72%;
+  --accent-foreground: 192 92% 12%;
   --success: 152 42% 52%;
   --warning: 38 80% 56%;
   --danger: 347 55% 56%;
@@ -127,13 +134,15 @@
   --popover-foreground: 210 18% 96%;
   --border: 220 8% 20%;
   --input: 220 8% 20%;
-  --ring: 224 60% 55%;
-  --primary: 224 60% 56%;
-  --primary-foreground: 210 18% 96%;
+  /* Bayan cyan ramp — same as .dark, kept for the slate "blackish" variant */
+  --ring: 196 84% 60%;
+  --primary: 196 84% 60%;
+  --primary-foreground: 192 92% 8%;
+  --primary-deep: 195 96% 48%;
   --secondary: 220 15% 12%;
   --secondary-foreground: 210 18% 96%;
-  --accent: 262 48% 60%;
-  --accent-foreground: 210 18% 96%;
+  --accent: 196 84% 72%;
+  --accent-foreground: 192 92% 12%;
   --success: 152 42% 52%;
   --warning: 38 80% 56%;
   --danger: 347 55% 56%;
@@ -192,13 +201,26 @@ html, body, #__next { height: 100%; }
 /* Sidebar / Navbar helper classes per design guide */
 .bg-sidebar-light { @apply bg-[hsl(var(--secondary))] border-r border-[hsl(var(--border))] text-[hsl(var(--foreground))]; }
 .sidebar-item-light { @apply flex items-center gap-2 px-4 py-2 rounded-md text-sm font-normal text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-150; }
-.sidebar-item-active-light { @apply bg-white text-blue-600 border border-[hsl(var(--border))] font-normal; }
+/* Active sidebar item — uses --primary so it picks up the brand cyan automatically.
+   Subtle accent left-border + soft cyan tint background that reads as "selected"
+   without shouting — matches the new Bayan cyan identity. */
+.sidebar-item-active-light {
+  @apply bg-[hsl(var(--accent)/0.18)] border border-[hsl(var(--primary)/0.25)] font-medium;
+  color: hsl(var(--primary-deep));
+  box-shadow: inset 2px 0 0 hsl(var(--primary));
+}
 
 .bg-sidebar-dark { @apply bg-[hsl(var(--surface-1))] border-r border-[hsl(var(--border))] text-[hsl(var(--foreground))]; }
 /* Use explicit color values to avoid Tailwind @apply arbitrary failures */
 .sidebar-item-dark { @apply flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-normal hover:bg-gray-800 transition-colors duration-150; color: hsl(var(--foreground)); }
 .sidebar-item-dark:hover { color: hsl(var(--foreground)); }
-.sidebar-item-active-dark { @apply bg-white/10 border border-[hsl(var(--border))] font-normal; color: hsl(var(--foreground)); }
+.sidebar-item-active-dark {
+  @apply border font-medium;
+  background: hsl(var(--primary) / 0.14);
+  border-color: hsl(var(--primary) / 0.32);
+  color: hsl(var(--foreground));
+  box-shadow: inset 2px 0 0 hsl(var(--primary));
+}
 
 /* Ensure dark variant always wins when both light & dark classes are present */
 .dark .sidebar-item-dark { color: hsl(var(--foreground)) !important; }
@@ -206,7 +228,7 @@ html, body, #__next { height: 100%; }
 /* If components include both light and dark classes, set dark mode tones explicitly */
 .dark .sidebar-item-light { color: hsl(var(--muted-foreground)) !important; }
 .dark .sidebar-item-light:hover { color: rgb(55 65 81) !important; } /* gray-700 */
-.dark .sidebar-item-active-light { color: rgb(96 165 250) !important; } /* blue-400 */
+.dark .sidebar-item-active-light { color: hsl(var(--primary)) !important; }
 
 .bg-navbar-light { @apply bg-white border-b border-[hsl(var(--border))] text-gray-900; }
 .nav-item-light { @apply text-gray-600 hover:text-gray-900 transition-colors duration-150; }
@@ -400,6 +422,66 @@ input, select, textarea {
   border-bottom-width: var(--border-width);
 }
 
+/* ── Bayan accent utilities ────────────────────────────────────────
+   Small library of intentional, branded surfaces. Use these instead of
+   adding hardcoded blue/cyan classes — they all key off --primary so
+   admin-level theme overrides (per-org branding) cascade through.
+
+   - .bayan-focus-ring  — visible cyan ring on keyboard focus (use on
+     primary CTAs, datasource cards, dashboard tiles).
+   - .bayan-link        — text link styled with brand cyan + smart underline.
+   - .bayan-pulse-bg    — gentle animated cyan tint for in-progress
+     states (loading skeletons, syncing indicators).
+   - .bayan-chip        — compact accent badge (status, tag, kbd-style).
+   ────────────────────────────────────────────────────────────────── */
+
+.bayan-focus-ring:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+.bayan-link {
+  color: hsl(var(--primary-deep));
+  text-decoration: underline;
+  text-decoration-color: hsl(var(--primary) / 0.35);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms ease;
+}
+.bayan-link:hover { text-decoration-color: hsl(var(--primary)); }
+.dark .bayan-link { color: hsl(var(--primary)); }
+
+@keyframes bayan-pulse {
+  0%, 100% { background-color: hsl(var(--accent) / 0.22); }
+  50%      { background-color: hsl(var(--accent) / 0.40); }
+}
+.bayan-pulse-bg {
+  background-color: hsl(var(--accent) / 0.22);
+  animation: bayan-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bayan-pulse-bg { animation: none; }
+}
+
+.bayan-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  background: hsl(var(--accent) / 0.22);
+  color: hsl(var(--primary-deep));
+  border: 1px solid hsl(var(--primary) / 0.25);
+}
+.dark .bayan-chip {
+  background: hsl(var(--primary) / 0.14);
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.30);
+}
+
 /* Normalize Tremor Card border color to our token (width left to component default) */
 .tremor-Card {
   border-color: hsl(var(--border));
@@ -558,10 +640,14 @@ button,
 [role="button"] {
   border-radius: 0.5rem; /* rounded-md */
 }
-/* Default background for bordered buttons without explicit bg- class */
-button.border:not([class*="bg-"]),
-[type="button"].border:not([class*="bg-"]),
-[type="submit"].border:not([class*="bg-"]) {
+/* Default background for bordered buttons without explicit bg- class.
+   Skip .btn-primary and .btn-danger — they intentionally paint their own
+   background and text colors via the .btn-* component rules below. Without
+   these :not() guards, this higher-specificity rule wins and the brand
+   button shows up as white-on-white (invisible). */
+button.border:not([class*="bg-"]):not(.btn-primary):not(.btn-danger),
+[type="button"].border:not([class*="bg-"]):not(.btn-primary):not(.btn-danger),
+[type="submit"].border:not([class*="bg-"]):not(.btn-primary):not(.btn-danger) {
   background-color: hsl(var(--card));
 }
 /* Default rounded for buttons missing rounded- utilities */

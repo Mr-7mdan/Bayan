@@ -1,0 +1,8 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bayan">
+  <title>Bayan — Glyph mark (light)</title>
+  <rect width="200" height="200" rx="40" fill="#29B5E8"/>
+  <!-- Horizontal stroke (the boat of ب) -->
+  <rect x="24" y="60" width="152" height="18" rx="9" fill="#FFFFFF"/>
+  <!-- Single dot beneath (the diacritic of ب — analytics data point) -->
+  <circle cx="100" cy="130" r="16" fill="#FFFFFF"/>
+</svg>

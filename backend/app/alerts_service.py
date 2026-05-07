@@ -1641,7 +1641,9 @@ def _default_base_template(logo_url: Optional[str]) -> str:
 def _apply_base_template(cfg: EmailConfig, subject: str, body_html: str) -> str:
     # Resolve {{date}} / {{time}} tokens in the subject
     subject = _resolve_datetime_tokens(subject)
-    # Prefer branding logoLight for always-light emails; fall back to email config logoUrl
+    # Prefer branding logoLight for always-light emails; fall back to email
+    # config logoUrl, then to the canonical Bayan default so a fresh install
+    # still gets a brand mark in alert emails out of the box.
     branding_logo = None
     try:
         data_dir = Path(settings.metadata_db_path).resolve().parent
@@ -1649,10 +1651,13 @@ def _apply_base_template(cfg: EmailConfig, subject: str, body_html: str) -> str:
         if f.exists():
             import json as _json
             obj = _json.loads(f.read_text(encoding="utf-8") or "{}")
-            branding_logo = (obj.get("logoLight") or None)
+            v = obj.get("logoLight")
+            if isinstance(v, str) and v.strip():
+                branding_logo = v.strip()
     except Exception:
         branding_logo = None
-    logo_src = (branding_logo or (cfg.logo_url or ""))
+    from .main import BAYAN_DEFAULTS as _BD
+    logo_src = (branding_logo or (cfg.logo_url or "") or _BD.get("logoLight", ""))
     # Resolve/inline logo: http(s) or relative '/...' via frontend_base_url
     try:
         if isinstance(logo_src, str) and logo_src:

@@ -111,6 +111,28 @@ export default function HomePage() {
       try { window.clearInterval(timer) } catch {}
       if (typeof window !== 'undefined') window.removeEventListener('beforeunload', onUnload)
       if (!cancelled) { try { void Api.dashboardsClose('builder', dashboardId, sid) } catch {} }
+      // Abort every in-flight widget query for this dashboard. Without
+      // this, leaving a dashboard with multi-minute heavy queries keeps
+      // burning the backend's DuckDB connections (and a thread-pool slot)
+      // until each query finishes — making the next page feel sluggish.
+      // The signal we pass through useQuery's queryFn aborts the fetch;
+      // the backend then detects the disconnect and calls
+      // DuckDB.interrupt() on the running connection.
+      try {
+        queryClient.cancelQueries({
+          predicate: (query) => {
+            const k0 = String(((query.queryKey || [])[0] ?? '')).toLowerCase()
+            return (
+              k0 === 'chart' ||
+              k0 === 'heatmap' ||
+              k0 === 'gantt' ||
+              k0 === 'widget' ||
+              k0 === 'kpi' ||
+              k0 === 'report-var'
+            )
+          },
+        })
+      } catch {}
     }
   }, [dashboardId])
 

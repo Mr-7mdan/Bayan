@@ -194,8 +194,8 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
     >
       <div className="px-4 py-3 border-b border-[hsl(var(--border))] flex justify-center">
         <Link href="/home" aria-label="Home" className="inline-flex items-center">
-          <img src={(env.orgLogoLight || '/logo.svg') as any} alt={(env.orgName || 'Bayan')} className="h-8 w-auto block dark:hidden" />
-          <img src={(env.orgLogoDark || '/logo-dark.svg') as any} alt={(env.orgName || 'Bayan')} className="h-8 w-auto hidden dark:block" />
+          <img src={(env.orgLogoLight || '/bayan-logo.svg') as any} alt={(env.orgName || 'Bayan')} className="h-8 w-auto block dark:hidden" />
+          <img src={(env.orgLogoDark || '/bayan-logo-dark.svg') as any} alt={(env.orgName || 'Bayan')} className="h-8 w-auto hidden dark:block" />
         </Link>
       </div>
 

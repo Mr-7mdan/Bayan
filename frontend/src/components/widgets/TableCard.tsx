@@ -641,7 +641,7 @@ export default function TableCard({
         if (Array.isArray((mergedSafe as any).x)) (mergedSafe as any).x = (mergedSafe as any).x[0]
         if ('limit' in mergedSafe) delete (mergedSafe as any).limit
         if ('offset' in mergedSafe) delete (mergedSafe as any).offset
-        return QueryApi.querySpec({ spec: mergedSafe, datasourceId, limit: size, offset, includeTotal: true, preferLocalDuck: (options as any)?.preferLocalDuck })
+        return QueryApi.querySpec({ spec: mergedSafe, datasourceId, limit: size, offset, includeTotal: true, preferLocalDuck: (options as any)?.preferLocalDuck }, signal)
       }
       // Include grid filters for SQL mode too (best-effort)
       const params: any = ignoreGlobal ? (gridWhere || {}) : { ...(filters || {}), ...(gridWhere || {}) }
@@ -659,6 +659,7 @@ export default function TableCard({
           preferLocalTable: ((querySpec as any)?.source as string | undefined),
         },
         user?.id,
+        signal,
       )
       return __p
     },

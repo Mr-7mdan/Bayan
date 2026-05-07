@@ -685,16 +685,23 @@ export const Api = {
   introspectLocal: (signal?: AbortSignal) => http<IntrospectResponse>(`/datasources/_local/schema`, { signal }, 60000),
   deleteDatasource: (id: string) => http<void>(`/datasources/${id}`, { method: 'DELETE' }),
   health: () => http<{ status: string; app: string; env: string }>(`/healthz`),
-  query: (payload: QueryRequest) => http<QueryResponse>('/query', { method: 'POST', body: JSON.stringify(payload) }),
+  query: (payload: QueryRequest, signal?: AbortSignal) => http<QueryResponse>('/query', { method: 'POST', body: JSON.stringify(payload), signal }),
   pivot: (payload: PivotRequest) => http<QueryResponse>('/query/pivot', { method: 'POST', body: JSON.stringify(payload) }),
   // SQL preview generation may also be slow with complex transforms; extend timeout a bit
   pivotSql: (payload: PivotRequest) => http<PivotSqlResponse>('/query/pivot/sql', { method: 'POST', body: JSON.stringify(payload) }, 30000),
-  queryForWidget: (widgetId: string, payload: QueryRequest, actorId?: string) => {
+  queryForWidget: (widgetId: string, payload: QueryRequest, actorId?: string, signal?: AbortSignal) => {
     const rid = _newRequestId()
     const prev = _widgetControllers.get(widgetId)
     if (prev) { try { prev.abort('superseded') } catch {} }
     const ctr = new AbortController()
     _widgetControllers.set(widgetId, ctr)
+    // If a caller-provided signal aborts (React Query unmount, dashboard
+    // cancelQueries, …), forward that into the supersede controller so
+    // both abort triggers funnel to the same fetch signal.
+    if (signal) {
+      if (signal.aborted) { try { ctr.abort((signal as any).reason) } catch { ctr.abort() } }
+      else { try { signal.addEventListener('abort', () => { try { ctr.abort((signal as any).reason) } catch { ctr.abort() } }, { once: true } as any) } catch {} }
+    }
     _latestRequestIdByWidget[widgetId] = rid
     const path = actorId ? `/query?actorId=${encodeURIComponent(actorId)}` : '/query'
     const promise = (async () => {
@@ -752,6 +759,8 @@ export const Api = {
   getBranding: () => http<BrandingOut>('/branding'),
   putAdminBranding: (payload: { orgName?: string; logoLight?: string; logoDark?: string; favicon?: string }, actorId?: string) =>
     http<BrandingOut>(`/admin/branding${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  resetAdminBranding: (actorId?: string) =>
+    http<BrandingOut>(`/admin/branding/reset${actorId ? `?actorId=${encodeURIComponent(actorId)}` : ''}`, { method: 'POST' }),
   getSidebarCounts: (userId: string) => http<SidebarCountsResponse>(`/users/${encodeURIComponent(userId)}/counts`),
   // Engine pool disposal
   disposeDatasourceEngine: (id: string) => http<{ disposed: boolean; target: string; message?: string }>(`/datasources/${encodeURIComponent(id)}/engine/dispose`, { method: 'POST' }),
@@ -808,11 +817,11 @@ export const Api = {
     ),
   periodTotals: (payload: { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' }) =>
     http<{ total?: number; totals?: Record<string, number> }>('/query/period-totals', { method: 'POST', body: JSON.stringify(payload) }),
-  periodTotalsBatch: (payload: { requests: Array<({ key?: string } & { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' })> }) =>
-    http<{ results: Record<string, { total?: number; totals?: Record<string, number> }> }>('/query/period-totals/batch', { method: 'POST', body: JSON.stringify(payload) }),
-  periodTotalsCompare: (payload: { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; prevStart: string; prevEnd: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' }) =>
-    http<{ cur: { total?: number; totals?: Record<string, number> }; prev: { total?: number; totals?: Record<string, number> } }>('/query/period-totals/compare', { method: 'POST', body: JSON.stringify(payload) }),
-  distinct: (payload: DistinctRequest) => http<DistinctResponse>('/query/distinct', { method: 'POST', body: JSON.stringify(payload) }),
+  periodTotalsBatch: (payload: { requests: Array<({ key?: string } & { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' })> }, signal?: AbortSignal) =>
+    http<{ results: Record<string, { total?: number; totals?: Record<string, number> }> }>('/query/period-totals/batch', { method: 'POST', body: JSON.stringify(payload), signal }),
+  periodTotalsCompare: (payload: { source: string; datasourceId?: string; y?: string; measure?: string; agg?: 'none'|'count'|'distinct'|'avg'|'sum'|'min'|'max'; dateField: string; start: string; end: string; prevStart: string; prevEnd: string; where?: Record<string, unknown>; legend?: string | string[]; weekStart?: 'sat'|'sun'|'mon' }, signal?: AbortSignal) =>
+    http<{ cur: { total?: number; totals?: Record<string, number> }; prev: { total?: number; totals?: Record<string, number> } }>('/query/period-totals/compare', { method: 'POST', body: JSON.stringify(payload), signal }),
+  distinct: (payload: DistinctRequest, signal?: AbortSignal) => http<DistinctResponse>('/query/distinct', { method: 'POST', body: JSON.stringify(payload), signal }),
   // --- Auth / Users ---
   signup: (payload: { name: string; email: string; password: string; role?: 'admin'|'user' }) =>
     http<UserOut>('/users/signup', { method: 'POST', body: JSON.stringify(payload) }),
@@ -1107,7 +1116,7 @@ export type QuerySpecRequest = {
 }
 
 export const QueryApi = {
-  querySpec: async (payload: QuerySpecRequest) => {
+  querySpec: async (payload: QuerySpecRequest, signal?: AbortSignal) => {
     try {
       const specAny: any = payload?.spec
       // Require a spec and a non-empty source; otherwise, return empty result to avoid 422 spam
@@ -1118,8 +1127,10 @@ export const QueryApi = {
       const spec: any = { ...specAny }
       // Preserve x as string | string[] for multi-level X support; only normalize legend
       if (Array.isArray(spec.legend)) spec.legend = spec.legend[0]
-      // Forward the normalized payload
-      return await http<QueryResponse>('/query/spec', { method: 'POST', body: JSON.stringify({ ...payload, spec }) }, 60000)
+      // Forward the normalized payload. The optional signal lets React Query
+      // (or any caller) abort the in-flight request — the backend will
+      // detect the disconnect and call DuckDB.interrupt() to stop the SQL.
+      return await http<QueryResponse>('/query/spec', { method: 'POST', body: JSON.stringify({ ...payload, spec }), signal }, 60000)
     } catch (e) {
       throw e
     }

@@ -201,13 +201,61 @@ async def update_branding(payload: BrandingUpdateIn, actorId: str | None = Query
                 current = json.loads(f.read_text(encoding="utf-8")) or {}
         except Exception:
             current = {}
-        # Merge allowed fields
+        # Merge allowed fields. An explicit empty string is interpreted as
+        # "clear this override" so the UI can reset back to the Bayan default.
         for k in ("orgName", "logoLight", "logoDark", "favicon"):
             v = getattr(payload, k, None)
-            if v is not None:
-                current[k] = v
+            if v is None:
+                continue
+            if isinstance(v, str) and not v.strip():
+                current.pop(k, None)
+            else:
+                current[k] = v.strip() if isinstance(v, str) else v
         f.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
-        # Echo combined object back in BrandingOut shape (palette/fonts not changed here)
-        return BrandingOut(fonts={"primary": "Inter", "code": "ui-monospace"}, palette={}, orgName=current.get("orgName"), logoLight=current.get("logoLight"), logoDark=current.get("logoDark"), favicon=current.get("favicon"))
+        # Echo effective branding (with Bayan defaults filled in) so the UI
+        # immediately shows what users will see.
+        from ..main import _coalesce_branding  # late import to avoid cycle at module load
+        eff = _coalesce_branding(current)
+        return BrandingOut(
+            fonts={"primary": "Inter", "code": "ui-monospace"},
+            palette={},
+            orgName=eff["orgName"],
+            logoLight=eff["logoLight"],
+            logoDark=eff["logoDark"],
+            favicon=eff["favicon"],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/branding/reset", response_model=BrandingOut)
+async def reset_branding(actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+    """Clear all branding overrides — restores the Bayan default look."""
+    if not _is_admin(db, actorId):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        data_dir = Path(settings.metadata_db_path).resolve().parent
+        data_dir.mkdir(parents=True, exist_ok=True)
+        f = data_dir / "branding.json"
+        # Remove every override key but keep any non-branding extras intact.
+        current = {}
+        try:
+            if f.exists():
+                current = json.loads(f.read_text(encoding="utf-8")) or {}
+        except Exception:
+            current = {}
+        for k in ("orgName", "logoLight", "logoDark", "favicon"):
+            current.pop(k, None)
+        f.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        from ..main import _coalesce_branding
+        eff = _coalesce_branding(current)
+        return BrandingOut(
+            fonts={"primary": "Inter", "code": "ui-monospace"},
+            palette={},
+            orgName=eff["orgName"],
+            logoLight=eff["logoLight"],
+            logoDark=eff["logoDark"],
+            favicon=eff["favicon"],
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

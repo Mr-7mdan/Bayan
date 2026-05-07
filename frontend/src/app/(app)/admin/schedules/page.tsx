@@ -396,14 +396,14 @@ function AdminSchedulesInner() {
         <div className="p-4 space-y-4">
           <TabGroup index={tabIndex} onIndexChange={(i) => { setSlideDir(i > prevTabIndex.current ? 'left' : 'right'); prevTabIndex.current = i; setTabIndex(i) }}>
             <TabList className="px-3 py-1.5 border-b border-[hsl(var(--border))]">
-              <Tab className="pb-2.5 font-medium hover:border-gray-300">
-                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-gray-800 ui-selected:dark:text-white">Create Tasks</span>
+              <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
+                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Create Tasks</span>
               </Tab>
-              <Tab className="pb-2.5 font-medium hover:border-gray-300">
-                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-gray-800 ui-selected:dark:text-white">Running Tasks</span>
+              <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
+                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Running Tasks</span>
               </Tab>
-              <Tab className="pb-2.5 font-medium hover:border-gray-300">
-                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-gray-800 ui-selected:dark:text-white">Scheduled Tasks</span>
+              <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
+                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Scheduled Tasks</span>
               </Tab>
             </TabList>
             <TabPanels className="pt-0">

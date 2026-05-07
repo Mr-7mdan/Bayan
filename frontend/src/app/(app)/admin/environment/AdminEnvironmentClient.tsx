@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Card, Title, Text } from '@tremor/react'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { Api } from '@/lib/api'
-import { useEnvironment } from '@/components/providers/EnvironmentProvider'
+import { useEnvironment, BAYAN_DEFAULTS } from '@/components/providers/EnvironmentProvider'
 
 function resolveDefaultApi(): string {
   return (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api').replace(/\/$/, '')
@@ -82,16 +82,18 @@ export default function AdminEnvironmentPage() {
     } catch {}
   }, [])
 
-  // Sync local text state from env whenever env changes (e.g. after server load / branding reload)
+  // Sync local text state from env whenever env changes (e.g. after server load / branding reload).
+  // For branding fields we treat values that match the Bayan default as "no override" so the
+  // input box stays empty (placeholder visible) and the "using default" indicator is correct.
   useEffect(() => {
     setLocalAiProvider(env.aiProvider || 'gemini')
     setLocalAiModel(env.aiModel || '')
     setLocalAiApiKey(env.aiApiKey || '')
     setLocalAiBaseUrl(env.aiBaseUrl || '')
-    setLocalOrgName(env.orgName || '')
-    setLocalFavicon(env.favicon || '')
-    setLocalLogoLight(env.orgLogoLight || '')
-    setLocalLogoDark(env.orgLogoDark || '')
+    setLocalOrgName((env.orgName && env.orgName !== BAYAN_DEFAULTS.orgName) ? env.orgName : '')
+    setLocalFavicon((env.favicon && env.favicon !== BAYAN_DEFAULTS.favicon) ? env.favicon : '')
+    setLocalLogoLight((env.orgLogoLight && env.orgLogoLight !== BAYAN_DEFAULTS.orgLogoLight) ? env.orgLogoLight : '')
+    setLocalLogoDark((env.orgLogoDark && env.orgLogoDark !== BAYAN_DEFAULTS.orgLogoDark) ? env.orgLogoDark : '')
     setLocalPublicDomain(env.publicDomain || '')
   }, [env])
 
@@ -250,6 +252,52 @@ export default function AdminEnvironmentPage() {
       window.setTimeout(() => setBrandingMsg(null), 1500)
     } catch (e: any) {
       setBrandingErr(e?.message || 'Failed to save')
+    } finally { setSavingBranding(false) }
+  }
+
+  const restoreBayanDefaults = async () => {
+    if (!confirm('Restore the default Bayan logo, name, and favicon? Your current overrides will be cleared.')) return
+    setSavingBranding(true); setBrandingMsg(null); setBrandingErr(null)
+    try {
+      const res = await Api.resetAdminBranding(user?.id)
+      // Server returns the effective values (Bayan defaults filled in).
+      setLocalOrgName(''); setLocalLogoLight(''); setLocalLogoDark(''); setLocalFavicon('')
+      setEnv({
+        orgName: res.orgName || BAYAN_DEFAULTS.orgName,
+        orgLogoLight: res.logoLight || BAYAN_DEFAULTS.orgLogoLight,
+        orgLogoDark: res.logoDark || BAYAN_DEFAULTS.orgLogoDark,
+        favicon: res.favicon || BAYAN_DEFAULTS.favicon,
+      })
+      setBrandingMsg('Restored Bayan defaults')
+      window.setTimeout(() => setBrandingMsg(null), 1800)
+    } catch (e: any) {
+      setBrandingErr(e?.message || 'Failed to reset branding')
+    } finally { setSavingBranding(false) }
+  }
+
+  // Reset a single branding override (PUT empty string → server clears it,
+  // GET will fall back to the Bayan default for that field).
+  const resetBrandingField = async (key: 'orgName' | 'logoLight' | 'logoDark' | 'favicon') => {
+    setSavingBranding(true); setBrandingMsg(null); setBrandingErr(null)
+    try {
+      const payload: Record<string, string> = { [key]: '' }
+      const res = await Api.putAdminBranding(payload as any, user?.id)
+      const next = {
+        orgName: res.orgName || BAYAN_DEFAULTS.orgName,
+        orgLogoLight: res.logoLight || BAYAN_DEFAULTS.orgLogoLight,
+        orgLogoDark: res.logoDark || BAYAN_DEFAULTS.orgLogoDark,
+        favicon: res.favicon || BAYAN_DEFAULTS.favicon,
+      }
+      setEnv(next)
+      // Clear the local input so the placeholder (showing the default) is visible
+      if (key === 'orgName') setLocalOrgName('')
+      if (key === 'logoLight') setLocalLogoLight('')
+      if (key === 'logoDark') setLocalLogoDark('')
+      if (key === 'favicon') setLocalFavicon('')
+      setBrandingMsg('Reset to Bayan default')
+      window.setTimeout(() => setBrandingMsg(null), 1500)
+    } catch (e: any) {
+      setBrandingErr(e?.message || 'Failed to reset')
     } finally { setSavingBranding(false) }
   }
 
@@ -424,7 +472,7 @@ export default function AdminEnvironmentPage() {
               <div className="mt-2 text-[11px] text-muted-foreground">Server key: {serverHasKey ? 'set' : 'not set'}</div>
               <div className="mt-3 flex items-center gap-2">
                 <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={testingAI} onClick={onTestAI}>{testingAI ? 'Testing…' : 'Test endpoint'}</button>
-                <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingAI} onClick={() => saveAiToServer(false)}>{savingAI ? 'Saving…' : 'Save to server'}</button>
+                <button className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" type="button" disabled={savingAI} onClick={() => saveAiToServer(false)}>{savingAI ? 'Saving…' : 'Save to server'}</button>
                 <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingAI} onClick={() => saveAiToServer(true)}>Clear server key</button>
                 {aiMsg && <span className="text-xs text-emerald-600">{aiMsg}</span>}
                 {aiErr && <span className="text-xs text-rose-600">{aiErr}</span>}
@@ -435,66 +483,86 @@ export default function AdminEnvironmentPage() {
           </section>
           {/* Branding */}
           <section className="rounded-md border p-3 bg-[hsl(var(--card))]">
-            <h3 className="text-sm font-semibold mb-2">Branding</h3>
-            <p className="text-xs text-muted-foreground mb-3">Used in document title, favicon, and UI logos when provided. Values are stored in your browser.</p>
-            <div className="grid grid-cols-1 md-grid-cols-2 gap-3 md:grid-cols-2">
-              <label className="text-sm block">Organization Name
-                <input
-                  name="org_name"
-                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  placeholder="e.g., Bayan Holdings"
-                  value={localOrgName}
-                  onChange={(e)=> setLocalOrgName(e.target.value)}
-                  onBlur={(e)=> setEnv({ orgName: e.target.value })}
-                  autoComplete="organization"
-                />
-              </label>
-              <label className="text-sm block">Favicon URL
-                <input
-                  name="org_favicon"
-                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  placeholder="/favicon.svg"
-                  value={localFavicon}
-                  onChange={(e)=> setLocalFavicon(e.target.value)}
-                  onBlur={(e)=> setEnv({ favicon: e.target.value })}
-                  autoComplete="url"
-                />
-              </label>
-              <label className="text-sm block">Light mode logo URL
-                <input
-                  name="org_logo_light"
-                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  placeholder="/logo.svg"
-                  value={localLogoLight}
-                  onChange={(e)=> setLocalLogoLight(e.target.value)}
-                  onBlur={(e)=> setEnv({ orgLogoLight: e.target.value })}
-                  autoComplete="url"
-                />
-              </label>
-              <label className="text-sm block">Dark mode logo URL
-                <input
-                  name="org_logo_dark"
-                  className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  placeholder="/logo-dark.svg"
-                  value={localLogoDark}
-                  onChange={(e)=> setLocalLogoDark(e.target.value)}
-                  onBlur={(e)=> setEnv({ orgLogoDark: e.target.value })}
-                  autoComplete="url"
-                />
-              </label>
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div>
+                <h3 className="text-sm font-semibold">Branding</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Customize the organization name, logos, and favicon shown across the app and in alert emails.
+                  Leave any field blank to use the <span className="font-medium text-foreground">Bayan default</span>.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 text-xs px-2.5 py-1.5 rounded-md border border-[hsl(var(--border))] hover:bg-muted disabled:opacity-50 cursor-pointer transition-colors"
+                disabled={savingBranding}
+                onClick={restoreBayanDefaults}
+                title="Clear all overrides and restore the default Bayan look"
+              >
+                Restore Bayan defaults
+              </button>
             </div>
-            <div className="mt-3 flex items-center gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <BrandingField
+                label="Organization Name"
+                name="org_name"
+                value={localOrgName}
+                placeholder={BAYAN_DEFAULTS.orgName}
+                isUsingDefault={!localOrgName.trim()}
+                disabled={savingBranding}
+                onChange={(v)=> setLocalOrgName(v)}
+                onCommit={(v)=> setEnv({ orgName: v })}
+                onResetAction={()=> resetBrandingField('orgName')}
+                autoComplete="organization"
+              />
+              <BrandingField
+                label="Favicon URL"
+                name="org_favicon"
+                value={localFavicon}
+                placeholder={BAYAN_DEFAULTS.favicon}
+                isUsingDefault={!localFavicon.trim()}
+                disabled={savingBranding}
+                onChange={(v)=> setLocalFavicon(v)}
+                onCommit={(v)=> setEnv({ favicon: v })}
+                onResetAction={()=> resetBrandingField('favicon')}
+                autoComplete="url"
+              />
+              <BrandingField
+                label="Light mode logo URL"
+                name="org_logo_light"
+                value={localLogoLight}
+                placeholder={BAYAN_DEFAULTS.orgLogoLight}
+                isUsingDefault={!localLogoLight.trim()}
+                disabled={savingBranding}
+                onChange={(v)=> setLocalLogoLight(v)}
+                onCommit={(v)=> setEnv({ orgLogoLight: v })}
+                onResetAction={()=> resetBrandingField('logoLight')}
+                autoComplete="url"
+              />
+              <BrandingField
+                label="Dark mode logo URL"
+                name="org_logo_dark"
+                value={localLogoDark}
+                placeholder={BAYAN_DEFAULTS.orgLogoDark}
+                isUsingDefault={!localLogoDark.trim()}
+                disabled={savingBranding}
+                onChange={(v)=> setLocalLogoDark(v)}
+                onCommit={(v)=> setEnv({ orgLogoDark: v })}
+                onResetAction={()=> resetBrandingField('logoDark')}
+                autoComplete="url"
+              />
+            </div>
+            <div className="mt-3 flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2">
-                <img src={(localLogoLight || '/logo.svg') as any} alt="Light logo preview" className="h-10 w-auto rounded border bg-white p-1" />
-                <span className="text-xs text-muted-foreground">Light</span>
+                <img src={(localLogoLight || BAYAN_DEFAULTS.orgLogoLight) as any} alt="Light logo preview" className="h-10 w-auto rounded border bg-white p-1" />
+                <span className="text-xs text-muted-foreground">Light{!localLogoLight.trim() && <span className="ml-1 text-[10px] text-muted-foreground/70">· default</span>}</span>
               </div>
               <div className="flex items-center gap-2">
-                <img src={(localLogoDark || '/logo-dark.svg') as any} alt="Dark logo preview" className="h-10 w-auto rounded border bg-black p-1" />
-                <span className="text-xs text-muted-foreground">Dark</span>
+                <img src={(localLogoDark || BAYAN_DEFAULTS.orgLogoDark) as any} alt="Dark logo preview" className="h-10 w-auto rounded border bg-black p-1" />
+                <span className="text-xs text-muted-foreground">Dark{!localLogoDark.trim() && <span className="ml-1 text-[10px] text-muted-foreground/70">· default</span>}</span>
               </div>
             </div>
-            <div className="mt-3 flex items-center gap-2">
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingBranding} onClick={saveBrandingToServer}>{savingBranding ? 'Saving…' : 'Save to server'}</button>
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <button className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" type="button" disabled={savingBranding} onClick={saveBrandingToServer}>{savingBranding ? 'Saving…' : 'Save to server'}</button>
               <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingBranding} onClick={reloadBrandingFromServer}>Reload from server</button>
               {brandingMsg && <span className="text-xs text-emerald-600">{brandingMsg}</span>}
               {brandingErr && <span className="text-xs text-rose-600">{brandingErr}</span>}
@@ -588,5 +656,67 @@ export default function AdminEnvironmentPage() {
       </Card>
     </div>
     </Suspense>
+  )
+}
+
+// ── Branding field with inline "default" indicator + reset button ──────
+function BrandingField({
+  label,
+  name,
+  value,
+  placeholder,
+  isUsingDefault,
+  disabled,
+  onChange,
+  onCommit,
+  onResetAction,
+  autoComplete,
+}: {
+  label: string
+  name: string
+  value: string
+  placeholder: string
+  isUsingDefault: boolean
+  disabled?: boolean
+  onChange: (v: string) => void
+  onCommit: (v: string) => void
+  onResetAction: () => void
+  autoComplete?: string
+}) {
+  return (
+    <div className="text-sm block">
+      <div className="flex items-center justify-between mb-1">
+        <label htmlFor={name} className="block">{label}</label>
+        {isUsingDefault ? (
+          <span
+            className="text-[10px] text-muted-foreground/70 italic"
+            title="No override is set — the Bayan default will be used."
+          >
+            using default
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer underline-offset-2 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={onResetAction}
+            disabled={disabled}
+            title="Clear this override and use the Bayan default"
+          >
+            Reset to default
+          </button>
+        )}
+      </div>
+      <input
+        id={name}
+        name={name}
+        className="w-full px-2 py-1.5 rounded-md border bg-background"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e)=> onChange(e.target.value)}
+        onBlur={(e)=> onCommit(e.target.value)}
+        autoComplete={autoComplete}
+        disabled={disabled}
+      />
+    </div>
   )
 }

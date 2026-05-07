@@ -514,7 +514,13 @@ export default function HeatmapCard({
   const q = useQuery({
     queryKey: ['heatmap', title, sql, datasourceId, presetKeyForQuery, queryMode, debSpecKey, debFiltersKey, breakSeq, debUiWhereKey, heatmapConfigKey],
     placeholderData: (prev) => prev as any,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
+      // React-Query passes an AbortSignal that fires on unmount / invalidation;
+      // shadow QueryApi.querySpec and Api.query with closures that thread the
+      // signal through so a closed dashboard tab actually triggers the
+      // disconnect → DuckDB.interrupt() path on the backend.
+      const _qs = (p: any) => QueryApi.querySpec(p, signal)
+      const _q = (p: any) => Api.query(p, signal)
       if (queryMode === 'spec' && querySpec) {
         // Start from base spec and attach date bounds, use uiTruthWhere for exposed filters
         const base: any = { ...querySpec }
@@ -563,7 +569,7 @@ export default function HeatmapCard({
               const yField = resolveYField(base, options, 'calendar')
               const select = [tField, yField].filter(Boolean) as string[]
               const rawSpec: any = { source: base.source, select: (select.length ? select : [tField]), where: Object.keys(where||{}).length ? where : undefined, limit: 200000, offset: 0 }
-              return QueryApi.querySpec({ spec: rawSpec, datasourceId, limit: 200000, offset: 0, includeTotal: false })
+              return _qs({ spec: rawSpec, datasourceId, limit: 200000, offset: 0, includeTotal: false })
             } catch { /* fall through to default path */ }
           }
         }
@@ -654,7 +660,7 @@ export default function HeatmapCard({
             const yField = resolveYField(base, options, 'weekdayHour')
             const select = [tField, yField].filter(Boolean) as string[]
             const rawSpec: any = { source: base.source, select: (select.length ? select : [tField]), where: Object.keys(where||{}).length ? where : undefined, limit: 100000, offset: 0 }
-            return QueryApi.querySpec({ spec: rawSpec, datasourceId, limit: 100000, offset: 0, includeTotal: false })
+            return _qs({ spec: rawSpec, datasourceId, limit: 100000, offset: 0, includeTotal: false })
           } catch { /* fall back to generic */ }
         }
         const specSafe: any = { ...base, where }
@@ -672,7 +678,7 @@ export default function HeatmapCard({
             delete specSafe.series
           }
         }
-        return QueryApi.querySpec({ spec: specSafe, datasourceId, limit: 100000, offset: 0, includeTotal: false })
+        return _qs({ spec: specSafe, datasourceId, limit: 100000, offset: 0, includeTotal: false })
       }
       const wid = String(widgetId || title || 'heatmap')
       const { promise: __p } = Api.queryForWidget(wid, { sql, datasourceId, limit: 100000, offset: 0, params: ignoreGlobal ? {} : (filters as any) }, user?.id)

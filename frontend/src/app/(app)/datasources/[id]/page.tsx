@@ -226,7 +226,7 @@ export default function DatasourceDetailPage() {
             {dsError && <Text className="text-red-600">{dsError}</Text>}
             {!!(tasks && tasks.length) && (
               <button
-                className="ml-2 inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-700 dark:text-gray-200 px-2 py-1"
+                className="ml-2 inline-flex items-center rounded-md border btn-primary px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={ds?.active === false}
                 onClick={async () => {
                   try {

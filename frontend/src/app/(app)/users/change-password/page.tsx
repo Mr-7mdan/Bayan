@@ -59,7 +59,7 @@ export default function ChangePasswordPage() {
           {err && <div className="text-sm text-red-600">{err}</div>}
           {msg && <div className="text-sm text-emerald-600">{msg}</div>}
           <div className="pt-1">
-            <button type="submit" disabled={busy} className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted disabled:opacity-60">{busy ? 'Updating…' : 'Update password'}</button>
+            <button type="submit" disabled={busy} className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-60 disabled:cursor-not-allowed">{busy ? 'Updating…' : 'Update password'}</button>
           </div>
         </form>
       </Card>

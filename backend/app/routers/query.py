@@ -11,10 +11,12 @@ import os
 import sys
 import math
 import threading
+import asyncio
+import functools
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -32,6 +34,8 @@ from ..config import settings
 from urllib.parse import unquote, urlparse
 from ..metrics import counter_inc, summary_observe, gauge_inc, gauge_dec
 from ..metrics_state import touch_actor
+from ..query_pool import get_query_executor
+from ..cancellation import CancelToken, set_current_token
 
 try:
     import duckdb as _duckdb
@@ -1608,7 +1612,122 @@ def _resolve_table_name(ds: Any, source_table_id: str | None, source_name: str |
     inner = f"SELECT {sel}{base_from_sql}{where_sql}{gb_sql}{order_by}"
     return {"sql": inner}
 
+async def _run_cancellable_in_pool(request: Optional[Request], sync_fn) -> QueryResponse:
+    """Execute *sync_fn* on the heavy-query thread pool with end-to-end
+    cancellation: a client disconnect (browser tab closed, dashboard
+    navigated away) interrupts the running DuckDB query instead of
+    letting it consume CPU and a connection slot to completion.
+
+    Mechanism:
+      1. Create a ``CancelToken`` for this request.
+      2. Submit ``sync_fn`` to the pool wrapped so the worker thread sets
+         the token on its thread-local before doing any DB work.
+         ``_PooledCursorWrap`` registers each borrowed DuckDB connection
+         with that token.
+      3. Race the resulting future against ``request.is_disconnected()``.
+         When the client drops, call ``token.cancel()`` — every
+         registered connection gets ``interrupt()``'d, the executor
+         thread unblocks, the connection returns to the pool.
+      4. Mirror the same path for ``asyncio.CancelledError`` so
+         server-side cancellation (shutdown, framework cancellation) also
+         interrupts in-flight SQL.
+    """
+    import contextlib
+    loop = asyncio.get_running_loop()
+    cancel_token = CancelToken()
+
+    def _worker():
+        set_current_token(cancel_token)
+        try:
+            return sync_fn()
+        finally:
+            # Threads in the pool are reused; clear immediately so a stale
+            # token can never reach the next request that lands here.
+            set_current_token(None)
+
+    future = loop.run_in_executor(get_query_executor(), _worker)
+    awaited = asyncio.wrap_future(future)
+
+    if request is None:
+        # No way to detect client disconnect — just await the work.
+        try:
+            return await awaited
+        except asyncio.CancelledError:
+            cancel_token.cancel()
+            raise
+
+    async def _watch_disconnect():
+        # Cheap poll — is_disconnected() peeks at the receive buffer; it
+        # does NOT block waiting for new data. 500 ms is plenty fast for
+        # a UX sense of "instantly cancelled" without burning CPU.
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            return
+
+    watcher = asyncio.create_task(_watch_disconnect())
+
+    try:
+        done, _pending = await asyncio.wait(
+            {awaited, watcher},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if awaited in done:
+            return awaited.result()
+        # Watcher resolved first → client disconnected.
+        n = cancel_token.cancel()
+        if n:
+            print(f"[cancellation] client disconnected; interrupted {n} DuckDB connection(s)", flush=True)
+        # Give the executor a brief window to unwind so the connection is
+        # returned to the pool cleanly. After that, surrender — the pool
+        # is bounded and DuckDB.interrupt() will eventually kick in.
+        try:
+            await asyncio.wait_for(asyncio.shield(awaited), timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            pass
+        raise HTTPException(status_code=499, detail="Client closed request")
+    except asyncio.CancelledError:
+        # FastAPI / server shutdown cancelled the endpoint coroutine.
+        n = cancel_token.cancel()
+        if n:
+            print(f"[cancellation] endpoint cancelled; interrupted {n} DuckDB connection(s)", flush=True)
+        raise
+    finally:
+        if not watcher.done():
+            watcher.cancel()
+            with contextlib.suppress(Exception):
+                await watcher
+
+
 @router.post("", response_model=QueryResponse)
+async def run_query_endpoint(
+    payload: QueryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    actorId: Optional[str] = None,
+    publicId: Optional[str] = None,
+    token: Optional[str] = None,
+) -> QueryResponse:
+    """Async HTTP entry-point for /query.
+
+    Offloads the (sync) heavy SQL execution to a dedicated thread pool so
+    long-running analytical queries cannot saturate starlette's default
+    thread pool — keeping navigation/CRUD endpoints responsive. If the
+    client disconnects while the query is running, the DuckDB connection
+    is interrupted so the query stops on the server too.
+    """
+    return await _run_cancellable_in_pool(
+        request,
+        functools.partial(run_query, payload, db, actorId, publicId, token),
+    )
+
+
+# NOTE: Sync implementation. Internal helpers in this module call this
+# directly (they're already running on the heavy-query pool thread, so
+# nested calls don't need to round-trip through the executor again).
 def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
     try:
         touch_actor(actorId)
@@ -2200,6 +2319,29 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
 
 
 @router.post("/spec", response_model=QueryResponse)
+async def run_query_spec_endpoint(
+    payload: QuerySpecRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    actorId: Optional[str] = None,
+    publicId: Optional[str] = None,
+    token: Optional[str] = None,
+    _guard: None = Depends(_spec_concurrency_guard),
+) -> QueryResponse:
+    """Async HTTP entry-point for /query/spec.
+
+    Same fast-lane isolation as /query: heavy spec compilation + execution
+    runs on the dedicated query thread pool, freeing starlette's default
+    pool for navigation, branding, and CRUD requests. Client disconnects
+    interrupt the running DuckDB connection so cancelled work doesn't
+    keep tying up server resources.
+    """
+    return await _run_cancellable_in_pool(
+        request,
+        functools.partial(run_query_spec, payload, db, actorId, publicId, token),
+    )
+
+
 def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _guard: None = Depends(_spec_concurrency_guard)) -> QueryResponse:
     """Compile a QuerySpec to SQL and execute via the standard path.
 

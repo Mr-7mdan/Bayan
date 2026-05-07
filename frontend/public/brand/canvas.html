@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Bayan · Logo Canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #011419;
+    --ink-soft: #0B1419;
+    --line: #E6EAEC;
+    --bg-light: #FAFBFC;
+    --bg-dark: #020617;
+    --sidebar-light: #FFFFFF;
+    --sidebar-dark: #0B1220;
+    --muted-light: #6B7280;
+    --muted-dark: #94A3B8;
+    --primary: #29B5E8;
+    --accent: #7DD3F3;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter Tight', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg-light);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  .page { max-width: 1320px; margin: 0 auto; padding: 64px 48px 96px; }
+
+  /* ── Header ──────────────────────────────────────── */
+  header {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 32px;
+    align-items: end;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--line);
+  }
+  header .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-light);
+    margin-bottom: 12px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 48px; font-weight: 600; letter-spacing: -1.5px;
+    line-height: 1;
+  }
+  header .subtitle {
+    font-size: 16px; color: var(--muted-light);
+    max-width: 60ch; line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  /* ── Direction row ──────────────────────────────── */
+  .direction {
+    margin-top: 64px;
+  }
+  .direction-head {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: baseline; gap: 24px;
+    margin-bottom: 24px;
+  }
+  .direction-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; font-weight: 500;
+    color: var(--primary);
+    letter-spacing: 0.04em;
+  }
+  .direction-name {
+    font-size: 32px; font-weight: 600; letter-spacing: -0.6px; margin: 0;
+  }
+  .direction-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--muted-light);
+    text-align: right;
+  }
+  .direction-blurb {
+    font-size: 14.5px; color: var(--muted-light);
+    max-width: 72ch; line-height: 1.55;
+    text-wrap: pretty;
+    margin: 0 0 32px 0;
+  }
+  .direction-blurb b { color: var(--ink); font-weight: 600; }
+
+  /* ── Comparison panes (light vs dark) ─────────── */
+  .panes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .pane { padding: 32px; }
+  .pane.light { background: var(--bg-light); color: var(--ink); }
+  .pane.dark  { background: var(--bg-dark);  color: #E2E8F0; }
+  .pane-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    margin-bottom: 24px;
+    opacity: 0.55;
+  }
+
+  /* Hero mark grid */
+  .mark-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    align-items: end; gap: 32px;
+    padding: 24px 0;
+    border-top: 1px dashed currentColor;
+    border-color: rgba(0,0,0,0.07);
+  }
+  .pane.dark .mark-row { border-color: rgba(255,255,255,0.07); }
+  .mark-row:first-of-type { border-top: 0; }
+  .mark-hero { display: flex; align-items: end; }
+  .mark-hero img { width: 96px; height: 96px; display: block; }
+  .mark-sm { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .mark-sm img { display: block; }
+  .mark-sm .px {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; opacity: 0.5;
+  }
+
+  /* Wordmark direction has no mark sizes */
+  .wordmark-row { padding: 32px 0; }
+  .wordmark-row img { max-width: 100%; height: auto; }
+
+  /* Lockup row */
+  .lockup-row {
+    margin-top: 8px;
+    padding: 24px 0;
+    border-top: 1px dashed rgba(0,0,0,0.07);
+  }
+  .pane.dark .lockup-row { border-color: rgba(255,255,255,0.07); }
+  .lockup-row img { max-width: 100%; height: auto; display: block; }
+
+  /* Sidebar mock */
+  .sidebar-mock {
+    margin-top: 32px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow:
+      0 1px 2px rgba(0,0,0,0.04),
+      0 8px 24px rgba(0,0,0,0.06);
+  }
+  .pane.dark .sidebar-mock { box-shadow: 0 12px 32px rgba(0,0,0,0.4); }
+  .sb {
+    width: 100%; aspect-ratio: 5 / 4;
+    display: grid;
+    grid-template-columns: 168px 1fr;
+  }
+  .sb-rail.light { background: var(--sidebar-light); border-right: 1px solid var(--line); }
+  .sb-rail.dark  { background: var(--sidebar-dark);  border-right: 1px solid #1E293B; }
+  .sb-rail {
+    padding: 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .sb-rail .logo-slot {
+    height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 12px;
+  }
+  .sb-rail .logo-slot img { height: 28px; width: auto; }
+  .sb-item {
+    height: 14px; border-radius: 4px;
+    background: rgba(0,0,0,0.04);
+  }
+  .sb-rail.dark .sb-item { background: rgba(255,255,255,0.06); }
+  .sb-item.active { background: var(--primary); opacity: 0.85; }
+  .sb-item.short { width: 60%; }
+  .sb-item.shorter { width: 40%; }
+  .sb-canvas.light { background: #F4F5F7; }
+  .sb-canvas.dark  { background: #050B17; }
+
+  /* ── Footer notes ───────────────────────────────── */
+  .notes {
+    margin-top: 80px; padding-top: 32px;
+    border-top: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+  }
+  .note h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--muted-light);
+    margin: 0 0 8px 0;
+  }
+  .note p {
+    margin: 0; font-size: 14px; line-height: 1.55;
+    color: var(--ink-soft); text-wrap: pretty;
+  }
+  .swatch-row { display: flex; gap: 8px; margin-top: 8px; }
+  .swatch {
+    width: 32px; height: 32px; border-radius: 6px;
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+
+  @media (max-width: 980px) {
+    .panes { grid-template-columns: 1fr; }
+    .notes { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <header>
+    <div>
+      <div class="eyebrow">brand · canvas v1</div>
+      <h1>Bayan logo directions</h1>
+    </div>
+    <p class="subtitle">
+      Three differentiated directions for the Bayan brand mark. Each retains the existing cyan
+      <span style="font-family: 'JetBrains Mono', monospace;">#29B5E8</span> equity but trades
+      the current crowded mark (bars + line + pie + frame) for a single, scalable concept.
+      Pick one — or mix (e.g. <i>A's mark + C's wordmark</i>).
+    </p>
+  </header>
+
+  <!-- ────────────────────────────────────────────── -->
+  <!-- Direction A · Pulse -->
+  <section class="direction">
+    <div class="direction-head">
+      <div class="direction-tag">A · pulse</div>
+      <h2 class="direction-name">Ascending bars in a soft square</h2>
+      <div class="direction-meta">conservative · scales to 16px</div>
+    </div>
+    <p class="direction-blurb">
+      <b>The disciplined refinement.</b> Refines the existing chart-bar metaphor into
+      a single, confident geometric mark. Four ascending bars in a rounded container.
+      One color, no gradients, no drop shadow. Closest to the current logo — easiest
+      to roll out without a brand re-launch.
+    </p>
+
+    <div class="panes">
+
+      <div class="pane light">
+        <div class="pane-label">Light · sidebar / docs / app shell</div>
+
+        <div class="mark-row">
+          <div class="mark-hero"><img src="a-pulse/mark-light.svg" alt="Pulse mark light 96px"/></div>
+          <div class="mark-sm"><img src="a-pulse/mark-light.svg" width="48" height="48"/><span class="px">48 px</span></div>
+          <div class="mark-sm"><img src="a-pulse/mark-light.svg" width="32" height="32"/><span class="px">32 px</span></div>
+          <div class="mark-sm"><img src="a-pulse/mark-light.svg" width="16" height="16"/><span class="px">16 px favicon</span></div>
+        </div>
+
+        <div class="lockup-row">
+          <img src="a-pulse/lockup-light.svg" alt="Pulse lockup light"/>
+        </div>
+
+        <div class="sidebar-mock">
+          <div class="sb">
+            <div class="sb-rail light">
+              <div class="logo-slot"><img src="a-pulse/lockup-light.svg" alt=""/></div>
+              <div class="sb-item active"></div>
+              <div class="sb-item"></div>
+              <div class="sb-item short"></div>
+              <div class="sb-item shorter"></div>
+              <div class="sb-item short"></div>
+            </div>
+            <div class="sb-canvas light"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane dark">
+        <div class="pane-label">Dark · sidebar / docs / app shell</div>
+
+        <div class="mark-row">
+          <div class="mark-hero"><img src="a-pulse/mark-dark.svg" alt="Pulse mark dark 96px"/></div>
+          <div class="mark-sm"><img src="a-pulse/mark-dark.svg" width="48" height="48"/><span class="px" style="opacity:.6">48 px</span></div>
+          <div class="mark-sm"><img src="a-pulse/mark-dark.svg" width="32" height="32"/><span class="px" style="opacity:.6">32 px</span></div>
+          <div class="mark-sm"><img src="a-pulse/mark-dark.svg" width="16" height="16"/><span class="px" style="opacity:.6">16 px favicon</span></div>
+        </div>
+
+        <div class="lockup-row">
+          <img src="a-pulse/lockup-dark.svg" alt="Pulse lockup dark"/>
+        </div>
+
+        <div class="sidebar-mock">
+          <div class="sb">
+            <div class="sb-rail dark">
+              <div class="logo-slot"><img src="a-pulse/lockup-dark.svg" alt=""/></div>
+              <div class="sb-item active"></div>
+              <div class="sb-item"></div>
+              <div class="sb-item short"></div>
+              <div class="sb-item shorter"></div>
+              <div class="sb-item short"></div>
+            </div>
+            <div class="sb-canvas dark"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────── -->
+  <!-- Direction B · Bayan Glyph -->
+  <section class="direction">
+    <div class="direction-head">
+      <div class="direction-tag">B · bayan glyph</div>
+      <h2 class="direction-name">The letter <span lang="ar" dir="rtl" style="font-family:'Noto Naskh Arabic', serif;">ب</span> — abstracted</h2>
+      <div class="direction-meta">distinctive · meaning-rooted</div>
+    </div>
+    <p class="direction-blurb">
+      <b>Bayan</b> (<span lang="ar" dir="rtl" style="font-family:'Noto Naskh Arabic', serif;">بَيَان</span>)
+      is Arabic for <i>clarity</i> / <i>exposition</i> — and starts with the letter
+      <span lang="ar" dir="rtl" style="font-family:'Noto Naskh Arabic', serif;">ب</span>
+      (a horizontal stroke with a single dot beneath it). This direction abstracts that
+      glyph: the stroke reads as an analytic baseline, the dot as a single data point.
+      Brand identity = brand name's first letter in its own script. Scales beautifully
+      to 16 px because there are only two shapes.
+    </p>
+
+    <div class="panes">
+
+      <div class="pane light">
+        <div class="pane-label">Light</div>
+
+        <div class="mark-row">
+          <div class="mark-hero"><img src="b-glyph/mark-light.svg" alt="Glyph mark light 96px"/></div>
+          <div class="mark-sm"><img src="b-glyph/mark-light.svg" width="48" height="48"/><span class="px">48 px</span></div>
+          <div class="mark-sm"><img src="b-glyph/mark-light.svg" width="32" height="32"/><span class="px">32 px</span></div>
+          <div class="mark-sm"><img src="b-glyph/mark-light.svg" width="16" height="16"/><span class="px">16 px favicon</span></div>
+        </div>
+
+        <div class="lockup-row">
+          <img src="b-glyph/lockup-light.svg" alt="Glyph lockup light"/>
+        </div>
+
+        <div class="sidebar-mock">
+          <div class="sb">
+            <div class="sb-rail light">
+              <div class="logo-slot"><img src="b-glyph/lockup-light.svg" alt=""/></div>
+              <div class="sb-item active"></div>
+              <div class="sb-item"></div>
+              <div class="sb-item short"></div>
+              <div class="sb-item shorter"></div>
+              <div class="sb-item short"></div>
+            </div>
+            <div class="sb-canvas light"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane dark">
+        <div class="pane-label">Dark</div>
+
+        <div class="mark-row">
+          <div class="mark-hero"><img src="b-glyph/mark-dark.svg" alt="Glyph mark dark 96px"/></div>
+          <div class="mark-sm"><img src="b-glyph/mark-dark.svg" width="48" height="48"/><span class="px" style="opacity:.6">48 px</span></div>
+          <div class="mark-sm"><img src="b-glyph/mark-dark.svg" width="32" height="32"/><span class="px" style="opacity:.6">32 px</span></div>
+          <div class="mark-sm"><img src="b-glyph/mark-dark.svg" width="16" height="16"/><span class="px" style="opacity:.6">16 px favicon</span></div>
+        </div>
+
+        <div class="lockup-row">
+          <img src="b-glyph/lockup-dark.svg" alt="Glyph lockup dark"/>
+        </div>
+
+        <div class="sidebar-mock">
+          <div class="sb">
+            <div class="sb-rail dark">
+              <div class="logo-slot"><img src="b-glyph/lockup-dark.svg" alt=""/></div>
+              <div class="sb-item active"></div>
+              <div class="sb-item"></div>
+              <div class="sb-item short"></div>
+              <div class="sb-item shorter"></div>
+              <div class="sb-item short"></div>
+            </div>
+            <div class="sb-canvas dark"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────── -->
+  <!-- Direction C · Wordmark -->
+  <section class="direction">
+    <div class="direction-head">
+      <div class="direction-tag">C · wordmark</div>
+      <h2 class="direction-name">bayan <span style="color:var(--primary);">·</span></h2>
+      <div class="direction-meta">typographic-led · no separate icon</div>
+    </div>
+    <p class="direction-blurb">
+      <b>The Stripe / Linear / Vercel pattern.</b> The wordmark <i>is</i> the identity. Lowercase
+      "bayan" in a tight geometric grotesque (Inter Tight 600), with a single cyan dot acting
+      as both a period and the brand's signature data point. No separate icon — the wordmark
+      stands alone in headers, emails, and OG cards. (Favicon falls back to a standalone "b" + dot.)
+    </p>
+
+    <div class="panes">
+
+      <div class="pane light">
+        <div class="pane-label">Light</div>
+        <div class="wordmark-row">
+          <img src="c-wordmark/wordmark-light.svg" alt="Wordmark light"/>
+        </div>
+        <div class="sidebar-mock">
+          <div class="sb">
+            <div class="sb-rail light">
+              <div class="logo-slot"><img src="c-wordmark/wordmark-light.svg" alt="" style="height:22px"/></div>
+              <div class="sb-item active"></div>
+              <div class="sb-item"></div>
+              <div class="sb-item short"></div>
+              <div class="sb-item shorter"></div>
+              <div class="sb-item short"></div>
+            </div>
+            <div class="sb-canvas light"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane dark">
+        <div class="pane-label">Dark</div>
+        <div class="wordmark-row">
+          <img src="c-wordmark/wordmark-dark.svg" alt="Wordmark dark"/>
+        </div>
+        <div class="sidebar-mock">
+          <div class="sb">
+            <div class="sb-rail dark">
+              <div class="logo-slot"><img src="c-wordmark/wordmark-dark.svg" alt="" style="height:22px"/></div>
+              <div class="sb-item active"></div>
+              <div class="sb-item"></div>
+              <div class="sb-item short"></div>
+              <div class="sb-item shorter"></div>
+              <div class="sb-item short"></div>
+            </div>
+            <div class="sb-canvas dark"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────── -->
+  <section class="notes">
+    <div class="note">
+      <h4>Brand DNA preserved</h4>
+      <p>Cyan primary <code style="font-family:'JetBrains Mono',monospace; font-size:12px;">#29B5E8</code> kept across all three. The cyan ramp (<code style="font-family:'JetBrains Mono',monospace; font-size:12px;">#7DD3F3</code> → <code style="font-family:'JetBrains Mono',monospace; font-size:12px;">#0598CC</code>) is reserved for chart palettes, not the logo itself.</p>
+      <div class="swatch-row">
+        <div class="swatch" style="background:#7DD3F3" title="#7DD3F3"></div>
+        <div class="swatch" style="background:#29B5E8" title="#29B5E8 primary"></div>
+        <div class="swatch" style="background:#0598CC" title="#0598CC"></div>
+        <div class="swatch" style="background:#011419" title="#011419 ink"></div>
+      </div>
+    </div>
+    <div class="note">
+      <h4>What we cut</h4>
+      <p>Drop shadow filters, multiple opacity layers, gradient fills, the line-graph overlay, the pie chart accent, the dashboard frame, and the decorative tick lines — every one of those was a textbook AI-slop tell that didn't survive contact with a 16-px favicon.</p>
+    </div>
+    <div class="note">
+      <h4>How to pick</h4>
+      <p><b>A</b> if you want the safest path and minimum disruption. <b>B</b> if you want the most distinctive identity and lean into Bayan's Arabic etymology. <b>C</b> if Bayan is repositioning toward a typographic, dev-tool aesthetic. Mixing — e.g. A's mark with C's wordmark — is also valid.</p>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

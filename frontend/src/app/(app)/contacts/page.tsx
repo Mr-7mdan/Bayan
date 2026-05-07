@@ -378,7 +378,7 @@ export default function ContactsPage() {
             <Text className="mt-0 text-gray-500 dark:text-white">Create and manage contacts, and send email/SMS</Text>
           </div>
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openAdd}>Add Contact</button>
+            <button className="inline-flex items-center gap-1 rounded-md border btn-primary px-3 py-1.5 text-sm font-medium" onClick={openAdd}>Add Contact</button>
             {isAdmin && (
               <>
                 <label className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] cursor-pointer">
@@ -608,8 +608,8 @@ export default function ContactsPage() {
               <label className="text-sm">Subject<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={bulkEmailDraft.subject} onChange={(e)=> setBulkEmailDraft((d)=> ({ ...d, subject: e.target.value }))} /></label>
               <Tabs.Root defaultValue="body" className="w-full">
                 <Tabs.List className="flex items-center gap-2 text-xs mt-2">
-                  <Tabs.Trigger value="body" className="px-2 py-1 rounded-md border data-[state=active]:bg-[hsl(var(--muted))]">Body (HTML)</Tabs.Trigger>
-                  <Tabs.Trigger value="preview" className="px-2 py-1 rounded-md border data-[state=active]:bg-[hsl(var(--muted))]">Preview</Tabs.Trigger>
+                  <Tabs.Trigger value="body" className="px-2 py-1 rounded-md border transition-colors data-[state=active]:bg-[hsl(var(--accent)/0.18)] data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:border-[hsl(var(--primary)/0.28)] data-[state=active]:font-semibold dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)] dark:data-[state=active]:text-[hsl(var(--primary))] dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]">Body (HTML)</Tabs.Trigger>
+                  <Tabs.Trigger value="preview" className="px-2 py-1 rounded-md border transition-colors data-[state=active]:bg-[hsl(var(--accent)/0.18)] data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:border-[hsl(var(--primary)/0.28)] data-[state=active]:font-semibold dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)] dark:data-[state=active]:text-[hsl(var(--primary))] dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]">Preview</Tabs.Trigger>
                 </Tabs.List>
                 <Tabs.Content value="body" className="mt-2">
                   <div className="rounded-md bg-background">

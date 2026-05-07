@@ -106,6 +106,26 @@ async def _issues_mw(request: Request, call_next):
 
 @app.on_event("startup")
 async def _startup():
+    # ── Reserve a generous thread pool for sync endpoints ──
+    # Starlette/anyio defaults to ~40 threads. Heavy /query handlers run
+    # synchronously and can hold a thread for minutes — when several such
+    # queries are in flight, lightweight navigation endpoints (sidebar
+    # counts, dashboard CRUD, branding, etc.) start queueing behind them.
+    # Bumping the default thread limiter gives the fast lane breathing room
+    # even if the heavy-query pool is fully saturated.
+    try:
+        import anyio
+        from anyio.to_thread import current_default_thread_limiter
+        try:
+            _starlette_pool = int(os.getenv("STARLETTE_THREADPOOL_SIZE", "128") or "128")
+        except Exception:
+            _starlette_pool = 128
+        if _starlette_pool > 0:
+            current_default_thread_limiter().total_tokens = _starlette_pool
+            print(f"[startup] anyio thread limiter set to {_starlette_pool}", flush=True)
+    except Exception as _lim_err:
+        # Non-fatal: anyio API surface varies across versions; fall back to defaults
+        print(f"[startup] anyio limiter tune skipped: {_lim_err}", flush=True)
     init_db()
     try:
         email = (settings.admin_email or "").strip().lower()
@@ -319,6 +339,30 @@ async def detect_db(payload: DetectRequest) -> DetectResponse:
     return DetectResponse(ok=False, detected=None, method="port_hint", candidates=[], versionString=None, error="No known DB ports open or reachable")
 
 
+# Canonical Bayan default branding. Used everywhere the org has not explicitly
+# overridden a value via the admin environment page. Keep these paths in sync
+# with the equivalent BAYAN_DEFAULTS constant in the frontend
+# EnvironmentProvider so SSR and the API agree.
+BAYAN_DEFAULTS = {
+    "orgName": "Bayan",
+    "logoLight": "/bayan-logo.svg",
+    "logoDark": "/bayan-logo-dark.svg",
+    "favicon": "/favicon.svg",
+}
+
+
+def _coalesce_branding(overrides: dict) -> dict:
+    """Return effective branding values with Bayan defaults filled in for any
+    missing or empty override. Empty strings are treated as 'use the default'."""
+    out: dict = {}
+    for k, default_v in BAYAN_DEFAULTS.items():
+        v = overrides.get(k)
+        if isinstance(v, str):
+            v = v.strip()
+        out[k] = v or default_v
+    return out
+
+
 @app.get("/api/branding", response_model=BrandingOut)
 async def get_branding() -> BrandingOut:
     # Default theme
@@ -356,13 +400,14 @@ async def get_branding() -> BrandingOut:
             overrides = json.loads(f.read_text(encoding="utf-8")) or {}
     except Exception:
         overrides = {}
+    eff = _coalesce_branding(overrides)
     return BrandingOut(
         fonts=base_fonts,
         palette=base_palette,
-        orgName=overrides.get("orgName"),
-        logoLight=overrides.get("logoLight"),
-        logoDark=overrides.get("logoDark"),
-        favicon=overrides.get("favicon"),
+        orgName=eff["orgName"],
+        logoLight=eff["logoLight"],
+        logoDark=eff["logoDark"],
+        favicon=eff["favicon"],
     )
 
 
@@ -387,5 +432,11 @@ async def _shutdown():
     # Ensure BackgroundScheduler threads are terminated to avoid GIL crash on Windows
     try:
         shutdown_scheduler(wait=True)
+    except Exception:
+        pass
+    # Drain in-flight heavy queries so connections close cleanly
+    try:
+        from .query_pool import shutdown_query_pool
+        shutdown_query_pool()
     except Exception:
         pass

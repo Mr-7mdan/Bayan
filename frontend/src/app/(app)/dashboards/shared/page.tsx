@@ -132,12 +132,12 @@ export default function CollectionsPage() {
         {error && <div className="px-4 py-2 text-sm text-red-600">{error}</div>}
         <TabGroup index={tabIndex} onIndexChange={(i) => { setSlideDir(i > prevTabIndex.current ? 'left' : 'right'); prevTabIndex.current = i; setTabIndex(i); }}>
           <TabList className="px-3 py-1.5 border-b border-[hsl(var(--border))]">
-            <Tab className="pb-2.5 font-medium hover:border-gray-300">
-              <span className="text-gray-500 dark:text-gray-400 ui-selected:text-gray-900 ui-selected:dark:text-white">My Collections</span>
+            <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
+              <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">My Collections</span>
               <span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring ui-selected:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring ui-selected:dark:text-dark-tremor-content-emphasis sm:inline-flex">{filteredMine.length}</span>
             </Tab>
-            <Tab className="pb-2.5 font-medium hover:border-gray-300">
-              <span className="text-gray-500 dark:text-gray-400 ui-selected:text-gray-900 ui-selected:dark:text-white">Collaborations</span>
+            <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
+              <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Collaborations</span>
               <span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring ui-selected:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring ui-selected:dark:text-dark-tremor-content-emphasis sm:inline-flex">{filteredCollab.length}</span>
             </Tab>
           </TabList>

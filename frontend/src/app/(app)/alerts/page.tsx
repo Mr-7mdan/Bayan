@@ -339,7 +339,7 @@ export default function AlertsPage() {
             <Text className="mt-0 text-gray-500 dark:text-white">Create and manage alerts, and configure email/SMS providers</Text>
           </div>
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setCreateOpen(true)}><RiAddLine className="w-4 h-4" />New</button>
+            <button className="inline-flex items-center gap-1 rounded-md border btn-primary px-3 py-1.5 text-sm font-medium" onClick={() => setCreateOpen(true)}><RiAddLine className="w-4 h-4" />New</button>
             {isAdmin && (
               <>
                 <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setDlgEmail(true)}><RiSettings3Line className="w-4 h-4" />Email Config</button>

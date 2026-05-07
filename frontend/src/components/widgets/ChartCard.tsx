@@ -960,7 +960,15 @@ export default function ChartCard({
     queryKey: ['chart', sql, datasourceId, type, JSON.stringify(options), queryMode, JSON.stringify(querySpec), JSON.stringify(customColumns), JSON.stringify(filters), debouncedUiKey, adaptiveGb, breakSeq, (querySpec as any)?.series?.[0]?.agg],
     enabled: visible && (queryMode === 'spec' ? (specReadySingle || specReadyMulti || specReadyAggish) : true),
     placeholderData: (prev) => prev as any,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
+      // React-Query passes an AbortSignal that fires when the component
+      // unmounts or the query is invalidated. We thread it through every
+      // network call below so a closed dashboard tab actually stops the
+      // backend SQL via the disconnect → DuckDB.interrupt() path. We
+      // wrap QueryApi.querySpec / Api.query so the existing call sites
+      // pick up the signal without churning the entire function body.
+      const _qs = (p: any) => QueryApi.querySpec(p, signal)
+      const _q = (p: any) => _q(p, signal)
       if (queryMode === 'spec' && querySpec) {
         // Fields validator: if value field is required and empty, do not call backend.
         // Exception: tremorTable does not require a value field.
@@ -1188,7 +1196,7 @@ export default function ChartCard({
             let offset = 0
             while (true) {
               const where = { ...baseNoDf, [`${dfField}__gte`]: ymd(start), [`${dfField}__lt`]: ymd(end) }
-              const res = await QueryApi.querySpec({ spec: { ...rawSpec, where, limit: (isPreview ? 100 : pageSize), offset }, datasourceId, limit: (isPreview ? 100 : pageSize), offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+              const res = await _qs({ spec: { ...rawSpec, where, limit: (isPreview ? 100 : pageSize), offset }, datasourceId, limit: (isPreview ? 100 : pageSize), offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
               const cols = (res?.columns || []) as string[]
               const pageRows = ((res?.rows || []) as any[]).map((arr) => {
                 const obj: Row = {}
@@ -1220,7 +1228,7 @@ export default function ChartCard({
               // Fall back to simple paging on error
               let offset = Number(querySpec.offset ?? 0)
               while (true) {
-                const res = await QueryApi.querySpec({ spec: { ...rawSpec, limit: (isPreview ? 100 : pageSize), offset }, datasourceId, limit: (isPreview ? 100 : pageSize), offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+                const res = await _qs({ spec: { ...rawSpec, limit: (isPreview ? 100 : pageSize), offset }, datasourceId, limit: (isPreview ? 100 : pageSize), offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
                 const cols = (res?.columns || []) as string[]
                 const pageRows = ((res?.rows || []) as any[]).map((arr) => {
                   const obj: Row = {}
@@ -1238,7 +1246,7 @@ export default function ChartCard({
             // Simple paging
             let offset = Number(querySpec.offset ?? 0)
             while (true) {
-              const res = await QueryApi.querySpec({ spec: { ...rawSpec, limit: pageSize, offset }, datasourceId, limit: pageSize, offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+              const res = await _qs({ spec: { ...rawSpec, limit: pageSize, offset }, datasourceId, limit: pageSize, offset, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
               if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production' && offset === 0) {
                 try { console.debug('[ChartCard] [RAW BACKEND RESPONSE] client-path', { columns: res?.columns, rowCount: res?.rows?.length, firstRow: res?.rows?.[0], secondRow: res?.rows?.[1] }) } catch {}
               }
@@ -1580,7 +1588,7 @@ export default function ChartCard({
               if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
                 try { console.debug('[ChartCard] branch=multi-series/raw', { sel, where: mergedWhere }) } catch {}
               }
-              return QueryApi.querySpec({ spec: raw, datasourceId, limit: isPreview ? Math.min(100, raw.limit ?? 1000) : (raw.limit ?? 1000), offset: raw.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+              return _qs({ spec: raw, datasourceId, limit: isPreview ? Math.min(100, raw.limit ?? 1000) : (raw.limit ?? 1000), offset: raw.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
             }
             const merged: QuerySpec = {
               source: querySpec.source,
@@ -1602,7 +1610,7 @@ export default function ChartCard({
             if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
               try { console.debug('[ChartCard] branch=multi-series/agg REQUEST', { spec: merged, where: mergedWhere, y: s.y, agg, legend: merged.legend, x: merged.x }) } catch {}
             }
-            return QueryApi.querySpec({ spec: merged as any, datasourceId, limit: merged.limit ?? 1000, offset: merged.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+            return _qs({ spec: merged as any, datasourceId, limit: merged.limit ?? 1000, offset: merged.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
           })
           const results = await Promise.all(promises)
           
@@ -1737,7 +1745,7 @@ export default function ChartCard({
               if (xf) sel.push(String(xf))
               if (s.y) sel.push(String(s.y))
               const raw: QuerySpec = { source: querySpec.source, where: mergedWhere, select: sel, limit: (querySpec.limit ?? 1000), offset: (querySpec.offset ?? 0) }
-              return QueryApi.querySpec({ spec: raw, datasourceId, limit: isPreview ? Math.min(100, raw.limit ?? 1000) : (raw.limit ?? 1000), offset: raw.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+              return _qs({ spec: raw, datasourceId, limit: isPreview ? Math.min(100, raw.limit ?? 1000) : (raw.limit ?? 1000), offset: raw.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
             }
             const merged: QuerySpec = {
               source: querySpec.source,
@@ -1756,7 +1764,7 @@ export default function ChartCard({
               order: ((querySpec as any)?.order as any),
             }
             // Send merged spec as-is; QueryApi will preserve x as string | string[]
-            return QueryApi.querySpec({ spec: merged as any, datasourceId, limit: merged.limit ?? 1000, offset: merged.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+            return _qs({ spec: merged as any, datasourceId, limit: merged.limit ?? 1000, offset: merged.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
           })
           const results = await Promise.all(promises)
           const map = new Map<string | number, any>()
@@ -1831,7 +1839,7 @@ export default function ChartCard({
           if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
             try { console.debug('[ChartCard] branch=single/raw', { sel, where: mergedWhere }) } catch {}
           }
-          const r = await QueryApi.querySpec({ spec: raw, datasourceId, limit: isPreview ? Math.min(100, raw.limit ?? 1000) : (raw.limit ?? 1000), offset: raw.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+          const r = await _qs({ spec: raw, datasourceId, limit: isPreview ? Math.min(100, raw.limit ?? 1000) : (raw.limit ?? 1000), offset: raw.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
           const map = new Map<string | number, any>()
           r.rows.forEach((row: any[]) => {
             const x = row[0] as any
@@ -1849,7 +1857,7 @@ export default function ChartCard({
           } catch {}
         }
         const mergedSafe = { ...merged, x: (Array.isArray((merged as any).x) ? (merged as any).x[0] : (merged as any).x) } as any
-        const res = await QueryApi.querySpec({ spec: { ...mergedSafe, where: mergedWhere }, datasourceId, limit: isPreview ? Math.min(100, mergedSafe.limit ?? 1000) : (mergedSafe.limit ?? 1000), offset: mergedSafe.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
+        const res = await _qs({ spec: { ...mergedSafe, where: mergedWhere }, datasourceId, limit: isPreview ? Math.min(100, mergedSafe.limit ?? 1000) : (mergedSafe.limit ?? 1000), offset: mergedSafe.offset ?? 0, includeTotal: false, preferLocalDuck: (options as any)?.preferLocalDuck })
         if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
           try {
             // eslint-disable-next-line no-console

@@ -460,7 +460,7 @@ export default function MyDashboardsPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+              className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium"
               onClick={() => { try { window.dispatchEvent(new CustomEvent('open-create-dashboard')) } catch {} }}
             >
               Build New Dashboard
@@ -557,12 +557,12 @@ export default function MyDashboardsPage() {
           }}
         >
           <Tabs.List className="px-3 py-1.5 border-b border-[hsl(var(--border))]">
-            <Tabs.Trigger value="all" className="pb-2.5 font-medium hover:border-gray-300">
-              <span className="text-gray-500 dark:text-gray-400 data-[state=active]:text-gray-900 data-[state=active]:dark:text-white">All Dashboards</span>
+            <Tabs.Trigger value="all" className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] data-[state=active]:border-[hsl(var(--primary))]">
+              <span className="text-gray-500 dark:text-gray-400 data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:dark:text-[hsl(var(--primary))]">All Dashboards</span>
               <span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring data-[state=active]:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring data-[state=active]:dark:text-dark-tremor-content-emphasis sm:inline-flex">{filteredAll.length}</span>
             </Tabs.Trigger>
-            <Tabs.Trigger value="published" className="pb-2.5 font-medium hover:border-gray-300">
-              <span className="text-gray-500 dark:text-gray-400 data-[state=active]:text-gray-900 data-[state=active]:dark:text-white">Published</span>
+            <Tabs.Trigger value="published" className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] data-[state=active]:border-[hsl(var(--primary))]">
+              <span className="text-gray-500 dark:text-gray-400 data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:dark:text-[hsl(var(--primary))]">Published</span>
               <span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring data-[state=active]:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring data-[state=active]:dark:text-dark-tremor-content-emphasis sm:inline-flex">{filteredPublished.length}</span>
             </Tabs.Trigger>
           </Tabs.List>

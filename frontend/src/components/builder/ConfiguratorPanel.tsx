@@ -2999,25 +2999,25 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
               onIndexChange={(i) => setChartTab(i===0?'appearance': i===1?'tooltip': i===2?'axis':'grid')}
             >
               <TabList variant="solid" className="text-xs bg-[hsl(var(--secondary)/0.6)] rounded-md p-1">
-                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-[hsl(var(--border))]">
+                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-[hsl(var(--accent)/0.18)] data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:font-semibold data-[state=active]:shadow-[inset_0_-2px_0_hsl(var(--primary))] data-[state=active]:border data-[state=active]:border-[hsl(var(--primary)/0.28)] dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)] dark:data-[state=active]:text-[hsl(var(--primary))] dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]">
                   <span className="flex items-center gap-1">
                     <RiPaletteLine className="size-4" aria-hidden="true" />
                     <span>Appearance</span>
                   </span>
                 </Tab>
-                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-[hsl(var(--border))]">
+                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-[hsl(var(--accent)/0.18)] data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:font-semibold data-[state=active]:shadow-[inset_0_-2px_0_hsl(var(--primary))] data-[state=active]:border data-[state=active]:border-[hsl(var(--primary)/0.28)] dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)] dark:data-[state=active]:text-[hsl(var(--primary))] dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]">
                   <span className="flex items-center gap-1">
                     <RiInformationLine className="size-4" aria-hidden="true" />
                     <span>Tooltip</span>
                   </span>
                 </Tab>
-                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-[hsl(var(--border))]">
+                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-[hsl(var(--accent)/0.18)] data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:font-semibold data-[state=active]:shadow-[inset_0_-2px_0_hsl(var(--primary))] data-[state=active]:border data-[state=active]:border-[hsl(var(--primary)/0.28)] dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)] dark:data-[state=active]:text-[hsl(var(--primary))] dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]">
                   <span className="flex items-center gap-1">
                     <RiRulerLine className="size-4" aria-hidden="true" />
                     <span>Axis</span>
                   </span>
                 </Tab>
-                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-[hsl(var(--border))]">
+                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-[hsl(var(--accent)/0.18)] data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:font-semibold data-[state=active]:shadow-[inset_0_-2px_0_hsl(var(--primary))] data-[state=active]:border data-[state=active]:border-[hsl(var(--primary)/0.28)] dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)] dark:data-[state=active]:text-[hsl(var(--primary))] dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]">
                   <span className="flex items-center gap-1">
                     <RiGridLine className="size-4" aria-hidden="true" />
                     <span>Grid</span>
@@ -4987,8 +4987,8 @@ function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Re
           <div className="space-y-3">
             <TabGroup index={kpiTab==='appearance'?0:1} onIndexChange={(i)=>setKpiTab(i===0?'appearance':'deltas')}>
               <TabList variant="solid" className="text-xs bg-[hsl(var(--secondary))] rounded-md p-1">
-                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-[hsl(var(--border))]">Appearance</Tab>
-                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-[hsl(var(--border))]">Deltas</Tab>
+                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-[hsl(var(--accent)/0.18)] data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:font-semibold data-[state=active]:shadow-[inset_0_-2px_0_hsl(var(--primary))] data-[state=active]:border data-[state=active]:border-[hsl(var(--primary)/0.28)] dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)] dark:data-[state=active]:text-[hsl(var(--primary))] dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]">Appearance</Tab>
+                <Tab className="px-3 py-1 rounded-md text-muted-foreground whitespace-nowrap data-[state=active]:bg-[hsl(var(--accent)/0.18)] data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:font-semibold data-[state=active]:shadow-[inset_0_-2px_0_hsl(var(--primary))] data-[state=active]:border data-[state=active]:border-[hsl(var(--primary)/0.28)] dark:data-[state=active]:bg-[hsl(var(--primary)/0.14)] dark:data-[state=active]:text-[hsl(var(--primary))] dark:data-[state=active]:border-[hsl(var(--primary)/0.32)]">Deltas</Tab>
               </TabList>
               <TabPanels className="relative z-10 overflow-visible">
                 <TabPanel>

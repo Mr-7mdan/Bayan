@@ -25,6 +25,16 @@ type EnvContextType = {
   setEnv: (patch: Partial<EnvironmentSettings>) => void
 }
 
+// Canonical Bayan default branding — must stay in sync with backend
+// `BAYAN_DEFAULTS` in `app/main.py`. These are the assets shipped under
+// `frontend/public/` and represent the out-of-the-box Bayan look.
+export const BAYAN_DEFAULTS = {
+  orgName: 'Bayan',
+  orgLogoLight: '/bayan-logo.svg',
+  orgLogoDark: '/bayan-logo-dark.svg',
+  favicon: '/favicon.svg',
+} as const
+
 const DEFAULTS: EnvironmentSettings = {
   weekStart: 'mon',
   publicDomain: (process.env.NEXT_PUBLIC_PUBLIC_DOMAIN || '').replace(/\/$/, ''),
@@ -32,10 +42,10 @@ const DEFAULTS: EnvironmentSettings = {
   aiModel: 'gemini-1.5-flash',
   aiApiKey: '',
   aiBaseUrl: '',
-  orgName: '',
-  orgLogoLight: '',
-  orgLogoDark: '',
-  favicon: '',
+  orgName: BAYAN_DEFAULTS.orgName,
+  orgLogoLight: BAYAN_DEFAULTS.orgLogoLight,
+  orgLogoDark: BAYAN_DEFAULTS.orgLogoDark,
+  favicon: BAYAN_DEFAULTS.favicon,
   bugReportMode: 'auto',
 }
 const STORAGE_KEY = 'app.environment.settings'

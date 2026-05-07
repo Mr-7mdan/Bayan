@@ -118,7 +118,7 @@ export default function GanttCard({
   const q = useQuery({
     queryKey: ['gantt', title, datasourceId, querySpec, options, filters],
     enabled: queryMode === 'spec' && !!querySpec?.source,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!querySpec?.source) return { columns: [], rows: [] }
       // Build a raw select spec pulling only needed fields; include existing where
       const select: string[] = []
@@ -136,7 +136,7 @@ export default function GanttCard({
         limit: querySpec.limit ?? 5000,
         offset: querySpec.offset ?? 0,
       }
-      return QueryApi.querySpec({ spec, datasourceId, limit: spec.limit ?? 5000, offset: spec.offset ?? 0, includeTotal: false })
+      return QueryApi.querySpec({ spec, datasourceId, limit: spec.limit ?? 5000, offset: spec.offset ?? 0, includeTotal: false }, signal)
     },
   })
 

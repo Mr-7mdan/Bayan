@@ -376,9 +376,25 @@ class _PooledCursorWrap:
         return getattr(self._conn, name)
 
     def __enter__(self):
+        # Register with the calling thread's cancel token (set by the
+        # /query async wrapper) so a client disconnect can interrupt this
+        # connection's running SQL via DuckDB's ``interrupt()``.
+        try:
+            from .cancellation import register_with_current_token
+            register_with_current_token(self._conn)
+        except Exception:
+            pass
         return self._conn
 
     def __exit__(self, exc_type, exc, tb):
+        # Drop the cancel-token registration first so a late cancel cannot
+        # interrupt a connection that has already been returned to the pool
+        # and potentially handed to another request.
+        try:
+            from .cancellation import unregister_with_current_token
+            unregister_with_current_token(self._conn)
+        except Exception:
+            pass
         # Return connection to pool (don't close it)
         try:
             self._pool.put(self._conn)

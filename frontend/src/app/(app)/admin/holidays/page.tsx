@@ -234,7 +234,7 @@ export default function AdminHolidaysPage() {
               disabled={uploading}
             >{uploading ? 'Uploading\u2026' : 'Upload CSV'}</button>
             <button
-              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+              className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium"
               onClick={() => { resetCreateForm(); setCreateOpen(true) }}
             >Add Holiday</button>
           </div>
@@ -311,7 +311,7 @@ export default function AdminHolidaysPage() {
                 <Dialog.Close asChild>
                   <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" disabled={crBusy || !crName} onClick={onCreate}>{crBusy ? 'Creating\u2026' : 'Create'}</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={crBusy || !crName} onClick={onCreate}>{crBusy ? 'Creating\u2026' : 'Create'}</button>
               </div>
             </div>
           </Dialog.Content>
@@ -349,7 +349,7 @@ export default function AdminHolidaysPage() {
                 <Dialog.Close asChild>
                   <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" disabled={edBusy || !edName} onClick={onEdit}>{edBusy ? 'Saving\u2026' : 'Save'}</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={edBusy || !edName} onClick={onEdit}>{edBusy ? 'Saving\u2026' : 'Save'}</button>
               </div>
             </div>
           </Dialog.Content>
