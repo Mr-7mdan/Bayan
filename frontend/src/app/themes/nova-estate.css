@@ -1,0 +1,66 @@
+/* ──────────────────────────────────────────────────────────────────
+   Alpha · Nova Estate · Light
+   Source spec: Designs/NovaEstate-Dashboard/NovaEstate-Dashboard-DESIGN.md
+   Aesthetic: Glassmorphism, teal #14B8A6 primary, 24px card radius,
+              system font, full-bleed grid. Optional WebGL background.
+   ──────────────────────────────────────────────────────────────────
+   STATUS: STUB — token shell only.
+   The full alpha pass authoring of glass surfaces, gradient borders,
+   shadow recipes, and component tweaks will be filled in by the
+   Nova Estate worker (see frontend/src/app/themes/README.md).
+   ────────────────────────────────────────────────────────────────── */
+
+:root[data-light-variant="nova-estate"]:not(.dark) {
+  /* ── Surfaces ────────────────────────────────────────────── */
+  --background: 0 0% 100%;          /* #FFFFFF */
+  --foreground: 222 47% 11%;        /* #0F172A */
+  --muted: 210 40% 98%;             /* #F8FAFC */
+  --muted-foreground: 215 20% 65%;  /* #94A3B8 */
+  --surface-0: 0 0% 100%;
+  --surface-1: 210 40% 98%;
+  --surface-2: 210 40% 96%;
+  --surface-3: 210 40% 94%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --border: 210 40% 96%;            /* #F1F5F9 */
+  --input: 210 40% 96%;
+
+  /* ── Accents (teal #14B8A6) ─────────────────────────────── */
+  --primary: 173 80% 40%;
+  --primary-foreground: 0 0% 100%;
+  --primary-deep: 173 90% 30%;
+  --ring: 173 80% 40%;
+  --secondary: 213 100% 92%;        /* #DBEAFE — supporting accent */
+  --secondary-foreground: 222 47% 11%;
+  --accent: 173 80% 40%;
+  --accent-foreground: 0 0% 100%;
+
+  /* ── Status — kept semantic, not redesigned ──────────────── */
+  --success: 152 45% 44%;
+  --warning: 38 90% 50%;
+  --danger: 347 62% 49%;
+
+  /* ── Charts (categorical, teal-led) ───────────────────────── */
+  --chart-1: 173 80% 40%;
+  --chart-2: 213 94% 68%;
+  --chart-3: 100 80% 75%;           /* #F4FCE3 family */
+  --chart-4: 262 62% 56%;
+  --chart-5: 152 50% 46%;
+
+  /* ── Topbar / header accents ──────────────────────────────── */
+  --topbar-bg: 0 0% 100%;
+  --topbar-fg: 222 47% 11%;
+  --header-accent: 173 80% 40%;
+
+  /* ── Forward-looking design tokens (not yet consumed) ────── */
+  --radius-card: 24px;
+  --font-display: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* TODO (worker): add component-level glass treatment, gradient border
+   shells, and shadow recipes per the Nova Estate spec. Scope every rule
+   under the same `:root[data-light-variant="nova-estate"]:not(.dark)`
+   selector so it never leaks into the production light palette. */
