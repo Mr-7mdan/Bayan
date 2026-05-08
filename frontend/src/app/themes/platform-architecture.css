@@ -1,0 +1,158 @@
+/* ──────────────────────────────────────────────────────────────────
+   Alpha · Platform Architecture · Dark
+   Source spec: Designs/Platform-Architecture/Platform-Architecture-DESIGN.md
+   Aesthetic: Deep teal #0E2C2A primary, dark teal #0A2220 surfaces,
+              SHARP 2px radius (signature constraint), Inter font,
+              outlined surfaces only (no glass/elevation). Minimal motion.
+   ──────────────────────────────────────────────────────────────────
+   STATUS: STUB — token shell only.
+   The full pass authoring of outlined surfaces, the radius-clamp to 2px
+   on existing components (huge contrast against the production 16-24px
+   radii), and the minimal-motion override will be filled in by the
+   Platform Architecture worker (see frontend/src/app/themes/README.md).
+   ────────────────────────────────────────────────────────────────── */
+
+.dark[data-variant="platform-architecture"] {
+  /* ── Surfaces ────────────────────────────────────────────── */
+  --background: 174 52% 12%;        /* #0E2C2A */
+  --foreground: 220 14% 96%;        /* #F3F4F6 */
+  --muted: 174 56% 8%;
+  --muted-foreground: 173 36% 53%;  /* #54B6AB */
+  --surface-0: 174 52% 12%;
+  --surface-1: 174 56% 8%;          /* #0A2220 */
+  --surface-2: 175 28% 15%;
+  --surface-3: 175 28% 18%;
+  --card: 174 56% 8%;
+  --card-foreground: 220 14% 96%;
+  --popover: 174 56% 8%;
+  --popover-foreground: 220 14% 96%;
+  --border: 174 52% 21%;            /* #18534C */
+  --input: 174 52% 21%;
+
+  /* ── Accents — deep teal, deliberate "low key" emphasis ──── */
+  --primary: 174 52% 12%;           /* same as bg — emphasis comes from outlines */
+  --primary-foreground: 220 14% 96%;
+  --primary-deep: 174 56% 8%;
+  --ring: 173 36% 53%;              /* the secondary text colour acts as focus */
+  --secondary: 175 28% 15%;
+  --secondary-foreground: 173 36% 53%;
+  --accent: 173 36% 53%;
+  --accent-foreground: 174 56% 8%;
+
+  /* ── Status — kept semantic ───────────────────────────────── */
+  --success: 152 42% 52%;
+  --warning: 38 80% 56%;
+  --danger: 347 55% 56%;
+
+  /* ── Charts (categorical, teal/blue-led) ──────────────────── */
+  --chart-1: 173 36% 53%;           /* #54B6AB */
+  --chart-2: 211 73% 35%;           /* #1E5496 family */
+  --chart-3: 173 50% 70%;           /* #A0D4CD */
+  --chart-4: 240 4% 27%;
+  --chart-5: 152 48% 52%;
+
+  /* ── Topbar / header accents ──────────────────────────────── */
+  --topbar-bg: 174 56% 8%;
+  --topbar-fg: 220 14% 96%;
+  --header-accent: 173 36% 53%;
+
+  /* ── Forward-looking design tokens ───────────────────────── */
+  --radius-card: 2px;               /* signature: very sharp corners */
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Component-level overrides
+   ──────────────────────────────────────────────────────────────────
+   Platform Architecture is an outline-first, motion-restrained design.
+   The production design system uses 6/8/12/16/24px radii, glassy/elevated
+   card surfaces, and filled primary buttons; this variant clamps every-
+   thing to a sharp 2px outline with no fill or shadow. That means the
+   broad utility-class overrides below (and a small set of !important
+   uses) are necessary to win against the production system's specificity
+   for radii and shadows. Every !important is annotated.
+   ────────────────────────────────────────────────────────────────── */
+
+/* 1 ─ Page background — austere deep teal, no gradient or decoration. */
+.dark[data-variant="platform-architecture"] body {
+  background-color: #0E2C2A;
+}
+
+/* 2 ─ Card surfaces — outlined only.
+       The --card token already maps to #0A2220, so we keep the fill and
+       just replace the production glass/elevated treatment with a single
+       1px teal outline + sharp 2px radius. */
+.dark[data-variant="platform-architecture"] .bg-card,
+.dark[data-variant="platform-architecture"] .bg-\[hsl\(var\(--card\)\)\] {
+  border: 1px solid #18534C;
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+/* 3 ─ Radius clamp — the SIGNATURE move.
+       Override every Tailwind radius utility down to 2px. Production
+       supplies these via @layer utilities so we need !important to win.
+       Exceptions: .rounded-full (pills/avatars) and .rounded-none stay
+       intentional and are not listed here. */
+.dark[data-variant="platform-architecture"] .rounded-sm,
+.dark[data-variant="platform-architecture"] .rounded,
+.dark[data-variant="platform-architecture"] .rounded-md,
+.dark[data-variant="platform-architecture"] .rounded-lg,
+.dark[data-variant="platform-architecture"] .rounded-xl,
+.dark[data-variant="platform-architecture"] .rounded-2xl,
+.dark[data-variant="platform-architecture"] .rounded-3xl,
+.dark[data-variant="platform-architecture"] [class*="rounded-["] {
+  border-radius: 2px !important; /* clamp production 6-24px radii to spec's 2px */
+}
+
+/* 4 ─ Sidebar active item — pure outline, no inset cyan bar.
+       Production renders an inset 2px cyan stripe via box-shadow; the
+       Platform Architecture aesthetic prefers a restrained 1px outline. */
+.dark[data-variant="platform-architecture"] .sidebar-item-active-dark {
+  background: transparent;
+  border: 1px solid #54B6AB;
+  border-radius: 2px;
+  box-shadow: none;
+  color: #54B6AB;
+}
+
+/* 5 ─ Buttons — outline-first.
+       Platform Architecture is an outline-first design; primary becomes
+       an outlined button with a faint accent fill on hover. This OVER-
+       RIDES the cyan-fill production primary so emphasis comes from
+       outlines, matching the spec's "low-key" emphasis model. */
+.dark[data-variant="platform-architecture"] .btn-primary {
+  background-color: transparent;
+  color: #F3F4F6;
+  border: 1px solid #18534C;
+  border-radius: 2px;
+}
+.dark[data-variant="platform-architecture"] .btn-primary:hover {
+  background-color: rgba(84, 182, 171, 0.10);
+  border-color: #54B6AB;
+}
+
+/* 6 ─ Forms — match the outlined language. */
+.dark[data-variant="platform-architecture"] input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.dark[data-variant="platform-architecture"] select,
+.dark[data-variant="platform-architecture"] textarea {
+  background-color: #0A2220;
+  border: 1px solid #18534C;
+  border-radius: 2px;
+}
+.dark[data-variant="platform-architecture"] input:focus,
+.dark[data-variant="platform-architecture"] select:focus,
+.dark[data-variant="platform-architecture"] textarea:focus {
+  border-color: #54B6AB;
+  outline: none;
+  box-shadow: none;
+}
+
+/* 7 ─ Motion — clamp all ambient transitions to the spec's 150ms.
+       Necessary because some production components specify duration-300/
+       duration-500/700/1000 directly via Tailwind utilities. The spec
+       calls for minimal motion that clusters at 150ms only. */
+.dark[data-variant="platform-architecture"] * {
+  transition-duration: 150ms !important;
+}

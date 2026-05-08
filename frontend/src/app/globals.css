@@ -4,6 +4,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Alpha theme variants ───────────────────────────────────────────
+   Each file is fully scoped under its own `data-variant` /
+   `data-light-variant` attribute selector, so they sit dormant at the
+   end of the cascade until ThemeProvider sets the matching attribute.
+   See frontend/src/app/themes/README.md for the contract. */
+@import './themes/nova-estate.css';
+@import './themes/core-interface.css';
+@import './themes/platform-architecture.css';
+
 /* Hide scrollbars utility (preserve scrolling) */
 .no-scrollbar {
   -ms-overflow-style: none; /* IE and Edge */
