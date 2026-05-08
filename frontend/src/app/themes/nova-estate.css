@@ -1,0 +1,178 @@
+/* ──────────────────────────────────────────────────────────────────
+   Alpha · Nova Estate · Light
+   Source spec: Designs/NovaEstate-Dashboard/NovaEstate-Dashboard-DESIGN.md
+   Aesthetic: Glassmorphism, teal #14B8A6 primary, 24px card radius,
+              system font, full-bleed grid. Optional WebGL background.
+   ──────────────────────────────────────────────────────────────────
+   STATUS: STUB — token shell only.
+   The full alpha pass authoring of glass surfaces, gradient borders,
+   shadow recipes, and component tweaks will be filled in by the
+   Nova Estate worker (see frontend/src/app/themes/README.md).
+   ────────────────────────────────────────────────────────────────── */
+
+:root[data-light-variant="nova-estate"]:not(.dark) {
+  /* ── Surfaces ────────────────────────────────────────────── */
+  --background: 0 0% 100%;          /* #FFFFFF */
+  --foreground: 222 47% 11%;        /* #0F172A */
+  --muted: 210 40% 98%;             /* #F8FAFC */
+  --muted-foreground: 215 20% 65%;  /* #94A3B8 */
+  --surface-0: 0 0% 100%;
+  --surface-1: 210 40% 98%;
+  --surface-2: 210 40% 96%;
+  --surface-3: 210 40% 94%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --border: 210 40% 96%;            /* #F1F5F9 */
+  --input: 210 40% 96%;
+
+  /* ── Accents (teal #14B8A6) ─────────────────────────────── */
+  --primary: 173 80% 40%;
+  --primary-foreground: 0 0% 100%;
+  --primary-deep: 173 90% 30%;
+  --ring: 173 80% 40%;
+  --secondary: 213 100% 92%;        /* #DBEAFE — supporting accent */
+  --secondary-foreground: 222 47% 11%;
+  --accent: 173 80% 40%;
+  --accent-foreground: 0 0% 100%;
+
+  /* ── Status — kept semantic, not redesigned ──────────────── */
+  --success: 152 45% 44%;
+  --warning: 38 90% 50%;
+  --danger: 347 62% 49%;
+
+  /* ── Charts (categorical, teal-led) ───────────────────────── */
+  --chart-1: 173 80% 40%;
+  --chart-2: 213 94% 68%;
+  --chart-3: 100 80% 75%;           /* #F4FCE3 family */
+  --chart-4: 262 62% 56%;
+  --chart-5: 152 50% 46%;
+
+  /* ── Topbar / header accents ──────────────────────────────── */
+  --topbar-bg: 0 0% 100%;
+  --topbar-fg: 222 47% 11%;
+  --header-accent: 173 80% 40%;
+
+  /* ── Forward-looking design tokens (not yet consumed) ────── */
+  --radius-card: 24px;
+  --font-display: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Component-level overrides — Nova Estate
+   Spec: Designs/NovaEstate-Dashboard/NovaEstate-Dashboard-DESIGN.md
+   Every rule scoped under :root[data-light-variant="nova-estate"]:not(.dark)
+   so it never leaks into the production palette.
+   ────────────────────────────────────────────────────────────────── */
+
+/* ── Body background ──────────────────────────────────────────────
+   Spec line ~79: page surface is #F8FAFC — gives a hint of warmth
+   above pure-white card surfaces so glass cards float convincingly. */
+:root[data-light-variant="nova-estate"]:not(.dark) body {
+  background-color: hsl(var(--muted));
+}
+
+/* ── Card surfaces (glass first) ──────────────────────────────────
+   Spec line ~109 ("Surfaces should read as glass first") and the three
+   recipes at lines 138-140. We pick recipe 1 as the default surface:
+   solid #FFFFFF + 1px #F1F5F9 border + 24px radius + soft shadow.
+   The translucent variant lives on `.nova-shell > *` (see below).
+   We override the most common surface utilities so existing cards
+   pick up the look without component edits. */
+:root[data-light-variant="nova-estate"]:not(.dark) .bg-card,
+:root[data-light-variant="nova-estate"]:not(.dark) .bg-\[hsl\(var\(--card\)\)\],
+:root[data-light-variant="nova-estate"]:not(.dark) .bg-\[hsl\(var\(--surface-1\)\)\],
+:root[data-light-variant="nova-estate"]:not(.dark) .bg-\[hsl\(var\(--popover\)\)\] {
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-card);
+  /* Spec shadow recipe 1 — soft 1px ambient lift */
+  box-shadow: rgba(0, 0, 0, 0.05) 0px 1px 2px 0px;
+}
+
+/* ── Gradient border shell utility ────────────────────────────────
+   Spec line ~117: opt-in wrapper that draws a hairline gradient frame
+   around content. Use as <div class="nova-shell"><div>…</div></div>.
+   Not applied globally — let component work pull it in where it earns
+   its place (hero cards, KPI tiles, etc.). */
+:root[data-light-variant="nova-estate"]:not(.dark) .nova-shell {
+  padding: 1px;
+  border-radius: var(--radius-card);
+  background: linear-gradient(
+    to right bottom,
+    rgba(255, 255, 255, 0.4),
+    rgba(255, 255, 255, 0.1),
+    rgba(0, 0, 0, 0)
+  );
+}
+:root[data-light-variant="nova-estate"]:not(.dark) .nova-shell > * {
+  /* Inner surface: spec recipe 2 — 80% white glass, 23px radius */
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 23px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────
+   DESIGN DECISION: keep the global `.btn-primary` token-based teal so
+   primary actions across Bayan stay cohesive with the rest of the
+   palette. The spec's #FDF2F8/#DB2777 button is contextual to the
+   real-estate dashboard demo and reads as a domain accent rather than
+   a system-wide primary. We expose it as an opt-in `.btn-nova-primary`
+   so designers can pull it into specific surfaces (e.g. the listings
+   page) without disrupting general primary-action affordances.
+   The token-derived `.btn-primary` already picks up our --primary teal
+   automatically — no override needed. */
+:root[data-light-variant="nova-estate"]:not(.dark) .btn-nova-primary {
+  background-color: #FDF2F8;
+  color: #DB2777;
+  border: 0 solid transparent;
+  border-radius: 9999px;
+  padding: 8px 16px;
+  font-weight: 500;
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+              color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+:root[data-light-variant="nova-estate"]:not(.dark) .btn-nova-primary:hover {
+  background-color: #FCE7F3;
+  color: #BE185D;
+}
+
+/* Soften the global pill radius on default secondary/outline buttons
+   so they sit in the same rounded DNA as the spec (corner family
+   6/16/24/32/9999). 9999px on small action buttons fits the spec's
+   button-link recipe. */
+:root[data-light-variant="nova-estate"]:not(.dark) .btn-secondary,
+:root[data-light-variant="nova-estate"]:not(.dark) .btn-outline {
+  border-radius: 9999px;
+}
+
+/* ── Sidebar active item ──────────────────────────────────────────
+   Glass-tinted teal selected state. Production scaffold uses
+   token-based cyan; we replace it with Nova Estate's teal accents
+   while keeping the inset bar pattern. */
+:root[data-light-variant="nova-estate"]:not(.dark) .sidebar-item-active-light {
+  background: hsl(var(--primary) / 0.08);
+  border: 1px solid hsl(var(--primary) / 0.2);
+  color: hsl(var(--primary-deep));
+  box-shadow: inset 2px 0 0 hsl(var(--primary));
+}
+
+/* ── Focus ring & accents ─────────────────────────────────────────
+   Brand utilities flow through tokens (--primary is teal in this
+   variant) so .bayan-focus-ring / .bayan-link / .bayan-chip already
+   pick up the new accent. No override required. */
+
+/* ── Motion ───────────────────────────────────────────────────────
+   Spec clusters at 150ms / 700ms with cubic-bezier(0.4,0,0.2,1).
+   Production baseline is already 150ms — no global override needed.
+   Component work should reach for the 700ms easing on section reveals
+   if they introduce new motion. */
+
+/* ── TODO: WebGL background (spec section "WebGL", lines ~175-216) ─
+   Skipped in this PR. Future pass should add a fixed full-bleed
+   <canvas id="webgl-canvas"> behind the app shell with a fine line
+   lattice + breathing pulse via Three.js, and preserve a DOM
+   fallback. Drive it from a feature flag so it stays opt-in. */
