@@ -1,17 +1,28 @@
 @import 'quill/dist/quill.snow.css';
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 /* ── Alpha theme variants ───────────────────────────────────────────
-   Each file is fully scoped under its own `data-variant` /
-   `data-light-variant` attribute selector, so they sit dormant at the
-   end of the cascade until ThemeProvider sets the matching attribute.
-   See frontend/src/app/themes/README.md for the contract. */
+   Imported BEFORE @tailwind directives — required by `postcss-import`
+   (and the CSS spec): `@import` rules must come before any other rules
+   in the file, otherwise postcss-import silently drops them and the
+   variant CSS never reaches the bundle.
+
+   Cascade priority is preserved by *specificity*, not file order: every
+   rule inside these files is scoped under
+     :root[data-light-variant="…"]:not(.dark)
+   or
+     .dark[data-variant="…"]
+   which have higher specificity than the production `:root` and `.dark`
+   token blocks below, so they still win when their attribute matches.
+
+   Each file sits dormant until ThemeProvider sets the matching
+   attribute. See frontend/src/app/themes/README.md for the contract. */
 @import './themes/nova-estate.css';
 @import './themes/core-interface.css';
 @import './themes/platform-architecture.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Hide scrollbars utility (preserve scrolling) */
 .no-scrollbar {
