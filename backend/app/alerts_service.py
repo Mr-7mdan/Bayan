@@ -849,13 +849,19 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
 
     has_sub_row = bool(subheaders) and (not tbl.get('mergeBlankSubheaders') or any(not m for m in merge_map))
 
-    # Column widths
+    # Column widths — pixels. 0 / missing means auto-fit.
     col_widths = tbl.get('colWidths') or []
+    wrap_text = bool(tbl.get('wrapText'))
 
-    # Build colgroup
+    # Build colgroup. We scale pixel widths so the PDF column sizes match the
+    # on-screen builder when the user previews and exports.
     colgroup = ''
-    if col_widths and any(w > 0 for w in col_widths):
-        cols_html = ''.join(f"<col style='width:{w}%;'/>" if w > 0 else '<col/>' for w in col_widths)
+    any_fixed = bool(col_widths and any(w and w > 0 for w in col_widths))
+    if any_fixed:
+        cols_html = ''.join(
+            f"<col style='width:{round(int(w) * scale)}px;'/>" if (w and w > 0) else '<col/>'
+            for w in col_widths
+        )
         colgroup = f"<colgroup>{cols_html}</colgroup>"
 
     # Build header row
@@ -902,9 +908,11 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
     for ri, row in enumerate(cells):
         rs = row_styles[ri] if ri < len(row_styles) else {}
         row_bg = (rs.get('bg') if isinstance(rs, dict) else None) or ('#f9fafb' if striped and ri % 2 == 1 else '#ffffff')
+        # Explicit row height only takes effect when wrap is enabled — without
+        # wrap, every row is single-line and content sizes the height.
         row_height = ''
         rh_list = tbl.get('rowHeights') or []
-        if ri < len(rh_list) and rh_list[ri]:
+        if wrap_text and ri < len(rh_list) and rh_list[ri]:
             row_height = f"height:{round(int(rh_list[ri]) * scale)}px;"
 
         tds = []
@@ -1041,17 +1049,28 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
                     color = cond_text
             colspan_attr = f" colspan='{cspan}'" if cspan > 1 else ''
             rowspan_attr = f" rowspan='{rspan}'" if rspan > 1 else ''
+            # Wrap toggle: when off (default), text stays single-line and
+            # overflow is hidden so fixed-width columns don't blow up. When on,
+            # text wraps at word boundaries inside the cell.
+            wrap_css = (
+                "white-space:normal;word-break:break-word;"
+                if wrap_text
+                else "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+            )
             tds.append(
                 f"<td{colspan_attr}{rowspan_attr} style='{border}{row_border_extra}{bg_style}font-size:{fs}px;font-weight:{fw};{fi}"
-                f"color:{color};text-align:{ta};vertical-align:{va};padding:{_pad(4)}px {_pad(8)}px;white-space:nowrap;'>{content}</td>"
+                f"color:{color};text-align:{ta};vertical-align:{va};padding:{_pad(4)}px {_pad(8)}px;{wrap_css}'>{content}</td>"
             )
         tbody_rows.append(f"<tr style='{row_height}'>{''.join(tds)}</tr>")
 
     radius = tbl.get('borderRadius')
     radius_style = f"border-radius:{radius}px;overflow:hidden;" if radius else ''
+    # Fixed table layout when any column has an explicit pixel width — without
+    # this, browsers ignore <col width=...> and size columns by content.
+    layout_style = "table-layout:fixed;" if any_fixed else ''
 
     return (
-        f"<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;{border}{radius_style}'>"
+        f"<table style='border-collapse:collapse;width:100%;font-family:Inter,Arial,sans-serif;{border}{radius_style}{layout_style}'>"
         f"{colgroup}<thead>{thead}</thead><tbody>{''.join(tbody_rows)}</tbody></table>"
     )
 

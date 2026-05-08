@@ -463,12 +463,16 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
             borderColor: bColor,
             borderRadius: tbl.borderRadius ? `${tbl.borderRadius}px` : undefined,
             overflow: tbl.borderRadius ? 'hidden' : undefined,
+            // table-layout: fixed lets the browser honor explicit <col> widths
+            // (otherwise content sizes them). Only switch to fixed when any
+            // column has an explicit pixel width — auto-fit rows otherwise.
+            tableLayout: (tbl.colWidths || []).some(w => w && w > 0) ? 'fixed' : 'auto',
           }}
         >
           {tbl.colWidths && tbl.colWidths.some(w => w > 0) && (
             <colgroup>
               {tbl.colWidths.map((w, i) => (
-                <col key={i} style={{ width: w > 0 ? `${w}%` : undefined }} />
+                <col key={i} style={{ width: w > 0 ? `${w}px` : undefined }} />
               ))}
             </colgroup>
           )}
@@ -518,7 +522,7 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                         borderWidth: bWidth,
                         borderColor: bColor,
                         whiteSpace: 'nowrap',
-                        width: tbl.colWidths?.[sc.colIdx] ? `${tbl.colWidths[sc.colIdx]}%` : undefined,
+                        width: tbl.colWidths?.[sc.colIdx] ? `${tbl.colWidths[sc.colIdx]}px` : undefined,
                       }}
                     >
                       {resolveText(sc.text)}
@@ -537,7 +541,10 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                   key={ri}
                   style={{
                     backgroundColor: rowBg,
-                    height: tbl.rowHeights?.[ri] ? `${tbl.rowHeights[ri]}px` : undefined,
+                    // Explicit row height only takes effect when wrap is enabled.
+                    // Without wrap, every cell is single-line; forcing a height
+                    // would just create empty vertical space.
+                    height: (tbl.wrapText && tbl.rowHeights?.[ri]) ? `${tbl.rowHeights[ri]}px` : undefined,
                   }}
                 >
                   {row.map((cell, ci) => {
@@ -582,6 +589,14 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
                         ...(rs?.borderBottomStyle ? { borderBottomStyle: rs.borderBottomStyle } : {}),
                         ...(rs?.borderBottomColor ? { borderBottomColor: rs.borderBottomColor } : {}),
                         ...(rs?.borderBottomWidth != null ? { borderBottomWidth: `${rs.borderBottomWidth}px` } : {}),
+                        // Wrap toggle from the table-level setting. Without wrap,
+                        // text stays on a single line (default analytics-table look);
+                        // with wrap, text breaks at word boundaries so multi-line
+                        // content fits inside fixed-width columns.
+                        whiteSpace: tbl.wrapText ? 'normal' : 'nowrap',
+                        wordBreak: tbl.wrapText ? 'break-word' as const : undefined,
+                        overflow: tbl.wrapText ? undefined : 'hidden',
+                        textOverflow: tbl.wrapText ? undefined : 'ellipsis',
                       }}
                     >
                       {cell.type === 'period'
