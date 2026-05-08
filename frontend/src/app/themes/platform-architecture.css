@@ -1,0 +1,68 @@
+/* ──────────────────────────────────────────────────────────────────
+   Alpha · Platform Architecture · Dark
+   Source spec: Designs/Platform-Architecture/Platform-Architecture-DESIGN.md
+   Aesthetic: Deep teal #0E2C2A primary, dark teal #0A2220 surfaces,
+              SHARP 2px radius (signature constraint), Inter font,
+              outlined surfaces only (no glass/elevation). Minimal motion.
+   ──────────────────────────────────────────────────────────────────
+   STATUS: STUB — token shell only.
+   The full pass authoring of outlined surfaces, the radius-clamp to 2px
+   on existing components (huge contrast against the production 16-24px
+   radii), and the minimal-motion override will be filled in by the
+   Platform Architecture worker (see frontend/src/app/themes/README.md).
+   ────────────────────────────────────────────────────────────────── */
+
+.dark[data-variant="platform-architecture"] {
+  /* ── Surfaces ────────────────────────────────────────────── */
+  --background: 174 52% 12%;        /* #0E2C2A */
+  --foreground: 220 14% 96%;        /* #F3F4F6 */
+  --muted: 174 56% 8%;
+  --muted-foreground: 173 36% 53%;  /* #54B6AB */
+  --surface-0: 174 52% 12%;
+  --surface-1: 174 56% 8%;          /* #0A2220 */
+  --surface-2: 175 28% 15%;
+  --surface-3: 175 28% 18%;
+  --card: 174 56% 8%;
+  --card-foreground: 220 14% 96%;
+  --popover: 174 56% 8%;
+  --popover-foreground: 220 14% 96%;
+  --border: 174 52% 21%;            /* #18534C */
+  --input: 174 52% 21%;
+
+  /* ── Accents — deep teal, deliberate "low key" emphasis ──── */
+  --primary: 174 52% 12%;           /* same as bg — emphasis comes from outlines */
+  --primary-foreground: 220 14% 96%;
+  --primary-deep: 174 56% 8%;
+  --ring: 173 36% 53%;              /* the secondary text colour acts as focus */
+  --secondary: 175 28% 15%;
+  --secondary-foreground: 173 36% 53%;
+  --accent: 173 36% 53%;
+  --accent-foreground: 174 56% 8%;
+
+  /* ── Status — kept semantic ───────────────────────────────── */
+  --success: 152 42% 52%;
+  --warning: 38 80% 56%;
+  --danger: 347 55% 56%;
+
+  /* ── Charts (categorical, teal/blue-led) ──────────────────── */
+  --chart-1: 173 36% 53%;           /* #54B6AB */
+  --chart-2: 211 73% 35%;           /* #1E5496 family */
+  --chart-3: 173 50% 70%;           /* #A0D4CD */
+  --chart-4: 240 4% 27%;
+  --chart-5: 152 48% 52%;
+
+  /* ── Topbar / header accents ──────────────────────────────── */
+  --topbar-bg: 174 56% 8%;
+  --topbar-fg: 220 14% 96%;
+  --header-accent: 173 36% 53%;
+
+  /* ── Forward-looking design tokens ───────────────────────── */
+  --radius-card: 2px;               /* signature: very sharp corners */
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/* TODO (worker): add outlined surface treatment (1px solid, no fill),
+   clamp existing rounded-md/lg/xl/2xl radii to 2px under this scope, and
+   add a `* { transition-duration: 150ms !important }` override to honour
+   the minimal motion spec — sparingly. */

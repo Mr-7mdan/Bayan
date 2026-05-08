@@ -1,0 +1,196 @@
+/* ──────────────────────────────────────────────────────────────────
+   Alpha · Core Interface · Dark
+   Source spec: Designs/Core-Interface/Core-Interface-DESIGN.md
+   Aesthetic: Electric cyan #22D3EE primary, near-black #0A0A0C surfaces,
+              16px card radius, Inter 300 weight, elevated treatment with
+              inset+ring shadows, optional WebGL dot-matrix background.
+   ──────────────────────────────────────────────────────────────────
+   Token shell + component-level overrides for the elevated dark variant.
+   All rules below are scoped to `.dark[data-variant="core-interface"]`.
+   ────────────────────────────────────────────────────────────────── */
+
+.dark[data-variant="core-interface"] {
+  /* ── Surfaces ────────────────────────────────────────────── */
+  --background: 240 7% 4%;          /* #0A0A0C */
+  --foreground: 0 0% 100%;          /* #FFFFFF text-secondary in spec */
+  --muted: 240 6% 8%;
+  --muted-foreground: 0 0% 64%;     /* #A3A3A3 */
+  --surface-0: 240 7% 4%;
+  --surface-1: 240 7% 7%;           /* #121215 */
+  --surface-2: 240 6% 11%;          /* #1C1C20 */
+  --surface-3: 240 5% 15%;          /* near #2A2A30 */
+  --card: 240 7% 7%;
+  --card-foreground: 0 0% 100%;
+  --popover: 240 7% 7%;
+  --popover-foreground: 0 0% 100%;
+  --border: 240 6% 17%;             /* #2A2A30 */
+  --input: 240 6% 17%;
+
+  /* ── Accents (cyan #22D3EE) ─────────────────────────────── */
+  --primary: 188 92% 53%;
+  --primary-foreground: 0 0% 100%;
+  --primary-deep: 188 94% 43%;      /* #06B6D4 */
+  --ring: 188 92% 53%;
+  --secondary: 188 94% 43%;
+  --secondary-foreground: 0 0% 100%;
+  --accent: 188 92% 53%;
+  --accent-foreground: 240 7% 4%;
+
+  /* ── Status — kept semantic ───────────────────────────────── */
+  --success: 152 42% 52%;
+  --warning: 38 80% 56%;
+  --danger: 347 55% 56%;
+
+  /* ── Charts (categorical, cyan-led) ───────────────────────── */
+  --chart-1: 188 92% 53%;           /* #22D3EE */
+  --chart-2: 188 94% 43%;           /* #06B6D4 */
+  --chart-3: 230 92% 56%;           /* #2548F6 */
+  --chart-4: 262 55% 60%;
+  --chart-5: 152 48% 52%;
+
+  /* ── Topbar / header accents ──────────────────────────────── */
+  --topbar-bg: 240 7% 4%;
+  --topbar-fg: 0 0% 100%;
+  --header-accent: 188 92% 53%;
+
+  /* ── Forward-looking design tokens ───────────────────────── */
+  --radius-card: 16px;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Component-level overrides
+   Spec: Designs/Core-Interface/Core-Interface-DESIGN.md
+   ────────────────────────────────────────────────────────────────── */
+
+/* ── Body / page background ───────────────────────────────────────
+   Near-black with a subtle cyan halo at the top, evoking the spec's
+   WebGL dot-matrix field without rendering one (see TODO at bottom). */
+.dark[data-variant="core-interface"] body {
+  background-color: #0A0A0C;
+  background-image: radial-gradient(circle at 50% 0%, rgba(34, 211, 238, 0.05), transparent 60%);
+  font-weight: 300;  /* spec body weight is Inter 300 */
+}
+
+/* ── Card surface treatment ───────────────────────────────────────
+   The hero move of this theme: layered shadow recipe replacing the
+   stroke with a 1px ring, a top inset highlight, and a deep drop.
+   `!important` on box-shadow because globals.css line 252 hard-disables
+   shadows globally via `[class*="shadow-"] { box-shadow: none !important }`. */
+.dark[data-variant="core-interface"] .bg-card,
+.dark[data-variant="core-interface"] .bg-\[hsl\(var\(--card\)\)\] {
+  background-color: #121215;
+  border-radius: 16px;
+  border: none;
+  box-shadow:
+    rgb(42, 42, 48) 0 0 0 1px,
+    rgba(255, 255, 255, 0.06) 0 1px 0 0 inset,
+    rgba(0, 0, 0, 0.5) 0 12px 24px 0 !important;
+}
+
+/* Popovers / dropdowns share the elevated treatment but with a tighter
+   drop shadow appropriate to floating UI. */
+.dark[data-variant="core-interface"] .bg-popover,
+.dark[data-variant="core-interface"] .bg-\[hsl\(var\(--popover\)\)\] {
+  background-color: #121215;
+  border-radius: 12px;
+  border: none;
+  box-shadow:
+    rgb(42, 42, 48) 0 0 0 1px,
+    rgba(255, 255, 255, 0.06) 0 1px 0 0 inset,
+    rgba(0, 0, 0, 0.6) 0 8px 16px 0 !important;
+}
+
+/* ── Sidebar surface + active item ───────────────────────────────
+   Spec gradient ramp #1C1C20 → #121215 with a 1px right border. */
+.dark[data-variant="core-interface"] .bg-sidebar-dark {
+  background: linear-gradient(to bottom, #1C1C20, #121215) !important;
+  border-right: 1px solid #2A2A30;
+}
+
+/* Active sidebar item — keep cyan inset bar, but tweak bg/border to
+   fit the elevated language. `!important` on box-shadow because the
+   global shadow killer at globals.css:252 wipes inset shadows too. */
+.dark[data-variant="core-interface"] .sidebar-item-active-dark {
+  background: rgba(34, 211, 238, 0.10);
+  border: 1px solid rgba(34, 211, 238, 0.30);
+  box-shadow:
+    inset 2px 0 0 #22D3EE,
+    rgba(255, 255, 255, 0.04) 0 1px 0 0 inset !important;
+  color: #22D3EE !important;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────
+   Spec primary button is a borderless pill with subtle inset highlight
+   + drop shadow. `--primary` already cascades electric cyan via the
+   token shell so we only refine the chrome here. */
+.dark[data-variant="core-interface"] .btn-primary {
+  border-color: transparent;
+  border-radius: 9999px;
+  box-shadow:
+    rgba(255, 255, 255, 0.08) 0 1px 0 0 inset,
+    rgba(0, 0, 0, 0.4) 0 4px 8px -2px !important;
+}
+.dark[data-variant="core-interface"] .btn-primary:hover {
+  box-shadow:
+    rgba(255, 255, 255, 0.10) 0 1px 0 0 inset,
+    rgba(0, 0, 0, 0.5) 0 6px 12px -2px !important;
+}
+
+/* Secondary / outline buttons get the same pill radius for visual rhythm. */
+.dark[data-variant="core-interface"] .btn,
+.dark[data-variant="core-interface"] .btn-secondary,
+.dark[data-variant="core-interface"] .btn-outline,
+.dark[data-variant="core-interface"] .btn-ghost {
+  border-radius: 9999px;
+}
+
+/* Default bordered buttons (the `button.border:not(...)` group around
+   globals.css:657) — give them the surface-2 fill so they don't blend
+   into the elevated card. */
+.dark[data-variant="core-interface"] button.border:not([class*="bg-"]):not(.btn-primary):not(.btn-danger),
+.dark[data-variant="core-interface"] [type="button"].border:not([class*="bg-"]):not(.btn-primary):not(.btn-danger),
+.dark[data-variant="core-interface"] [type="submit"].border:not([class*="bg-"]):not(.btn-primary):not(.btn-danger) {
+  background-color: #1C1C20;
+  border-color: #2A2A30;
+}
+
+/* ── Form fields ─────────────────────────────────────────────────
+   Inputs / selects / textareas use surface-2 with the subdued
+   border. Radius 8px — smaller than the 16px card family. */
+.dark[data-variant="core-interface"] input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.dark[data-variant="core-interface"] select,
+.dark[data-variant="core-interface"] textarea {
+  background-color: #1C1C20;
+  border-color: #2A2A30;
+  border-radius: 8px;
+}
+
+.dark[data-variant="core-interface"] input:focus,
+.dark[data-variant="core-interface"] select:focus,
+.dark[data-variant="core-interface"] textarea:focus {
+  border-color: #22D3EE;
+  outline: none;
+}
+
+/* ── Topbar ──────────────────────────────────────────────────────
+   Match the body near-black with a subtle bottom border so the topbar
+   reads as part of the page rather than a stacked card. */
+.dark[data-variant="core-interface"] .bg-navbar-dark {
+  background-color: #0A0A0C;
+  border-bottom: 1px solid #2A2A30;
+}
+
+/* ── Typography ──────────────────────────────────────────────────
+   Spec body & labels are Inter weight 300 — distinctive against the
+   production weights. Keep headings at their authored weight (the
+   `body { font-weight: 300 }` rule above provides the cascade). */
+
+/* ── TODO ────────────────────────────────────────────────────────
+   Optional WebGL dot-matrix particle field per the design spec
+   (Designs/Core-Interface/Core-Interface-DESIGN.md). Skipped in
+   this pass — the radial cyan halo above gives a static stand-in.
+   Future work: hook a <canvas> mounted by ThemeProvider when the
+   variant is active, render a dot-matrix shader, and clamp to
+   prefers-reduced-motion. */

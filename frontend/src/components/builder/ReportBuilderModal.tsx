@@ -2930,6 +2930,10 @@ function InlineTableEditor({
                   color: cs?.color || undefined,
                   textAlign: cs?.align || undefined,
                   verticalAlign: cs?.verticalAlign || undefined,
+                  whiteSpace: table.wrapText ? 'normal' : 'nowrap',
+                  wordBreak: table.wrapText ? 'break-word' : undefined,
+                  overflow: table.wrapText ? undefined : 'hidden',
+                  textOverflow: table.wrapText ? undefined : 'ellipsis',
                 }}
               >
                 <div className="flex items-center gap-0.5 relative">
@@ -3432,6 +3436,10 @@ function GridCanvas({
                                 color: cs?.color || undefined,
                                 textAlign: cs?.align || undefined,
                                 verticalAlign: cs?.verticalAlign || undefined,
+                                whiteSpace: el.table!.wrapText ? 'normal' : 'nowrap',
+                                wordBreak: el.table!.wrapText ? 'break-word' : undefined,
+                                overflow: el.table!.wrapText ? undefined : 'hidden',
+                                textOverflow: el.table!.wrapText ? undefined : 'ellipsis',
                               }}>
                                 {cell.type === 'text' ? (cell.text || '') : (
                                   <span className="text-primary/60 font-mono text-[9px]">{`{{${variables.find(v => v.id === cell.variableId)?.name || '?'}}}`}</span>
