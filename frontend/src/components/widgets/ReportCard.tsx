@@ -941,8 +941,12 @@ export default function ReportCard({
       const MM_TO_PX = 96 / 25.4
       const printableW_px = (pageW_mm - marginMm * 2) * MM_TO_PX
 
-      const contentW = el.offsetWidth
-      const contentH = el.offsetHeight
+      // Use scroll dimensions so overflowing content (e.g. a table wider than
+      // its grid cell) is included. offsetWidth/offsetHeight only report the
+      // container's own fixed box (gridCols*cellSize) and ignore overflow,
+      // which made wide tables clip off the right edge instead of scaling.
+      const contentW = Math.max(el.offsetWidth, el.scrollWidth)
+      const contentH = Math.max(el.offsetHeight, el.scrollHeight)
       // Scale down to fit page width (never scale up)
       const scale = Math.min(1, printableW_px / contentW)
       const scaledH_mm = (contentH * scale) / MM_TO_PX
