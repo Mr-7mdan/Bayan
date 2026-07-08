@@ -10,6 +10,7 @@ import time as _t
 from sqlalchemy.orm import Session
 
 from ..models import SessionLocal, AiConfig, User
+from ..auth import require_admin
 from ..security import encrypt_text, decrypt_text
 from ..metrics import counter_inc, summary_observe
 
@@ -115,14 +116,7 @@ async def get_ai_config(db: Session = Depends(get_db)) -> AiConfigOut:
 
 
 @router.put("/config")
-async def put_ai_config(payload: AiConfigPayload, actorId: str | None = Query(default=None), db: Session = Depends(get_db)) -> dict:
-    def _is_admin(db: Session, actor_id: str | None) -> bool:
-        if not actor_id:
-            return False
-        u = db.query(User).filter(User.id == str(actor_id).strip()).first()
-        return bool(u and (u.role or "user").lower() == "admin")
-    if not _is_admin(db, actorId):
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def put_ai_config(payload: AiConfigPayload, db: Session = Depends(get_db), admin: User = Depends(require_admin)) -> dict:
     c = db.query(AiConfig).first()
     if not c:
         c = AiConfig(id="default")

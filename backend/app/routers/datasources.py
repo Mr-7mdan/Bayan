@@ -15,6 +15,7 @@ except Exception:  # pragma: no cover
     _duckdb = None
 
 from ..models import SessionLocal, Datasource, init_db, create_datasource, NewDatasourceInput, User, SyncTask, SyncState, SyncRun, SyncLock, DatasourceShare
+from ..auth import actor_id_optional
 from ..db import get_duckdb_engine, get_engine_from_dsn, run_sequence_sync, run_snapshot_sync, open_duck_native, get_active_duck_path
 from ..api_ingest import run_api_sync
 from ..db import dispose_engine_by_key, dispose_all_engines, dispose_duck_engine
@@ -271,7 +272,7 @@ def _task_to_out(db: Session, t: SyncTask) -> SyncTaskOut:
 
 
 @router.get("", response_model=list[DatasourceOut])
-def list_ds(userId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def list_ds(userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     if _is_admin(db, actorId) and (userId is None or (str(userId).strip().lower() in {"", "undefined", "null"})):
         q = db.query(Datasource)
         rows = q.order_by(Datasource.created_at.desc()).all()
@@ -301,7 +302,7 @@ def list_ds(userId: str | None = Query(default=None), actorId: str | None = Quer
 
 
 @router.get("/{ds_id}", response_model=DatasourceDetailOut)
-def get_ds(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def get_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -366,7 +367,7 @@ def patch_ds(ds_id: str, payload: DatasourceUpdate, db: Session = Depends(get_db
 
 
 @router.get("/{ds_id}/shares", response_model=list[DatasourceShareOut])
-def list_ds_shares(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def list_ds_shares(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -386,7 +387,7 @@ def list_ds_shares(ds_id: str, actorId: str | None = Query(default=None), db: Se
 
 
 @router.post("/{ds_id}/shares", response_model=DatasourceShareOut)
-def add_ds_share(ds_id: str, payload: DatasourceShareAddRequest, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def add_ds_share(ds_id: str, payload: DatasourceShareAddRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -413,7 +414,7 @@ def add_ds_share(ds_id: str, payload: DatasourceShareAddRequest, actorId: str | 
 
 
 @router.delete("/{ds_id}/shares/{user_id}")
-def remove_ds_share(ds_id: str, user_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def remove_ds_share(ds_id: str, user_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -457,7 +458,7 @@ def dispose_all_cached_engines():
 
 
 @router.post("/{ds_id}/activate", response_model=DatasourceOut)
-def activate_ds(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def activate_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -477,7 +478,7 @@ def activate_ds(ds_id: str, actorId: str | None = Query(default=None), db: Sessi
 
 
 @router.post("/{ds_id}/deactivate", response_model=DatasourceOut)
-def deactivate_ds(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def deactivate_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -498,7 +499,7 @@ def deactivate_ds(ds_id: str, actorId: str | None = Query(default=None), db: Ses
 
 # --- Sync tasks management ---
 @router.get("/{ds_id}/sync-tasks", response_model=list[SyncTaskOut])
-def list_sync_tasks(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def list_sync_tasks(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -544,7 +545,7 @@ def list_sync_tasks(ds_id: str, actorId: str | None = Query(default=None), db: S
 
 
 @router.post("/{ds_id}/sync-tasks", response_model=SyncTaskOut)
-def create_sync_task(ds_id: str, payload: SyncTaskCreate, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def create_sync_task(ds_id: str, payload: SyncTaskCreate, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -592,7 +593,7 @@ def create_sync_task(ds_id: str, payload: SyncTaskCreate, actorId: str | None = 
 
 
 @router.get("/{ds_id}/sync/status", response_model=list[SyncTaskOut])
-def get_sync_status(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def get_sync_status(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -657,7 +658,7 @@ def run_sync_now(
     response: Response,
     taskId: str | None = Query(default=None),
     execute: bool = Query(default=False),
-    actorId: str | None = Query(default=None),
+    actorId: str | None = Depends(actor_id_optional),
     db: Session = Depends(get_db),
 ):
     ds = db.get(Datasource, ds_id)
@@ -1140,7 +1141,7 @@ def _set_phase(db: Session, state_id: str, phase: str | None) -> None:
             pass
 
 @router.get("/{ds_id}/sync/logs", response_model=list[SyncRunOut])
-def list_sync_logs(ds_id: str, taskId: str | None = Query(default=None), limit: int = Query(default=50), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def list_sync_logs(ds_id: str, taskId: str | None = Query(default=None), limit: int = Query(default=50), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -1167,7 +1168,7 @@ def list_sync_logs(ds_id: str, taskId: str | None = Query(default=None), limit: 
 
 
 @router.delete("/{ds_id}/sync/logs")
-def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -1191,7 +1192,7 @@ def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorI
 
 
 @router.post("/{ds_id}/sync/abort")
-def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     from datetime import datetime, timedelta
     
     print(f"[ABORT] Endpoint called: ds_id={ds_id}, taskId={taskId}", flush=True)
@@ -1272,7 +1273,7 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
 
 
 @router.post("/{ds_id}/sync/reset-stuck")
-def reset_stuck_syncs(ds_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def reset_stuck_syncs(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     """
     Reset stuck sync states that are marked as in_progress but are not actually running.
     This is a recovery endpoint for when syncs crash or are killed without cleanup.
@@ -1325,7 +1326,7 @@ def reset_stuck_syncs(ds_id: str, actorId: str | None = Query(default=None), db:
 
 
 @router.patch("/{ds_id}/sync-tasks/{task_id}", response_model=SyncTaskOut)
-def update_sync_task(ds_id: str, task_id: str, payload: SyncTaskCreate, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def update_sync_task(ds_id: str, task_id: str, payload: SyncTaskCreate, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     t = db.get(SyncTask, task_id)
     if not t or t.datasource_id != ds_id:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -1362,7 +1363,7 @@ def update_sync_task(ds_id: str, task_id: str, payload: SyncTaskCreate, actorId:
 
 
 @router.delete("/{ds_id}/sync-tasks/{task_id}", status_code=204)
-def delete_sync_task(ds_id: str, task_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def delete_sync_task(ds_id: str, task_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     t = db.get(SyncTask, task_id)
     if not t or t.datasource_id != ds_id:
         return Response(status_code=204)
@@ -1380,7 +1381,7 @@ def delete_sync_task(ds_id: str, task_id: str, actorId: str | None = Query(defau
 
 
 @router.post("/{ds_id}/sync-tasks/{task_id}/flush")
-def flush_sync_task(ds_id: str, task_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def flush_sync_task(ds_id: str, task_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     """Flush/reset a sync task's local DuckDB table without deleting the task itself.
 
     This drops the materialized table (including user-scoped variants) and resets the
@@ -1606,7 +1607,7 @@ class _DropLocalTableRequest(BaseModel):
 
 
 @router.post("/{ds_id}/local/drop-table")
-def drop_local_table(ds_id: str, payload: _DropLocalTableRequest, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def drop_local_table(ds_id: str, payload: _DropLocalTableRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -1640,7 +1641,7 @@ class _RenameLocalTableRequest(BaseModel):
 
 
 @router.post("/{ds_id}/local/rename-table")
-def rename_local_table(ds_id: str, payload: _RenameLocalTableRequest, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def rename_local_table(ds_id: str, payload: _RenameLocalTableRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -2628,7 +2629,7 @@ def _to_export_item(ds: Datasource) -> DatasourceExportItem:
 
 
 @router.get("/export", response_model=list[DatasourceExportItem])
-def export_datasources(ids: list[str] | None = Query(default=None), includeSyncTasks: bool = Query(default=True), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def export_datasources(ids: list[str] | None = Query(default=None), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Permissions: admin can export any; non-admin can only export own datasources
     if _is_admin(db, actorId):
         q = db.query(Datasource)
@@ -2669,7 +2670,7 @@ def export_datasources(ids: list[str] | None = Query(default=None), includeSyncT
 
 
 @router.get("/{ds_id}/export", response_model=DatasourceExportItem)
-def export_single_datasource(ds_id: str, includeSyncTasks: bool = Query(default=True), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def export_single_datasource(ds_id: str, includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -2703,7 +2704,7 @@ def export_single_datasource(ds_id: str, includeSyncTasks: bool = Query(default=
 
 
 @router.post("/import", response_model=DatasourceImportResponse)
-def import_datasources(payload: DatasourceImportRequest, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def import_datasources(payload: DatasourceImportRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     if not payload or not isinstance(payload.items, list):
         raise HTTPException(status_code=400, detail="items array is required")
     created = 0

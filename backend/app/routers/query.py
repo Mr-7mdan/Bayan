@@ -28,6 +28,7 @@ from ..sql_dialect_normalizer import normalize_sql_expression
 import json
 from dateutil import parser as date_parser
 from ..models import SessionLocal, Datasource, User, DatasourceShare, get_share_link_by_public, verify_share_link_token
+from ..auth import actor_id_optional
 from ..schemas import QueryRequest, QueryResponse, QuerySpecRequest, DistinctRequest, DistinctResponse, PivotRequest
 from ..security import decrypt_text
 from ..config import settings
@@ -66,6 +67,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 # Note: Ibis can be heavy to import; to keep startup/reload fast, we lazily import
 # it inside the /query/spec handler only when needed.
@@ -1707,9 +1709,9 @@ async def run_query_endpoint(
     payload: QueryRequest,
     request: Request,
     db: Session = Depends(get_db),
-    actorId: Optional[str] = None,
     publicId: Optional[str] = None,
     token: Optional[str] = None,
+    actorId: Optional[str] = Depends(actor_id_optional),
 ) -> QueryResponse:
     """Async HTTP entry-point for /query.
 
@@ -1718,6 +1720,11 @@ async def run_query_endpoint(
     thread pool — keeping navigation/CRUD endpoints responsive. If the
     client disconnects while the query is running, the DuckDB connection
     is interrupted so the query stops on the server too.
+
+    Identity comes from the auth dependency (token, or legacy ?actorId=
+    while auth_enforce is off), never a raw client-supplied param. The
+    publicId+token public embed path stays reachable (actorId resolves to
+    None) because we use the non-raising optional resolver.
     """
     return await _run_cancellable_in_pool(
         request,
@@ -2323,9 +2330,9 @@ async def run_query_spec_endpoint(
     payload: QuerySpecRequest,
     request: Request,
     db: Session = Depends(get_db),
-    actorId: Optional[str] = None,
     publicId: Optional[str] = None,
     token: Optional[str] = None,
+    actorId: Optional[str] = Depends(actor_id_optional),
     _guard: None = Depends(_spec_concurrency_guard),
 ) -> QueryResponse:
     """Async HTTP entry-point for /query/spec.
@@ -2335,6 +2342,9 @@ async def run_query_spec_endpoint(
     pool for navigation, branding, and CRUD requests. Client disconnects
     interrupt the running DuckDB connection so cancelled work doesn't
     keep tying up server resources.
+
+    Identity resolved via the auth dependency; publicId+token embed path
+    stays reachable (actorId resolves to None).
     """
     return await _run_cancellable_in_pool(
         request,
@@ -5661,7 +5671,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
 
 @router.post("/distinct")
-def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> DistinctResponse:
+def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> DistinctResponse:
     _validate_source(payload.source)
     # Resolve date presets at execution time
     if getattr(payload, 'where', None):
@@ -6308,10 +6318,14 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
 
 
 @router.post("/pivot", response_model=QueryResponse)
-def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> QueryResponse:
+def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _actor: Optional[str] = Depends(actor_id_optional)) -> QueryResponse:
     """Server-side pivot aggregation.
     Returns long-form grouped rows: [row_dims..., col_dims..., value].
     """
+    # HTTP requests inject the resolved actor via `_actor` (a str or None); internal
+    # callers pass actorId positionally and leave `_actor` as the Depends sentinel.
+    if isinstance(_actor, str):
+        actorId = _actor
     _validate_source(payload.source)
     import sys
     sys.stderr.write(f"[PIVOT_START] datasourceId={payload.datasourceId}, widgetId={payload.widgetId}, source={payload.source}\n")
@@ -8509,7 +8523,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
 
 
 @router.post("/pivot/sql")
-def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     """Return the SQL that would be executed by /pivot without running it. Used for SQL preview."""
     import sys
     try:
@@ -8591,7 +8605,11 @@ def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
 
 
 @router.post("/period-totals")
-def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _actor: Optional[str] = Depends(actor_id_optional)) -> dict:
+    # HTTP requests inject the resolved actor via `_actor` (a str or None); internal
+    # callers pass actorId positionally and leave `_actor` as the Depends sentinel.
+    if isinstance(_actor, str):
+        actorId = _actor
     # Resolve date presets at execution time
     if payload.get("where"):
         payload["where"] = _resolve_date_presets(payload["where"])
@@ -9709,7 +9727,7 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
 
 # --- Period totals batch: accept multiple requests and return a keyed map ---
 @router.post("/period-totals/batch")
-def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     try:
         touch_actor(actorId)
     except Exception:
@@ -9764,7 +9782,7 @@ def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: O
 
 # --- Period totals compare: return cur and prev in one call ---
 @router.post("/period-totals/compare")
-def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     # Resolve date presets at execution time
     if payload.get("where"):
         payload["where"] = _resolve_date_presets(payload["where"])

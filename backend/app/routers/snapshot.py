@@ -6,10 +6,11 @@ import logging
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import Response, JSONResponse
 
 from ..config import settings
+from ..auth import actor_id_optional
 
 logger = logging.getLogger(__name__)
 
@@ -214,8 +215,8 @@ async def snapshot_widget(
     w: int = Query(default=800),
     h: int = Query(default=360),
     theme: str = Query(default="dark"),
-    actorId: Optional[str] = Query(default=None),
     waitMs: int = Query(default=1200),
+    actorId: Optional[str] = Depends(actor_id_optional),
 ):
     try:
         png = await snapshot_embed_png(

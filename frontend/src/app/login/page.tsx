@@ -2,7 +2,7 @@
 
 import { Card, Title, Text } from '@tremor/react'
 import { useAuth } from '@/components/providers/AuthProvider'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Api } from '@/lib/api'
@@ -12,6 +12,12 @@ import ThemeToggle from '@/components/ui/ThemeToggle'
 export default function LoginPage() {
   const { login } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  // Only honor same-origin relative paths from ?next= to avoid open redirects.
+  const nextPath = (() => {
+    const n = searchParams?.get('next') || ''
+    return n.startsWith('/') && !n.startsWith('//') ? n : '/home'
+  })()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
@@ -79,7 +85,7 @@ export default function LoginPage() {
           localStorage.removeItem('saved_email')
         }
       } catch {}
-      router.replace('/home')
+      router.replace(nextPath as any)
     } catch (err: unknown) {
       // Friendly error messages for common auth failures
       let msg = 'Could not sign in. Please check your email and password.'
@@ -194,7 +200,7 @@ export default function LoginPage() {
                       // Auto login after signup
                       await login(suEmail, suPassword, true)
                       setSignupOpen(false)
-                      router.replace('/home')
+                      router.replace(nextPath as any)
                     } catch (e: any) {
                       setSuError(e?.message || 'Failed to signup')
                     } finally { setSuBusy(false) }

@@ -358,6 +358,26 @@ function _cacheTtlForPath(p: string): number {
   return GET_CACHE_MS
 }
 
+export function getAuthToken(): string | null {
+  try { return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') } catch { return null }
+}
+
+// Clear stored auth and bounce to /login on a 401, unless we're on a public route.
+function handleAuthFailure(): void {
+  try {
+    localStorage.removeItem('auth_token'); sessionStorage.removeItem('auth_token')
+    localStorage.removeItem('auth_user'); sessionStorage.removeItem('auth_user')
+    document.cookie = 'bayan_session=; path=/; max-age=0; SameSite=Lax'
+  } catch {}
+  try {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname
+      const isPublic = /^\/login/.test(p) || /^\/v\//.test(p) || /^\/render\//.test(p)
+      if (!isPublic) window.location.href = '/login'
+    }
+  } catch {}
+}
+
 async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Promise<T> {
   const controller = new AbortController()
   const externalSignal: AbortSignal | undefined = (init as any)?.signal as AbortSignal | undefined
@@ -373,6 +393,11 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
     const headers: Record<string, string> = { ...(init?.headers as any || {}) }
     const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData
     if (hasBody && !isFormData) headers['Content-Type'] = headers['Content-Type'] || 'application/json'
+    // Attach the session token on every call so the backend can resolve identity.
+    try {
+      const tok = typeof window !== 'undefined' ? getAuthToken() : null
+      if (tok && !headers['Authorization']) headers['Authorization'] = 'Bearer ' + tok
+    } catch {}
     const { signal: _ignored, ...restInit } = (init || {}) as any
     // Auto-attach publicId/token for public view queries
     let finalPath = path
@@ -433,6 +458,7 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
           break
         }
         if (!res.ok) {
+          if (res.status === 401) handleAuthFailure()
           const body = await res.text().catch(() => '')
           throw new Error(`HTTP ${res.status}: ${body}`)
         }
@@ -827,8 +853,19 @@ export const Api = {
     http<UserOut>('/users/signup', { method: 'POST', body: JSON.stringify(payload) }),
   login: (payload: { email: string; password: string }) =>
     http<UserOut>('/users/login', { method: 'POST', body: JSON.stringify(payload) }),
-  changePassword: (payload: { userId: string; oldPassword: string; newPassword: string }) =>
-    http<{ ok: boolean }>('/users/change-password', { method: 'POST', body: JSON.stringify(payload) }),
+  changePassword: async (payload: { userId: string; oldPassword: string; newPassword: string }) => {
+    const res = await http<{ ok: boolean; token?: string }>('/users/change-password', { method: 'POST', body: JSON.stringify(payload) })
+    // Changing the password invalidates all prior tokens (fingerprint change);
+    // swap in the freshly issued one so the current session stays valid.
+    try {
+      if (res?.token && typeof window !== 'undefined') {
+        const inLocal = localStorage.getItem('auth_token') != null
+        ;(inLocal ? localStorage : sessionStorage).setItem('auth_token', res.token)
+        document.cookie = `bayan_session=${res.token}; path=/; SameSite=Lax`
+      }
+    } catch {}
+    return res
+  },
   resetPassword: (payload: { email: string; newPassword: string }) =>
     http<{ ok: boolean }>('/users/reset-password', { method: 'POST', body: JSON.stringify(payload) }),
   requestPasswordReset: (email: string) =>
@@ -1303,6 +1340,7 @@ export type UserOut = {
   name: string
   email: string
   role: 'admin' | 'user'
+  token?: string | null
 }
 
 export type UserRowOut = UserOut & {

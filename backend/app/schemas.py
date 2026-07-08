@@ -385,7 +385,8 @@ class UserOut(BaseModel):
     name: str
     email: str
     role: str
-    
+    token: str | None = None
+
 class UserRowOut(BaseModel):
     id: str
     name: str

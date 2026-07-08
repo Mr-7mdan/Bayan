@@ -119,6 +119,42 @@ def verify_reset_token(token: str) -> Optional[str]:
         return None
 
 
+# --- Session tokens (HMAC-signed, time-limited, password-fingerprinted) ---
+def _pw_fingerprint(password_hash: str) -> str:
+    return hashlib.sha256((password_hash or "").encode()).hexdigest()[:12]
+
+
+def sign_session_token(user_id: str, password_hash: str, ttl_seconds: int) -> str:
+    exp = int(time.time()) + ttl_seconds
+    payload = f"sess:{user_id}:{exp}:{_pw_fingerprint(password_hash)}".encode("utf-8")
+    sig = hmac.new(settings.secret_key.encode("utf-8"), payload, hashlib.sha256).digest()
+    return f"{_b64url_encode(payload)}.{_b64url_encode(sig)}"
+
+
+def verify_session_token(token: str) -> Optional[Tuple[str, str]]:
+    """Returns (user_id, pw_fingerprint) if signature+expiry valid, else None."""
+    try:
+        if not token:
+            return None
+        parts = token.split(".")
+        if len(parts) != 2:
+            return None
+        payload_b = _b64url_decode(parts[0])
+        sig_b = _b64url_decode(parts[1])
+        expected = hmac.new(settings.secret_key.encode("utf-8"), payload_b, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig_b, expected):
+            return None
+        payload = payload_b.decode("utf-8")
+        prefix, user_id, exp_s, fp = payload.split(":", 3)
+        if prefix != "sess":
+            return None
+        if int(time.time()) > int(exp_s):
+            return None
+        return (user_id, fp)
+    except Exception:
+        return None
+
+
 # --- Server-signed short-lived embed tokens ---
 def _b64url_encode(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")

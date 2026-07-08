@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     # Secrets — MUST be set via SECRET_KEY env var; app refuses to start with the placeholder
     secret_key: str = Field(default="BayanSecretKey-CHANGE-ME")
 
+    # Authentication enforcement. When False (default), endpoints fall back to the
+    # legacy actorId query param so old clients keep working during rollout. When
+    # True, actorId is ignored for identity and unauthenticated requests get 401.
+    auth_enforce: bool = Field(default=False, validation_alias=AliasChoices("AUTH_ENFORCE"))
+    session_ttl_seconds: int = Field(default=60 * 60 * 24 * 30, validation_alias=AliasChoices("SESSION_TTL_SECONDS"))  # 30 days
+
     # Local analytical store (DuckDB)
     duckdb_path: str = Field(default=".data/local.duckdb")
 

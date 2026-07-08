@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -47,7 +47,9 @@ from ..schemas import (
     AdminSetPasswordRequest,
 )
 from uuid import uuid4
-from ..security import hash_password, verify_password, needs_rehash, sign_reset_token, verify_reset_token
+from ..security import hash_password, verify_password, needs_rehash, sign_reset_token, verify_reset_token, sign_session_token
+from ..auth import get_current_user, get_current_user_optional, require_admin
+from ..config import settings
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -60,15 +62,26 @@ def get_db():
         db.close()
 
 
-def _require_admin(db: Session, actor_id: str) -> None:
-    uid = (actor_id or "").strip()
-    u = db.query(User).filter(User.id == uid).first()
-    if not u or (u.role or "user").lower() != "admin":
-        raise HTTPException(status_code=403, detail="Admin required")
+def _require_self_or_admin(user: User | None, user_id: str) -> None:
+    """Enforce that the caller owns the path user_id (or is admin).
+
+    No-op while auth_enforce is off so legacy actorId/path clients keep working.
+    """
+    if not settings.auth_enforce:
+        return
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if (user.role or "user").lower() == "admin":
+        return
+    ref = (user_id or "").strip()
+    # Path may carry either the user's UUID or their email; both identify self.
+    if ref != user.id and ref.lower() != (user.email or "").lower():
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 @router.get("/{user_id}/counts", response_model=SidebarCountsResponse)
-def get_sidebar_counts(user_id: str, db: Session = Depends(get_db)) -> SidebarCountsResponse:
+def get_sidebar_counts(user_id: str, db: Session = Depends(get_db), user: User | None = Depends(get_current_user_optional)) -> SidebarCountsResponse:
+    _require_self_or_admin(user, user_id)
     uid = (user_id or "").strip()
     if uid.lower() in {"", "undefined", "null"}:
         uid = "dev_user"
@@ -91,7 +104,9 @@ def add_dashboard_collection(
     user_id: str,
     payload: AddToCollectionRequest,
     db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
 ) -> AddToCollectionResponse:
+    _require_self_or_admin(user, user_id)
     # Resolve email to actual user UUID so collections and permissions use a
     # consistent identifier (the caller may pass an email address).
     original_input = user_id
@@ -140,14 +155,16 @@ def add_dashboard_collection(
 
 
 @router.get("/{user_id}/notifications", response_model=list[NotificationOut])
-def get_notifications(user_id: str, db: Session = Depends(get_db)):
+def get_notifications(user_id: str, db: Session = Depends(get_db), user: User | None = Depends(get_current_user_optional)):
+    _require_self_or_admin(user, user_id)
     # Return and clear notifications (pop semantics)
     items = pop_notifications(db, user_id)
     return [NotificationOut(id=n.id, message=n.message, created_at=n.created_at) for n in items]
 
 
 @router.get("/{user_id}/collections/items", response_model=list[CollectionItemOut])
-def list_collection_items(user_id: str, db: Session = Depends(get_db)):
+def list_collection_items(user_id: str, db: Session = Depends(get_db), user: User | None = Depends(get_current_user_optional)):
+    _require_self_or_admin(user, user_id)
     # List all dashboards added to any of the user's collections, with permission and publish info
     colls = db.query(Collection).filter(Collection.user_id == user_id).all()
     if not colls:
@@ -188,7 +205,9 @@ def remove_dashboard_collection(
     collection_id: str,
     dashboard_id: str,
     db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
 ) -> AddToCollectionResponse:
+    _require_self_or_admin(user, user_id)
     collection = get_collection_by_id(db, collection_id, user_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -221,7 +240,8 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
     db.add(u)
     db.commit()
     db.refresh(u)
-    return UserOut(id=u.id, name=u.name, email=u.email, role=u.role)
+    token = sign_session_token(u.id, u.password_hash, settings.session_ttl_seconds)
+    return UserOut(id=u.id, name=u.name, email=u.email, role=u.role, token=token)
 
 
 @router.post("/login", response_model=UserOut)
@@ -230,18 +250,26 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> UserOut:
     u = db.query(User).filter(User.email == email).first()
     if not u or not verify_password(payload.password, u.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    # Transparently upgrade legacy SHA256 hashes to argon2id on successful login
+    if not bool(u.active):
+        raise HTTPException(status_code=403, detail="Account disabled")
+    # Transparently upgrade legacy SHA256 hashes to argon2id on successful login.
+    # Rehash BEFORE signing so the token fingerprint matches the stored hash.
     if needs_rehash(u.password_hash):
         u.password_hash = hash_password(payload.password)
         db.add(u)
         db.commit()
-    return UserOut(id=u.id, name=u.name, email=u.email, role=u.role)
+    token = sign_session_token(u.id, u.password_hash, settings.session_ttl_seconds)
+    return UserOut(id=u.id, name=u.name, email=u.email, role=u.role, token=token)
 
 
 @router.post("/change-password", response_model=dict)
-def change_password(payload: ChangePasswordRequest, db: Session = Depends(get_db)):
-    uid = (payload.userId or "").strip()
-    u = db.get(User, uid)
+def change_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # Derive the user from the authenticated session, not a client-supplied id.
+    u = db.get(User, user.id)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
     if not verify_password(payload.oldPassword, u.password_hash):
@@ -249,7 +277,10 @@ def change_password(payload: ChangePasswordRequest, db: Session = Depends(get_db
     u.password_hash = hash_password(payload.newPassword)
     db.add(u)
     db.commit()
-    return {"ok": True}
+    # Old tokens die via fingerprint mismatch; hand back a fresh one so the
+    # current client stays logged in.
+    token = sign_session_token(u.id, u.password_hash, settings.session_ttl_seconds)
+    return {"ok": True, "token": token}
 
 
 @router.post("/request-password-reset", response_model=dict)
@@ -299,9 +330,8 @@ def confirm_password_reset(payload: ConfirmPasswordResetPayload, db: Session = D
 
 
 @router.post("/reset-password", response_model=dict)
-def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db), actorId: str = Query(...)):
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     """Admin-only direct password reset (legacy endpoint)."""
-    _require_admin(db, actorId)
     email = (payload.email or "").strip().lower()
     u = db.query(User).filter(User.email == email).first()
     if not u:
@@ -329,13 +359,13 @@ def bootstrap_admin(payload: SignupRequest, db: Session = Depends(get_db)) -> Us
     db.add(u)
     db.commit()
     db.refresh(u)
-    return UserOut(id=u.id, name=u.name, email=u.email, role=u.role)
+    token = sign_session_token(u.id, u.password_hash, settings.session_ttl_seconds)
+    return UserOut(id=u.id, name=u.name, email=u.email, role=u.role, token=token)
 
 
 # --- Admin: users management ---
 @router.get("/admin/list", response_model=list[UserRowOut])
-def admin_list_users(actorId: str, db: Session = Depends(get_db)):
-    _require_admin(db, actorId)
+def admin_list_users(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     rows = db.query(User).order_by(User.created_at.desc()).all()
     out: list[UserRowOut] = []
     for u in rows:
@@ -344,8 +374,7 @@ def admin_list_users(actorId: str, db: Session = Depends(get_db)):
 
 
 @router.post("/admin", response_model=UserOut)
-def admin_create_user(payload: AdminCreateUserRequest, actorId: str, db: Session = Depends(get_db)):
-    _require_admin(db, actorId)
+def admin_create_user(payload: AdminCreateUserRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     email = (payload.email or "").strip().lower()
     name = (payload.name or "").strip() or email.split("@")[0]
     role = (payload.role or "user").lower()
@@ -362,8 +391,7 @@ def admin_create_user(payload: AdminCreateUserRequest, actorId: str, db: Session
 
 
 @router.post("/admin/{target_id}/set-active", response_model=dict)
-def admin_set_active(target_id: str, payload: SetActiveRequest, actorId: str, db: Session = Depends(get_db)):
-    _require_admin(db, actorId)
+def admin_set_active(target_id: str, payload: SetActiveRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     u = db.get(User, target_id)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
@@ -374,8 +402,7 @@ def admin_set_active(target_id: str, payload: SetActiveRequest, actorId: str, db
 
 
 @router.post("/admin/{target_id}/set-password", response_model=dict)
-def admin_set_password(target_id: str, payload: AdminSetPasswordRequest, actorId: str, db: Session = Depends(get_db)):
-    _require_admin(db, actorId)
+def admin_set_password(target_id: str, payload: AdminSetPasswordRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     u = db.get(User, target_id)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
@@ -387,7 +414,8 @@ def admin_set_password(target_id: str, payload: AdminSetPasswordRequest, actorId
 
 # --- Favorites (stored as the default "Favorites" collection) ---
 @router.get("/{user_id}/favorites", response_model=list[FavoriteOut])
-def list_favorites(user_id: str, db: Session = Depends(get_db)):
+def list_favorites(user_id: str, db: Session = Depends(get_db), user: User | None = Depends(get_current_user_optional)):
+    _require_self_or_admin(user, user_id)
     # Ensure the default Favorites collection exists
     coll = ensure_collection(db, user_id)
     # Join items with dashboards for names and timestamps
@@ -412,7 +440,8 @@ def list_favorites(user_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{user_id}/favorites", response_model=dict)
-def add_favorite(user_id: str, payload: AddFavoriteRequest, db: Session = Depends(get_db)):
+def add_favorite(user_id: str, payload: AddFavoriteRequest, db: Session = Depends(get_db), user: User | None = Depends(get_current_user_optional)):
+    _require_self_or_admin(user, user_id)
     dash_id = (payload.dashboardId or "").strip()
     if not dash_id:
         raise HTTPException(status_code=400, detail="dashboardId is required")
@@ -422,7 +451,8 @@ def add_favorite(user_id: str, payload: AddFavoriteRequest, db: Session = Depend
 
 
 @router.delete("/{user_id}/favorites/{dashboard_id}", response_model=dict)
-def remove_favorite(user_id: str, dashboard_id: str, db: Session = Depends(get_db)):
+def remove_favorite(user_id: str, dashboard_id: str, db: Session = Depends(get_db), user: User | None = Depends(get_current_user_optional)):
+    _require_self_or_admin(user, user_id)
     coll = ensure_collection(db, user_id)
     removed = remove_dashboard_from_collection(db, coll.id, dashboard_id)
     return {"ok": bool(removed)}

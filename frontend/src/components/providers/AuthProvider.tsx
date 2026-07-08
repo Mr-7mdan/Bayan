@@ -46,8 +46,21 @@ export default function AuthProvider({ children }: { children?: ReactNode }) {
     setUser(userObj)
     try {
       const payload = JSON.stringify(userObj)
-      if (remember) localStorage.setItem('auth_user', payload)
-      else sessionStorage.setItem('auth_user', payload)
+      const token = u.token || ''
+      if (remember) {
+        localStorage.setItem('auth_user', payload)
+        if (token) localStorage.setItem('auth_token', token)
+      } else {
+        sessionStorage.setItem('auth_user', payload)
+        if (token) sessionStorage.setItem('auth_token', token)
+      }
+      // Mirror the token into a cookie so the Next middleware can gate routes.
+      // Non-httpOnly by necessity: frontend (:3000) and backend (:8000) are
+      // separate origins, so the API cannot set a cookie the middleware reads.
+      if (token) {
+        const maxAge = remember ? '; max-age=2592000' : ''
+        document.cookie = `bayan_session=${token}; path=/; SameSite=Lax${maxAge}`
+      }
     } catch {}
   }
 
@@ -56,6 +69,9 @@ export default function AuthProvider({ children }: { children?: ReactNode }) {
     try {
       localStorage.removeItem('auth_user')
       sessionStorage.removeItem('auth_user')
+      localStorage.removeItem('auth_token')
+      sessionStorage.removeItem('auth_token')
+      document.cookie = 'bayan_session=; path=/; max-age=0; SameSite=Lax'
     } catch {}
   }
 

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..models import SessionLocal, AlertRule, EmailConfig, SmsConfigHadara, AlertRun, Dashboard
+from ..auth import actor_id_optional
 from ..security import encrypt_text, decrypt_text
 from ..alerts_service import run_rule, send_email, send_sms_hadara, evaluate_threshold, _render_kpi_html  # type: ignore
 from ..scheduler import schedule_all_alert_jobs as _sync_alert_jobs
@@ -317,7 +318,7 @@ class EvaluateV2Response(BaseModel):
 
 
 @router.post("/evaluate")
-async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Query(default=None), db: Session = Depends(get_db)) -> EvaluateResponse:
+async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)) -> EvaluateResponse:
     cfg = payload.config.model_dump() if hasattr(payload.config, 'model_dump') else (payload.config or {})
     triggers = cfg.get("triggers") or []
     render = cfg.get("render") or {}
@@ -559,7 +560,7 @@ async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Query(d
 
 
 @router.post("/evaluate-v2")
-async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Query(default=None), db: Session = Depends(get_db)) -> EvaluateV2Response:
+async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)) -> EvaluateV2Response:
     cfg = payload.config.model_dump() if hasattr(payload.config, 'model_dump') else (payload.config or {})
     triggers = cfg.get("triggers") or []
     render = cfg.get("render") or {}

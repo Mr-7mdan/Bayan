@@ -46,6 +46,7 @@ from ..schemas import (
 )
 from ..config import settings
 from ..models import Datasource, SyncTask
+from ..auth import actor_id_optional
 from ..security import decrypt_text, encrypt_text, sign_embed_token, verify_embed_token
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
@@ -176,7 +177,7 @@ def _rewrite_datasource_ids(defn: dict, id_map: dict[str, str], table_map: dict[
 def list_dashboards(
     userId: str | None = Query(default=None),
     published: bool | None = Query(default=None),
-    actorId: str | None = Query(default=None),
+    actorId: str | None = Depends(actor_id_optional),
     db: Session = Depends(get_db),
 ):
     # If a userId is provided, return only that user's dashboards.
@@ -234,14 +235,17 @@ def list_dashboards(
 
 
 @router.post("", response_model=DashboardOut)
-def save_dash(payload: DashboardSaveRequest, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def save_dash(payload: DashboardSaveRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     try:
+        # When enforcing, identity comes only from the authenticated actor;
+        # the client-supplied payload.userId is not trusted for ownership.
+        owner = actorId if settings.auth_enforce else payload.userId
         # Enforce permissions on update: owner or explicit 'rw' permission
         if payload.id:
             d0 = load_dashboard(db, payload.id)
             if not d0:
                 raise ValueError("Dashboard not found")
-            actor = (payload.userId or actorId or "dev_user")
+            actor = actorId if settings.auth_enforce else (payload.userId or actorId or "dev_user")
             if _is_admin(db, actor):
                 actor = d0.user_id or actor  # bypass checks
             if d0.user_id and d0.user_id != actor:
@@ -250,7 +254,7 @@ def save_dash(payload: DashboardSaveRequest, actorId: str | None = Query(default
                     raise HTTPException(status_code=403, detail="No write permission for this dashboard")
         d: Dashboard = save_dashboard(
             db,
-            user_id=payload.userId,
+            user_id=owner,
             name=payload.name,
             definition=payload.definition.model_dump(),
             dash_id=payload.id,
@@ -267,7 +271,7 @@ def save_dash(payload: DashboardSaveRequest, actorId: str | None = Query(default
 
 
 @router.get("/{dash_id}", response_model=DashboardOut)
-def get_dash(dash_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def get_dash(dash_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -322,7 +326,7 @@ class EmbedTokenRowOut(BaseModel):
 
 
 @router.get("/{dash_id}/embed-tokens", response_model=list[EmbedTokenRowOut])
-def list_embed_tokens(dash_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def list_embed_tokens(dash_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -339,7 +343,7 @@ def list_embed_tokens(dash_id: str, actorId: str | None = Query(default=None), d
 
 
 @router.delete("/{dash_id}/embed-tokens/{token_id}")
-def delete_embed_token(dash_id: str, token_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def delete_embed_token(dash_id: str, token_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -364,7 +368,7 @@ class ShareEntryOut(BaseModel):
 
 
 @router.get("/{dash_id}/shares", response_model=list[ShareEntryOut])
-def list_shares(dash_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def list_shares(dash_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -382,7 +386,7 @@ def list_shares(dash_id: str, actorId: str | None = Query(default=None), db: Ses
 
 
 @router.delete("/{dash_id}/shares/{user_id}")
-def delete_share(dash_id: str, user_id: str, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def delete_share(dash_id: str, user_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -403,7 +407,7 @@ def delete_share(dash_id: str, user_id: str, actorId: str | None = Query(default
 
 
 @router.post("/public/{public_id}/embed-token")
-def create_embed_token(public_id: str, ttl: int = Query(default=3600), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def create_embed_token(public_id: str, ttl: int = Query(default=3600), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     sl = get_share_link_by_public(db, public_id)
     if not sl:
         raise HTTPException(status_code=404, detail="Not found")
@@ -420,12 +424,12 @@ def create_embed_token(public_id: str, ttl: int = Query(default=3600), actorId: 
 
 
 @router.delete("/{dash_id}")
-def delete_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def delete_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Permission: owner or 'rw'
     d0 = load_dashboard(db, dash_id)
     if not d0:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    actor = (userId or actorId or "dev_user")
+    actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
     if _is_admin(db, actor):
         actor = d0.user_id or actor  # bypass checks
     if d0.user_id and d0.user_id != actor:
@@ -439,11 +443,11 @@ def delete_dash(dash_id: str, userId: str | None = Query(default=None), actorId:
 
 
 @router.post("/{dash_id}/publish", response_model=PublishOut)
-def publish_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def publish_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    actor = (userId or actorId or "dev_user")
+    actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
     if _is_admin(db, actor):
         actor = d.user_id or actor
     if d.user_id and d.user_id != actor:
@@ -455,11 +459,11 @@ def publish_dash(dash_id: str, userId: str | None = Query(default=None), actorId
 
 
 @router.post("/{dash_id}/unpublish")
-def unpublish_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def unpublish_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    actor = (userId or actorId or "dev_user")
+    actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
     if _is_admin(db, actor):
         actor = d.user_id or actor
     if d.user_id and d.user_id != actor:
@@ -482,11 +486,11 @@ def get_publish_status(dash_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{dash_id}/publish/token", response_model=PublishOut)
-def set_publish_token(dash_id: str, payload: SetPublishTokenRequest, userId: str | None = Query(default=None), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def set_publish_token(dash_id: str, payload: SetPublishTokenRequest, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    actor = (userId or actorId or "dev_user")
+    actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
     if _is_admin(db, actor):
         actor = d.user_id or actor
     if d.user_id and d.user_id != actor:
@@ -592,7 +596,7 @@ def _ds_to_export_item(ds: Datasource) -> DatasourceExportItem:
 
 
 @router.get("/export", response_model=DashboardExportResponse)
-def export_dashboards(userId: str | None = Query(default=None), ids: list[str] | None = Query(default=None), includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def export_dashboards(userId: str | None = Query(default=None), ids: list[str] | None = Query(default=None), includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Permission: admin can export any; otherwise restrict to provided userId==actor or fallback to actor
     if _is_admin(db, actorId):
         q = db.query(Dashboard)
@@ -651,7 +655,7 @@ def export_dashboards(userId: str | None = Query(default=None), ids: list[str] |
 
 
 @router.get("/{dash_id}/export", response_model=DashboardExportResponse)
-def export_dashboard(dash_id: str, includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def export_dashboard(dash_id: str, includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -701,7 +705,7 @@ def export_dashboard(dash_id: str, includeDatasources: bool = Query(default=True
 
 
 @router.post("/import", response_model=DashboardImportResponse)
-def import_dashboards(payload: DashboardImportRequest, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+def import_dashboards(payload: DashboardImportRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     if not payload or not isinstance(payload.dashboards, list):
         raise HTTPException(status_code=400, detail="dashboards array is required")
     # Build datasource id map if provided

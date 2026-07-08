@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from sqlalchemy.orm import Session
 from pathlib import Path
 import json
 
+from ..auth import require_admin
 from ..models import SessionLocal, User, Datasource
 from ..schemas import BrandingUpdateIn, BrandingOut
 from ..config import settings
@@ -28,31 +29,18 @@ def get_db():
         db.close()
 
 
-def _is_admin(db: Session, actor_id: str | None) -> bool:
-    if not actor_id:
-        return False
-    u = db.query(User).filter(User.id == str(actor_id).strip()).first()
-    return bool(u and (u.role or "user").lower() == "admin")
-
-
 @router.get("/scheduler/jobs")
-async def scheduler_jobs(actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
-    if not _is_admin(db, actorId):
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def scheduler_jobs(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     return list_jobs()
 
 
 @router.post("/scheduler/refresh")
-async def scheduler_refresh(actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
-    if not _is_admin(db, actorId):
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def scheduler_refresh(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     return schedule_all_jobs()
 
 
 @router.get("/metrics-live")
-async def metrics_live(actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
-    if not _is_admin(db, actorId):
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def metrics_live(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     snap = metrics_snapshot()
     # Helpers to sum by metric name
     def sum_gauge(name: str, **label_eq):
@@ -151,16 +139,12 @@ class _SetDuckActivePayload(BaseModel):
 
 
 @router.get("/duckdb/active")
-async def duckdb_active(actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
-    if not _is_admin(db, actorId):
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def duckdb_active(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     return { "path": get_active_duck_path() }
 
 
 @router.post("/duckdb/active")
-async def duckdb_set_active(payload: _SetDuckActivePayload, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
-    if not _is_admin(db, actorId):
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def duckdb_set_active(payload: _SetDuckActivePayload, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     # Prefer datasourceId if provided
     if payload.datasourceId:
         ds = db.get(Datasource, payload.datasourceId)
@@ -188,9 +172,7 @@ async def duckdb_set_active(payload: _SetDuckActivePayload, actorId: str | None 
 
 
 @router.put("/branding", response_model=BrandingOut)
-async def update_branding(payload: BrandingUpdateIn, actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
-    if not _is_admin(db, actorId):
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def update_branding(payload: BrandingUpdateIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     try:
         data_dir = Path(settings.metadata_db_path).resolve().parent
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -229,10 +211,8 @@ async def update_branding(payload: BrandingUpdateIn, actorId: str | None = Query
 
 
 @router.post("/branding/reset", response_model=BrandingOut)
-async def reset_branding(actorId: str | None = Query(default=None), db: Session = Depends(get_db)):
+async def reset_branding(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     """Clear all branding overrides — restores the Bayan default look."""
-    if not _is_admin(db, actorId):
-        raise HTTPException(status_code=403, detail="Forbidden")
     try:
         data_dir = Path(settings.metadata_db_path).resolve().parent
         data_dir.mkdir(parents=True, exist_ok=True)

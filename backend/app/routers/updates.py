@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..models import User, SessionLocal
+from ..auth import require_admin
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/updates", tags=["updates"])
@@ -204,17 +205,9 @@ async def _download_asset(url: str, dest: Path) -> None:
 @router.post("/apply", response_model=ApplyResult)
 async def apply_update(
     component: str = Query(default="backend", pattern=r"^(backend|frontend)$"),
-    actorId: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
 ) -> ApplyResult:
-    # Simple admin gate (reuse existing roles)
-    if actorId:
-        u = db.query(User).filter(User.id == str(actorId).strip()).first()
-        if not (u and (u.role or "user").lower() == "admin"):
-            raise HTTPException(status_code=403, detail="Admin required")
-    else:
-        raise HTTPException(status_code=403, detail="actorId is required for updates")
-
     if not settings.updates_enabled:
         raise HTTPException(status_code=400, detail="Updates are disabled")
 
@@ -385,17 +378,9 @@ async def promote_update(
     component: str = Query(default="backend", pattern=r"^(backend|frontend)$"),
     version: Optional[str] = Query(default=None),
     restart: bool = Query(default=True),
-    actorId: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
 ) -> PromoteResult:
-    # Admin gate
-    if actorId:
-        u = db.query(User).filter(User.id == str(actorId).strip()).first()
-        if not (u and (u.role or "user").lower() == "admin"):
-            raise HTTPException(status_code=403, detail="Admin required")
-    else:
-        raise HTTPException(status_code=403, detail="actorId is required for updates")
-
     # Determine version if not provided
     if not version:
         release = await _github_latest_release()
