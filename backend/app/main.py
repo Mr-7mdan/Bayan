@@ -57,6 +57,21 @@ if (settings.secret_key or "").strip() in _PLACEHOLDER_KEYS:
 
 app = FastAPI(title=settings.app_name)
 
+# SQL-injection hardening (spec 03): custom-column/transform exprs and
+# identifiers that fail validation surface as 400, not 500.
+from fastapi.responses import JSONResponse
+from .sql_ident import UnknownIdentifier, InvalidExpression
+
+
+@app.exception_handler(InvalidExpression)
+async def _invalid_expression_handler(request: Request, exc: InvalidExpression):
+    return JSONResponse(status_code=400, content={"detail": "invalid custom column expression"})
+
+
+@app.exception_handler(UnknownIdentifier)
+async def _unknown_identifier_handler(request: Request, exc: UnknownIdentifier):
+    return JSONResponse(status_code=400, content={"detail": "unknown field"})
+
 # CORS: always use explicit origins to ensure ACAO is set with credentials
 origins = settings.cors_origins_list
 app.add_middleware(

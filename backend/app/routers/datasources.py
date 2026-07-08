@@ -45,6 +45,7 @@ from ..schemas import (
     PreviewResponse,
 )
 from ..sqlgen import build_sql
+from ..sql_ident import build_attach_string, quote_ident, scrub as _scrub_secrets
 from ..config import settings
 import re
 import time
@@ -1977,14 +1978,14 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                 user = _unq(p.username or '')
                 password = _unq(p.password or '')
                 database = db_override or (p.path or '').lstrip('/')
-                parts = [f"host={host}", f"port={port}"]
-                if user:
-                    parts.append(f"user={user}")
-                if password:
-                    parts.append(f"password={password}")
-                if database:
-                    parts.append(f"database={database}")
-                attach_str = ' '.join(parts)
+                try:
+                    attach_str = build_attach_string(
+                        {'host': host, 'port': port, 'user': user, 'password': password},
+                        database,
+                    )
+                except ValueError as e:
+                    print(f"[Introspect] ATTACH '{alias}' rejected: {e}")
+                    continue
                 try:
                     conn.execute(f"INSTALL {attach_type}")
                 except Exception:
@@ -1993,7 +1994,7 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                     conn.execute(f"LOAD {attach_type}")
                 except Exception:
                     pass
-                attach_sql = f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})"
+                attach_sql = f"ATTACH '{attach_str}' AS {quote_ident(alias)} (TYPE {attach_type})"
                 try:
                     conn.execute(attach_sql)
                     try:
@@ -2003,7 +2004,7 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                         pass
                 except Exception as e:
                     if 'already' not in str(e).lower() and 'exists' not in str(e).lower():
-                        print(f"[Introspect] ATTACH '{alias}' failed: {e}")
+                        print(f"[Introspect] ATTACH '{alias}' ({host}) failed: {_scrub_secrets(e, [password, attach_str])}")
                         continue
                     # Still register so pool connections can replay
                     try:
@@ -2302,14 +2303,14 @@ def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
                 user = _unq(p.username or '')
                 password = _unq(p.password or '')
                 database = db_override or (p.path or '').lstrip('/')
-                parts = [f"host={host}", f"port={port}"]
-                if user:
-                    parts.append(f"user={user}")
-                if password:
-                    parts.append(f"password={password}")
-                if database:
-                    parts.append(f"database={database}")
-                attach_str = ' '.join(parts)
+                try:
+                    attach_str = build_attach_string(
+                        {'host': host, 'port': port, 'user': user, 'password': password},
+                        database,
+                    )
+                except ValueError as e:
+                    print(f"[/tables] ATTACH '{alias}' rejected: {e}")
+                    continue
                 try:
                     conn.execute(f"INSTALL {attach_type}")
                 except Exception:
@@ -2318,7 +2319,7 @@ def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
                     conn.execute(f"LOAD {attach_type}")
                 except Exception:
                     pass
-                attach_sql = f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})"
+                attach_sql = f"ATTACH '{attach_str}' AS {quote_ident(alias)} (TYPE {attach_type})"
                 try:
                     conn.execute(attach_sql)
                     try:
@@ -2328,7 +2329,7 @@ def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
                         pass
                 except Exception as e:
                     if 'already' not in str(e).lower() and 'exists' not in str(e).lower():
-                        print(f"[/tables] ATTACH '{alias}' failed: {e}")
+                        print(f"[/tables] ATTACH '{alias}' ({host}) failed: {_scrub_secrets(e, [password, attach_str])}")
                         continue
                     # Still register so pool connections can replay
                     try:

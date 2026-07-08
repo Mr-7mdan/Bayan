@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 import re
+import sqlglot
+from sqlglot import exp
 from .sql_dialect_normalizer import normalize_sql_expression
+from .sql_ident import quote_ident, InvalidExpression
 
 _re_cc = re
 
@@ -19,6 +22,52 @@ def _dialect_name(dialect: str | None) -> str:
     return d or "unknown"
 
 
+# Custom-column / transform expressions are free-form user SQL inlined into the
+# SELECT list. Gate them: reject statement terminators, comments, and DDL/DML
+# keywords, and require the whole string to parse as a single scalar expression.
+_EXPR_DENY = re.compile(
+    r';|--|/\*|\bDROP\b|\bDELETE\b|\bINSERT\b|\bUPDATE\b|'
+    r'\bALTER\b|\bATTACH\b|\bCREATE\b|\bCOPY\b|\bPRAGMA\b|'
+    r'\bGRANT\b|\bINTO\b',
+    re.IGNORECASE,
+)
+
+# sqlglot dialects we can safely hand to the parser; anything else -> duckdb.
+_SQLGLOT_DIALECTS = {"duckdb", "mysql", "postgres", "tsql", "sqlite"}
+
+
+def _sqlglot_dialect(dialect: str) -> str:
+    d = (dialect or '').lower()
+    if d == 'mssql':
+        return 'tsql'
+    if d.startswith('postgres'):
+        return 'postgres'
+    return d if d in _SQLGLOT_DIALECTS else 'duckdb'
+
+
+def validate_expr(expr: str, dialect: str) -> str:
+    """Validate a free-form custom-column/transform expression before it is
+    inlined into SQL. Raises InvalidExpression on anything that is not a single
+    scalar expression. Behavior-preserving: legitimate arithmetic/CASE exprs
+    pass through unchanged."""
+    e = str(expr or '').strip()
+    if not e:
+        return e
+    if _EXPR_DENY.search(e):
+        raise InvalidExpression("disallowed token in expression")
+    # Must parse as a single scalar expression, not a statement/stacked query.
+    try:
+        trees = sqlglot.parse(e, read=_sqlglot_dialect(dialect))
+    except Exception:
+        raise InvalidExpression("unparseable expression")
+    if len(trees) != 1 or isinstance(
+        trees[0],
+        (exp.Command, exp.DDL, exp.Insert, exp.Delete, exp.Update, exp.Drop),
+    ):
+        raise InvalidExpression("expression is not a scalar")
+    return e
+
+
 def _lit(v: Any) -> str:
     if v is None: return "NULL"
     if isinstance(v, (int, float)):
@@ -32,28 +81,12 @@ _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _quote_segment(d: str, seg: str) -> str:
-    # Return segment quoted for the dialect d. If already quoted, return as-is.
+    # Quote a single identifier segment for dialect d. Delegates to the shared
+    # helper, which doubles any embedded quote char so a segment can never break
+    # out of its quotes (the escaping the old inline logic lacked). Idempotent.
     if not seg:
         return seg
-    if seg.startswith('"') and seg.endswith('"'):
-        return seg
-    if seg.startswith('`') and seg.endswith('`'):
-        return seg
-    if seg.startswith('[') and seg.endswith(']'):
-        return seg
-    if not _IDENT_RE.match(seg):
-        # Non-simple: quote anyway
-        if d == 'mysql':
-            return f"`{seg}`"
-        if d == 'mssql':
-            return f"[{seg}]"
-        return f'"{seg}"'
-    # Simple identifier: still quote to be safe
-    if d == 'mysql':
-        return f"`{seg}`"
-    if d == 'mssql':
-        return f"[{seg}]"
-    return f'"{seg}"'
+    return quote_ident(seg, d)
 
 
 def _qtable(dialect: str, name: str) -> str:
@@ -691,6 +724,8 @@ def build_sql(
         # even if the column itself isn't in the final SELECT.
         
         if name and expr:
+            # Gate free-form user SQL before it is inlined into the SELECT list.
+            validate_expr(expr, d)
             # Detect pure arithmetic: only identifiers, numbers, and arithmetic operators (+, -, *, /)
             _num_hint = (ctype == 'number')
             if not _num_hint:
@@ -762,6 +797,8 @@ def build_sql(
             nm = str((tr or {}).get("name") or "").strip()
             ex = str((tr or {}).get("expr") or "").strip()
             if nm and ex:
+                # Gate free-form user SQL before it is inlined into the SELECT list.
+                validate_expr(ex, d)
                 # Apply same normalization/numeric-hint logic as custom columns
                 _num_hint = False
                 try:

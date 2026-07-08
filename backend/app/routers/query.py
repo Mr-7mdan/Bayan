@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from ..db import get_active_duck_path, get_duckdb_engine, get_engine_from_dsn, open_duck_native, _replay_attaches_on_conn
 from ..sqlgen import build_sql, build_distinct_sql
 from ..sqlgen_glot import SQLGlotBuilder, should_use_sqlglot
+from ..sql_ident import quote_ident, quote_source, build_attach_string, scrub as _scrub_secrets
 from ..sql_dialect_normalizer import normalize_sql_expression
 import json
 from dateutil import parser as date_parser
@@ -451,17 +452,11 @@ def _parse_mysql_dsn(dsn: str) -> dict:
 
 
 def _build_mysql_attach_str(info: dict, db_override: str = '') -> str:
-    """Build the DuckDB MySQL ATTACH connection string from parsed DSN info."""
-    parts = [f"host={info.get('host', 'localhost')}"]
-    parts.append(f"port={info.get('port', 3306)}")
-    if info.get('user'):
-        parts.append(f"user={info['user']}")
-    if info.get('password'):
-        parts.append(f"password={info['password']}")
-    db = (db_override or info.get('database') or '').strip()
-    if db:
-        parts.append(f"database={db}")
-    return ' '.join(parts)
+    """Build the DuckDB MySQL ATTACH connection string from parsed DSN info.
+
+    Delegates to the credential-safe shared builder, which rejects any field
+    containing a character that could break out of the ATTACH '...' literal."""
+    return build_attach_string(info, db_override)
 
 
 def _duck_attach_type(ds_type: str) -> Optional[str]:
@@ -510,18 +505,24 @@ def _apply_duck_mysql_attachments(conn, attachments: list, db_session) -> None:
             info = _parse_mysql_dsn(dsn)
             if not info.get('host'):
                 continue
-            attach_str = _build_mysql_attach_str(info, db_override)
             try:
-                conn.execute(f"ATTACH '{attach_str}' AS \"{alias}\" (TYPE {attach_type})")
+                attach_str = _build_mysql_attach_str(info, db_override)
+            except ValueError as e:
+                # invalid character in a credential field — never log the value
+                sys.stderr.write(f"[RemoteAttach] ATTACH '{alias}' rejected: {e}\n")
+                continue
+            try:
+                conn.execute(f"ATTACH '{attach_str}' AS {quote_ident(alias)} (TYPE {attach_type})")
                 sys.stderr.write(f"[RemoteAttach] Attached '{alias}' ({attach_type}) → {info.get('host')}/{info.get('database')}\n")
             except Exception as e:
                 msg = str(e).lower()
                 if 'already' in msg or 'exists' in msg:
                     pass  # Already attached on the shared connection
                 else:
-                    sys.stderr.write(f"[RemoteAttach] ATTACH '{alias}' failed: {e}\n")
+                    # Scrub any credential the DuckDB exception may echo back.
+                    sys.stderr.write(f"[RemoteAttach] ATTACH '{alias}' ({info.get('host')}) failed: {_scrub_secrets(e, [info.get('password'), attach_str])}\n")
         except Exception as e:
-            sys.stderr.write(f"[RemoteAttach] Error processing '{alias}': {e}\n")
+            sys.stderr.write(f"[RemoteAttach] Error processing '{alias}': {type(e).__name__}\n")
     sys.stderr.flush()
 
 
@@ -537,25 +538,12 @@ def _duck_has_table(table: Optional[str]) -> bool:
             return False
         with open_duck_native(db_path) as conn:
             try:
-                # Try as-is first (for schema-qualified names)
-                conn.execute(f"SELECT * FROM {t} LIMIT 0")
+                # quote_source escape-quotes each dotted segment (DuckDB dialect),
+                # so schema-qualified names work without the old fallback ladder.
+                conn.execute(f"SELECT * FROM {quote_source(t)} LIMIT 0")
                 return True
             except Exception:
-                try:
-                    # Try with double quotes (DuckDB standard)
-                    conn.execute(f'SELECT * FROM "{t}" LIMIT 0')
-                    return True
-                except Exception:
-                    try:
-                        # Try quoting each part for schema.table
-                        if '.' in t:
-                            parts = [p.strip().strip('"').strip('`').strip('[]') for p in t.split('.')]
-                            quoted = '.'.join([f'"{p}"' for p in parts])
-                            conn.execute(f'SELECT * FROM {quoted} LIMIT 0')
-                            return True
-                    except Exception:
-                        pass
-                    return False
+                return False
     except Exception:
         return False
 
@@ -2534,34 +2522,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
     # Helpers available to all branches
     def _q_ident(name: str) -> str:
-        s = str(name or '').strip('\n\r\t')
-        if not s:
-            return s
-        if s.startswith('[') and s.endswith(']'):
-            return s
-        if s.startswith('"') and s.endswith('"'):
-            return s
-        if s.startswith('`') and s.endswith('`'):
-            return s
-        d = (ds_type or '').lower()
-        if 'mssql' in d or 'sqlserver' in d:
-            return f"[{s}]"
-        if 'mysql' in d and 'duckdb' not in d:
-            return f"`{s}`"
-        return f'"{s}"'
+        return quote_ident(name, ds_type)
     def _q_source(name: str) -> str:
-        s = str(name or '').strip()
-        if not s:
-            return s
-        d = (ds_type or '').lower()
-        if 'mssql' in d or 'sqlserver' in d:
-            parts = s.split('.')
-            return '.'.join([p if (p.startswith('[') and p.endswith(']')) else f"[{p}]" for p in parts])
-        if 'mysql' in d:
-            parts = s.split('.')
-            return '.'.join([p if (p.startswith('`') and p.endswith('`')) else f"`{p}`" for p in parts])
-        parts = s.split('.')
-        return '.'.join([p if ((p.startswith('"') and p.endswith('"')) or (p.startswith('[') and p.endswith(']')) or (p.startswith('`') and p.endswith('`'))) else f'"{p}"' for p in parts])
+        return quote_source(name, ds_type)
     def _pname(base: str, suffix: str = "") -> str:
         core = re.sub(r"[^A-Za-z0-9_]", "_", str(base or ''))
         return f"w_{core}{suffix}"
@@ -3672,21 +3635,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         # Apply WHERE filters on top of transformed subquery
         # Helpers: quote identifiers for WHERE and sanitize param names
         def _q_ident(name: str) -> str:
-            s = str(name or '').strip('\n\r\t')
-            if not s:
-                return s
-            if s.startswith('[') and s.endswith(']'):
-                return s
-            if s.startswith('"') and s.endswith('"'):
-                return s
-            if s.startswith('`') and s.endswith('`'):
-                return s
-            d = (ds_type or '').lower()
-            if 'mssql' in d or 'sqlserver' in d:
-                return f"[{s}]"
-            if 'mysql' in d:
-                return f"`{s}`"
-            return f'"{s}"'
+            return quote_ident(name, ds_type)
         def _pname(base: str, suffix: str = "") -> str:
             core = re.sub(r"[^A-Za-z0-9_]", "_", str(base or ''))
             return f"w_{core}{suffix}"
@@ -6384,35 +6333,10 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
                 s = parts[-1]
         except Exception:
             pass
-        if not s:
-            return s
-        if s.startswith('[') and s.endswith(']'):
-            return s
-        if s.startswith('"') and s.endswith('"'):
-            return s
-        if s.startswith('`') and s.endswith('`'):
-            return s
-        d = (ds_type or '').lower()
-        if 'mssql' in d or 'sqlserver' in d:
-            return f"[{s}]"
-        if 'mysql' in d:
-            return f"`{s}`"
-        return f'"{s}"'
+        return quote_ident(s, ds_type)
 
     def _q_source(name: str) -> str:
-        s = str(name or '').strip()
-        if not s:
-            return s
-        d = (ds_type or '').lower()
-        if 'mssql' in d or 'sqlserver' in d:
-            parts = s.split('.')
-            return '.'.join([p if (p.startswith('[') and p.endswith(']')) else f"[{p}]" for p in parts])
-        if 'mysql' in d:
-            parts = s.split('.')
-            return '.'.join([p if (p.startswith('`') and p.endswith('`')) else f"`{p}`" for p in parts])
-        # Default (DuckDB/Postgres/SQLite): double-quote each part to allow spaces/special chars
-        parts = s.split('.')
-        return '.'.join([p if ((p.startswith('"') and p.endswith('"')) or (p.startswith('[') and p.endswith(']')) or (p.startswith('`') and p.endswith('`'))) else f'"{p}"' for p in parts])
+        return quote_source(name, ds_type)
 
     def _derived_lhs(name: str) -> str:
         raw = str(name or '').strip()
@@ -8553,13 +8477,7 @@ def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
         source = getattr(payload, 'source', '')
         # Build plain source quoted
         def _q_src(s: str) -> str:
-            parts = str(s or '').strip().split('.')
-            d = ds_type.lower()
-            if 'mssql' in d or 'sqlserver' in d:
-                return '.'.join([f"[{p}]" if not (p.startswith('[') and p.endswith(']')) else p for p in parts])
-            if 'mysql' in d:
-                return '.'.join([f"`{p}`" if not (p.startswith('`') and p.endswith('`')) else p for p in parts])
-            return '.'.join([f'"{p}"' if not ((p.startswith('"') and p.endswith('"'))) else p for p in parts])
+            return quote_source(s, ds_type)
 
         effective_source = _q_src(source)
 
@@ -8836,33 +8754,9 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         except Exception:
             dialect_name = "duckdb" if route_duck else "unknown"
         def _q_ident_local(name: str) -> str:
-            s = str(name or '').strip('\n\r\t')
-            if not s:
-                return s
-            if s.startswith('[') and s.endswith(']'):
-                return s
-            if s.startswith('"') and s.endswith('"'):
-                return s
-            if s.startswith('`') and s.endswith('`'):
-                return s
-            if ("mssql" in dialect_name) or ("sqlserver" in dialect_name):
-                return f"[{s}]"
-            if "mysql" in dialect_name:
-                return f"`{s}`"
-            return f'"{s}"'
+            return quote_ident(name, dialect_name)
         def _q_source_local(name: str) -> str:
-            s = str(name or '').strip()
-            if not s:
-                return s
-            if ("mssql" in dialect_name) or ("sqlserver" in dialect_name):
-                parts = s.split('.')
-                return '.'.join([p if (p.startswith('[') and p.endswith(']')) else f"[{p}]" for p in parts])
-            if "mysql" in dialect_name:
-                parts = s.split('.')
-                return '.'.join([p if (p.startswith('`') and p.endswith('`')) else f"`{p}`" for p in parts])
-            # Default: double-quote each part for DuckDB/Postgres/SQLite
-            parts = s.split('.')
-            return '.'.join([p if ((p.startswith('"') and p.endswith('"')) or (p.startswith('[') and p.endswith(']')) or (p.startswith('`') and p.endswith('`'))) else f'"{p}"' for p in parts])
+            return quote_source(name, dialect_name)
         # Expand y if it's a custom column, otherwise quote it
         if y:
             if y in expr_map:
@@ -8914,20 +8808,7 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
     except Exception:
         dialect_name = "duckdb" if route_duck else "unknown"
     def _quote_ident(name: str) -> str:
-        s = str(name or '').strip()
-        if not s:
-            return s
-        if s.startswith('[') and s.endswith(']'):
-            return s
-        if s.startswith('"') and s.endswith('"'):
-            return s
-        if s.startswith('`') and s.endswith('`'):
-            return s
-        if ("mssql" in dialect_name) or ("sqlserver" in dialect_name):
-            return f"[{s}]"
-        if "mysql" in dialect_name:
-            return f"`{s}`"
-        return f'"{s}"'
+        return quote_ident(name, dialect_name)
     def _derived_lhs2(name: str) -> str:
         raw = str(name or '').strip()
         m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", raw, flags=re.IGNORECASE)
