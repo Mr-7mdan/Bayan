@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     auth_enforce: bool = Field(default=False, validation_alias=AliasChoices("AUTH_ENFORCE"))
     session_ttl_seconds: int = Field(default=60 * 60 * 24 * 30, validation_alias=AliasChoices("SESSION_TTL_SECONDS"))  # 30 days
 
+    # Audit log retention: rows older than this are purged by the daily job (spec 05)
+    audit_retention_days: int = Field(default=365, validation_alias=AliasChoices("AUDIT_RETENTION_DAYS"))
+
     # Local analytical store (DuckDB)
     duckdb_path: str = Field(default=".data/local.duckdb")
 

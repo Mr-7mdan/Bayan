@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -49,6 +49,7 @@ from ..schemas import (
 from uuid import uuid4
 from ..security import hash_password, verify_password, needs_rehash, sign_reset_token, verify_reset_token, sign_session_token
 from ..auth import get_current_user, get_current_user_optional, require_admin
+from ..audit import audit
 from ..config import settings
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -103,6 +104,7 @@ def get_sidebar_counts(user_id: str, db: Session = Depends(get_db), user: User |
 def add_dashboard_collection(
     user_id: str,
     payload: AddToCollectionRequest,
+    request: Request,
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user_optional),
 ) -> AddToCollectionResponse:
@@ -134,6 +136,16 @@ def add_dashboard_collection(
             grant_share_permission(db, dashboard_id, user_id, payload.permission)
         except Exception:
             pass
+        # Endpoint-level audit gives the correct actor (the sharer), unlike the
+        # model-level grant which is also reached from dashboard flows.
+        audit(
+            "dashboard.share.grant",
+            actor_id=(user.id if user else None),
+            target_type="dashboard",
+            target_id=dashboard_id,
+            request=request,
+            details={"targetUserId": user_id, "permission": payload.permission},
+        )
     # If this request represents a cross-user share, enqueue a notification
     if added and payload.sharedBy and payload.dashboardName:
         try:
@@ -229,7 +241,7 @@ def remove_dashboard_collection(
 
 # --- Auth endpoints ---
 @router.post("/signup", response_model=UserOut)
-def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
+def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_db)) -> UserOut:
     email = (payload.email or "").strip().lower()
     name = (payload.name or "").strip() or email.split("@")[0]
     role = "user"
@@ -240,17 +252,22 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
     db.add(u)
     db.commit()
     db.refresh(u)
+    audit("auth.signup", actor_id=u.id, target_type="user", target_id=u.id, request=request, details={"email": email})
     token = sign_session_token(u.id, u.password_hash, settings.session_ttl_seconds)
     return UserOut(id=u.id, name=u.name, email=u.email, role=u.role, token=token)
 
 
 @router.post("/login", response_model=UserOut)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> UserOut:
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> UserOut:
     email = (payload.email or "").strip().lower()
     u = db.query(User).filter(User.email == email).first()
     if not u or not verify_password(payload.password, u.password_hash):
+        audit("auth.login.failure", actor_id=(u.id if u else None), target_type="user",
+              target_id=(u.id if u else None), request=request, status="failure", details={"email": email})
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not bool(u.active):
+        audit("auth.login.failure", actor_id=u.id, target_type="user", target_id=u.id,
+              request=request, status="failure", details={"email": email, "reason": "disabled"})
         raise HTTPException(status_code=403, detail="Account disabled")
     # Transparently upgrade legacy SHA256 hashes to argon2id on successful login.
     # Rehash BEFORE signing so the token fingerprint matches the stored hash.
@@ -258,6 +275,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> UserOut:
         u.password_hash = hash_password(payload.password)
         db.add(u)
         db.commit()
+    audit("auth.login.success", actor_id=u.id, target_type="user", target_id=u.id, request=request)
     token = sign_session_token(u.id, u.password_hash, settings.session_ttl_seconds)
     return UserOut(id=u.id, name=u.name, email=u.email, role=u.role, token=token)
 
@@ -265,6 +283,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> UserOut:
 @router.post("/change-password", response_model=dict)
 def change_password(
     payload: ChangePasswordRequest,
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -277,6 +296,7 @@ def change_password(
     u.password_hash = hash_password(payload.newPassword)
     db.add(u)
     db.commit()
+    audit("auth.password.change", actor_id=u.id, target_type="user", target_id=u.id, request=request)
     # Old tokens die via fingerprint mismatch; hand back a fresh one so the
     # current client stays logged in.
     token = sign_session_token(u.id, u.password_hash, settings.session_ttl_seconds)
@@ -284,12 +304,15 @@ def change_password(
 
 
 @router.post("/request-password-reset", response_model=dict)
-def request_password_reset(payload: RequestPasswordResetPayload, db: Session = Depends(get_db)):
+def request_password_reset(payload: RequestPasswordResetPayload, request: Request, db: Session = Depends(get_db)):
     """Step 1: User enters email. If valid, send a reset link via email."""
     from ..config import settings as _cfg
     email = (payload.email or "").strip().lower()
     u = db.query(User).filter(User.email == email).first()
     if not u:
+        # Log the miss but keep the anti-enumeration response unchanged.
+        audit("auth.password.reset_request", target_type="user", request=request,
+              status="failure", details={"email": email})
         # Always return ok to prevent email enumeration
         return {"ok": True}
     token = sign_reset_token(u.id, ttl_seconds=3600)
@@ -311,11 +334,13 @@ def request_password_reset(payload: RequestPasswordResetPayload, db: Session = D
         send_email(db, subject="Password Reset - Bayan", to=[u.email], html=html)
     except Exception:
         pass  # email failure should not block the response
+    audit("auth.password.reset_request", actor_id=u.id, target_type="user", target_id=u.id,
+          request=request, details={"email": email})
     return {"ok": True}
 
 
 @router.post("/confirm-password-reset", response_model=dict)
-def confirm_password_reset(payload: ConfirmPasswordResetPayload, db: Session = Depends(get_db)):
+def confirm_password_reset(payload: ConfirmPasswordResetPayload, request: Request, db: Session = Depends(get_db)):
     """Step 2: User clicks link, enters new password. Token is verified and password updated."""
     user_id = verify_reset_token(payload.token)
     if not user_id:
@@ -326,11 +351,12 @@ def confirm_password_reset(payload: ConfirmPasswordResetPayload, db: Session = D
     u.password_hash = hash_password(payload.newPassword)
     db.add(u)
     db.commit()
+    audit("auth.password.reset_confirm", actor_id=u.id, target_type="user", target_id=u.id, request=request)
     return {"ok": True}
 
 
 @router.post("/reset-password", response_model=dict)
-def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+def reset_password(payload: ResetPasswordRequest, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     """Admin-only direct password reset (legacy endpoint)."""
     email = (payload.email or "").strip().lower()
     u = db.query(User).filter(User.email == email).first()
@@ -339,11 +365,13 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db),
     u.password_hash = hash_password(payload.newPassword)
     db.add(u)
     db.commit()
+    audit("user.password.admin_set", actor_id=(admin.id if admin else None), target_type="user",
+          target_id=u.id, request=request)
     return {"ok": True}
 
 
 @router.post("/bootstrap-admin", response_model=UserOut)
-def bootstrap_admin(payload: SignupRequest, db: Session = Depends(get_db)) -> UserOut:
+def bootstrap_admin(payload: SignupRequest, request: Request, db: Session = Depends(get_db)) -> UserOut:
     """Create the very first admin user if none exists.
     Subsequent calls are blocked once an admin exists.
     """
@@ -359,6 +387,8 @@ def bootstrap_admin(payload: SignupRequest, db: Session = Depends(get_db)) -> Us
     db.add(u)
     db.commit()
     db.refresh(u)
+    audit("user.create", actor_id=u.id, target_type="user", target_id=u.id, request=request,
+          details={"role": "admin", "bootstrap": True})
     token = sign_session_token(u.id, u.password_hash, settings.session_ttl_seconds)
     return UserOut(id=u.id, name=u.name, email=u.email, role=u.role, token=token)
 
@@ -374,7 +404,7 @@ def admin_list_users(db: Session = Depends(get_db), admin: User = Depends(requir
 
 
 @router.post("/admin", response_model=UserOut)
-def admin_create_user(payload: AdminCreateUserRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+def admin_create_user(payload: AdminCreateUserRequest, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     email = (payload.email or "").strip().lower()
     name = (payload.name or "").strip() or email.split("@")[0]
     role = (payload.role or "user").lower()
@@ -387,28 +417,34 @@ def admin_create_user(payload: AdminCreateUserRequest, db: Session = Depends(get
     db.add(u)
     db.commit()
     db.refresh(u)
+    audit("user.create", actor_id=(admin.id if admin else None), target_type="user", target_id=u.id,
+          request=request, details={"role": role, "bootstrap": False})
     return UserOut(id=u.id, name=u.name, email=u.email, role=u.role)
 
 
 @router.post("/admin/{target_id}/set-active", response_model=dict)
-def admin_set_active(target_id: str, payload: SetActiveRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+def admin_set_active(target_id: str, payload: SetActiveRequest, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     u = db.get(User, target_id)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
     u.active = bool(payload.active)
     db.add(u)
     db.commit()
+    audit("user.set_active", actor_id=(admin.id if admin else None), target_type="user", target_id=target_id,
+          request=request, details={"active": bool(payload.active)})
     return {"ok": True}
 
 
 @router.post("/admin/{target_id}/set-password", response_model=dict)
-def admin_set_password(target_id: str, payload: AdminSetPasswordRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+def admin_set_password(target_id: str, payload: AdminSetPasswordRequest, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     u = db.get(User, target_id)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
     u.password_hash = hash_password(payload.newPassword)
     db.add(u)
     db.commit()
+    audit("user.password.admin_set", actor_id=(admin.id if admin else None), target_type="user",
+          target_id=target_id, request=request)
     return {"ok": True}
 
 

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from datetime import datetime
 from sqlalchemy.orm import Session
 from pathlib import Path
 import json
 
 from ..auth import require_admin
-from ..models import SessionLocal, User, Datasource
+from ..audit import audit
+from ..models import SessionLocal, User, Datasource, AuditLog
 from ..schemas import BrandingUpdateIn, BrandingOut
 from ..config import settings
 from ..scheduler import list_jobs, schedule_all_jobs
@@ -35,8 +36,10 @@ async def scheduler_jobs(db: Session = Depends(get_db), admin: User = Depends(re
 
 
 @router.post("/scheduler/refresh")
-async def scheduler_refresh(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    return schedule_all_jobs()
+async def scheduler_refresh(request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    result = schedule_all_jobs()
+    audit("admin.scheduler.refresh", actor_id=(admin.id if admin else None), target_type="system", request=request)
+    return result
 
 
 @router.get("/metrics-live")
@@ -144,7 +147,7 @@ async def duckdb_active(db: Session = Depends(get_db), admin: User = Depends(req
 
 
 @router.post("/duckdb/active")
-async def duckdb_set_active(payload: _SetDuckActivePayload, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+async def duckdb_set_active(payload: _SetDuckActivePayload, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     # Prefer datasourceId if provided
     if payload.datasourceId:
         ds = db.get(Datasource, payload.datasourceId)
@@ -157,22 +160,28 @@ async def duckdb_set_active(payload: _SetDuckActivePayload, db: Session = Depend
         dsn = decrypt_text(ds.connection_encrypted or "") if ds.connection_encrypted else None
         if dsn:
             path_set = set_active_duck_path(dsn)
+            audit("admin.duckdb.set_active", actor_id=(admin.id if admin else None), target_type="system",
+                  target_id=payload.datasourceId, request=request, details={"path": path_set})
             return { "path": path_set }
         # No connection URI means this datasource IS the default local store.
         # Just confirm (and re-persist) the current active path — do NOT derive a
         # new name-based path which would switch to an empty file.
         current_path = get_active_duck_path()
         path_set = set_active_duck_path(current_path)
+        audit("admin.duckdb.set_active", actor_id=(admin.id if admin else None), target_type="system",
+              target_id=payload.datasourceId, request=request, details={"path": path_set})
         return { "path": path_set }
     # Or accept a direct path string
     if payload.path and str(payload.path).strip():
         path_set = set_active_duck_path(str(payload.path).strip())
+        audit("admin.duckdb.set_active", actor_id=(admin.id if admin else None), target_type="system",
+              request=request, details={"path": path_set})
         return { "path": path_set }
     raise HTTPException(status_code=400, detail="datasourceId or path is required")
 
 
 @router.put("/branding", response_model=BrandingOut)
-async def update_branding(payload: BrandingUpdateIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+async def update_branding(payload: BrandingUpdateIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     try:
         data_dir = Path(settings.metadata_db_path).resolve().parent
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -198,6 +207,7 @@ async def update_branding(payload: BrandingUpdateIn, db: Session = Depends(get_d
         # immediately shows what users will see.
         from ..main import _coalesce_branding  # late import to avoid cycle at module load
         eff = _coalesce_branding(current)
+        audit("admin.branding.update", actor_id=(admin.id if admin else None), target_type="system", request=request)
         return BrandingOut(
             fonts={"primary": "Inter", "code": "ui-monospace"},
             palette={},
@@ -211,7 +221,7 @@ async def update_branding(payload: BrandingUpdateIn, db: Session = Depends(get_d
 
 
 @router.post("/branding/reset", response_model=BrandingOut)
-async def reset_branding(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+async def reset_branding(request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     """Clear all branding overrides — restores the Bayan default look."""
     try:
         data_dir = Path(settings.metadata_db_path).resolve().parent
@@ -229,6 +239,7 @@ async def reset_branding(db: Session = Depends(get_db), admin: User = Depends(re
         f.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
         from ..main import _coalesce_branding
         eff = _coalesce_branding(current)
+        audit("admin.branding.reset", actor_id=(admin.id if admin else None), target_type="system", request=request)
         return BrandingOut(
             fonts={"primary": "Inter", "code": "ui-monospace"},
             palette={},
@@ -239,3 +250,38 @@ async def reset_branding(db: Session = Depends(get_db), admin: User = Depends(re
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Audit log read API (spec 05): append-only, admin-only, no update/delete ---
+@router.get("/audit-logs")
+async def audit_logs(
+    actorId: str | None = Query(default=None),
+    action: str | None = Query(default=None),        # prefix match, e.g. "auth."
+    actor: str | None = Query(default=None),          # filter by actor_id or actor_email
+    targetId: str | None = Query(default=None),
+    since: str | None = Query(default=None),          # ISO datetime
+    until: str | None = Query(default=None),
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    q = db.query(AuditLog)
+    if action:
+        q = q.filter(AuditLog.action.like(action + "%"))
+    if actor:
+        q = q.filter((AuditLog.actor_id == actor) | (AuditLog.actor_email == actor))
+    if targetId:
+        q = q.filter(AuditLog.target_id == targetId)
+    if since:
+        q = q.filter(AuditLog.ts >= datetime.fromisoformat(since))
+    if until:
+        q = q.filter(AuditLog.ts <= datetime.fromisoformat(until))
+    total = q.count()
+    rows = q.order_by(AuditLog.ts.desc()).offset(offset).limit(limit).all()
+    return {"total": total, "items": [
+        {"id": r.id, "ts": (r.ts.isoformat() + "Z" if r.ts else None), "actorId": r.actor_id,
+         "actorEmail": r.actor_email, "action": r.action, "targetType": r.target_type,
+         "targetId": r.target_id, "ip": r.ip, "userAgent": r.user_agent,
+         "status": r.status, "details": json.loads(r.details_json or "null")}
+        for r in rows]}

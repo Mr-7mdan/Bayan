@@ -47,6 +47,7 @@ from ..schemas import (
 from ..config import settings
 from ..models import Datasource, SyncTask
 from ..auth import actor_id_optional
+from ..audit import audit
 from ..authz import is_admin as _authz_is_admin
 from ..security import decrypt_text, encrypt_text, sign_embed_token, verify_embed_token
 
@@ -232,8 +233,9 @@ def list_dashboards(
 
 
 @router.post("", response_model=DashboardOut)
-def save_dash(payload: DashboardSaveRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def save_dash(payload: DashboardSaveRequest, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     try:
+        is_update = bool(payload.id)
         # When enforcing, identity comes only from the authenticated actor;
         # the client-supplied payload.userId is not trusted for ownership.
         owner = actorId if settings.auth_enforce else payload.userId
@@ -256,6 +258,8 @@ def save_dash(payload: DashboardSaveRequest, actorId: str | None = Depends(actor
             definition=payload.definition.model_dump(),
             dash_id=payload.id,
         )
+        audit("dashboard.update" if is_update else "dashboard.create",
+              actor_id=actorId, target_type="dashboard", target_id=d.id, request=request)
         return DashboardOut(
             id=d.id,
             name=d.name,
@@ -340,7 +344,7 @@ def list_embed_tokens(dash_id: str, actorId: str | None = Depends(actor_id_optio
 
 
 @router.delete("/{dash_id}/embed-tokens/{token_id}")
-def delete_embed_token(dash_id: str, token_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def delete_embed_token(dash_id: str, token_id: str, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -352,6 +356,8 @@ def delete_embed_token(dash_id: str, token_id: str, actorId: str | None = Depend
     deleted = revoke_embed_token(db, token_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Token not found")
+    audit("dashboard.embed_token.revoke", actor_id=actorId, target_type="dashboard", target_id=dash_id,
+          request=request, details={"tokenId": token_id})
     return {"deleted": deleted}
 
 
@@ -383,7 +389,7 @@ def list_shares(dash_id: str, actorId: str | None = Depends(actor_id_optional), 
 
 
 @router.delete("/{dash_id}/shares/{user_id}")
-def delete_share(dash_id: str, user_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def delete_share(dash_id: str, user_id: str, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -400,11 +406,13 @@ def delete_share(dash_id: str, user_id: str, actorId: str | None = Depends(actor
         pass
     if not removed:
         raise HTTPException(status_code=404, detail="Share not found")
+    audit("dashboard.share.revoke", actor_id=actorId, target_type="dashboard", target_id=dash_id,
+          request=request, details={"targetUserId": user_id})
     return {"deleted": removed}
 
 
 @router.post("/public/{public_id}/embed-token")
-def create_embed_token(public_id: str, ttl: int = Query(default=3600), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def create_embed_token(public_id: str, request: Request, ttl: int = Query(default=3600), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     sl = get_share_link_by_public(db, public_id)
     if not sl:
         raise HTTPException(status_code=404, detail="Not found")
@@ -417,11 +425,14 @@ def create_embed_token(public_id: str, ttl: int = Query(default=3600), actorId: 
     token, exp = sign_embed_token(public_id, ttl)
     # Persist the token for revocation/listing
     create_embed_token_row(db, d.id, public_id, token, exp)
+    # Never log the token itself — only that one was issued and its expiry.
+    audit("dashboard.embed_token.create", actor_id=actorId, target_type="dashboard", target_id=d.id,
+          request=request, details={"publicId": public_id, "exp": exp})
     return EmbedTokenOut(token=token, exp=exp)
 
 
 @router.delete("/{dash_id}")
-def delete_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def delete_dash(dash_id: str, request: Request, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Permission: owner or 'rw'
     d0 = load_dashboard(db, dash_id)
     if not d0:
@@ -436,11 +447,12 @@ def delete_dash(dash_id: str, userId: str | None = Query(default=None), actorId:
     deleted = delete_dashboard(db, dash_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Dashboard not found")
+    audit("dashboard.delete", actor_id=actorId, target_type="dashboard", target_id=dash_id, request=request)
     return {"deleted": deleted}
 
 
 @router.post("/{dash_id}/publish", response_model=PublishOut)
-def publish_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def publish_dash(dash_id: str, request: Request, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -452,11 +464,13 @@ def publish_dash(dash_id: str, userId: str | None = Query(default=None), actorId
         if perm != "rw":
             raise HTTPException(status_code=403, detail="No write permission for this dashboard")
     sl = publish_dashboard_link(db, dash_id)
+    audit("dashboard.publish", actor_id=actorId, target_type="dashboard", target_id=dash_id,
+          request=request, details={"publicId": sl.public_id})
     return PublishOut(publicId=sl.public_id, protected=bool(sl.token_hash))
 
 
 @router.post("/{dash_id}/unpublish")
-def unpublish_dash(dash_id: str, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def unpublish_dash(dash_id: str, request: Request, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -468,6 +482,7 @@ def unpublish_dash(dash_id: str, userId: str | None = Query(default=None), actor
         if perm != "rw":
             raise HTTPException(status_code=403, detail="No write permission for this dashboard")
     count = unpublish_dashboard_links(db, dash_id)
+    audit("dashboard.unpublish", actor_id=actorId, target_type="dashboard", target_id=dash_id, request=request)
     return {"unpublished": count}
 
 
@@ -483,7 +498,7 @@ def get_publish_status(dash_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{dash_id}/publish/token", response_model=PublishOut)
-def set_publish_token(dash_id: str, payload: SetPublishTokenRequest, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def set_publish_token(dash_id: str, payload: SetPublishTokenRequest, request: Request, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -499,6 +514,9 @@ def set_publish_token(dash_id: str, payload: SetPublishTokenRequest, userId: str
         set_share_link_token(db, sl, (payload.token or None), settings.secret_key)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # Store only whether a token now protects the link — never the token itself.
+    audit("dashboard.publish.token_set", actor_id=actorId, target_type="dashboard", target_id=dash_id,
+          request=request, details={"protected": bool(sl.token_hash)})
     return PublishOut(publicId=sl.public_id, protected=bool(sl.token_hash))
 
 
@@ -593,7 +611,7 @@ def _ds_to_export_item(ds: Datasource) -> DatasourceExportItem:
 
 
 @router.get("/export", response_model=DashboardExportResponse)
-def export_dashboards(userId: str | None = Query(default=None), ids: list[str] | None = Query(default=None), includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def export_dashboards(request: Request, userId: str | None = Query(default=None), ids: list[str] | None = Query(default=None), includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Permission: admin can export any; otherwise restrict to provided userId==actor or fallback to actor
     if _actor_is_admin(db, actorId):
         q = db.query(Dashboard)
@@ -648,11 +666,13 @@ def export_dashboards(userId: str | None = Query(default=None), ids: list[str] |
                     })
                 item.syncTasks = st_items  # type: ignore[attr-defined]
             ds_items.append(item)
+    audit("dashboard.export", actor_id=actorId, target_type="dashboard", request=request,
+          details={"ids": [d.id for d in rows], "includeDatasources": bool(includeDatasources)})
     return DashboardExportResponse(dashboards=d_items, datasources=(ds_items or None))
 
 
 @router.get("/{dash_id}/export", response_model=DashboardExportResponse)
-def export_dashboard(dash_id: str, includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def export_dashboard(dash_id: str, request: Request, includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
@@ -698,11 +718,13 @@ def export_dashboard(dash_id: str, includeDatasources: bool = Query(default=True
                         })
                     item.syncTasks = st_items  # type: ignore[attr-defined]
                 ds_items.append(item)
+    audit("dashboard.export", actor_id=actorId, target_type="dashboard", target_id=dash_id, request=request,
+          details={"ids": [dash_id], "includeDatasources": bool(includeDatasources)})
     return DashboardExportResponse(dashboards=[d_item], datasources=(ds_items or None))
 
 
 @router.post("/import", response_model=DashboardImportResponse)
-def import_dashboards(payload: DashboardImportRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def import_dashboards(payload: DashboardImportRequest, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     if not payload or not isinstance(payload.dashboards, list):
         raise HTTPException(status_code=400, detail="dashboards array is required")
     # Build datasource id map if provided
@@ -748,4 +770,6 @@ def import_dashboards(payload: DashboardImportRequest, actorId: str | None = Dep
             d = save_dashboard(db, user_id=owner, name=it.name, definition=defn)
             created += 1
         out.append(DashboardOut(id=d.id, name=d.name, userId=d.user_id, created_at=d.created_at, definition=json.loads(d.definition_json or "{}")))
+    audit("dashboard.import", actor_id=actorId, target_type="dashboard", request=request,
+          details={"count": len(out)})
     return DashboardImportResponse(imported=len(out), items=out)

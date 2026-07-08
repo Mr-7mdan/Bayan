@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, UploadFile, File, Form
 from typing import Any
 from uuid import uuid4
 import os
@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover
 
 from ..models import SessionLocal, Datasource, init_db, create_datasource, NewDatasourceInput, User, SyncTask, SyncState, SyncRun, SyncLock, DatasourceShare
 from ..auth import actor_id_optional
+from ..audit import audit
 from ..authz import is_admin as _authz_is_admin, datasource_permission, Permission, require_admin
 from ..db import get_duckdb_engine, get_engine_from_dsn, run_sequence_sync, run_snapshot_sync, open_duck_native, get_active_duck_path
 from ..api_ingest import run_api_sync
@@ -98,7 +99,7 @@ def _http_for_db_error(e: Exception) -> HTTPException | None:
     return None
 
 @router.post("", response_model=DatasourceOut)
-def create_ds(payload: DatasourceCreate, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def create_ds(payload: DatasourceCreate, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     enc = encrypt_text(payload.connectionUri) if payload.connectionUri else None
     ds = create_datasource(
         db,
@@ -111,6 +112,8 @@ def create_ds(payload: DatasourceCreate, actorId: str | None = Depends(actor_id_
             user_id=(actorId if settings.auth_enforce else payload.userId),
         ),
     )
+    audit("datasource.create", actor_id=actorId, target_type="datasource", target_id=ds.id,
+          request=request, details={"name": payload.name, "type": payload.type, "hasCredentials": bool(enc)})
     return DatasourceOut.model_validate(ds)
 
 
@@ -353,11 +356,14 @@ def get_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Ses
 
 # Update datasource (edit dialog)
 @router.patch("/{ds_id}", response_model=DatasourceOut)
-def patch_ds(ds_id: str, payload: DatasourceUpdate, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def patch_ds(ds_id: str, payload: DatasourceUpdate, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
     _require_ds_perm(db, actorId, ds, Permission.EDIT)
+    # Record which fields changed by NAME only — never the values (connectionUri etc.).
+    changed = [f for f in ("name", "type", "connectionUri", "options", "active")
+               if getattr(payload, f, None) is not None]
     # Apply partial updates
     if payload.name is not None:
         ds.name = payload.name
@@ -378,6 +384,8 @@ def patch_ds(ds_id: str, payload: DatasourceUpdate, actorId: str | None = Depend
     db.add(ds)
     db.commit()
     db.refresh(ds)
+    audit("datasource.update", actor_id=actorId, target_type="datasource", target_id=ds_id,
+          request=request, details={"changed": changed})
     return DatasourceOut.model_validate(ds)
 
 
@@ -402,7 +410,7 @@ def list_ds_shares(ds_id: str, actorId: str | None = Depends(actor_id_optional),
 
 
 @router.post("/{ds_id}/shares", response_model=DatasourceShareOut)
-def add_ds_share(ds_id: str, payload: DatasourceShareAddRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def add_ds_share(ds_id: str, payload: DatasourceShareAddRequest, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -419,17 +427,21 @@ def add_ds_share(ds_id: str, payload: DatasourceShareAddRequest, actorId: str | 
         db.add(existing)
         db.commit()
         db.refresh(existing)
+        audit("datasource.share.grant", actor_id=actorId, target_type="datasource", target_id=ds_id,
+              request=request, details={"targetUserId": tgt.id, "permission": existing.permission})
         return DatasourceShareOut(userId=existing.user_id, name=tgt.name, email=tgt.email, permission=existing.permission, createdAt=existing.created_at)
     from uuid import uuid4
     s = DatasourceShare(id=str(uuid4()), datasource_id=ds_id, user_id=tgt.id, permission=(payload.permission or "ro"))
     db.add(s)
     db.commit()
     db.refresh(s)
+    audit("datasource.share.grant", actor_id=actorId, target_type="datasource", target_id=ds_id,
+          request=request, details={"targetUserId": tgt.id, "permission": s.permission})
     return DatasourceShareOut(userId=s.user_id, name=tgt.name, email=tgt.email, permission=s.permission, createdAt=s.created_at)
 
 
 @router.delete("/{ds_id}/shares/{user_id}")
-def remove_ds_share(ds_id: str, user_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def remove_ds_share(ds_id: str, user_id: str, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -439,13 +451,15 @@ def remove_ds_share(ds_id: str, user_id: str, actorId: str | None = Depends(acto
             raise HTTPException(status_code=403, detail="Forbidden")
     db.query(DatasourceShare).filter(DatasourceShare.datasource_id == ds_id, DatasourceShare.user_id == str(user_id).strip()).delete()
     db.commit()
+    audit("datasource.share.revoke", actor_id=actorId, target_type="datasource", target_id=ds_id,
+          request=request, details={"targetUserId": str(user_id).strip()})
     return {"ok": True}
 
 
 @router.put("/{ds_id}", response_model=DatasourceOut)
-def put_ds(ds_id: str, payload: DatasourceUpdate, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
-    # Same semantics as PATCH for now
-    return patch_ds(ds_id, payload, actorId, db)
+def put_ds(ds_id: str, payload: DatasourceUpdate, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+    # Same semantics as PATCH for now (patch_ds emits the datasource.update audit)
+    return patch_ds(ds_id, payload, request, actorId, db)
 
 
 @router.post("/{ds_id}/engine/dispose")
@@ -2610,12 +2624,13 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{ds_id}", status_code=204)
-def delete_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def delete_ds(ds_id: str, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds: Datasource | None = db.get(Datasource, ds_id)
     if ds:
         _require_ds_perm(db, actorId, ds, Permission.EDIT)
         db.delete(ds)
         db.commit()
+        audit("datasource.delete", actor_id=actorId, target_type="datasource", target_id=ds_id, request=request)
     # Idempotent: return 204 even if it wasn't found
     return Response(status_code=204)
 
@@ -2647,7 +2662,7 @@ def _to_export_item(ds: Datasource) -> DatasourceExportItem:
 
 
 @router.get("/export", response_model=list[DatasourceExportItem])
-def export_datasources(ids: list[str] | None = Query(default=None), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def export_datasources(request: Request, ids: list[str] | None = Query(default=None), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Permissions: admin can export any; non-admin can only export own datasources
     if _actor_is_admin(db, actorId):
         q = db.query(Datasource)
@@ -2684,11 +2699,13 @@ def export_datasources(ids: list[str] | None = Query(default=None), includeSyncT
                 })
             item.syncTasks = st_items  # type: ignore[attr-defined]
         out.append(item)
+    audit("datasource.export", actor_id=actorId, target_type="datasource", request=request,
+          details={"ids": [r.id for r in rows], "includesCredentials": True})
     return out
 
 
 @router.get("/{ds_id}/export", response_model=DatasourceExportItem)
-def export_single_datasource(ds_id: str, includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def export_single_datasource(ds_id: str, request: Request, includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -2718,11 +2735,13 @@ def export_single_datasource(ds_id: str, includeSyncTasks: bool = Query(default=
                 "createdAt": t.created_at,
             })
         item.syncTasks = st_items  # type: ignore[attr-defined]
+    audit("datasource.export", actor_id=actorId, target_type="datasource", target_id=ds.id, request=request,
+          details={"ids": [ds.id], "includesCredentials": True})
     return item
 
 
 @router.post("/import", response_model=DatasourceImportResponse)
-def import_datasources(payload: DatasourceImportRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+def import_datasources(payload: DatasourceImportRequest, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     if not payload or not isinstance(payload.items, list):
         raise HTTPException(status_code=400, detail="items array is required")
     created = 0
@@ -2845,6 +2864,8 @@ def import_datasources(payload: DatasourceImportRequest, actorId: str | None = D
         except Exception:
             # Non-fatal; continue importing core datasources
             pass
+    audit("datasource.import", actor_id=actorId, target_type="datasource", request=request,
+          details={"count": len(out)})
     return DatasourceImportResponse(created=created, updated=updated, items=out, idMap=(id_map or None))
 
 

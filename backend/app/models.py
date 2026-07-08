@@ -146,6 +146,25 @@ class UserNotification(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+
+# Append-only audit trail for security-relevant actions (spec 05).
+# No update/delete endpoints exist; only the daily retention purge removes rows.
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    actor_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    actor_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # snapshot at event time
+    action: Mapped[str] = mapped_column(String, nullable=False, index=True)     # dot-namespaced
+    target_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)   # 'user'|'datasource'|'dashboard'|'share'|'system'
+    target_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    ip: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="success")  # 'success'|'failure'
+    details_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)     # JSON: sanitized before/after/extra
+
+
 class Collection(Base):
     __tablename__ = "collections"
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_collections_user_name"),)

@@ -64,6 +64,28 @@ def _job_id(task_id: str) -> str:
     return f"sync:{task_id}"
 
 
+def _purge_audit_logs() -> None:
+    """Daily retention purge for the append-only audit_log table (spec 05).
+    Deletes rows older than AUDIT_RETENTION_DAYS. Not itself audited (noise)."""
+    import logging
+    from .models import SessionLocal, AuditLog
+    from datetime import datetime, timedelta
+    db = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=int(settings.audit_retention_days))
+        deleted = db.query(AuditLog).filter(AuditLog.ts < cutoff).delete(synchronize_session=False)
+        db.commit()
+        logging.getLogger("bayan.audit").info("audit purge removed %s rows older than %s", deleted, cutoff.isoformat())
+    except Exception as e:
+        logging.getLogger("bayan.audit").warning("audit purge failed: %s", e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
 def schedule_all_jobs() -> dict:
     """Sync scheduler state with DB SyncTasks that have schedule_cron and enabled.
     Returns a summary dict with counts.
@@ -119,6 +141,19 @@ def schedule_all_jobs() -> dict:
         except Exception:
             # Ignore and continue
             continue
+
+    # Static daily audit-log retention purge (spec 05)
+    try:
+        sched.add_job(
+            func=_purge_audit_logs,
+            trigger=CronTrigger.from_crontab("30 3 * * *", timezone=_SCHEDULER_TZ),
+            id="audit:purge",
+            replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+    except Exception as _ae:
+        print(f"[SCHEDULER] Failed to register audit:purge: {_ae}", flush=True)
 
     # --- Catch-up: fire any sync job missed since the last run ---
     # Handles server restarts where APScheduler recalculates next_run_time into the
@@ -273,6 +308,8 @@ def list_jobs() -> list[dict]:
             out.append(info)
         elif j.id.startswith("alert:"):
             info.update({"alertId": (j.kwargs or {}).get("alert_id")})
+            out.append(info)
+        elif j.id.startswith("audit:"):
             out.append(info)
     # Sort by next run
     out.sort(key=lambda x: x.get("nextRunAt") or "")
