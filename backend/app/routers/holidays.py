@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..models import HolidayRule, SessionLocal
+from ..models import HolidayRule, SessionLocal, User
+from ..authz import require_user, require_admin
 
 router = APIRouter(prefix="/holidays", tags=["holidays"])
 
@@ -45,12 +46,12 @@ class HolidayRuleResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[HolidayRuleResponse])
-def list_holidays(db: Session = Depends(_get_db)):
+def list_holidays(db: Session = Depends(_get_db), user: User | None = Depends(require_user)):
     return db.query(HolidayRule).order_by(HolidayRule.name).all()
 
 
 @router.post("", response_model=HolidayRuleResponse)
-def create_holiday(body: HolidayRuleCreate, db: Session = Depends(_get_db)):
+def create_holiday(body: HolidayRuleCreate, db: Session = Depends(_get_db), admin: User | None = Depends(require_admin)):
     rule = HolidayRule(id=str(uuid4()), **body.model_dump())
     db.add(rule)
     db.commit()
@@ -59,7 +60,7 @@ def create_holiday(body: HolidayRuleCreate, db: Session = Depends(_get_db)):
 
 
 @router.put("/{rule_id}", response_model=HolidayRuleResponse)
-def update_holiday(rule_id: str, body: HolidayRuleCreate, db: Session = Depends(_get_db)):
+def update_holiday(rule_id: str, body: HolidayRuleCreate, db: Session = Depends(_get_db), admin: User | None = Depends(require_admin)):
     rule = db.query(HolidayRule).filter(HolidayRule.id == rule_id).first()
     if not rule:
         raise HTTPException(404, "Holiday rule not found")
@@ -71,7 +72,7 @@ def update_holiday(rule_id: str, body: HolidayRuleCreate, db: Session = Depends(
 
 
 @router.delete("/{rule_id}")
-def delete_holiday(rule_id: str, db: Session = Depends(_get_db)):
+def delete_holiday(rule_id: str, db: Session = Depends(_get_db), admin: User | None = Depends(require_admin)):
     rule = db.query(HolidayRule).filter(HolidayRule.id == rule_id).first()
     if not rule:
         raise HTTPException(404, "Holiday rule not found")
@@ -81,7 +82,7 @@ def delete_holiday(rule_id: str, db: Session = Depends(_get_db)):
 
 
 @router.post("/upload")
-async def upload_holidays(file: UploadFile = File(...), db: Session = Depends(_get_db)):
+async def upload_holidays(file: UploadFile = File(...), db: Session = Depends(_get_db), admin: User | None = Depends(require_admin)):
     """Upload CSV with columns: name, rule_type, specific_date, recurrence_expr"""
     content = await file.read()
     text = content.decode("utf-8")

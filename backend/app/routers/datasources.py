@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover
 
 from ..models import SessionLocal, Datasource, init_db, create_datasource, NewDatasourceInput, User, SyncTask, SyncState, SyncRun, SyncLock, DatasourceShare
 from ..auth import actor_id_optional
+from ..authz import is_admin as _authz_is_admin, datasource_permission, Permission, require_admin
 from ..db import get_duckdb_engine, get_engine_from_dsn, run_sequence_sync, run_snapshot_sync, open_duck_native, get_active_duck_path
 from ..api_ingest import run_api_sync
 from ..db import dispose_engine_by_key, dispose_all_engines, dispose_duck_engine
@@ -97,7 +98,7 @@ def _http_for_db_error(e: Exception) -> HTTPException | None:
     return None
 
 @router.post("", response_model=DatasourceOut)
-def create_ds(payload: DatasourceCreate, db: Session = Depends(get_db)):
+def create_ds(payload: DatasourceCreate, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     enc = encrypt_text(payload.connectionUri) if payload.connectionUri else None
     ds = create_datasource(
         db,
@@ -106,7 +107,8 @@ def create_ds(payload: DatasourceCreate, db: Session = Depends(get_db)):
             type=payload.type,
             connection_encrypted=enc,
             options=payload.options,
-            user_id=payload.userId,
+            # identity from token when enforcing; payload.userId only in legacy window
+            user_id=(actorId if settings.auth_enforce else payload.userId),
         ),
     )
     return DatasourceOut.model_validate(ds)
@@ -231,11 +233,22 @@ def _max_concurrent(ds: Datasource) -> int:
         return 1
 
 
-def _is_admin(db: Session, actor_id: str | None) -> bool:
+def _actor_is_admin(db: Session, actor_id: str | None) -> bool:
+    # Admin check routed through authz.is_admin (spec 04).
     if not actor_id:
         return False
     u = db.query(User).filter(User.id == str(actor_id).strip()).first()
-    return bool(u and (u.role or "user").lower() == "admin")
+    return _authz_is_admin(u)
+
+
+def _require_ds_perm(db: Session, actor_id: str | None, ds: Datasource, need: Permission) -> None:
+    """Enforce a datasource permission on the acting identity (spec 04).
+    No-op while auth_enforce is off so legacy clients keep working."""
+    if not settings.auth_enforce:
+        return
+    u = db.get(User, str(actor_id).strip()) if actor_id else None
+    if datasource_permission(db, u, ds) < need:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def _group_key_for(ds_id: str, schema: str | None, table: str, dest: str) -> str:
@@ -274,7 +287,7 @@ def _task_to_out(db: Session, t: SyncTask) -> SyncTaskOut:
 
 @router.get("", response_model=list[DatasourceOut])
 def list_ds(userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
-    if _is_admin(db, actorId) and (userId is None or (str(userId).strip().lower() in {"", "undefined", "null"})):
+    if _actor_is_admin(db, actorId) and (userId is None or (str(userId).strip().lower() in {"", "undefined", "null"})):
         q = db.query(Datasource)
         rows = q.order_by(Datasource.created_at.desc()).all()
         return [DatasourceOut.model_validate(r) for r in rows]
@@ -307,7 +320,7 @@ def get_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Ses
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         t = str(ds.type or '').lower()
         is_public_duck = (t == 'duckdb') and not bool(ds.connection_encrypted)
@@ -340,10 +353,11 @@ def get_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Ses
 
 # Update datasource (edit dialog)
 @router.patch("/{ds_id}", response_model=DatasourceOut)
-def patch_ds(ds_id: str, payload: DatasourceUpdate, db: Session = Depends(get_db)):
+def patch_ds(ds_id: str, payload: DatasourceUpdate, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
+    _require_ds_perm(db, actorId, ds, Permission.EDIT)
     # Apply partial updates
     if payload.name is not None:
         ds.name = payload.name
@@ -372,7 +386,7 @@ def list_ds_shares(ds_id: str, actorId: str | None = Depends(actor_id_optional),
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -392,7 +406,7 @@ def add_ds_share(ds_id: str, payload: DatasourceShareAddRequest, actorId: str | 
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -419,7 +433,7 @@ def remove_ds_share(ds_id: str, user_id: str, actorId: str | None = Depends(acto
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -429,13 +443,13 @@ def remove_ds_share(ds_id: str, user_id: str, actorId: str | None = Depends(acto
 
 
 @router.put("/{ds_id}", response_model=DatasourceOut)
-def put_ds(ds_id: str, payload: DatasourceUpdate, db: Session = Depends(get_db)):
+def put_ds(ds_id: str, payload: DatasourceUpdate, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Same semantics as PATCH for now
-    return patch_ds(ds_id, payload, db)
+    return patch_ds(ds_id, payload, actorId, db)
 
 
 @router.post("/{ds_id}/engine/dispose")
-def dispose_ds_engine(ds_id: str, db: Session = Depends(get_db)):
+def dispose_ds_engine(ds_id: str, db: Session = Depends(get_db), admin: User | None = Depends(require_admin)):
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -453,7 +467,7 @@ def dispose_ds_engine(ds_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/engines/dispose-all")
-def dispose_all_cached_engines():
+def dispose_all_cached_engines(admin: User | None = Depends(require_admin)):
     count = dispose_all_engines()
     return {"disposed": int(count)}
 
@@ -463,7 +477,7 @@ def activate_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db
     ds: Datasource | None = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -484,7 +498,7 @@ def deactivate_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), 
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
     # Only owner or admin can toggle active
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -504,7 +518,7 @@ def list_sync_tasks(ds_id: str, actorId: str | None = Depends(actor_id_optional)
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -550,7 +564,7 @@ def create_sync_task(ds_id: str, payload: SyncTaskCreate, actorId: str | None = 
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -599,7 +613,7 @@ def get_sync_status(ds_id: str, actorId: str | None = Depends(actor_id_optional)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
     # Allow owner or admin to view
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -666,7 +680,7 @@ def run_sync_now(
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
     # Enforce permission: owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1146,7 +1160,7 @@ def list_sync_logs(ds_id: str, taskId: str | None = Query(default=None), limit: 
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1173,7 +1187,7 @@ def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorI
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1200,7 +1214,7 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1282,7 +1296,7 @@ def reset_stuck_syncs(ds_id: str, actorId: str | None = Depends(actor_id_optiona
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1332,7 +1346,7 @@ def update_sync_task(ds_id: str, task_id: str, payload: SyncTaskCreate, actorId:
     if not t or t.datasource_id != ds_id:
         raise HTTPException(status_code=404, detail="Task not found")
     ds = db.get(Datasource, ds_id)
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds and ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1369,7 +1383,7 @@ def delete_sync_task(ds_id: str, task_id: str, actorId: str | None = Depends(act
     if not t or t.datasource_id != ds_id:
         return Response(status_code=204)
     ds = db.get(Datasource, ds_id)
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds and ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1410,7 +1424,7 @@ def flush_sync_task(ds_id: str, task_id: str, actorId: str | None = Depends(acto
         raise HTTPException(status_code=404, detail="Task not found")
 
     # owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1613,7 +1627,7 @@ def drop_local_table(ds_id: str, payload: _DropLocalTableRequest, actorId: str |
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
     # owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1647,7 +1661,7 @@ def rename_local_table(ds_id: str, payload: _RenameLocalTableRequest, actorId: s
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
     # owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1751,10 +1765,11 @@ def get_transforms(ds_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{ds_id}/transforms", response_model=DatasourceTransforms)
-def put_transforms(ds_id: str, payload: DatasourceTransforms, db: Session = Depends(get_db)):
+def put_transforms(ds_id: str, payload: DatasourceTransforms, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
+    _require_ds_perm(db, actorId, ds, Permission.EDIT)
     try:
         opts = json.loads(ds.options_json or "{}")
     except Exception:
@@ -1768,10 +1783,11 @@ def put_transforms(ds_id: str, payload: DatasourceTransforms, db: Session = Depe
 
 
 @router.post("/{ds_id}/transforms/preview", response_model=PreviewResponse)
-def preview_transforms(ds_id: str, payload: TransformsPreviewRequest, db: Session = Depends(get_db)):
+def preview_transforms(ds_id: str, payload: TransformsPreviewRequest, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
+    _require_ds_perm(db, actorId, ds, Permission.VIEW)
     # Infer dialect from datasource type string (keeps it simple for now)
     dialect = (ds.type or "").lower()
     source = payload.source or ""
@@ -2594,9 +2610,10 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{ds_id}", status_code=204)
-def delete_ds(ds_id: str, db: Session = Depends(get_db)):
+def delete_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds: Datasource | None = db.get(Datasource, ds_id)
     if ds:
+        _require_ds_perm(db, actorId, ds, Permission.EDIT)
         db.delete(ds)
         db.commit()
     # Idempotent: return 204 even if it wasn't found
@@ -2632,7 +2649,7 @@ def _to_export_item(ds: Datasource) -> DatasourceExportItem:
 @router.get("/export", response_model=list[DatasourceExportItem])
 def export_datasources(ids: list[str] | None = Query(default=None), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Permissions: admin can export any; non-admin can only export own datasources
-    if _is_admin(db, actorId):
+    if _actor_is_admin(db, actorId):
         q = db.query(Datasource)
     else:
         actor = (actorId or "").strip()
@@ -2675,7 +2692,7 @@ def export_single_datasource(ds_id: str, includeSyncTasks: bool = Query(default=
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if ds.user_id and ds.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -2715,7 +2732,7 @@ def import_datasources(payload: DatasourceImportRequest, actorId: str | None = D
     for it in payload.items:
         # Permission: admin may import for any user; otherwise force to actor
         target_user = (it.userId or actorId or "").strip()
-        if not _is_admin(db, actorId):
+        if not _actor_is_admin(db, actorId):
             actor = (actorId or "").strip()
             if not actor:
                 raise HTTPException(status_code=403, detail="Forbidden")
@@ -2891,12 +2908,14 @@ def _build_cast_select(columns: list[str], col_types: dict[str, str]) -> str:
 def import_sql_preview(
     ds_id: str,
     payload: _ImportSqlPreviewRequest,
+    actorId: str | None = Depends(actor_id_optional),
     db: Session = Depends(get_db),
 ):
     """Preview SQL: routes to external datasource when sourceDsId is provided, else queries local DuckDB."""
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
+    _require_ds_perm(db, actorId, ds, Permission.VIEW)
     sql = (payload.sql or "").strip().rstrip(";")
     if not sql:
         raise HTTPException(status_code=400, detail="sql is required")
@@ -2943,12 +2962,14 @@ def import_sql_preview(
 def import_sql_commit(
     ds_id: str,
     payload: _ImportSqlCommitRequest,
+    actorId: str | None = Depends(actor_id_optional),
     db: Session = Depends(get_db),
 ):
     """Create (or replace) a DuckDB table from SQL; routes to external source when sourceDsId provided."""
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
+    _require_ds_perm(db, actorId, ds, Permission.EDIT)
     if _duckdb is None:
         raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
     sql = (payload.sql or "").strip().rstrip(";")
@@ -3065,12 +3086,14 @@ def import_sql_commit(
 async def import_file_preview(
     ds_id: str,
     file: UploadFile = File(...),
+    actorId: str | None = Depends(actor_id_optional),
     db: Session = Depends(get_db),
 ):
     """Parse an uploaded CSV or Excel file and return preview rows."""
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
+    _require_ds_perm(db, actorId, ds, Permission.VIEW)
     if _duckdb is None:
         raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
     import tempfile, os as _os
@@ -3140,12 +3163,14 @@ async def import_file_commit(
     tableName: str = Form(...),
     ifExists: str = Form(default="replace"),
     columnTypes: str | None = Form(default=None),  # JSON: {"col": "INTEGER", ...}
+    actorId: str | None = Depends(actor_id_optional),
     db: Session = Depends(get_db),
 ):
     """Commit an uploaded CSV/Excel file as a new DuckDB table."""
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
+    _require_ds_perm(db, actorId, ds, Permission.EDIT)
     if _duckdb is None:
         raise HTTPException(status_code=500, detail="DuckDB driver unavailable")
     table_name = (tableName or "").strip()

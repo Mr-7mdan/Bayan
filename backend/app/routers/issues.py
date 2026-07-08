@@ -8,10 +8,11 @@ import traceback
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 
 from ..config import settings
+from ..authz import require_user
 
 router = APIRouter(prefix="/issues", tags=["issues"]) 
 
@@ -193,7 +194,7 @@ async def report_issue(kind: str, message: str | None, error_name: str | None, s
 
 
 @router.post("/report")
-async def report(payload: IssueReportIn):
+async def report(payload: IssueReportIn, _user = Depends(require_user)):
     try:
         res = await report_issue(
             kind=payload.kind or "frontend",
@@ -246,7 +247,7 @@ async def report_backend_exception(exc: BaseException, request: Request) -> None
 
 
 @router.post("/test")
-async def test_issue():
+async def test_issue(_user = Depends(require_user)):
     token = (settings.github_token or "").strip()
     owner = (settings.update_repo_owner or "").strip()
     repo = (settings.update_repo_name or "").strip()

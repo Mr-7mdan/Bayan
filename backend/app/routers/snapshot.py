@@ -10,7 +10,10 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import Response, JSONResponse
 
 from ..config import settings
-from ..auth import actor_id_optional
+from ..auth import actor_id_optional, get_current_user_optional, get_db
+from ..authz import require_dashboard, Permission
+from ..models import User
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +220,22 @@ async def snapshot_widget(
     theme: str = Query(default="dark"),
     waitMs: int = Query(default=1200),
     actorId: Optional[str] = Depends(actor_id_optional),
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
 ):
+    # Under enforcement: require VIEW on the dashboard for authed callers; the
+    # publicId+token embed path is validated downstream. The snapshot_actor_id
+    # fallback is a legacy-window convenience only — never a query-param bypass
+    # once enforcement is on.
+    if settings.auth_enforce:
+        if publicId:
+            resolved_actor = actorId
+        else:
+            if dashboardId:
+                require_dashboard(db, user, dashboardId, Permission.VIEW)
+            resolved_actor = actorId
+    else:
+        resolved_actor = actorId or settings.snapshot_actor_id
     try:
         png = await snapshot_embed_png(
             dashboard_id=dashboardId,
@@ -228,7 +246,7 @@ async def snapshot_widget(
             width=w,
             height=h,
             theme=theme,
-            actor_id=actorId or settings.snapshot_actor_id,
+            actor_id=resolved_actor,
             wait_ms=waitMs,
         )
         return Response(content=png, media_type="image/png")

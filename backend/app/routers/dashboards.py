@@ -47,6 +47,7 @@ from ..schemas import (
 from ..config import settings
 from ..models import Datasource, SyncTask
 from ..auth import actor_id_optional
+from ..authz import is_admin as _authz_is_admin
 from ..security import decrypt_text, encrypt_text, sign_embed_token, verify_embed_token
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
@@ -78,18 +79,14 @@ def get_db():
         db.close()
 
 
-def _is_admin(db: Session, actor_id: str | None) -> bool:
+def _actor_is_admin(db: Session, actor_id: str | None) -> bool:
+    # Admin check routed through authz.is_admin (spec 04). The former
+    # snapshot_actor_id query-param bypass is removed — the snapshot service
+    # authenticates via spec 02's identity, not a spoofable actorId.
     if not actor_id:
         return False
-    aid = str(actor_id).strip()
-    # Allow the configured snapshot actor to bypass permission checks (server-side snapshot rendering)
-    try:
-        if aid and (aid == settings.snapshot_actor_id):
-            return True
-    except Exception:
-        pass
-    u = db.query(User).filter(User.id == aid).first()
-    return bool(u and (u.role or "user").lower() == "admin")
+    u = db.query(User).filter(User.id == str(actor_id).strip()).first()
+    return _authz_is_admin(u)
 
 
 def _collect_datasource_ids_from_definition(defn: dict) -> set[str]:
@@ -182,7 +179,7 @@ def list_dashboards(
 ):
     # If a userId is provided, return only that user's dashboards.
     # If not provided, return only dev_user sample (for empty state/demo), unless admin actor is provided, in which case list all.
-    if _is_admin(db, actorId) and (userId is None or (str(userId).strip().lower() in {"", "undefined", "null"})):
+    if _actor_is_admin(db, actorId) and (userId is None or (str(userId).strip().lower() in {"", "undefined", "null"})):
         q = db.query(Dashboard)
     elif userId is None or (str(userId).strip().lower() in {"", "undefined", "null"}):
         q = db.query(Dashboard).filter(Dashboard.user_id == "dev_user")
@@ -246,7 +243,7 @@ def save_dash(payload: DashboardSaveRequest, actorId: str | None = Depends(actor
             if not d0:
                 raise ValueError("Dashboard not found")
             actor = actorId if settings.auth_enforce else (payload.userId or actorId or "dev_user")
-            if _is_admin(db, actor):
+            if _actor_is_admin(db, actor):
                 actor = d0.user_id or actor  # bypass checks
             if d0.user_id and d0.user_id != actor:
                 perm = get_share_permission(db, d0.id, actor)
@@ -276,7 +273,7 @@ def get_dash(dash_id: str, actorId: str | None = Depends(actor_id_optional), db:
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     # Enforce read permissions: owner, admin, or shared (ro/rw)
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if d.user_id and d.user_id != actor:
             perm = get_share_permission(db, d.id, actor)
@@ -331,7 +328,7 @@ def list_embed_tokens(dash_id: str, actorId: str | None = Depends(actor_id_optio
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     # owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if d.user_id and d.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -348,7 +345,7 @@ def delete_embed_token(dash_id: str, token_id: str, actorId: str | None = Depend
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     # owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if d.user_id and d.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -373,7 +370,7 @@ def list_shares(dash_id: str, actorId: str | None = Depends(actor_id_optional), 
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     # owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if d.user_id and d.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -391,7 +388,7 @@ def delete_share(dash_id: str, user_id: str, actorId: str | None = Depends(actor
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     # owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if d.user_id and d.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -415,7 +412,7 @@ def create_embed_token(public_id: str, ttl: int = Query(default=3600), actorId: 
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     # Require owner or admin to issue tokens
-    if not (_is_admin(db, actorId) or (d.user_id and d.user_id == (actorId or "").strip())):
+    if not (_actor_is_admin(db, actorId) or (d.user_id and d.user_id == (actorId or "").strip())):
         raise HTTPException(status_code=403, detail="Forbidden")
     token, exp = sign_embed_token(public_id, ttl)
     # Persist the token for revocation/listing
@@ -430,7 +427,7 @@ def delete_dash(dash_id: str, userId: str | None = Query(default=None), actorId:
     if not d0:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
-    if _is_admin(db, actor):
+    if _actor_is_admin(db, actor):
         actor = d0.user_id or actor  # bypass checks
     if d0.user_id and d0.user_id != actor:
         perm = get_share_permission(db, d0.id, actor)
@@ -448,7 +445,7 @@ def publish_dash(dash_id: str, userId: str | None = Query(default=None), actorId
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
-    if _is_admin(db, actor):
+    if _actor_is_admin(db, actor):
         actor = d.user_id or actor
     if d.user_id and d.user_id != actor:
         perm = get_share_permission(db, d.id, actor)
@@ -464,7 +461,7 @@ def unpublish_dash(dash_id: str, userId: str | None = Query(default=None), actor
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
-    if _is_admin(db, actor):
+    if _actor_is_admin(db, actor):
         actor = d.user_id or actor
     if d.user_id and d.user_id != actor:
         perm = get_share_permission(db, d.id, actor)
@@ -491,7 +488,7 @@ def set_publish_token(dash_id: str, payload: SetPublishTokenRequest, userId: str
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
-    if _is_admin(db, actor):
+    if _actor_is_admin(db, actor):
         actor = d.user_id or actor
     if d.user_id and d.user_id != actor:
         perm = get_share_permission(db, d.id, actor)
@@ -598,7 +595,7 @@ def _ds_to_export_item(ds: Datasource) -> DatasourceExportItem:
 @router.get("/export", response_model=DashboardExportResponse)
 def export_dashboards(userId: str | None = Query(default=None), ids: list[str] | None = Query(default=None), includeDatasources: bool = Query(default=True), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     # Permission: admin can export any; otherwise restrict to provided userId==actor or fallback to actor
-    if _is_admin(db, actorId):
+    if _actor_is_admin(db, actorId):
         q = db.query(Dashboard)
         if userId and str(userId).strip().lower() not in {"", "undefined", "null"}:
             q = q.filter(Dashboard.user_id == str(userId).strip())
@@ -624,7 +621,7 @@ def export_dashboards(userId: str | None = Query(default=None), ids: list[str] |
     if includeDatasources and ds_ids:
         ds_q = db.query(Datasource).filter(Datasource.id.in_(list(ds_ids)))
         # Non-admin: restrict to own
-        if not _is_admin(db, actorId):
+        if not _actor_is_admin(db, actorId):
             actor = (actorId or "").strip()
             ds_q = ds_q.filter(Datasource.user_id == actor)
         for ds in ds_q.all():
@@ -660,7 +657,7 @@ def export_dashboard(dash_id: str, includeDatasources: bool = Query(default=True
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
     # owner or admin
-    if not _is_admin(db, actorId):
+    if not _actor_is_admin(db, actorId):
         actor = (actorId or "").strip()
         if d.user_id and d.user_id != actor:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -674,7 +671,7 @@ def export_dashboard(dash_id: str, includeDatasources: bool = Query(default=True
         ids = _collect_datasource_ids_from_definition(defn)
         if ids:
             ds_q = db.query(Datasource).filter(Datasource.id.in_(list(ids)))
-            if not _is_admin(db, actorId):
+            if not _actor_is_admin(db, actorId):
                 actor = (actorId or "").strip()
                 ds_q = ds_q.filter(Datasource.user_id == actor)
             for ds in ds_q.all():
@@ -738,7 +735,7 @@ def import_dashboards(payload: DashboardImportRequest, actorId: str | None = Dep
         d: Dashboard | None = None
         if it.id:
             d = load_dashboard(db, it.id)
-        if d and d.user_id and d.user_id != owner and not _is_admin(db, actorId):
+        if d and d.user_id and d.user_id != owner and not _actor_is_admin(db, actorId):
             # Do not allow overriding other owners; create new instead
             d = None
         if d:

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from ..config import settings
 from ..models import User, SessionLocal
 from ..auth import require_admin
+from ..authz import require_user
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/updates", tags=["updates"])
@@ -94,7 +95,7 @@ def _read_or_seed_frontend_version() -> Optional[str]:
 
 
 @router.get("/version", response_model=VersionOut)
-async def get_version() -> VersionOut:
+async def get_version(_user = Depends(require_user)) -> VersionOut:
     backend_v = settings.app_version
     frontend_v = _read_or_seed_frontend_version()
     return VersionOut(backend=backend_v, frontend=frontend_v)
@@ -163,7 +164,7 @@ async def _download_manifest_for_release(release: Dict[str, Any]) -> tuple[Updat
 
 
 @router.get("/check", response_model=UpdateCheckOut)
-async def check_updates(component: str = Query(default="backend", pattern=r"^(backend|frontend|both)$")) -> UpdateCheckOut:
+async def check_updates(component: str = Query(default="backend", pattern=r"^(backend|frontend|both)$"), _user = Depends(require_user)) -> UpdateCheckOut:
     enabled = bool(settings.updates_enabled and settings.update_repo_owner and settings.update_repo_name)
     current_backend = settings.app_version or None
     current_frontend = _read_or_seed_frontend_version()

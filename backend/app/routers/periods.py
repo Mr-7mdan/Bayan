@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+
+from ..authz import require_user
 
 router = APIRouter(prefix="/periods", tags=["periods"]) 
 
@@ -78,7 +80,7 @@ def _week_start(dt: datetime, start: WeekStart) -> datetime:
 
 
 @router.post("/resolve", response_model=ResolvePeriodsResponse)
-def resolve_periods(payload: ResolvePeriodsRequest) -> ResolvePeriodsResponse:
+def resolve_periods(payload: ResolvePeriodsRequest, _user = Depends(require_user)) -> ResolvePeriodsResponse:
     # Use UTC as base
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     if payload.now:

@@ -14,8 +14,9 @@ import html as _html
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..models import SessionLocal, AlertRule, EmailConfig, SmsConfigHadara, AlertRun, Dashboard
+from ..models import SessionLocal, AlertRule, EmailConfig, SmsConfigHadara, AlertRun, Dashboard, User
 from ..auth import actor_id_optional
+from ..authz import require_user, require_admin, require_owned, require_dashboard, is_admin, Permission
 from ..security import encrypt_text, decrypt_text
 from ..alerts_service import run_rule, send_email, send_sms_hadara, evaluate_threshold, _render_kpi_html  # type: ignore
 from ..scheduler import schedule_all_alert_jobs as _sync_alert_jobs
@@ -137,17 +138,21 @@ class TestSmsPayload(BaseModel):
 
 # --- CRUD ---
 @router.get("")
-async def list_alerts(db: Session = Depends(get_db)) -> list[AlertOut]:
-    items = db.query(AlertRule).order_by(AlertRule.created_at.desc()).all()
+async def list_alerts(db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> list[AlertOut]:
+    q = db.query(AlertRule)
+    if settings.auth_enforce and not is_admin(user):
+        q = q.filter(AlertRule.user_id == user.id)
+    items = q.order_by(AlertRule.created_at.desc()).all()
     return [AlertOut.from_model(it) for it in items]
 
 
 @router.post("")
-async def create_alert(payload: AlertCreate, db: Session = Depends(get_db)) -> AlertOut:
+async def create_alert(payload: AlertCreate, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> AlertOut:
     a = AlertRule(
         id=str(uuid4()),
         name=payload.name,
         kind=payload.kind,
+        user_id=(user.id if user else None),
         widget_id=payload.widgetId,
         dashboard_id=payload.dashboardId,
         enabled=bool(payload.enabled),
@@ -164,18 +169,14 @@ async def create_alert(payload: AlertCreate, db: Session = Depends(get_db)) -> A
 
 
 @router.get("/{alert_id}")
-async def get_alert(alert_id: str, db: Session = Depends(get_db)) -> AlertOut:
-    a = db.get(AlertRule, alert_id)
-    if not a:
-        raise HTTPException(status_code=404, detail="Not found")
+async def get_alert(alert_id: str, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> AlertOut:
+    a = require_owned(db, user, AlertRule, alert_id)
     return AlertOut.from_model(a)
 
 
 @router.put("/{alert_id}")
-async def update_alert(alert_id: str, payload: AlertCreate, db: Session = Depends(get_db)) -> AlertOut:
-    a = db.get(AlertRule, alert_id)
-    if not a:
-        raise HTTPException(status_code=404, detail="Not found")
+async def update_alert(alert_id: str, payload: AlertCreate, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> AlertOut:
+    a = require_owned(db, user, AlertRule, alert_id)
     a.name = payload.name
     a.kind = payload.kind
     a.widget_id = payload.widgetId
@@ -193,10 +194,12 @@ async def update_alert(alert_id: str, payload: AlertCreate, db: Session = Depend
 
 
 @router.delete("/{alert_id}")
-async def delete_alert(alert_id: str, db: Session = Depends(get_db)) -> dict:
+async def delete_alert(alert_id: str, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> dict:
     a = db.get(AlertRule, alert_id)
     if not a:
         return {"deleted": 0}
+    if settings.auth_enforce and not is_admin(user) and (a.user_id or "") != (user.id if user else None):
+        raise HTTPException(status_code=403, detail="Forbidden")
     db.delete(a)
     db.commit()
     try:
@@ -207,10 +210,8 @@ async def delete_alert(alert_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/{alert_id}/run")
-async def run_alert_now(alert_id: str, db: Session = Depends(get_db)) -> dict:
-    a = db.get(AlertRule, alert_id)
-    if not a:
-        raise HTTPException(status_code=404, detail="Not found")
+async def run_alert_now(alert_id: str, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> dict:
+    a = require_owned(db, user, AlertRule, alert_id)
     run_id = str(uuid4())
     alert_id_str = str(a.id)
     ar = AlertRun(id=run_id, alert_id=a.id)
@@ -286,7 +287,8 @@ async def run_alert_now(alert_id: str, db: Session = Depends(get_db)) -> dict:
     return {"ok": True, "message": "Triggered", "runId": run_id, "steps": []}
 
 @router.get("/{alert_id}/runs")
-async def list_alert_runs(alert_id: str, limit: int = 50, db: Session = Depends(get_db)) -> list[AlertRunOut]:
+async def list_alert_runs(alert_id: str, limit: int = 50, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> list[AlertRunOut]:
+    require_owned(db, user, AlertRule, alert_id)
     limit = max(1, min(int(limit or 50), 200))
     rows = (
         db.query(AlertRun)
@@ -318,7 +320,7 @@ class EvaluateV2Response(BaseModel):
 
 
 @router.post("/evaluate")
-async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)) -> EvaluateResponse:
+async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db), _user: User | None = Depends(require_user)) -> EvaluateResponse:
     cfg = payload.config.model_dump() if hasattr(payload.config, 'model_dump') else (payload.config or {})
     triggers = cfg.get("triggers") or []
     render = cfg.get("render") or {}
@@ -560,7 +562,7 @@ async def evaluate_alert(payload: EvaluatePayload, actorId: str | None = Depends
 
 
 @router.post("/evaluate-v2")
-async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)) -> EvaluateV2Response:
+async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db), _user: User | None = Depends(require_user)) -> EvaluateV2Response:
     cfg = payload.config.model_dump() if hasattr(payload.config, 'model_dump') else (payload.config or {})
     triggers = cfg.get("triggers") or []
     render = cfg.get("render") or {}
@@ -2858,7 +2860,7 @@ async def evaluate_alert_v2(payload: EvaluatePayload, actorId: str | None = Depe
 
 # --- Provider configs ---
 @router.get("/config/email")
-async def get_email_config(db: Session = Depends(get_db)) -> EmailConfigPayload:
+async def get_email_config(db: Session = Depends(get_db), admin: User | None = Depends(require_admin)) -> EmailConfigPayload:
     c = db.query(EmailConfig).first()
     if not c:
         return EmailConfigPayload()
@@ -2875,7 +2877,7 @@ async def get_email_config(db: Session = Depends(get_db)) -> EmailConfigPayload:
 
 
 @router.put("/config/email")
-async def put_email_config(payload: EmailConfigPayload, db: Session = Depends(get_db)) -> dict:
+async def put_email_config(payload: EmailConfigPayload, db: Session = Depends(get_db), admin: User | None = Depends(require_admin)) -> dict:
     c = db.query(EmailConfig).first()
     if not c:
         c = EmailConfig(id=str(uuid4()))
@@ -2894,7 +2896,7 @@ async def put_email_config(payload: EmailConfigPayload, db: Session = Depends(ge
 
 
 @router.get("/config/sms/hadara")
-async def get_sms_config_hadara(db: Session = Depends(get_db)) -> SmsConfigPayload:
+async def get_sms_config_hadara(db: Session = Depends(get_db), admin: User | None = Depends(require_admin)) -> SmsConfigPayload:
     c = db.query(SmsConfigHadara).first()
     if not c:
         return SmsConfigPayload()
@@ -2902,7 +2904,7 @@ async def get_sms_config_hadara(db: Session = Depends(get_db)) -> SmsConfigPaylo
 
 
 @router.put("/config/sms/hadara")
-async def put_sms_config_hadara(payload: SmsConfigPayload, db: Session = Depends(get_db)) -> dict:
+async def put_sms_config_hadara(payload: SmsConfigPayload, db: Session = Depends(get_db), admin: User | None = Depends(require_admin)) -> dict:
     c = db.query(SmsConfigHadara).first()
     if not c:
         c = SmsConfigHadara(id="hadara")
@@ -2922,8 +2924,10 @@ def download_report_pdf(
     widget_id: str,
     landscape: bool = False,
     db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
 ) -> FastAPIResponse:
     """Generate and stream a report widget as a single-page PDF."""
+    require_dashboard(db, user, dashboard_id, Permission.VIEW)
     wcfg = _lookup_widget_config(db, dashboard_id=dashboard_id, widget_id=widget_id)
     if not wcfg:
         raise HTTPException(status_code=404, detail="Widget not found")
@@ -2941,7 +2945,7 @@ def download_report_pdf(
 
 # --- Tests ---
 @router.post("/test-email")
-async def test_email(payload: TestEmailPayload, db: Session = Depends(get_db)) -> dict:
+async def test_email(payload: TestEmailPayload, db: Session = Depends(get_db), admin: User | None = Depends(require_admin)) -> dict:
     # Payload.html from the Email Config preview is already a full HTML document. Avoid double wrapping.
     ok, err = send_email(db, subject=payload.subject, to=payload.to, html=payload.html, already_wrapped=True)
     if not ok:
@@ -2950,7 +2954,7 @@ async def test_email(payload: TestEmailPayload, db: Session = Depends(get_db)) -
 
 
 @router.post("/test-sms")
-async def test_sms(payload: TestSmsPayload, db: Session = Depends(get_db)) -> dict:
+async def test_sms(payload: TestSmsPayload, db: Session = Depends(get_db), admin: User | None = Depends(require_admin)) -> dict:
     ok, err = send_sms_hadara(db, to_numbers=payload.to, message=payload.message)
     if not ok:
         raise HTTPException(status_code=400, detail=err or "Failed to send")

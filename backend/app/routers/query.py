@@ -28,7 +28,8 @@ from ..sql_ident import quote_ident, quote_source, build_attach_string, scrub as
 from ..sql_dialect_normalizer import normalize_sql_expression
 import json
 from dateutil import parser as date_parser
-from ..models import SessionLocal, Datasource, User, DatasourceShare, get_share_link_by_public, verify_share_link_token
+from ..models import SessionLocal, Datasource, User, DatasourceShare, Dashboard, get_share_link_by_public, verify_share_link_token
+from ..authz import is_admin as is_admin_user
 from ..auth import actor_id_optional
 from ..schemas import QueryRequest, QueryResponse, QuerySpecRequest, DistinctRequest, DistinctResponse, PivotRequest
 from ..security import decrypt_text
@@ -700,12 +701,40 @@ def get_db():
         db.close()
 
 
+def _resolve_public_actor(db: Session, actorId: Optional[str], publicId: Optional[str], token: Optional[str]) -> Optional[str]:
+    """Verify a public share link + token; on success resolve the acting
+    identity to the shared dashboard's owner when the caller is anonymous, so
+    verified public/embed viewers keep datasource access under ``auth_enforce``.
+    Raises 404/401 exactly as the previous inline blocks did.
+    """
+    if not (isinstance(publicId, str) and publicId):
+        return actorId
+    sl = get_share_link_by_public(db, publicId)
+    if not sl:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not verify_share_link_token(sl, token if isinstance(token, str) else None, settings.secret_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not actorId:
+        d = db.get(Dashboard, sl.dashboard_id)
+        actorId = (d.user_id if d else None) or actorId
+    return actorId
+
+
 def _engine_for_datasource(db: Session, datasource_id: Optional[str], actor_id: Optional[str] = None) -> Engine:
-    """Return engine for datasource, enforcing access when actor_id is provided.
-    Backward-compatible: if actor_id is None, no enforcement (dev/local flows).
+    """Return engine for datasource, enforcing access on the acting identity.
+
+    - ``auth_enforce`` OFF (migration window): if ``actor_id`` is None, no
+      enforcement (legacy/dev/local flows) — preserved unchanged.
+    - ``auth_enforce`` ON: a real ``actor_id`` is mandatory for any concrete
+      datasource. Public/embed viewers reach here with ``actor_id`` already
+      resolved to the shared dashboard's owner (see public entry points), so
+      the owner check below passes; an anonymous caller with no verified public
+      token is denied.
     """
     if not datasource_id:
         return get_duckdb_engine()
+    if settings.auth_enforce and not actor_id:
+        raise HTTPException(status_code=403, detail="Not allowed to query this datasource")
     # Use short-lived cache to avoid hammering the metadata DB under bursts
     ds_info = _ds_cache_get(str(datasource_id))
     if ds_info is None:
@@ -723,7 +752,7 @@ def _engine_for_datasource(db: Session, datasource_id: Optional[str], actor_id: 
     # Enforce that only owner, admin, or shared users can access when actor is provided
     if actor_id:
         u = db.get(User, str(actor_id).strip())
-        is_admin = bool(u and (u.role or "user").lower() == "admin")
+        is_admin = is_admin_user(u)
         if not is_admin and (str(ds_info.get("user_id") or "").strip() != str(actor_id).strip()):
             share = db.query(DatasourceShare).filter(DatasourceShare.datasource_id == str(datasource_id), DatasourceShare.user_id == str(actor_id).strip()).first()
             if not share:
@@ -1728,12 +1757,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
         touch_actor(actorId)
     except Exception:
         pass
-    if isinstance(publicId, str) and publicId:
-        sl = get_share_link_by_public(db, publicId)
-        if not sl:
-            raise HTTPException(status_code=404, detail="Not found")
-        if not verify_share_link_token(sl, token if isinstance(token, str) else None, settings.secret_key):
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    actorId = _resolve_public_actor(db, actorId, publicId, token)
     # Prefer local DuckDB when enabled and local table exists (tri-state preferLocalDuck)
     try:
         _p = getattr(payload, 'preferLocalDuck', None)
@@ -2347,6 +2371,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     - Other engines: build a generic SQL SELECT with WHERE and delegate to /query.
     """
     # Debug: Log WHERE clause and incoming X at the start
+    actorId = _resolve_public_actor(db, actorId, publicId, token)
     spec = payload.spec
     _validate_source(spec.source)
     x_raw = spec.x if hasattr(spec, 'x') else None
@@ -2382,7 +2407,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         # Enforce access if actor is present
         if actorId:
             u = db.get(User, str(actorId).strip())
-            is_admin = bool(u and (u.role or "user").lower() == "admin")
+            is_admin = is_admin_user(u)
             if not is_admin and (ds.user_id or "").strip() != str(actorId).strip():
                 s = db.query(DatasourceShare).filter(DatasourceShare.datasource_id == ds.id, DatasourceShare.user_id == str(actorId).strip()).first()
                 if not s:
@@ -2397,7 +2422,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             if actorId:
                 # Filter by actorId or admin
                 u = db.get(User, str(actorId).strip())
-                is_admin = bool(u and (u.role or "user").lower() == "admin")
+                is_admin = is_admin_user(u)
                 if not is_admin:
                     stmt = stmt.where(Datasource.user_id == str(actorId).strip())
             # Note: If actorId is None, allow any DuckDB datasource (local store is shared)
@@ -5643,12 +5668,7 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
             except Exception:
                 pass
             raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
-    if isinstance(publicId, str) and publicId:
-        sl = get_share_link_by_public(db, publicId)
-        if not sl:
-            raise HTTPException(status_code=404, detail="Not found")
-        if not verify_share_link_token(sl, token if isinstance(token, str) else None, settings.secret_key):
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    actorId = _resolve_public_actor(db, actorId, publicId, token)
     """Return distinct values for a column (including derived date parts) with optional WHERE.
 
     - Omits datasource defaults (TopN/sort) to ensure completeness
@@ -5688,7 +5708,7 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
             stmt = select(Datasource).where(Datasource.type == "duckdb")
             if actorId:
                 u = db.get(User, str(actorId).strip())
-                is_admin = bool(u and (u.role or "user").lower() == "admin")
+                is_admin = is_admin_user(u)
                 if not is_admin:
                     stmt = stmt.where(Datasource.user_id == str(actorId).strip())
             
@@ -6275,6 +6295,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
     # callers pass actorId positionally and leave `_actor` as the Depends sentinel.
     if isinstance(_actor, str):
         actorId = _actor
+    actorId = _resolve_public_actor(db, actorId, publicId, token)
     _validate_source(payload.source)
     import sys
     sys.stderr.write(f"[PIVOT_START] datasourceId={payload.datasourceId}, widgetId={payload.widgetId}, source={payload.source}\n")
@@ -8450,6 +8471,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
 def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     """Return the SQL that would be executed by /pivot without running it. Used for SQL preview."""
     import sys
+    actorId = _resolve_public_actor(db, actorId, publicId, token)
     try:
         if getattr(payload, 'where', None):
             payload.where = _resolve_date_presets(payload.where)
@@ -8547,12 +8569,7 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
             except Exception:
                 pass
             raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
-    if isinstance(publicId, str) and publicId:
-        sl = get_share_link_by_public(db, publicId)
-        if not sl:
-            raise HTTPException(status_code=404, detail="Not found")
-        if not verify_share_link_token(sl, token if isinstance(token, str) else None, settings.secret_key):
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    actorId = _resolve_public_actor(db, actorId, publicId, token)
     """Compute aggregated totals for a period (start..end), optionally grouped by a legend column.
 
     Payload keys:
@@ -9621,12 +9638,7 @@ def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: O
         _ra = _throttle_take(actorId)
         if _ra:
             raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
-    if isinstance(publicId, str) and publicId:
-        sl = get_share_link_by_public(db, publicId)
-        if not sl:
-            raise HTTPException(status_code=404, detail="Not found")
-        if not verify_share_link_token(sl, token if isinstance(token, str) else None, settings.secret_key):
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    actorId = _resolve_public_actor(db, actorId, publicId, token)
     """Batch variant of period-totals.
 
     Payload:
@@ -9679,12 +9691,7 @@ def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId:
         _ra = _throttle_take(actorId)
         if _ra:
             raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
-    if isinstance(publicId, str) and publicId:
-        sl = get_share_link_by_public(db, publicId)
-        if not sl:
-            raise HTTPException(status_code=404, detail="Not found")
-        if not verify_share_link_token(sl, token if isinstance(token, str) else None, settings.secret_key):
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    actorId = _resolve_public_actor(db, actorId, publicId, token)
     """Compare variant: computes current and previous windows in one call.
 
     Payload keys include single-call keys plus prevStart, prevEnd.

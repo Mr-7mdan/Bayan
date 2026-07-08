@@ -4,10 +4,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
 
 from ..date_presets import PresetConfig, materialize_holidays, resolve_preset
+from ..authz import require_user
 
 router = APIRouter(prefix="/date-presets", tags=["date-presets"])
 
@@ -96,7 +97,7 @@ def _load_holidays() -> frozenset[str]:
 # ── Endpoint ──────────────────────────────────────────────────────────────
 
 @router.post("/preview", response_model=PreviewResponse)
-def preview_preset(req: PreviewRequest):
+def preview_preset(req: PreviewRequest, _user = Depends(require_user)):
     """Resolve a PresetConfig to concrete date bounds for UI preview."""
     config: PresetConfig = {
         "period": req.period,  # type: ignore[typeddict-item]

@@ -259,6 +259,27 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE email_config ADD COLUMN base_template_html TEXT"))
             if "logo_url" not in cols_email:
                 conn.execute(text("ALTER TABLE email_config ADD COLUMN logo_url TEXT"))
+            # spec 04: alert ownership. Add user_id, backfill from the linked
+            # dashboard's owner. Rows still NULL afterward (no dashboard) stay
+            # admin-only.
+            info_alerts = conn.execute(text("PRAGMA table_info(alert_rules)")).fetchall()
+            cols_alerts = {row[1] for row in info_alerts}
+            if "user_id" not in cols_alerts:
+                conn.execute(text("ALTER TABLE alert_rules ADD COLUMN user_id TEXT"))
+                conn.execute(text(
+                    "UPDATE alert_rules SET user_id = ("
+                    "SELECT user_id FROM dashboards WHERE dashboards.id = alert_rules.dashboard_id"
+                    ") WHERE user_id IS NULL"
+                ))
+            # spec 04: backfill legacy contacts (user_id never written before)
+            # to the first admin so they remain visible to admins.
+            first_admin = conn.execute(text(
+                "SELECT id FROM users WHERE lower(role) = 'admin' ORDER BY created_at LIMIT 1"
+            )).fetchone()
+            if first_admin:
+                conn.execute(text(
+                    "UPDATE contacts SET user_id = :aid WHERE user_id IS NULL OR user_id = ''"
+                ), {"aid": first_admin[0]})
         except Exception:
             pass
         # ensure base_url exists on ai_config
@@ -802,6 +823,7 @@ class AlertRule(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False, default="alert")  # 'alert' | 'notification'
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # owner (spec 04); NULL = legacy, admin-only
     widget_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     dashboard_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

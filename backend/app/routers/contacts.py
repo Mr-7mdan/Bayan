@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 import re
 import threading
 
-from ..models import SessionLocal, Contact
+from ..models import SessionLocal, Contact, User
+from ..authz import require_user, require_owned, is_admin
+from ..config import settings
 from ..schemas import (
     ContactIn,
     ContactOut,
@@ -142,10 +144,13 @@ async def list_contacts(
     page: int = Query(default=1),
     pageSize: int = Query(default=20),
     db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
 ) -> ContactsListResponse:
     page = max(1, int(page or 1))
     pageSize = max(1, min(200, int(pageSize or 20)))
     q = db.query(Contact)
+    if settings.auth_enforce and not is_admin(user):
+        q = q.filter(Contact.user_id == user.id)
     if active is not None:
         q = q.filter(Contact.active == bool(active))
     if search:
@@ -165,12 +170,12 @@ async def list_contacts(
 
 
 @router.post("", response_model=ContactOut)
-async def create_contact(payload: ContactIn, db: Session = Depends(get_db)) -> ContactOut:
+async def create_contact(payload: ContactIn, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> ContactOut:
     if not (payload.name or '').strip():
         raise HTTPException(status_code=400, detail="name is required")
     c = Contact(
         id=str(uuid4()),
-        user_id=payload.userId,
+        user_id=(user.id if user else payload.userId),  # identity from token; payload.userId only in legacy window
         name=payload.name.strip(),
         email=(payload.email or None),
         phone=(payload.phone or None),
@@ -185,10 +190,8 @@ async def create_contact(payload: ContactIn, db: Session = Depends(get_db)) -> C
 
 
 @router.put("/{contact_id}", response_model=ContactOut)
-async def update_contact(contact_id: str, payload: ContactIn, db: Session = Depends(get_db)) -> ContactOut:
-    c = db.get(Contact, contact_id)
-    if not c:
-        raise HTTPException(status_code=404, detail="Not found")
+async def update_contact(contact_id: str, payload: ContactIn, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> ContactOut:
+    c = require_owned(db, user, Contact, contact_id)
     if payload.name is not None:
         c.name = payload.name
     if payload.email is not None:
@@ -202,30 +205,30 @@ async def update_contact(contact_id: str, payload: ContactIn, db: Session = Depe
 
 
 @router.post("/{contact_id}/deactivate")
-async def deactivate_contact(contact_id: str, active: bool = Query(default=False), db: Session = Depends(get_db)) -> dict:
-    c = db.get(Contact, contact_id)
-    if not c:
-        raise HTTPException(status_code=404, detail="Not found")
+async def deactivate_contact(contact_id: str, active: bool = Query(default=False), db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> dict:
+    c = require_owned(db, user, Contact, contact_id)
     c.active = bool(active)
     db.add(c); db.commit()
     return {"ok": True, "active": c.active}
 
 
 @router.delete("/{contact_id}")
-async def delete_contact(contact_id: str, db: Session = Depends(get_db)) -> dict:
+async def delete_contact(contact_id: str, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> dict:
     c = db.get(Contact, contact_id)
     if not c:
         return {"deleted": 0}
+    if settings.auth_enforce and not is_admin(user) and (c.user_id or "") != (user.id if user else None):
+        raise HTTPException(status_code=403, detail="Forbidden")
     db.delete(c); db.commit()
     return {"deleted": 1}
 
 
 @router.post("/import", response_model=ImportContactsResponse)
-async def import_contacts(payload: ImportContactsRequest, db: Session = Depends(get_db)) -> ImportContactsResponse:
+async def import_contacts(payload: ImportContactsRequest, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> ImportContactsResponse:
     count = 0
     for it in (payload.items or []):
         try:
-            c = Contact(id=str(uuid4()), user_id=it.userId, name=it.name, email=it.email, phone=it.phone, active=True)
+            c = Contact(id=str(uuid4()), user_id=(user.id if user else it.userId), name=it.name, email=it.email, phone=it.phone, active=True)
             try: c.tags = it.tags or []
             except Exception: c.tags = []
             db.add(c); count += 1
@@ -236,8 +239,10 @@ async def import_contacts(payload: ImportContactsRequest, db: Session = Depends(
 
 
 @router.get("/export")
-async def export_contacts(ids: Optional[str] = Query(default=None), db: Session = Depends(get_db)) -> dict:
+async def export_contacts(ids: Optional[str] = Query(default=None), db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> dict:
     q = db.query(Contact)
+    if settings.auth_enforce and not is_admin(user):
+        q = q.filter(Contact.user_id == user.id)
     if ids:
         id_list = [i.strip() for i in ids.split(',') if i.strip()]
         q = q.filter(Contact.id.in_(id_list))
@@ -246,12 +251,15 @@ async def export_contacts(ids: Optional[str] = Query(default=None), db: Session 
 
 
 @router.post("/send-email")
-async def send_bulk_email(payload: BulkEmailPayload, db: Session = Depends(get_db)) -> dict:
+async def send_bulk_email(payload: BulkEmailPayload, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> dict:
+    _scoped = settings.auth_enforce and not is_admin(user)
     # Collect candidates from ids, direct emails, and tags
     candidates: list[str] = []
     if payload.ids:
         for cid in payload.ids:
             c = db.get(Contact, cid)
+            if _scoped and c and (c.user_id or "") != user.id:
+                raise HTTPException(status_code=403, detail="Not allowed to message this contact")
             if c and c.active and (c.email or '').strip():
                 candidates.append(c.email.strip())
     for e in (payload.emails or []):
@@ -263,6 +271,8 @@ async def send_bulk_email(payload: BulkEmailPayload, db: Session = Depends(get_d
         if not t:
             continue
         q = db.query(Contact).filter(Contact.active == True, (Contact.tags_json != None) & (Contact.tags_json.ilike(f'%"{t}"%')))  # noqa: E711
+        if _scoped:
+            q = q.filter(Contact.user_id == user.id)
         for c in q.all():
             s = (c.email or '').strip()
             if s:
@@ -354,12 +364,15 @@ async def send_bulk_email(payload: BulkEmailPayload, db: Session = Depends(get_d
 
 
 @router.post("/send-sms")
-async def send_bulk_sms(payload: BulkSmsPayload, db: Session = Depends(get_db)) -> dict:
+async def send_bulk_sms(payload: BulkSmsPayload, db: Session = Depends(get_db), user: User | None = Depends(require_user)) -> dict:
+    _scoped = settings.auth_enforce and not is_admin(user)
     # Collect candidates from ids, direct numbers, and tags
     candidates: list[str] = []
     if payload.ids:
         for cid in payload.ids:
             c = db.get(Contact, cid)
+            if _scoped and c and (c.user_id or "") != user.id:
+                raise HTTPException(status_code=403, detail="Not allowed to message this contact")
             if c and c.active and (c.phone or '').strip():
                 candidates.append(c.phone.strip())
     for p in (payload.numbers or []):
@@ -371,6 +384,8 @@ async def send_bulk_sms(payload: BulkSmsPayload, db: Session = Depends(get_db)) 
         if not t:
             continue
         q = db.query(Contact).filter(Contact.active == True, (Contact.tags_json != None) & (Contact.tags_json.ilike(f'%"{t}"%')))  # noqa: E711
+        if _scoped:
+            q = q.filter(Contact.user_id == user.id)
         for c in q.all():
             s = (c.phone or '').strip()
             if s:
@@ -498,7 +513,7 @@ def _send_sms_chunk_job(*, job_id: str, numbers: list[str], message: str, notify
 
 
 @router.get("/send-status")
-async def get_send_status(jobId: str = Query(alias="jobId")) -> dict:
+async def get_send_status(jobId: str = Query(alias="jobId"), user: User | None = Depends(require_user)) -> dict:
     st = _get_job(jobId)
     if not st:
         raise HTTPException(status_code=404, detail="Job not found")

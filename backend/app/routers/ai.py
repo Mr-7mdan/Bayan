@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..models import SessionLocal, AiConfig, User
 from ..auth import require_admin
+from ..authz import require_user
 from ..security import encrypt_text, decrypt_text
 from ..metrics import counter_inc, summary_observe
 
@@ -108,7 +109,7 @@ class AiConfigOut(BaseModel):
 
 
 @router.get("/config", response_model=AiConfigOut)
-async def get_ai_config(db: Session = Depends(get_db)) -> AiConfigOut:
+async def get_ai_config(db: Session = Depends(get_db), admin: User = Depends(require_admin)) -> AiConfigOut:
     c = db.query(AiConfig).first()
     if not c:
         return AiConfigOut()
@@ -268,7 +269,7 @@ _DEF_SYS = (
 )
 
 @router.post("/describe", response_model=AiDescribeResponse)
-async def ai_describe(payload: AiDescribeRequest, request: Request, db: Session = Depends(get_db)) -> AiDescribeResponse:
+async def ai_describe(payload: AiDescribeRequest, request: Request, db: Session = Depends(get_db), _user = Depends(require_user)) -> AiDescribeResponse:
     cols = ", ".join([f"{c.name}{f' ({c.type})' if c.type else ''}" for c in payload.dsSchema.columns])
     sample_text = "\n".join([str(s) for s in payload.samples[:10]])
     user = (
@@ -306,7 +307,7 @@ async def ai_describe(payload: AiDescribeRequest, request: Request, db: Session 
     return AiDescribeResponse(description=text.strip())
 
 @router.post("/enhance", response_model=AiEnhanceResponse)
-async def ai_enhance(payload: AiEnhanceRequest, request: Request, db: Session = Depends(get_db)) -> AiEnhanceResponse:
+async def ai_enhance(payload: AiEnhanceRequest, request: Request, db: Session = Depends(get_db), _user = Depends(require_user)) -> AiEnhanceResponse:
     cols = ", ".join([c.name for c in payload.dsSchema.columns])
     allowed = ", ".join(payload.allowedTypes or [])
     user = (
@@ -349,7 +350,7 @@ async def ai_enhance(payload: AiEnhanceRequest, request: Request, db: Session = 
     return AiEnhanceResponse(enhancedPrompt=text.strip())
 
 @router.post("/plan", response_model=AiPlanResponse)
-async def ai_plan(payload: AiPlanRequest, request: Request, db: Session = Depends(get_db)) -> AiPlanResponse:
+async def ai_plan(payload: AiPlanRequest, request: Request, db: Session = Depends(get_db), _user = Depends(require_user)) -> AiPlanResponse:
     cols = ", ".join([c.name for c in payload.dsSchema.columns])
     sample_text = "\n".join([str(s) for s in payload.samples[:5]])
     # Enumerate options explicitly in the system message for diversity
@@ -427,7 +428,7 @@ async def ai_plan(payload: AiPlanRequest, request: Request, db: Session = Depend
     return AiPlanResponse(plan=text.strip())
 
 @router.post("/suggest", response_model=AiSuggestResponse)
-async def ai_suggest(payload: AiSuggestRequest, request: Request, db: Session = Depends(get_db)) -> AiSuggestResponse:
+async def ai_suggest(payload: AiSuggestRequest, request: Request, db: Session = Depends(get_db), _user = Depends(require_user)) -> AiSuggestResponse:
     cols = ", ".join([c.name for c in payload.dsSchema.columns])
     sample_text = "\n".join([str(s) for s in payload.samples[:10]])
     offset = int(payload.variantOffset or 0)
