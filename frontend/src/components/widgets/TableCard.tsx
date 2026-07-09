@@ -1,7 +1,7 @@
 "use client"
 
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react'
 import { Api, QueryApi } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { compileFormula, parseReferences } from '@/lib/formula'
@@ -23,7 +23,27 @@ function useDebounced<T>(val: T, delay = 350): T {
   return v
 }
 
-export default function TableCard({
+// Date range menu with Apply/Cancel (module scope: closes over nothing from TableCard)
+function DateRangeMenu({ field, a, b, onApply, onClear }: { field: string; a?: string; b?: string; onApply: (params: { a?: string; b?: string }) => void; onClear: () => void }) {
+  const [start, setStart] = useState<string>(a || '')
+  const [end, setEnd] = useState<string>(b || '')
+  return (
+    <div className="p-1 space-y-2 w-[260px]">
+      <div className="grid grid-cols-2 items-center gap-2">
+        <label className="text-[11px] text-muted-foreground">Start</label>
+        <input type="date" className="h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--card))]" value={start} onChange={(e) => setStart(e.target.value)} />
+        <label className="text-[11px] text-muted-foreground">End</label>
+        <input type="date" className="h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--card))]" value={end} onChange={(e) => setEnd(e.target.value)} />
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <button className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted" onClick={onClear}>Clear</button>
+        <button className="text-[11px] px-2 py-1 rounded-md border bg-[hsl(var(--btn3))] text-black" onClick={() => onApply({ a: start || undefined, b: end || undefined })}>Apply</button>
+      </div>
+    </div>
+  )
+}
+
+function TableCard({
   title,
   sql,
   datasourceId,
@@ -224,13 +244,15 @@ export default function TableCard({
     return eff
   }, [queryMode, querySpec, filters.startDate, filters.endDate, uiWhere, fieldsExposed, (options as any)?.deltaDateField, widgetId, (options?.table?.tableType || 'data'), JSON.stringify(gridWhere || {})])
 
-  // Dev-only: trace where composition for tables
-  if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-    try {
-      // eslint-disable-next-line no-console
-      console.debug('[TableCard] [FiltersDebug] where', { title, effectiveWhere })
-    } catch {}
-  }
+  // Dev-only: trace where composition for tables (moved out of render body)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      try {
+        // eslint-disable-next-line no-console
+        console.debug('[TableCard] [FiltersDebug] where', { title, effectiveWhere })
+      } catch {}
+    }
+  }, [title, effectiveWhere])
 
   // Distinct loader for strings (omits self constraint)
   function useDistinctStrings(
@@ -698,11 +720,30 @@ export default function TableCard({
   }, [widgetId, q.data?.columns])
 
   type Row = Record<string, unknown>
-  const rows: Row[] = ((q.data?.rows as Array<Array<unknown>>) || []).map((r: Array<unknown>) => {
+  // Memoize so AgTable/PivotMatrixView receive a stable rows reference across unrelated re-renders
+  const rows: Row[] = useMemo(() => ((q.data?.rows as Array<Array<unknown>>) || []).map((r: Array<unknown>) => {
     const obj: Record<string, unknown> = {}
     r.forEach((cell: unknown, idx: number) => { obj[`c${idx}`] = cell as unknown })
     return obj as Row
-  })
+  }), [q.data?.rows])
+  const columns: string[] = useMemo(() => (q.data?.columns as string[]) || [], [q.data?.columns])
+
+  // Stable pivot props for PivotMatrixView (hoisted out of the render-body IIFE)
+  const pivotViewTableOptions = useMemo(() => {
+    const rawCfg: any = options?.table?.pivotConfig || {}
+    const cleanCfg: any = { ...rawCfg }
+    delete cleanCfg.aggregatorName
+    const cols: string[] = Array.isArray(cleanCfg.cols) ? cleanCfg.cols.slice() : []
+    const hasMetric = Array.isArray((pivot as any)?.values) && ((pivot as any).values.length > 1)
+    const METRIC = '__metric__'
+    const colsWithMetric = hasMetric ? (cols.includes(METRIC) ? cols : [...cols, METRIC]) : cols
+    const style = { ...((options?.table?.pivotStyle || {}) as any), valueFormat: (options?.yAxisFormat || (options?.table?.pivotStyle as any)?.valueFormat), valueCurrency: (options as any)?.valueCurrency }
+    return { ...options?.table, pivotConfig: { ...cleanCfg, cols: colsWithMetric, vals: ['value'] }, pivotStyle: style }
+  }, [options?.table, options?.yAxisFormat, (options as any)?.valueCurrency, pivot])
+  const pivotForMatrix = useMemo(() => ({ ...(pivot as any), values: (Array.isArray((pivot as any)?.values) ? (pivot as any).values.map((v: any) => ({ ...v, agg: 'sum' })) : []) }), [pivot])
+
+  // Stable AG Grid filter handler so the memoized AgTable does not re-render
+  const onGridFilterChange = useCallback((w: Record<string, any>) => { setPage(0); setGridWhere(w || {}) }, [])
 
   // Emit sample distinct values per column for filters UI (based on current page rows)
   useEffect(() => {
@@ -801,26 +842,6 @@ export default function TableCard({
   const isPivotCard = ((options?.table?.tableType || 'data') === 'pivot')
   const cardClass = `${(autoFit && !isPivotCard) ? '' : 'h-full'} ${isPivotCard ? 'flex flex-col min-h-0' : ''} !border-0 shadow-none rounded-lg ${cardFill === 'transparent' ? 'bg-transparent' : 'bg-card'}`
   const tableType = options?.table?.tableType || 'data'
-
-  // Date range menu with Apply/Cancel
-  const DateRangeMenu = ({ field, a, b, onApply, onClear }: { field: string; a?: string; b?: string; onApply: (params: { a?: string; b?: string }) => void; onClear: () => void }) => {
-    const [start, setStart] = useState<string>(a || '')
-    const [end, setEnd] = useState<string>(b || '')
-    return (
-      <div className="p-1 space-y-2 w-[260px]">
-        <div className="grid grid-cols-2 items-center gap-2">
-          <label className="text-[11px] text-muted-foreground">Start</label>
-          <input type="date" className="h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--card))]" value={start} onChange={(e) => setStart(e.target.value)} />
-          <label className="text-[11px] text-muted-foreground">End</label>
-          <input type="date" className="h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--card))]" value={end} onChange={(e) => setEnd(e.target.value)} />
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted" onClick={onClear}>Clear</button>
-          <button className="text-[11px] px-2 py-1 rounded-md border bg-[hsl(var(--btn3))] text-black" onClick={() => onApply({ a: start || undefined, b: end || undefined })}>Apply</button>
-        </div>
-      </div>
-    )
-  }
 
   // Tabs (same pattern as ChartCard): render wrapper when tabsField configured and not already inside a tab
   const tabsFieldOpt = (options as any)?.tabsField as string | undefined
@@ -1057,17 +1078,7 @@ export default function TableCard({
           })()}
           {tableType === 'pivot' ? (
             (() => {
-              // Build options for PivotMatrixView: force vals=['value'] and append synthetic metric dim for multi-values
-              const rawCfg: any = options?.table?.pivotConfig || {}
-              const cleanCfg: any = { ...rawCfg }
-              delete cleanCfg.aggregatorName
-              const cols: string[] = Array.isArray(cleanCfg.cols) ? cleanCfg.cols.slice() : []
-              const hasMetric = Array.isArray((pivot as any)?.values) && ((pivot as any).values.length > 1)
-              const METRIC = '__metric__'
-              const colsWithMetric = hasMetric ? (cols.includes(METRIC) ? cols : [...cols, METRIC]) : cols
-              const style = { ...((options?.table?.pivotStyle || {}) as any), valueFormat: (options?.yAxisFormat || (options?.table?.pivotStyle as any)?.valueFormat), valueCurrency: (options as any)?.valueCurrency }
-              const pivotViewTableOptions = { ...options?.table, pivotConfig: { ...cleanCfg, cols: colsWithMetric, vals: ['value'] }, pivotStyle: style }
-              const pivotForMatrix = { ...(pivot as any), values: (Array.isArray((pivot as any)?.values) ? (pivot as any).values.map((v: any) => ({ ...v, agg: 'sum' })) : []) }
+              // pivotViewTableOptions / pivotForMatrix are memoized above the return
               const onExport = () => { try { window.dispatchEvent(new CustomEvent('pivot-export-excel', { detail: { widgetId, filename: title } } as any)) } catch {} }
               const showControls = pivotViewTableOptions?.showControls ?? true // Default to true
               return (
@@ -1100,7 +1111,7 @@ export default function TableCard({
                   )}
                   <PivotMatrixView
                     rows={rows as any}
-                    columns={(q.data?.columns as string[]) || []}
+                    columns={columns}
                     widgetId={widgetId}
                     tableOptions={pivotViewTableOptions}
                     pivot={pivotForMatrix as any}
@@ -1114,9 +1125,9 @@ export default function TableCard({
               <div className="max-h-[70vh] overflow-y-auto">
                 <AgTable
                   rows={rows as any}
-                  columns={(q.data?.columns as string[]) || []}
+                  columns={columns}
                   tableOptions={options?.table}
-                  onFilterWhereChangeAction={(w) => { setPage(0); setGridWhere(w || {}); }}
+                  onFilterWhereChangeAction={onGridFilterChange}
                 />
               </div>
               {/* Pager */}
@@ -1169,3 +1180,5 @@ export default function TableCard({
     </ErrorBoundary>
   )
 }
+
+export default memo(TableCard)

@@ -3,7 +3,7 @@
 import { Metric } from '@tremor/react'
 import dynamic from 'next/dynamic'
 import { Api, QueryApi, RequestGuard } from '@/lib/api'
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef, memo } from 'react'
 import type { QuerySpec } from '@/lib/api'
 import { useFilters } from '@/components/providers/FiltersProvider'
 import type { WidgetConfig } from '@/types/widgets'
@@ -37,7 +37,7 @@ const LineChart: any = dynamic(() => import('@tremor/react').then(m => m.LineCha
 const AreaChart: any = dynamic(() => import('@tremor/react').then(m => (m as any).AreaChart as any), { ssr: false })
 const BarChart: any = dynamic(() => import('@tremor/react').then(m => (m as any).BarChart as any), { ssr: false })
 
-export default function KpiCard({
+function KpiCard({
   title,
   sql,
   datasourceId,
@@ -1797,3 +1797,5 @@ export default function KpiCard({
     </ErrorBoundary>
   )
 }
+
+export default memo(KpiCard)

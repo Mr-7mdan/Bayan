@@ -218,7 +218,7 @@ function gradientFromOptions(opts?: WidgetConfig['options']): string[] {
   return ['#f9fafb', b.light, b.dark]
 }
 
-export default function HeatmapCard({
+function HeatmapCard({
   title,
   sql,
   datasourceId,
@@ -1398,3 +1398,5 @@ export default function HeatmapCard({
     </div>
   )
 }
+
+export default React.memo(HeatmapCard)

@@ -1,6 +1,7 @@
 "use client"
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { RiAddLine, RiAddFill, RiSubtractLine, RiSubtractFill, RiArrowRightSLine, RiArrowDownSLine, RiArrowRightSFill, RiArrowDownSFill, RiArrowRightWideLine, RiArrowDownWideLine, RiArrowDropRightLine, RiArrowDropDownLine } from '@remixicon/react'
 import type { TableOptions } from '@/types/widgets'
 
@@ -106,7 +107,7 @@ function buildTree(data: Record<string, any>[], dims: string[], orientation: 'ro
   return { root, leafKeys, headerRows }
 }
 
-export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableOptions, pivot }: PivotMatrixViewProps) {
+function PivotMatrixView({ rows, columns: _cols, widgetId, tableOptions, pivot }: PivotMatrixViewProps) {
   const cfg = (tableOptions?.pivotConfig || {}) as any
   const rowDims: string[] = Array.isArray(cfg.rows) ? cfg.rows : []
   const colDims: string[] = Array.isArray(cfg.cols) ? cfg.cols : []
@@ -342,7 +343,7 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
     } catch {}
   }, [visRowLeaves.length, visibleColLeaves.length])
 
-  const colLeavesUnder = (prefix?: string | null, visibleOnly = false): string[] => {
+  const colLeavesUnder = useCallback((prefix?: string | null, visibleOnly = false): string[] => {
     if (colDims.length === 0) return ['__no_key__']
     const source = visibleOnly ? visibleColLeaves : colLeaves
     if (!prefix) return source.slice()
@@ -353,7 +354,7 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
       for (let i = 0; i < partsP.length; i++) { if (p[i] !== partsP[i]) return false }
       return true
     })
-  }
+  }, [colDims.length, visibleColLeaves, colLeaves])
 
   // Compute which prefixes have children (to decide where to show toggles)
   const prefixesWithChildren = useMemo(() => {
@@ -420,14 +421,14 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
     for (const [pref, arr] of leavesByPrefix.entries()) { if (arr.length > 0) map.set(pref, arr[0]) }
     return map
   }, [leavesByPrefix])
-  const nearestCollapsedPrefixFor = (rk: string): string | null => {
+  const nearestCollapsedPrefixFor = useCallback((rk: string): string | null => {
     const parts = splitKey(rk)
     for (let i = parts.length - 1; i >= 1; i--) {
       const pref = parts.slice(0, i).join('|')
       if (collapsed.has(pref)) return pref
     }
     return null
-  }
+  }, [collapsed])
   const isUnderPrefix = (rk: string, pref: string | null): boolean => {
     if (!pref) return false
     const pA = splitKey(pref)
@@ -718,7 +719,7 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
   }, [widgetId, altRows])
 
   // Value accessor that aggregates across collapsed row and column groups when needed
-  const valueAt = (rk: string, ck: string, opts?: { ignoreRowCollapse?: boolean }): number => {
+  const valueAt = useCallback((rk: string, ck: string, opts?: { ignoreRowCollapse?: boolean }): number => {
     const rPref = opts?.ignoreRowCollapse ? null : nearestCollapsedPrefixFor(rk)
     const rowKeys = rPref ? (leavesByPrefix.get(rPref) || []) : [rk]
     const colKeys = (() => {
@@ -744,7 +745,7 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
     let s = 0
     for (const r of rowKeys) for (const c of colKeys) s += Number(matrix.get(r)?.get(c) || 0)
     return s
-  }
+  }, [matrix, aggName, colDims.length, leavesByPrefix, nearestCollapsedPrefixFor, colLeavesUnder, colLeaves])
 
   // Sorting state
   const cycle = (m: 'none'|'asc'|'desc'): 'none'|'asc'|'desc' => (m === 'none' ? 'desc' : (m === 'desc' ? 'asc' : 'none'))
@@ -894,12 +895,29 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
     return levelRuns
   }, [visibleRowKeys, rowDims])
 
+  // Row virtualization: window the body <tr>s above a threshold so DOM stays bounded.
+  // Gated off in subtotal mode because subtotal rows inject extra <tr>s that break index math.
+  // ponytail: subtotal mode renders full; virtualize it if someone ships a 1000-parent subtotal pivot.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const virtualize = visibleRowKeys.length > 150 && !showSubtotals
+  const rowVirtualizer = useVirtualizer({
+    count: visibleRowKeys.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 12,
+    enabled: virtualize,
+  })
+
   // Render
   return (
-    <div className="rounded-md border bg-transparent flex flex-col overflow-hidden">
+    <div
+      ref={scrollRef}
+      className={`rounded-md border bg-transparent flex flex-col ${virtualize ? 'overflow-auto' : 'overflow-hidden'}`}
+      style={virtualize ? { maxHeight: '70vh' } : undefined}
+    >
       <style>{animCss}</style>
       <table ref={tableRef} className={tableClass}>
-        <thead>
+        <thead className="sticky top-0 z-10">
           {/* Column header rows */}
           {colDims.length > 0 ? (
             (() => {
@@ -1079,7 +1097,8 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
               <td colSpan={Math.max(1, rowDims.length) + Math.max(1, visColLeaves.length) + (showRowTotals ? 1 : 0)} className="text-sm text-muted-foreground text-center py-6">No data</td>
             </tr>
           ) : (
-            visibleRowKeys.map((rk: string, rowIdx: number) => {
+            (() => {
+              const renderRow = (rk: string, rowIdx: number) => {
               const parts = splitKey(rk)
               const closing = isUnderPrefix(rk, closingPrefix)
               const opening = isUnderPrefix(rk, openingPrefix)
@@ -1103,11 +1122,14 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
                   }}
                   className={`group ${rowBase}`}
                 >
-                  {rowDims.map((_: string, level: number) => (
-                    rowHeaderSpans[level][rowIdx] > 0 ? (
+                  {rowDims.map((_: string, level: number) => {
+                    // Virtualized mode: rowSpan cannot cross a window boundary, so render every
+                    // level cell with rowSpan=1 (repeated labels are the accepted trade-off).
+                    const rhSpan = virtualize ? 1 : rowHeaderSpans[level][rowIdx]
+                    return rhSpan > 0 ? (
                       <th
                         key={`rh-${rowIdx}-${level}`}
-                        rowSpan={rowHeaderSpans[level][rowIdx]}
+                        rowSpan={rhSpan}
                         className={`${headerTextAlignClass} ${headerValignClass} border px-2 font-semibold bg-gradient-to-b from-[hsl(var(--muted)/0.9)] to-[hsl(var(--muted)/0.6)]`}
                         style={{ height: rowHeight, fontSize: headerFontSize, fontStyle: headerFontStyle as any, fontWeight: headerFontWeight as any, filter: rowHeaderDepthHue ? `hue-rotate(${level*16}deg) saturate(1.25)` : undefined }}
                         onClick={() => onRowHeaderClick(level)}
@@ -1153,7 +1175,7 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
                         </div>
                       </th>
                     ) : null
-                  ))}
+                  })}
                   {colDims.length === 0 ? (
                     <td className={`${cellTextAlignClass} ${cellValignClass} border px-2 ${cellBgClass}`} style={{ height: rowHeight }}>
                       <span style={{ fontSize: cellFontSize, fontStyle: cellFontStyle as any, fontWeight: cellFontWeight as any }}>{formatNumber(valueAt(rk, '__no_key__'))}</span>
@@ -1299,7 +1321,17 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
                 })()}
                 </React.Fragment>
               )
-            })
+              }
+              return virtualize ? (
+                <>
+                  <tr style={{ height: rowVirtualizer.getVirtualItems()[0]?.start ?? 0 }} />
+                  {rowVirtualizer.getVirtualItems().map((vi) => renderRow(visibleRowKeys[vi.index], vi.index))}
+                  <tr style={{ height: rowVirtualizer.getTotalSize() - (rowVirtualizer.getVirtualItems().at(-1)?.end ?? 0) }} />
+                </>
+              ) : (
+                visibleRowKeys.map(renderRow)
+              )
+            })()
           )}
           {/* Column totals row */}
           {showColTotals && (
@@ -1375,11 +1407,8 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
                         // Grand total: sum all values across all visible rows and columns
                         let s = 0
                         for (const rk of visibleRowKeys) {
-                          const val = valueAt(rk, '__TOTAL__')
-                          console.log(`[Pivot] Total row grand total: rk=${rk}, val=${val}`)
-                          s += val
+                          s += valueAt(rk, '__TOTAL__')
                         }
-                        console.log(`[Pivot] Total row grand total final: ${s}`)
                         return formatNumber(s)
                       })()}
                     </td>
@@ -1393,3 +1422,5 @@ export default function PivotMatrixView({ rows, columns: _cols, widgetId, tableO
     </div>
   )
 }
+
+export default React.memo(PivotMatrixView)

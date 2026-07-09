@@ -53,7 +53,7 @@ function formatValue(mode: 'none'|'short'|'currency'|'percent'|'bytes'|undefined
   }
 }
 
-export default function AgTable({
+function AgTable({
   columns,
   rows,
   tableOptions,
@@ -196,7 +196,10 @@ export default function AgTable({
     return undefined
   }, [tableOptions?.selection?.mode])
 
-  const domLayout = tableOptions?.performance?.domLayout || 'autoHeight'
+  // Enable AG Grid's native row virtualization for large pages ('normal' layout);
+  // small pages keep 'autoHeight'. Explicit user config always wins.
+  const domLayout = tableOptions?.performance?.domLayout
+    || (rows.length > 100 ? 'normal' : 'autoHeight')
   const density = tableOptions?.density || 'compact'
   const rowHeight = tableOptions?.rowHeight ?? (density === 'compact' ? 28 : 36)
   const headerHeight = tableOptions?.headerHeight ?? (density === 'compact' ? 28 : 36)
@@ -324,6 +327,8 @@ export default function AgTable({
         className="rounded-md border bg-card overflow-x-auto"
         style={{
           width: '100%',
+          // 'normal' layout needs an explicit height so the grid viewport can virtualize rows
+          height: domLayout === 'normal' ? '65vh' : undefined,
           // Core surface/text/border
           ['--ag-background-color' as any]: 'hsl(var(--card))',
           ['--ag-foreground-color' as any]: 'hsl(var(--foreground))',
@@ -367,3 +372,5 @@ export default function AgTable({
     </div>
   )
 }
+
+export default React.memo(AgTable)

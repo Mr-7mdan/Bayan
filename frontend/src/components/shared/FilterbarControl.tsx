@@ -1,8 +1,53 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { RiArrowDownSLine, RiCalendar2Line, RiHashtag, RiTextWrap } from '@remixicon/react'
+
+// Virtualized manual-value checkbox list: bounds DOM <li> count for high-cardinality fields.
+// Selection lookup is O(1) via selSet; loading/empty fallbacks stay outside the virtual container.
+function VirtualValueList({ items, selSet, onToggle, loading }: { items: string[]; selSet: Set<string>; onToggle: (v: string) => void; loading?: boolean }) {
+  const parentRef = useRef<HTMLDivElement | null>(null)
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 24,
+    overscan: 10,
+  })
+  return (
+    <div ref={parentRef} className="max-h-56 overflow-auto border rounded-md">
+      {items.length > 0 ? (
+        <ul className="p-2" style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+          {virtualizer.getVirtualItems().map((vi) => {
+            const v = items[vi.index]
+            return (
+              <li
+                key={v}
+                className="absolute left-2 right-2 flex items-center gap-2 text-xs"
+                style={{ top: 0, height: vi.size, transform: `translateY(${vi.start}px)` }}
+              >
+                <input type="checkbox" className="size-3" checked={selSet.has(v)} onChange={() => onToggle(v)} />
+                <span className="truncate" title={v}>{v}</span>
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <ul className="p-2 space-y-1">
+          {loading ? (
+            <li className="text-xs text-muted-foreground flex items-center gap-2">
+              <span className="inline-block size-3 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+              Loading values...
+            </li>
+          ) : (
+            <li className="text-xs text-muted-foreground">No values</li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
+}
 import { PresetConfig, DEFAULT_PRESET, QUICK_PICKS, QuickPick, PERIOD_OPTIONS, OFFSET_OPTIONS, AS_OF_OPTIONS, RANGE_MODE_OPTIONS, parseLegacyPreset, matchQuickPick, usePresetPreview } from '@/lib/datePresets'
 
 export type FilterbarControlProps = {
@@ -167,16 +212,19 @@ function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadingC
     if (sig !== lastPatchSigRef.current) { lastPatchSigRef.current = sig; onPatchAction(patch) }
   }, [mode, JSON.stringify(sel)])
   
-  // Smart sort for numbers
-  const opts = ((distinctCache?.[field] || []) as string[]).map((s) => String(s))
-  const sortedOpts = [...opts].sort((a, b) => {
-    const na = Number(a), nb = Number(b)
-    if (isNaN(na) && isNaN(nb)) return String(a).localeCompare(String(b))
-    if (isNaN(na)) return 1
-    if (isNaN(nb)) return -1
-    return na - nb
-  })
-  const filtered = sortedOpts.filter((s) => s.toLowerCase().includes(q.toLowerCase()))
+  // Smart sort for numbers (memoized so high-cardinality lists don't re-sort every render)
+  const sortedOpts = useMemo(() => {
+    const opts = ((distinctCache?.[field] || []) as string[]).map((s) => String(s))
+    return [...opts].sort((a, b) => {
+      const na = Number(a), nb = Number(b)
+      if (isNaN(na) && isNaN(nb)) return String(a).localeCompare(String(b))
+      if (isNaN(na)) return 1
+      if (isNaN(nb)) return -1
+      return na - nb
+    })
+  }, [distinctCache?.[field]])
+  const filtered = useMemo(() => sortedOpts.filter((s) => s.toLowerCase().includes(q.toLowerCase())), [sortedOpts, q])
+  const selSet = useMemo(() => new Set(sel), [sel])
   
   // Auto-select search results
   useEffect(() => {
@@ -228,25 +276,7 @@ function NumberRuleInline({ field, where, onPatchAction, distinctCache, loadingC
               <button className="hover:text-foreground" onClick={deselectAll}>Deselect All</button>
             </div>
           </div>
-          <div className="max-h-56 overflow-auto border rounded-md">
-            <ul className="p-2 space-y-1">
-              {filtered.map((v) => (
-                <li key={v} className="flex items-center gap-2 text-xs">
-                  <input type="checkbox" className="size-3" checked={sel.includes(v)} onChange={()=>toggle(v)} />
-                  <span className="truncate" title={v}>{v}</span>
-                </li>
-              ))}
-              {filtered.length === 0 && loadingCache?.[field] && (
-                <li className="text-xs text-muted-foreground flex items-center gap-2">
-                  <span className="inline-block size-3 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
-                  Loading values...
-                </li>
-              )}
-              {filtered.length === 0 && !loadingCache?.[field] && (
-                <li className="text-xs text-muted-foreground">No values</li>
-              )}
-            </ul>
-          </div>
+          <VirtualValueList items={filtered} selSet={selSet} onToggle={toggle} loading={loadingCache?.[field]} />
           <div className="flex items-center gap-2">
             <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs" onClick={deselectAll}>Clear</button>
             <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs font-medium" onClick={()=>{}}>Apply</button>
@@ -367,8 +397,9 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadingC
     const sig = JSON.stringify(patch)
     if (sig !== lastPatchSigRef.current) { lastPatchSigRef.current = sig; onPatchAction(patch) }
   }, [mode, JSON.stringify(sel)])
-  const opts = ((distinctCache?.[field] || []) as string[]).map((s) => String(s))
-  const filtered = opts.filter((s) => s.toLowerCase().includes(q.toLowerCase()))
+  const opts = useMemo(() => ((distinctCache?.[field] || []) as string[]).map((s) => String(s)), [distinctCache?.[field]])
+  const filtered = useMemo(() => opts.filter((s) => s.toLowerCase().includes(q.toLowerCase())), [opts, q])
+  const selSet = useMemo(() => new Set(sel), [sel])
   // Auto-select filtered results by default when searching (matches Details behavior)
   useEffect(() => {
     if (mode !== 'manual') return
@@ -415,25 +446,7 @@ function StringRuleInline({ field, where, onPatchAction, distinctCache, loadingC
               <button className="hover:text-foreground" onClick={deselectAll}>Deselect All</button>
             </div>
           </div>
-          <div className="max-h-56 overflow-auto border rounded-md">
-            <ul className="p-2 space-y-1">
-              {filtered.map((v) => (
-                <li key={v} className="flex items-center gap-2 text-xs">
-                  <input type="checkbox" className="size-3" checked={sel.includes(v)} onChange={()=>toggle(v)} />
-                  <span className="truncate" title={v}>{v}</span>
-                </li>
-              ))}
-              {filtered.length === 0 && loadingCache?.[field] && (
-                <li className="text-xs text-muted-foreground flex items-center gap-2">
-                  <span className="inline-block size-3 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
-                  Loading values...
-                </li>
-              )}
-              {filtered.length === 0 && !loadingCache?.[field] && (
-                <li className="text-xs text-muted-foreground">No values</li>
-              )}
-            </ul>
-          </div>
+          <VirtualValueList items={filtered} selSet={selSet} onToggle={toggle} loading={loadingCache?.[field]} />
           <div className="flex items-center gap-2">
             <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs" onClick={deselectAll}>Clear</button>
             <button className="flex-1 px-2 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] text-xs font-medium" onClick={()=>{}}>Apply</button>
