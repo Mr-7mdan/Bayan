@@ -1,0 +1,96 @@
+name: CI
+
+# Triggers per spec 22: gate PRs into main and direct pushes to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Required repo secrets: NONE.
+# backend/app/config.py fields all have defaults (incl. a SECRET_KEY placeholder);
+# tests import app.config with defaults and never read backend/.env. Do not add secrets here.
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12" # 3.14 locally; 3.12 has broadest manylinux wheel coverage (pyodbc/pyarrow/duckdb/dlt)
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Install deps
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # GATING. Critical rules only (E9,F63,F7,F82) via backend/ruff.toml.
+      # The 70 pre-existing F821/F823 in routers/{query,datasources,alerts}.py are
+      # quarantined by per-file-ignores in ruff.toml (tracked debt, see spec 22 + 25).
+      # A NEW undefined name anywhere else still fails this step -> real gate.
+      - name: Ruff (critical rules)
+        run: ruff check app tests
+
+      # GATING for 111 tests. The 3 stale failures (spec 25 baseline) are DESELECTED
+      # here instead of xfail'd, because this branch may not touch backend/tests/ source.
+      # These are the same 3 tests spec 22 wants marked xfail once source edits are allowed;
+      # until then they are skipped by node id and everything else gates normally.
+      # TODO(spec 22): replace --deselect with @pytest.mark.xfail in the test files, then drop these flags.
+      - name: Pytest (excludes 3 known-stale tests - see spec 22/25)
+        run: >-
+          python -m pytest tests/ -q
+          --deselect tests/test_date_presets.py::TestPresetConfig::test_legacy_map_covers_all_old_presets
+          --deselect tests/test_date_presets.py::TestResolvePresetDay::test_day_before_last_working_day
+          --deselect tests/test_sqlglot_builder.py::TestSQLGlotBuilder::test_derived_columns_no_validation
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install deps
+        run: npm ci
+
+      # ADVISORY (non-blocking) until spec 22's source fixes land.
+      # `npm run typecheck` does not exist yet and package.json/src are owned by other work,
+      # so we invoke tsc directly. 13 real tsc errors exist today (spec 25 baseline);
+      # dist/ phantom errors do not occur in CI (frontend/dist is gitignored, absent on fresh checkout).
+      # TODO(spec 22): after the 13 source fixes + tsconfig `exclude: dist`, drop continue-on-error to make this GATING.
+      - name: Typecheck (advisory - 13 known errors, see spec 22/25)
+        continue-on-error: true
+        run: npx tsc --noEmit
+
+      # ADVISORY (non-blocking) until spec 22's source fixes land.
+      # 63 lint errors today (39 rules-of-hooks, 22 no-unescaped-entities, 1 display-name, 1 no-namespace).
+      # TODO(spec 22): once .eslintrc downgrades those rules and src is fixed, drop continue-on-error to make this GATING.
+      - name: Lint (advisory - 63 known errors, see spec 22/25)
+        continue-on-error: true
+        run: npx next lint
+
+      # GATING. Real frontend gate today: a genuinely broken build (syntax/module errors) fails here.
+      # NOTE: the current `build` script is `next build --no-lint` with next.config `ignoreBuildErrors:true`,
+      # so lint/type errors do NOT fail it yet - that is what the two advisory steps above cover.
+      # TODO(spec 22): when `--no-lint` and `ignoreBuildErrors` are removed, this step subsumes the two above.
+      - name: Build
+        run: npm run build
+
+      # Self-skips until spec 21 lands scripts/check-bundle-size.mjs + a "size" script.
+      - name: Bundle size budget (spec 21)
+        run: |
+          if [ -f scripts/check-bundle-size.mjs ]; then npm run size; else echo "spec 21 not landed yet - skipping"; fi

@@ -1,0 +1,12 @@
+# CI lint gate: critical errors only (syntax errors, undefined names).
+target-version = "py312"
+
+[lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[lint.per-file-ignores]
+# ponytail: 70 pre-existing F821/F823 undefined names in these routers; fix, then delete these lines. See v2 Roadmap/P2-ops/22-ci-cd-pipeline.md
+# The `**/` prefix is required - per-file-ignore globs don't match when ruff runs from the repo root otherwise.
+"**/app/routers/query.py" = ["F821", "F823"]
+"**/app/routers/datasources.py" = ["F821"]
+"**/app/routers/alerts.py" = ["F821", "F823"]

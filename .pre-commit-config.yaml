@@ -1,0 +1,14 @@
+# Local-only convenience; GitHub Actions (.github/workflows/ci.yml) is the real gate.
+# Backend only: ruff critical rules (same gate as CI, same config).
+# DEBT (see v2 Roadmap/P2-ops/22-ci-cd-pipeline.md):
+#   - 70 backend F821/F823 quarantined via per-file-ignores in backend/ruff.toml.
+#   - frontend react-hooks/rules-of-hooks: 39 pre-existing violations; downgrade to "warn" once .eslintrc is editable.
+#   - 3 stale backend tests deselected in CI; convert to @pytest.mark.xfail when tests/ is editable.
+# Enable locally with `pre-commit install` (not forced). No frontend hook: tsc --noEmit is too slow per-commit.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.0  # bump to latest at install time
+    hooks:
+      - id: ruff
+        args: [--config, backend/ruff.toml]
+        files: ^backend/(app|tests)/
