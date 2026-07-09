@@ -1,0 +1,19 @@
+# Root build-context ignore (defensive: nothing builds from repo root today,
+# each service uses its own context + .dockerignore).
+.git/
+.env
+.env.*
+node_modules/
+**/node_modules/
+.data/
+**/.data/
+*.db
+*.duckdb
+*.sqlite
+backend/venv/
+**/venv/
+logs/
+*.log
+.DS_Store
+.pytest_cache/
+.ruff_cache/

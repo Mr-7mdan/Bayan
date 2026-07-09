@@ -4,6 +4,8 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts')
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Standalone server bundle for the Docker image (spec 23)
+  output: 'standalone',
   // Use stable option location for typed routes (moved out of experimental)
   typedRoutes: true,
   // Silence workspace root inference warning (point to monorepo root if applicable)

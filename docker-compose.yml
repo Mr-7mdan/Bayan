@@ -1,0 +1,58 @@
+# Bayan containerized deployment. Additive — the systemd/bare-metal path
+# (backend/run_prod_gunicorn.sh, reporting-api*.service) is untouched.
+#
+#   docker compose up -d --build
+#   open http://localhost   (UI + same-origin /api proxied to backend)
+#
+# No separate nginx container: the Next.js standalone server proxies /api/* to
+# the backend via the next.config.js rewrite, so frontend is the public entry.
+# Front an external nginx/Traefik for TLS if needed (see DEPLOY_DOCKER.md).
+
+services:
+  backend:
+    build: ./backend
+    # Secrets (SECRET_KEY, etc.) come from the existing env file — never baked
+    # into the image. `environment:` below overrides any bare-metal-tuned values
+    # so paths/binding are correct inside the container.
+    env_file:
+      - backend/.env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      DUCKDB_PATH: /data/local.duckdb
+      METADATA_DB_PATH: /data/meta.sqlite
+      PROMETHEUS_MULTIPROC_DIR: /data/prom_multiproc
+      # Single scheduler + single writer: DuckDB/SQLite are single-writer.
+      # To scale web workers, set WEB_CONCURRENCY>1 AND RUN_SCHEDULER=0 here, then
+      # add a second backend service with WEB_CONCURRENCY=1 RUN_SCHEDULER=1.
+      WEB_CONCURRENCY: "1"
+      RUN_SCHEDULER: "1"
+      FRONTEND_BASE_URL: http://frontend:3000
+      BACKEND_BASE_URL: http://backend:8000/api
+    volumes:
+      # One named volume holds meta.sqlite + local.duckdb + duckdb.active +
+      # duckdb_tmp/ + prom_multiproc/ — survives `down`/`up`.
+      - bayan-data:/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Feeds both the client bundle and the server-side /api rewrite target.
+        NEXT_PUBLIC_API_BASE_URL: http://backend:8000/api
+    ports:
+      - "80:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  bayan-data:
