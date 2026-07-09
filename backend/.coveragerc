@@ -1,0 +1,12 @@
+# Coverage config for `pytest --cov=app` (spec 25).
+# Threshold is enforced in CI via --cov-fail-under (informational ratchet), not here.
+[run]
+source = app
+omit =
+    app/main.py
+    app/migrations/*
+    tests/*
+
+[report]
+show_missing = false
+skip_covered = false

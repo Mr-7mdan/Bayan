@@ -22,3 +22,8 @@ scripts/out/
 backend/.data/
 .vscode/
 .windsurf/
+
+# Logs (spec 07 — never track log files)
+*.log
+logs/
+.playwright-mcp/

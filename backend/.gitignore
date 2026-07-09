@@ -11,3 +11,8 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Test coverage (spec 25)
+.coverage
+htmlcov/
+coverage.xml

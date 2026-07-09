@@ -38,14 +38,18 @@ jobs:
       - name: Ruff (critical rules)
         run: ruff check app tests
 
-      # GATING for 111 tests. The 3 stale failures (spec 25 baseline) are DESELECTED
-      # here instead of xfail'd, because this branch may not touch backend/tests/ source.
+      # GATING for the test suite + coverage. The 3 stale failures (spec 25 baseline) are
+      # DESELECTED here instead of xfail'd, because this branch may not touch backend/tests/ source.
       # These are the same 3 tests spec 22 wants marked xfail once source edits are allowed;
       # until then they are skipped by node id and everything else gates normally.
+      # Coverage: --cov-fail-under is a ratchet FLOOR (current ~16%). Spec 25 targets 25%;
+      # raise this as specs 02/04/10 add endpoint-level tests for the router layer.
       # TODO(spec 22): replace --deselect with @pytest.mark.xfail in the test files, then drop these flags.
-      - name: Pytest (excludes 3 known-stale tests - see spec 22/25)
+      # TODO(spec 25): ratchet --cov-fail-under 15 -> 25 once router endpoints are covered.
+      - name: Pytest + coverage (excludes 3 known-stale tests - see spec 22/25)
         run: >-
           python -m pytest tests/ -q
+          --cov=app --cov-report=term --cov-fail-under=15
           --deselect tests/test_date_presets.py::TestPresetConfig::test_legacy_map_covers_all_old_presets
           --deselect tests/test_date_presets.py::TestResolvePresetDay::test_day_before_last_working_day
           --deselect tests/test_sqlglot_builder.py::TestSQLGlotBuilder::test_derived_columns_no_validation
@@ -66,6 +70,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install deps
         run: npm ci
+
+      # GATING (spec 25). Vitest unit tests for pure lib modules must pass.
+      # --coverage is informational only (no frontend coverage gate yet - ratchet later).
+      - name: Test (vitest + coverage)
+        run: npm run test:coverage
 
       # ADVISORY (non-blocking) until spec 22's source fixes land.
       # `npm run typecheck` does not exist yet and package.json/src are owned by other work,
