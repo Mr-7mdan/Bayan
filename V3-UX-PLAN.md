@@ -117,9 +117,39 @@ virtualization, a11y foundation, bundle cuts).
 - `npm run build` — green at wave end.
 - Commit per sub-wave; user eyeballs the running app at checkpoints.
 
+## Wave P — Skill-guided review + polish (FINAL, after B2/C/R/S land)
+
+Added per skill-guided re-review (design-review, design-tokens, ui-animation,
+tailwind-design-system, shadcn-ui):
+
+### P1. Screenshot design review (mandatory, replaces informal eyeballing)
+- Boot the app; Playwright captures: login, home, builder (populated + empty),
+  configurator open, report builder — × desktop 1280 / tablet 768 / mobile 375
+  × light + dark. Save under `.design/bayan-v3/screenshots/`.
+- Critique each against the review checklist (hierarchy, consistency, states,
+  contrast, dark-mode shadows); produce DESIGN_REVIEW.md; fix Must/Should items.
+
+### P2. Motion QA (ui-animation standards)
+- Grep-audit: no `transition-all`, no layout-prop transitions (width/height/top/left),
+  every animation has a reduced-motion path.
+- Rules encoded into implementation: high-frequency ephemeral UI (panel toggles,
+  menus, tooltips) enters instantly/fast and exits 100–150ms; NEVER animate
+  keyboard-initiated actions (Cmd+S state changes are instant); popovers/menus
+  get `transform-origin` at the trigger; modal + scrim share duration/easing.
+
+### P3. Token additions from audit (applied)
+- `--ease-enter` (0.22,1,0.36,1) alongside `--ease-out` (move curve); `--shadow-focus`.
+- Known debt (accepted): `[class*="ring-"]` !important rule forces ring color to
+  --border, so Tailwind ring-color utilities are neutralized — keyboard focus is
+  carried by `:focus-visible` outline instead. Revisit only if per-component ring
+  colors become needed.
+
 ## Out of scope (documented follow-ups)
 
 - Report builder live PDF preview pane (needs snapshot/render service integration).
 - Full ChartCard/AlertDialog decomposition (v2 roadmap specs 13/14 partials continue separately).
 - V1 configurator deletion (one release after V2 flip).
 - Marketing/landing surfaces.
+- Tailwind v4 migration (CSS-first `@theme`, OKLCH palette) — real project, own branch.
+- shadcn/ui adoption — rejected: repo has fresh canonical primitives mirroring its
+  API shape; swapping component stacks now is churn without user value.
