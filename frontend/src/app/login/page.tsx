@@ -9,6 +9,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { Api } from '@/lib/api'
 import { useTheme } from '@/components/providers/ThemeProvider'
 import ThemeToggle from '@/components/ui/ThemeToggle'
+import { Button, Input } from '@/components/ui'
 
 export default function LoginPage() {
   const t = useTranslations('login')
@@ -143,14 +144,8 @@ export default function LoginPage() {
             <Text className="mt-0 text-gray-600 dark:text-gray-300">{t('subtitle')}</Text>
           </div>
           <form onSubmit={onSubmit} className="mt-5 space-y-3">
-            <div>
-              <Text className="text-sm text-gray-600 dark:text-gray-300">{t('email')}</Text>
-              <input type="email" aria-label={t('email')} value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-card" />
-            </div>
-            <div>
-              <Text className="text-sm text-gray-600 dark:text-gray-300">{t('password')}</Text>
-              <input type="password" aria-label={t('password')} value={password} onChange={(e) => setPassword(e.target.value)} required className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-card" />
-            </div>
+            <Input type="email" label={t('email')} aria-label={t('email')} value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <Input type="password" label={t('password')} aria-label={t('password')} value={password} onChange={(e) => setPassword(e.target.value)} required />
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                 <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
@@ -159,13 +154,9 @@ export default function LoginPage() {
               <button type="button" className="text-sm text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setResetOpen(true)}>{t('forgotPassword')}</button>
             </div>
             {error && <div className="text-sm text-red-600">{error}</div>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full text-sm px-3 py-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-muted disabled:opacity-60 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950"
-            >
+            <Button type="submit" variant="primary" loading={loading} className="w-full">
               {loading ? t('submitting') : t('submit')}
-            </button>
+            </Button>
           </form>
           <div className="mt-4 text-center text-sm text-gray-600 dark:text-gray-300">
             {t('noAccount')}{' '}

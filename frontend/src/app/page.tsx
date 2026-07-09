@@ -9,7 +9,7 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import GridLayout from 'react-grid-layout'
 import { GRIDSIZE_COLS, colsFor, deriveLayouts, reconcileOrphans, rescaleLayout, type BreakpointKey } from '@/lib/gridBreakpoints'
-import * as Dialog from '@radix-ui/react-dialog'
+import { Modal, Button } from '@/components/ui'
 import KpiCard from '@/components/widgets/KpiCard'
 import ChartCard from '@/components/widgets/ChartCard'
 import HeatmapCard from '@/components/widgets/HeatmapCard'
@@ -1811,14 +1811,16 @@ export default function HomePage() {
         )}
       </main>
 
-      {/* Publish / Share Dialog (reused pattern) */}
-      <Dialog.Root open={publishOpen} onOpenChange={(v) => { if (!v) setPublishOpen(false) }}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/20" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Publish or Share</Dialog.Title>
-            <Dialog.Description className="text-sm text-muted-foreground mt-1">Choose whether to publish a public read‑only link, or share with a specific user.</Dialog.Description>
-            <div className="mt-4 space-y-4">
+      {/* Publish / Share Dialog — canonical Modal primitive (Wave F2 adoption proof) */}
+      <Modal
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        size="md"
+        title="Publish or Share"
+        description="Choose whether to publish a public read‑only link, or share with a specific user."
+        footer={<Button variant="secondary" size="sm" onClick={() => setPublishOpen(false)}>Close</Button>}
+      >
+            <div className="space-y-4">
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm"><input type="radio" name="pubmode" checked={pubMode==='public'} onChange={() => setPubMode('public')} /><span>Public version: read‑only</span></label>
                 <label className="flex items-center gap-2 text-sm"><input type="radio" name="pubmode" checked={pubMode==='user'} onChange={() => setPubMode('user')} /><span>Share with a user</span></label>
@@ -1938,13 +1940,8 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Close</button></Dialog.Close>
             </div>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      </Modal>
       {/* Global kebab menu (outside card overlays) */}
       <WidgetKebabMenu
         open={!!kebabMenuId}
