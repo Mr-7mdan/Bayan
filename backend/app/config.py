@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Audit log retention: rows older than this are purged by the daily job (spec 05)
     audit_retention_days: int = Field(default=365, validation_alias=AliasChoices("AUDIT_RETENTION_DAYS"))
 
+    # Wall-clock cap on a single data-sync job before the slot is released (spec 10)
+    sync_job_timeout_seconds: int = Field(default=3600, validation_alias=AliasChoices("SYNC_JOB_TIMEOUT_SECONDS"))
+
     # Local analytical store (DuckDB)
     duckdb_path: str = Field(default=".data/local.duckdb")
 

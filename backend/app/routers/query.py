@@ -797,10 +797,44 @@ except Exception:
     _RC_TTL_SECONDS = _CACHE_TTL_SECONDS
 
 
+# ponytail: single global generation — any sync busts all cached results.
+# Fine at hourly sync cadence + seconds-level TTLs; per-datasource keys if churn matters.
+_RESULT_CACHE_GEN = 0
+
+
+def _cache_generation() -> int:
+    try:
+        r = _get_redis()
+    except Exception:
+        r = None
+    if r is not None:
+        try:
+            return int(r.get("q:gen") or 0)
+        except Exception:
+            pass
+    return _RESULT_CACHE_GEN
+
+
+def bump_result_cache_generation() -> None:
+    """Invalidate all cached query results by advancing the generation counter that
+    is baked into every cache key. Called on sync completion."""
+    global _RESULT_CACHE_GEN
+    _RESULT_CACHE_GEN += 1
+    try:
+        r = _get_redis()
+    except Exception:
+        r = None
+    if r is not None:
+        try:
+            r.incr("q:gen")
+        except Exception:
+            pass
+
+
 def _cache_key(prefix: str, datasource_id: Optional[str], sql_inner: str, params: Dict[str, Any]) -> str:
     ds = datasource_id or "__local__"
     items = ",".join(f"{k}={repr(v)}" for k, v in sorted(params.items()))
-    return f"{prefix}|{ds}|{sql_inner}|{items}"
+    return f"{prefix}|g{_cache_generation()}|{ds}|{sql_inner}|{items}"
 
 
 def _cache_get(key: str) -> Optional[Tuple[list[str], list[list[Any]]]]:

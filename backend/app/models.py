@@ -8,7 +8,7 @@ from typing import Optional
 from uuid import uuid4
 import hashlib
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, create_engine, func, text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, create_engine, event, func, text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -197,6 +197,17 @@ engine_meta = create_engine(
     poolclass=NullPool,
 )
 SessionLocal = sessionmaker(bind=engine_meta, autoflush=False, autocommit=False)
+
+
+@event.listens_for(engine_meta, "connect")
+def _sqlite_pragmas(dbapi_conn, _record):  # spec 09 step 5: WAL for concurrent read/write
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA synchronous=NORMAL")
+    finally:
+        cur.close()
 
 
 def init_db() -> None:

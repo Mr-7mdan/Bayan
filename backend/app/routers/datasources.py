@@ -748,7 +748,6 @@ def run_sync_now(
         try:
             from ..scheduler import ensure_scheduler_started, run_task_job
             from apscheduler.triggers.date import DateTrigger
-            from datetime import datetime as _dt
         except Exception:
             # Fallback: if scheduler unavailable, run inline
             execute = True
@@ -758,10 +757,11 @@ def run_sync_now(
             enq = 0
             for t in tasks_sorted:
                 try:
-                    # Use local now (not utcnow) for DateTrigger to avoid timezone misfire by ~3h
+                    # Aware UTC run_date — APScheduler converts to its own tz correctly
+                    # regardless of SCHEDULER_TIMEZONE (naive now() misfires when they differ).
                     sched.add_job(
                         func=run_task_job,
-                        trigger=DateTrigger(run_date=_dt.now()),
+                        trigger=DateTrigger(run_date=datetime.now(timezone.utc)),
                         kwargs={"ds_id": ds_id, "task_id": t.id},
                         max_instances=1,
                         coalesce=True,
@@ -1125,6 +1125,16 @@ def run_sync_now(
                 except Exception as _retry_err:
                     print(f"[ABORT] CRITICAL: Could not reset in_progress for state_id={st.id}: {_retry_err}", flush=True)
 
+    # Bump the result-cache generation so completed syncs make new rows visible
+    # immediately (stale TTL entries become unreachable). Local import: query.py
+    # does not import datasources.py, so no cycle.
+    if results:
+        try:
+            from .query import bump_result_cache_generation
+            bump_result_cache_generation()
+        except Exception:
+            pass
+
     # Release locks
     try:
         for gk in acquired_keys:
@@ -1223,7 +1233,8 @@ def clear_sync_logs(ds_id: str, taskId: str | None = Query(default=None), actorI
 @router.post("/{ds_id}/sync/abort")
 def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     from datetime import datetime, timedelta
-    
+    from ..timeutil import as_utc
+
     print(f"[ABORT] Endpoint called: ds_id={ds_id}, taskId={taskId}", flush=True)
     ds = db.get(Datasource, ds_id)
     if not ds:
@@ -1251,7 +1262,7 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
             # Determine if stuck based on last_run_at timestamp on SyncState
             if st.last_run_at:
                 last_update = st.last_run_at
-                time_since_update = datetime.now(timezone.utc).replace(tzinfo=None) - last_update.replace(tzinfo=None)
+                time_since_update = datetime.now(timezone.utc) - as_utc(last_update)
                 if time_since_update > timedelta(minutes=stuck_threshold_minutes):
                     is_stuck = True
                     print(f"[ABORT] Sync appears STUCK: state_id={st.id}, last_run_at={st.last_run_at}, minutes_since={time_since_update.total_seconds()/60:.1f}", flush=True)

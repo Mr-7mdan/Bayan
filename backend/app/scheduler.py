@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from .config import settings
+from .timeutil import as_utc
 
 # Timezone used for all cron triggers and scheduler clock.
 # Configured via SCHEDULER_TIMEZONE env var (see config.py). Defaults to UTC.
@@ -17,6 +19,11 @@ from .alerts_service import run_rule
 from .routers import datasources as ds_router
 
 _scheduler: Optional[BackgroundScheduler] = None
+
+# Dedicated bounded pool so a hung sync never wedges an APScheduler worker thread.
+# ponytail: bounded shared pool; a truly hung driver call leaks one thread until restart —
+# acceptable, capped at 4. Per-datasource pools if that ever bites.
+_SYNC_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sync-job")
 
 
 def ensure_scheduler_started() -> BackgroundScheduler:
@@ -55,6 +62,10 @@ def shutdown_scheduler(wait: bool = True) -> None:
                 _scheduler.shutdown(wait=wait)
             finally:
                 _scheduler = None
+        try:
+            _SYNC_POOL.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
     except Exception:
         # Best-effort; ignore errors during shutdown
         _scheduler = None
@@ -178,10 +189,7 @@ def schedule_all_jobs() -> dict:
                     from .models import SyncState
                     _st = _catchup_db.query(SyncState).filter(SyncState.task_id == t.id).first()
                     if _st and _st.last_run_at is not None:
-                        _last = _st.last_run_at
-                        if _last.tzinfo is None:
-                            from datetime import timezone as _tz_mod
-                            _last = _last.replace(tzinfo=_tz_mod.utc)
+                        _last = as_utc(_st.last_run_at)
                         if _last.astimezone(_tz) >= _candidate:
                             continue  # Already ran for this slot
                     # Fire catch-up
@@ -228,7 +236,7 @@ def _auto_reset_stuck(db, ds_id: str, stale_threshold_minutes: int = 30) -> int:
         if not in_progress:
             return 0
         reset_count = 0
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
         for st in in_progress:
             # Use the most recent activity timestamp: progress_updated_at (set on each batch),
             # falling back to started_at, then last_run_at
@@ -241,7 +249,7 @@ def _auto_reset_stuck(db, ds_id: str, stale_threshold_minutes: int = 30) -> int:
                 is_stuck = True
                 reason = "no activity timestamp"
             else:
-                elapsed = now - last_activity.replace(tzinfo=None)
+                elapsed = now - as_utc(last_activity)
                 is_stuck = elapsed > timedelta(minutes=stale_threshold_minutes)
                 reason = f"no progress for {elapsed.total_seconds()/60:.0f}min (threshold={stale_threshold_minutes}min)"
             if is_stuck:
@@ -255,7 +263,7 @@ def _auto_reset_stuck(db, ds_id: str, stale_threshold_minutes: int = 30) -> int:
                 db.add(st)
                 reset_count += 1
             else:
-                elapsed_str = f"{(now - last_activity.replace(tzinfo=None)).total_seconds()/60:.0f}min" if last_activity else "?"
+                elapsed_str = f"{(now - as_utc(last_activity)).total_seconds()/60:.0f}min" if last_activity else "?"
                 print(f"[AUTO_RESET_STUCK] Sync still active: task_id={st.task_id}, progress={st.progress_current}/{st.progress_total}, last_activity={elapsed_str} ago", flush=True)
         if reset_count:
             db.commit()
@@ -270,29 +278,79 @@ def _auto_reset_stuck(db, ds_id: str, stale_threshold_minutes: int = 30) -> int:
         return 0
 
 
-def run_task_job(ds_id: str, task_id: str) -> None:
-    """Scheduler job wrapper to execute a single SyncTask.
-
-    IMPORTANT: This runs inside APScheduler's daemon thread. Unhandled exceptions
-    here can kill the scheduler, stopping ALL future jobs permanently.
-    """
+def _execute_sync(ds_id: str, task_id: str) -> None:
+    """Run the actual sync. Executes inside the dedicated _SYNC_POOL thread, NOT the
+    APScheduler worker, so a hung DB driver call can never wedge the scheduler."""
     db = SessionLocal()
     try:
-        # Auto-reset any syncs with no progress for >30 minutes
-        _auto_reset_stuck(db, ds_id, stale_threshold_minutes=30)
-
         ds: Optional[Datasource] = db.get(Datasource, ds_id)
         actor = (ds.user_id if ds and ds.user_id else None)
         ds_router.run_sync_now(ds_id, response=Response(), taskId=task_id, execute=True, actorId=actor, db=db)
-    except Exception as e:
-        # Catch ALL exceptions to prevent killing the scheduler daemon thread.
-        # APScheduler silently dies if the job function raises.
-        print(f"[SYNC_JOB] FAILED task={task_id} ds={ds_id}: {e}", flush=True)
     finally:
         try:
             db.close()
         except Exception:
             pass
+
+
+def _request_cancel(task_id: str) -> None:
+    """Cooperatively abort a runaway sync by flipping cancel_requested; the sync
+    engines honor it at their next batch boundary (_check_abort, datasources.py)."""
+    db = SessionLocal()
+    try:
+        from .models import SyncState
+        st = db.query(SyncState).filter(SyncState.task_id == task_id).first()
+        if st and st.in_progress:
+            st.cancel_requested = True
+            db.add(st); db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+def run_task_job(ds_id: str, task_id: str) -> None:
+    """Scheduler job wrapper to execute a single SyncTask.
+
+    IMPORTANT: This runs inside APScheduler's daemon thread. Unhandled exceptions
+    here can kill the scheduler, stopping ALL future jobs permanently.
+
+    The sync itself runs in a bounded dedicated pool with a wall-clock timeout. On
+    timeout we request a cooperative abort and return — the APScheduler slot is
+    released (still max_instances=1, so no overlap) instead of blocking forever.
+    """
+    db = SessionLocal()
+    try:
+        # Auto-reset any syncs with no progress for >30 minutes (backstop for
+        # workers that never reach a batch boundary to honor cancel_requested).
+        _auto_reset_stuck(db, ds_id, stale_threshold_minutes=30)
+    except Exception as e:
+        print(f"[SYNC_JOB] auto-reset failed task={task_id} ds={ds_id}: {e}", flush=True)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+    # config.py setting (deferred): sync_job_timeout_seconds: int = 3600. Read
+    # defensively until it lands so this module imports/runs without it.
+    timeout = max(60, int(getattr(settings, "sync_job_timeout_seconds", 3600)))
+    fut = _SYNC_POOL.submit(_execute_sync, ds_id, task_id)
+    try:
+        fut.result(timeout=timeout)
+    except FutureTimeout:
+        print(f"[SYNC_JOB] TIMEOUT task={task_id} ds={ds_id} after {timeout}s — requesting abort", flush=True)
+        _request_cancel(task_id)
+    except Exception as e:
+        # Catch ALL exceptions to prevent killing the scheduler daemon thread.
+        # APScheduler silently dies if the job function raises.
+        print(f"[SYNC_JOB] FAILED task={task_id} ds={ds_id}: {e}", flush=True)
 
 
 def list_jobs() -> list[dict]:
@@ -440,10 +498,8 @@ def schedule_all_alert_jobs(default_cron: str = "*/15 * * * *") -> dict:
                 _candidate = _trig.get_next_fire_time(None, _window_start)
                 if _candidate is None or _candidate >= _now_local:
                     continue
-                _last = a.last_run_at
+                _last = as_utc(a.last_run_at)
                 if _last is not None:
-                    if _last.tzinfo is None:
-                        _last = _last.replace(tzinfo=timezone.utc)
                     if _last.astimezone(_tz) >= _candidate:
                         continue
                 sched.add_job(
