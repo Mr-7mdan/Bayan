@@ -57,6 +57,8 @@ from ..metrics import counter_inc, summary_observe
 import logging
 import os
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/datasources", tags=["datasources"])
 
 # 1-minute in-memory cache for schema introspection (key -> (timestamp, IntrospectResponse))
@@ -653,7 +655,7 @@ def get_sync_status(ds_id: str, actorId: str | None = Depends(actor_id_optional)
         if duck_path:
             norm_duck_path = os.path.normpath(duck_path).lower()
 
-        print(f"[DEBUG] get_sync_status ds_id={ds_id} duck_path={duck_path} norm={norm_duck_path}", flush=True)
+        logger.debug(f"[DEBUG] get_sync_status ds_id={ds_id} duck_path={duck_path} norm={norm_duck_path}")
 
         all_tasks = db.query(SyncTask).all()
         tasks = []
@@ -725,7 +727,7 @@ def run_sync_now(
     try:
         _log.info("run_sync_now start: ds_id=%s is_api=%s execute=%s taskId=%s", ds_id, is_api, execute, taskId)
         if DEBUG:
-            print(f"[ds] run_sync_now start ds_id={ds_id} is_api={is_api} execute={execute} taskId={taskId}", flush=True)
+            logger.debug(f"[ds] run_sync_now start ds_id={ds_id} is_api={is_api} execute={execute} taskId={taskId}")
     except Exception:
         pass
     if not is_api:
@@ -778,13 +780,13 @@ def run_sync_now(
 
     # Run snapshots first, then sequences to avoid overlap in a single call
     tasks_sorted = sorted(tasks, key=lambda t: 0 if t.mode == "snapshot" else 1)
-    print(f"[ABORT] Execute path: found {len(tasks_sorted)} tasks to sync", flush=True)
+    logger.warning(f"[ABORT] Execute path: found {len(tasks_sorted)} tasks to sync")
     results: list[dict] = []
 
     # Acquire locks per group key to ensure idempotent runs across processes
     acquired_keys: list[str] = []
     busy_keys: list[str] = []
-    print(f"[ABORT] About to acquire locks for {len(tasks_sorted)} tasks", flush=True)
+    logger.warning(f"[ABORT] About to acquire locks for {len(tasks_sorted)} tasks")
     try:
         uniq_groups = sorted({t.group_key for t in tasks_sorted})
         
@@ -794,10 +796,10 @@ def run_sync_now(
                 try:
                     deleted = db.query(SyncLock).filter(SyncLock.group_key == gk).delete()
                     if deleted:
-                        print(f"[ABORT] Force-cleared existing lock for group: {gk}", flush=True)
+                        logger.warning(f"[ABORT] Force-cleared existing lock for group: {gk}")
                     db.commit()
                 except Exception as clear_err:
-                    print(f"[ABORT] Failed to clear lock for group {gk}: {clear_err}", flush=True)
+                    logger.warning(f"[ABORT] Failed to clear lock for group {gk}: {clear_err}")
                     try:
                         db.rollback()
                     except Exception:
@@ -816,7 +818,7 @@ def run_sync_now(
                 # If we fail to create, consider it busy
                 busy_keys.append(gk)
         if busy_keys:
-            print(f"[ABORT] Cannot sync - groups locked: {busy_keys}", flush=True)
+            logger.warning(f"[ABORT] Cannot sync - groups locked: {busy_keys}")
             try: counter_inc("sync_lock_busy_total")
             except Exception: pass
             # Release any previously acquired locks before returning
@@ -825,12 +827,12 @@ def run_sync_now(
                 except Exception: pass
             return {"ok": False, "message": f"Groups locked: {', '.join(busy_keys)}"}
         else:
-            print(f"[ABORT] Successfully acquired locks for groups: {acquired_keys}", flush=True)
+            logger.warning(f"[ABORT] Successfully acquired locks for groups: {acquired_keys}")
             try: counter_inc("sync_lock_acquired_total")
             except Exception: pass
     except Exception as lock_err:
         # Best-effort; proceed without hard lock if lock table unavailable
-        print(f"[ABORT] Lock acquisition failed (will proceed anyway): {lock_err}", flush=True)
+        logger.warning(f"[ABORT] Lock acquisition failed (will proceed anyway): {lock_err}")
         pass
 
     # Parse options once
@@ -842,7 +844,7 @@ def run_sync_now(
     try:
         _log.info("options parsed: api_opts=%s keys=%s", bool(api_opts), (list(api_opts.keys()) if api_opts else []))
         if DEBUG:
-            print(f"[ds] api_opts present={bool(api_opts)} keys={(list(api_opts.keys()) if api_opts else [])}", flush=True)
+            logger.debug(f"[ds] api_opts present={bool(api_opts)} keys={(list(api_opts.keys()) if api_opts else [])}")
     except Exception:
         pass
     
@@ -854,20 +856,20 @@ def run_sync_now(
             try:
                 fresh_state = check_db.query(SyncState).filter(SyncState.id == state_id).first()
                 abort_flag = bool(getattr(fresh_state, 'cancel_requested', False)) if fresh_state else False
-                print(f"[ABORT_CHECK] state_id={state_id}, cancel_requested={abort_flag}, in_progress={getattr(fresh_state, 'in_progress', None) if fresh_state else None}", flush=True)
+                logger.warning(f"[ABORT_CHECK] state_id={state_id}, cancel_requested={abort_flag}, in_progress={getattr(fresh_state, 'in_progress', None) if fresh_state else None}")
                 return abort_flag
             finally:
                 check_db.close()
         except Exception as e:
-            print(f"[ABORT_CHECK] Error checking abort flag for state_id={state_id}: {e}", flush=True)
+            logger.warning(f"[ABORT_CHECK] Error checking abort flag for state_id={state_id}: {e}")
             return False
 
-    print(f"[ABORT] Processing {len(tasks_sorted)} tasks for sync", flush=True)
+    logger.warning(f"[ABORT] Processing {len(tasks_sorted)} tasks for sync")
     for t in tasks_sorted:
-        print(f"[ABORT] Processing task: task_id={t.id}, mode={t.mode}, dest_table={t.dest_table_name}", flush=True)
+        logger.warning(f"[ABORT] Processing task: task_id={t.id}, mode={t.mode}, dest_table={t.dest_table_name}")
         st = db.query(SyncState).filter(SyncState.task_id == t.id).first()
         if not st:
-            print(f"[ABORT] Creating new SyncState for task_id={t.id}", flush=True)
+            logger.warning(f"[ABORT] Creating new SyncState for task_id={t.id}")
             st = SyncState(id=str(uuid4()), task_id=t.id, in_progress=False)
             # For sequence tasks, initialize watermark from existing destination data if available
             if t.mode == "sequence" and t.sequence_column:
@@ -893,13 +895,13 @@ def run_sync_now(
                                 max_val = (row[0] if row else None)
                                 if max_val is not None:
                                     st.last_sequence_value = int(max_val)
-                                    print(f"[SEQUENCE] Initialized watermark for task_id={t.id} from existing data: {max_val}", flush=True)
+                                    logger.debug(f"[SEQUENCE] Initialized watermark for task_id={t.id} from existing data: {max_val}")
                         except Exception as e:
-                            print(f"[SEQUENCE] Could not initialize watermark from existing data: {e}", flush=True)
+                            logger.warning(f"[SEQUENCE] Could not initialize watermark from existing data: {e}")
                             # Default to 0 for new sequence tasks without existing data
                             st.last_sequence_value = 0
                 except Exception as e:
-                    print(f"[SEQUENCE] Error initializing watermark for task_id={t.id}: {e}", flush=True)
+                    logger.warning(f"[SEQUENCE] Error initializing watermark for task_id={t.id}: {e}")
                     st.last_sequence_value = 0
             db.add(st)
             db.commit()
@@ -910,12 +912,12 @@ def run_sync_now(
             prev_norm = os.path.normpath(st.last_duck_path).lower()
             curr_norm = os.path.normpath(curr_duck_path).lower()
             if prev_norm != curr_norm:
-                print(f"[SEQUENCE] DuckDB path changed: {prev_norm} → {curr_norm}. Resetting watermark for task_id={t.id}", flush=True)
+                logger.debug(f"[SEQUENCE] DuckDB path changed: {prev_norm} → {curr_norm}. Resetting watermark for task_id={t.id}")
                 st.last_sequence_value = None
                 st.last_row_count = None
 
         # Mark in progress and clear any previous cancel flag
-        print(f"[ABORT] Starting sync: state_id={st.id}, task_id={t.id}, setting in_progress=True, cancel_requested=False", flush=True)
+        logger.warning(f"[ABORT] Starting sync: state_id={st.id}, task_id={t.id}, setting in_progress=True, cancel_requested=False")
         st.in_progress = True
         st.cancel_requested = False  # type: ignore[attr-defined]
         st.progress_current = 0
@@ -924,7 +926,7 @@ def run_sync_now(
         st.started_at = datetime.now(timezone.utc)  # type: ignore[attr-defined]
         db.add(st)
         db.commit()
-        print(f"[ABORT] Committed sync start for state_id={st.id}", flush=True)
+        logger.warning(f"[ABORT] Committed sync start for state_id={st.id}")
         # Create a run log row
         _sync_t0 = time.perf_counter()
         run = SyncRun(id=str(uuid4()), task_id=t.id, datasource_id=ds_id, mode=t.mode)
@@ -934,7 +936,7 @@ def run_sync_now(
             try:
                 _log.info("running task: id=%s mode=%s dest=%s", t.id, t.mode, t.dest_table_name if t.mode != "sequence" else t.dest_table_name)
                 if DEBUG:
-                    print(f"[ds] running task id={t.id} mode={t.mode} dest={t.dest_table_name}", flush=True)
+                    logger.debug(f"[ds] running task id={t.id} mode={t.mode} dest={t.dest_table_name}")
             except Exception:
                 pass
             if is_api:
@@ -944,7 +946,7 @@ def run_sync_now(
                 try:
                     _log.info("calling run_api_sync: endpoint=%s parse=%s query_keys=%s", (cfg.get('endpoint') or cfg.get('urlTemplate')), (cfg.get('parse') or cfg.get('format')), [ (q or {}).get('key') for q in (cfg.get('query') or []) ])
                     if DEBUG:
-                        print(f"[ds] calling run_api_sync endpoint={(cfg.get('endpoint') or cfg.get('urlTemplate'))} parse={(cfg.get('parse') or cfg.get('format'))} qkeys={[ (q or {}).get('key') for q in (cfg.get('query') or []) ]}", flush=True)
+                        logger.debug(f"[ds] calling run_api_sync endpoint={(cfg.get('endpoint') or cfg.get('urlTemplate'))} parse={(cfg.get('parse') or cfg.get('format'))} qkeys={[ (q or {}).get('key') for q in (cfg.get('query') or []) ]}")
                 except Exception:
                     pass
                 res = run_api_sync(
@@ -962,7 +964,7 @@ def run_sync_now(
                 try:
                     _log.info("run_api_sync returned: rows=%s window=%s..%s", st.last_row_count, res.get('windowStart'), res.get('windowEnd'))
                     if DEBUG:
-                        print(f"[ds] run_api_sync returned rows={st.last_row_count} window={res.get('windowStart')}..{res.get('windowEnd')}", flush=True)
+                        logger.debug(f"[ds] run_api_sync returned rows={st.last_row_count} window={res.get('windowStart')}..{res.get('windowEnd')}")
                 except Exception:
                     pass
                 results.append({"taskId": t.id, "mode": t.mode, "rowCount": st.last_row_count, "windowStart": res.get('windowStart'), "windowEnd": res.get('windowEnd')})
@@ -1104,7 +1106,7 @@ def run_sync_now(
                 summary_observe("sync_duration_ms", (time.perf_counter() - _sync_t0) * 1000.0)
             except Exception:
                 pass
-            print(f"[ABORT] Finally block: Setting in_progress=False for state_id={st.id}, cancel_requested={getattr(st, 'cancel_requested', None)}", flush=True)
+            logger.warning(f"[ABORT] Finally block: Setting in_progress=False for state_id={st.id}, cancel_requested={getattr(st, 'cancel_requested', None)}")
             st.in_progress = False
             try:
                 st.progress_phase = None  # type: ignore[attr-defined]
@@ -1115,9 +1117,9 @@ def run_sync_now(
                 db.add(st)
                 db.add(run)
                 db.commit()
-                print(f"[ABORT] Committed in_progress=False for state_id={st.id}", flush=True)
+                logger.warning(f"[ABORT] Committed in_progress=False for state_id={st.id}")
             except Exception as _commit_err:
-                print(f"[ABORT] Commit failed in finally block: {_commit_err}. Attempting rollback+retry.", flush=True)
+                logger.warning(f"[ABORT] Commit failed in finally block: {_commit_err}. Attempting rollback+retry.")
                 try:
                     db.rollback()
                     # Retry with a fresh query to reset in_progress
@@ -1128,9 +1130,9 @@ def run_sync_now(
                         _st2.started_at = None
                         db.add(_st2)
                         db.commit()
-                        print(f"[ABORT] Retry commit succeeded for state_id={st.id}", flush=True)
+                        logger.warning(f"[ABORT] Retry commit succeeded for state_id={st.id}")
                 except Exception as _retry_err:
-                    print(f"[ABORT] CRITICAL: Could not reset in_progress for state_id={st.id}: {_retry_err}", flush=True)
+                    logger.warning(f"[ABORT] CRITICAL: Could not reset in_progress for state_id={st.id}: {_retry_err}")
 
     # Bump the result-cache generation so completed syncs make new rows visible
     # immediately (stale TTL entries become unreachable). Local import: query.py
@@ -1242,7 +1244,7 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
     from datetime import datetime, timedelta
     from ..timeutil import as_utc
 
-    print(f"[ABORT] Endpoint called: ds_id={ds_id}, taskId={taskId}", flush=True)
+    logger.warning(f"[ABORT] Endpoint called: ds_id={ds_id}, taskId={taskId}")
     ds = db.get(Datasource, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -1255,7 +1257,7 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
     if taskId:
         q = q.filter(SyncState.task_id == taskId)
     rows = q.all()
-    print(f"[ABORT] Found {len(rows)} in-progress sync states to check", flush=True)
+    logger.warning(f"[ABORT] Found {len(rows)} in-progress sync states to check")
     
     cancel_requested = 0
     force_reset = 0
@@ -1272,17 +1274,17 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
                 time_since_update = datetime.now(timezone.utc) - as_utc(last_update)
                 if time_since_update > timedelta(minutes=stuck_threshold_minutes):
                     is_stuck = True
-                    print(f"[ABORT] Sync appears STUCK: state_id={st.id}, last_run_at={st.last_run_at}, minutes_since={time_since_update.total_seconds()/60:.1f}", flush=True)
+                    logger.warning(f"[ABORT] Sync appears STUCK: state_id={st.id}, last_run_at={st.last_run_at}, minutes_since={time_since_update.total_seconds()/60:.1f}")
                 else:
-                    print(f"[ABORT] Sync appears ACTIVE: state_id={st.id}, last_run_at={st.last_run_at}, minutes_since={time_since_update.total_seconds()/60:.1f}", flush=True)
+                    logger.warning(f"[ABORT] Sync appears ACTIVE: state_id={st.id}, last_run_at={st.last_run_at}, minutes_since={time_since_update.total_seconds()/60:.1f}")
             else:
                 # No last_run_at means it never started properly - definitely stuck
                 is_stuck = True
-                print(f"[ABORT] Sync never started properly (no last_run_at): state_id={st.id}, forcing reset", flush=True)
+                logger.warning(f"[ABORT] Sync never started properly (no last_run_at): state_id={st.id}, forcing reset")
             
             if is_stuck:
                 # Force reset stuck sync
-                print(f"[ABORT] FORCE RESET stuck sync: state_id={st.id}, task_id={st.task_id}", flush=True)
+                logger.warning(f"[ABORT] FORCE RESET stuck sync: state_id={st.id}, task_id={st.task_id}")
                 st.in_progress = False
                 st.cancel_requested = False  # type: ignore[attr-defined]
                 st.progress_current = None
@@ -1292,20 +1294,20 @@ def abort_sync(ds_id: str, taskId: str | None = Query(default=None), actorId: st
                 force_reset += 1
             else:
                 # Active sync - just set cancel flag
-                print(f"[ABORT] Setting cancel_requested=True for ACTIVE sync: state_id={st.id}, task_id={st.task_id}", flush=True)
+                logger.warning(f"[ABORT] Setting cancel_requested=True for ACTIVE sync: state_id={st.id}, task_id={st.task_id}")
                 setattr(st, 'cancel_requested', True)
                 db.add(st)
                 cancel_requested += 1
                 
         except Exception as e:
-            print(f"[ABORT] Failed to process state_id={st.id}: {e}", flush=True)
+            logger.warning(f"[ABORT] Failed to process state_id={st.id}: {e}")
             continue
     
     try:
         db.commit()
-        print(f"[ABORT] Committed changes: {cancel_requested} active syncs flagged for cancellation, {force_reset} stuck syncs reset", flush=True)
+        logger.warning(f"[ABORT] Committed changes: {cancel_requested} active syncs flagged for cancellation, {force_reset} stuck syncs reset")
     except Exception as e:
-        print(f"[ABORT] Commit failed: {e}", flush=True)
+        logger.warning(f"[ABORT] Commit failed: {e}")
         try: db.rollback()
         except Exception: pass
         raise HTTPException(status_code=500, detail=f"Failed to abort syncs: {e}")
@@ -1341,12 +1343,12 @@ def reset_stuck_syncs(ds_id: str, actorId: str | None = Depends(actor_id_optiona
         .all()
     )
     
-    print(f"[RESET_STUCK] Found {len(stuck_states)} stuck sync states for datasource {ds_id}", flush=True)
+    logger.debug(f"[RESET_STUCK] Found {len(stuck_states)} stuck sync states for datasource {ds_id}")
     
     reset_count = 0
     for st in stuck_states:
         try:
-            print(f"[RESET_STUCK] Resetting state_id={st.id}, task_id={st.task_id}", flush=True)
+            logger.debug(f"[RESET_STUCK] Resetting state_id={st.id}, task_id={st.task_id}")
             st.in_progress = False
             st.cancel_requested = False  # type: ignore[attr-defined]
             st.progress_current = None
@@ -1355,14 +1357,14 @@ def reset_stuck_syncs(ds_id: str, actorId: str | None = Depends(actor_id_optiona
             db.add(st)
             reset_count += 1
         except Exception as e:
-            print(f"[RESET_STUCK] Failed to reset state_id={st.id}: {e}", flush=True)
+            logger.warning(f"[RESET_STUCK] Failed to reset state_id={st.id}: {e}")
             continue
     
     try:
         db.commit()
-        print(f"[RESET_STUCK] Successfully reset {reset_count} stuck sync states", flush=True)
+        logger.debug(f"[RESET_STUCK] Successfully reset {reset_count} stuck sync states")
     except Exception as e:
-        print(f"[RESET_STUCK] Commit failed: {e}", flush=True)
+        logger.warning(f"[RESET_STUCK] Commit failed: {e}")
         try:
             db.rollback()
         except Exception:
@@ -1787,12 +1789,12 @@ def get_transforms(ds_id: str, db: Session = Depends(get_db)):
         remoteAttachments=cfg.get("remoteAttachments", []),
         defaults=cfg.get("defaults"),
     )
-    print(f"[/transforms] Returning {len(out.transforms)} transforms:", flush=True)
+    logger.debug(f"[/transforms] Returning {len(out.transforms)} transforms:")
     for tr in out.transforms:
         if isinstance(tr, dict):
-            print(f"  - {tr.get('type')}: {tr.get('name') or tr.get('target')}", flush=True)
+            logger.debug(f"  - {tr.get('type')}: {tr.get('name') or tr.get('target')}")
         else:
-            print(f"  - {getattr(tr, 'type', '?')}: {getattr(tr, 'name', None) or getattr(tr, 'target', '?')}", flush=True)
+            logger.debug(f"  - {getattr(tr, 'type', '?')}: {getattr(tr, 'name', None) or getattr(tr, 'target', '?')}")
     return out
 
 
@@ -2017,7 +2019,7 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                     attach_type = 'postgres'
                     default_port = 5432
                 else:
-                    print(f"[Introspect] Unsupported remote type '{ds_type}' for alias '{alias}'")
+                    logger.debug(f"[Introspect] Unsupported remote type '{ds_type}' for alias '{alias}'")
                     continue
                 clean = re.sub(r'^(mysql|postgres|postgresql)\+\w+://', lambda m: m.group(1) + '://', dsn or '')
                 p = urlparse(clean)
@@ -2032,7 +2034,7 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                         database,
                     )
                 except ValueError as e:
-                    print(f"[Introspect] ATTACH '{alias}' rejected: {e}")
+                    logger.debug(f"[Introspect] ATTACH '{alias}' rejected: {e}")
                     continue
                 try:
                     conn.execute(f"INSTALL {attach_type}")
@@ -2052,7 +2054,7 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                         pass
                 except Exception as e:
                     if 'already' not in str(e).lower() and 'exists' not in str(e).lower():
-                        print(f"[Introspect] ATTACH '{alias}' ({host}) failed: {_scrub_secrets(e, [password, attach_str])}")
+                        logger.warning(f"[Introspect] ATTACH '{alias}' ({host}) failed: {_scrub_secrets(e, [password, attach_str])}")
                         continue
                     # Still register so pool connections can replay
                     try:
@@ -2080,13 +2082,13 @@ def _introspect_attach_remotes(conn, options_json: str, db_session) -> list:
                             for tbl, cols in tables_dict.items()
                         ]
                         result.append(SchemaInfo(name=sch, tables=tables))
-                    print(f"[Introspect] Remote '{alias}': {sum(len(t) for t in by_sch.values())} tables across {len(by_sch)} schemas")
+                    logger.debug(f"[Introspect] Remote '{alias}': {sum(len(t) for t in by_sch.values())} tables across {len(by_sch)} schemas")
                 except Exception as e:
-                    print(f"[Introspect] Remote schema query for '{alias}' failed: {e}")
+                    logger.warning(f"[Introspect] Remote schema query for '{alias}' failed: {e}")
             except Exception as e:
-                print(f"[Introspect] Error processing remote attachment '{alias}': {e}")
+                logger.warning(f"[Introspect] Error processing remote attachment '{alias}': {e}")
     except Exception as e:
-        print(f"[Introspect] _introspect_attach_remotes error: {e}")
+        logger.warning(f"[Introspect] _introspect_attach_remotes error: {e}")
     return result
 
 
@@ -2100,17 +2102,17 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
         _schema_cache[ds_id] = (time.monotonic(), result)
         return result
 
-    print(f"[/schema] Called for datasource {ds_id}")
+    logger.debug(f"[/schema] Called for datasource {ds_id}")
     try:
         ds: Datasource | None = db.get(Datasource, ds_id)
         if not ds:
-            print(f"[/schema] ERROR: Datasource {ds_id} not found")
+            logger.warning(f"[/schema] ERROR: Datasource {ds_id} not found")
             raise HTTPException(status_code=404, detail="Datasource not found")
-        print(f"[/schema] Found datasource: type={ds.type}, has_connection={bool(ds.connection_encrypted)}")
+        logger.debug(f"[/schema] Found datasource: type={ds.type}, has_connection={bool(ds.connection_encrypted)}")
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[/schema] ERROR: Unexpected error: {e}")
+        logger.warning(f"[/schema] ERROR: Unexpected error: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Schema introspection failed: {e}")
@@ -2121,7 +2123,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
     
     if not ds.connection_encrypted:
         if is_remote:
-            print(f"[/schema] ERROR: Remote datasource ({ds.type}) has no connection string!")
+            logger.warning(f"[/schema] ERROR: Remote datasource ({ds.type}) has no connection string!")
             raise HTTPException(status_code=400, detail=f"Datasource is configured as {ds.type} but has no connection string. Please update the datasource configuration.")
         # Special-case: DuckDB datasource without a connection URI should introspect the local store
         try:
@@ -2241,24 +2243,24 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
         
         with engine.connect() as conn:
             for sch in schema_names:
-                print(f"[/schema] Processing schema: {sch}")
+                logger.debug(f"[/schema] Processing schema: {sch}")
                 try:
                     tbls = insp.get_table_names(schema=sch)
-                    print(f"[/schema]   Found {len(tbls)} tables")
+                    logger.debug(f"[/schema]   Found {len(tbls)} tables")
                 except Exception:
                     tbls = []
                 # Try inspector first for views, then fall back to information_schema
                 vws: list[str] = []
                 try:
                     vws = [str(v) for v in insp.get_view_names(schema=sch)]
-                    print(f"[/schema]   Found {len(vws)} views")
+                    logger.debug(f"[/schema]   Found {len(vws)} views")
                 except Exception:
                     vws = []
                 if not vws:
                     try:
                         res = conn.execute(text("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = :s AND TABLE_TYPE = 'VIEW'"), {"s": sch})
                         vws = [str(r[0]) for r in res.fetchall()]
-                        print(f"[/schema]   Found {len(vws)} views via INFORMATION_SCHEMA")
+                        logger.debug(f"[/schema]   Found {len(vws)} views via INFORMATION_SCHEMA")
                     except Exception:
                         vws = []
                 if not vws and is_mssql:
@@ -2266,14 +2268,14 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                     try:
                         res = conn.execute(text("SELECT v.name FROM sys.views v JOIN sys.schemas s ON s.schema_id = v.schema_id WHERE s.name = :s"), {"s": sch})
                         vws = [str(r[0]) for r in res.fetchall()]
-                        print(f"[/schema]   Found {len(vws)} views via sys.views")
+                        logger.debug(f"[/schema]   Found {len(vws)} views via sys.views")
                     except Exception:
                         vws = []
                 names = list({*tbls, *vws})
                 names.sort()
                 
                 # OPTIMIZATION: Batch-fetch ALL columns for this schema in one query
-                print(f"[/schema]   Batch-fetching columns for {len(names)} tables...")
+                logger.debug(f"[/schema]   Batch-fetching columns for {len(names)} tables...")
                 columns_by_table: dict[str, list[ColumnInfo]] = {}
                 try:
                     # Use INFORMATION_SCHEMA to get all columns for all tables in this schema at once
@@ -2286,9 +2288,9 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                         if tbl_name not in columns_by_table:
                             columns_by_table[tbl_name] = []
                         columns_by_table[tbl_name].append(ColumnInfo(name=str(col_name), type=str(col_type)))
-                    print(f"[/schema]   Batch-fetched columns for {len(columns_by_table)} tables")
+                    logger.debug(f"[/schema]   Batch-fetched columns for {len(columns_by_table)} tables")
                 except Exception as e:
-                    print(f"[/schema]   WARNING: Batch column fetch failed: {e}, falling back to per-table queries")
+                    logger.warning(f"[/schema]   WARNING: Batch column fetch failed: {e}, falling back to per-table queries")
                 
                 tables: list[TableInfo] = []
                 for name in names:
@@ -2303,7 +2305,7 @@ def introspect_schema(ds_id: str, db: Session = Depends(get_db)):
                             cols = []
                     
                     tables.append(TableInfo(name=name, columns=cols))
-                print(f"[/schema]   Created {len(tables)} table info objects")
+                logger.debug(f"[/schema]   Created {len(tables)} table info objects")
                 schemas.append(SchemaInfo(name=sch, tables=tables))
         return _cache_and_return(IntrospectResponse(schemas=schemas))
     except Exception as e:
@@ -2331,7 +2333,7 @@ def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
             try:
                 ref_ds = db_session.get(Datasource, ref_ds_id)
                 if not ref_ds or not getattr(ref_ds, 'connection_encrypted', None):
-                    print(f"[/tables] Remote attachment '{alias}': datasource not found or no connection")
+                    logger.debug(f"[/tables] Remote attachment '{alias}': datasource not found or no connection")
                     continue
                 dsn = decrypt_text(ref_ds.connection_encrypted)
                 ds_type = (getattr(ref_ds, 'type', '') or '').lower()
@@ -2342,7 +2344,7 @@ def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
                     attach_type = 'postgres'
                     default_port = 5432
                 else:
-                    print(f"[/tables] Unsupported remote type '{ds_type}' for alias '{alias}', skipping")
+                    logger.debug(f"[/tables] Unsupported remote type '{ds_type}' for alias '{alias}', skipping")
                     continue
                 clean = re.sub(r'^(mysql|postgres|postgresql)\+\w+://', lambda m: m.group(1) + '://', dsn or '')
                 p = urlparse(clean)
@@ -2357,7 +2359,7 @@ def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
                         database,
                     )
                 except ValueError as e:
-                    print(f"[/tables] ATTACH '{alias}' rejected: {e}")
+                    logger.debug(f"[/tables] ATTACH '{alias}' rejected: {e}")
                     continue
                 try:
                     conn.execute(f"INSTALL {attach_type}")
@@ -2377,7 +2379,7 @@ def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
                         pass
                 except Exception as e:
                     if 'already' not in str(e).lower() and 'exists' not in str(e).lower():
-                        print(f"[/tables] ATTACH '{alias}' ({host}) failed: {_scrub_secrets(e, [password, attach_str])}")
+                        logger.warning(f"[/tables] ATTACH '{alias}' ({host}) failed: {_scrub_secrets(e, [password, attach_str])}")
                         continue
                     # Still register so pool connections can replay
                     try:
@@ -2399,29 +2401,29 @@ def _list_remote_attached_tables(conn, options_json: str, db_session) -> list:
                         by_sch.setdefault(sch_key, []).append(str(tbl))
                     for sch_key, tbls in by_sch.items():
                         result.append(_TablesSchema(name=sch_key, tables=sorted(tbls)))
-                    print(f"[/tables] Remote '{alias}': {sum(len(t) for t in by_sch.values())} tables across {len(by_sch)} schema groups")
+                    logger.debug(f"[/tables] Remote '{alias}': {sum(len(t) for t in by_sch.values())} tables across {len(by_sch)} schema groups")
                 except Exception as e:
-                    print(f"[/tables] Remote '{alias}' table query failed: {e}")
+                    logger.warning(f"[/tables] Remote '{alias}' table query failed: {e}")
             except Exception as e:
-                print(f"[/tables] Remote attachment '{alias}' error: {e}")
+                logger.warning(f"[/tables] Remote attachment '{alias}' error: {e}")
     except Exception as e:
-        print(f"[/tables] _list_remote_attached_tables error: {e}")
+        logger.warning(f"[/tables] _list_remote_attached_tables error: {e}")
     return result
 
 
 @router.get("/{ds_id}/tables", response_model=TablesOnlyResponse)
 def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
-    print(f"[/tables] Called for datasource {ds_id}")
+    logger.debug(f"[/tables] Called for datasource {ds_id}")
     try:
         ds: Datasource | None = db.get(Datasource, ds_id)
         if not ds:
-            print(f"[/tables] ERROR: Datasource {ds_id} not found")
+            logger.warning(f"[/tables] ERROR: Datasource {ds_id} not found")
             raise HTTPException(status_code=404, detail="Datasource not found")
-        print(f"[/tables] Found datasource: type={ds.type}, has_connection={bool(ds.connection_encrypted)}")
+        logger.debug(f"[/tables] Found datasource: type={ds.type}, has_connection={bool(ds.connection_encrypted)}")
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[/tables] ERROR: Unexpected error: {e}")
+        logger.warning(f"[/tables] ERROR: Unexpected error: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"List tables failed: {e}")
@@ -2432,7 +2434,7 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
     
     if not ds.connection_encrypted:
         if is_remote:
-            print(f"[/tables] ERROR: Remote datasource ({ds.type}) has no connection string!")
+            logger.warning(f"[/tables] ERROR: Remote datasource ({ds.type}) has no connection string!")
             raise HTTPException(status_code=400, detail=f"Datasource is configured as {ds.type} but has no connection string. Please update the datasource configuration.")
         # Treat as DuckDB local — always use the actively tracked path, not the raw
         # settings default which may be stale/relative after a path switch.
@@ -2467,19 +2469,19 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"List tables failed: {e}")
     # External datasource with connection string
-    print(f"[/tables] Decrypting connection string...")
+    logger.debug(f"[/tables] Decrypting connection string...")
     try:
         dsn = decrypt_text(ds.connection_encrypted)
-        print(f"[/tables] Decrypted successfully")
+        logger.debug(f"[/tables] Decrypted successfully")
     except Exception as e:
-        print(f"[/tables] ERROR: Decryption failed: {e}")
+        logger.warning(f"[/tables] ERROR: Decryption failed: {e}")
         dsn = None
     if not dsn:
         raise HTTPException(status_code=400, detail="Invalid connection secret")
     
     # Special handling for DuckDB - use native driver to avoid connection conflicts
     if (dsn or '').lower().startswith('duckdb:'):
-        print(f"[/tables] Using native DuckDB driver...")
+        logger.debug(f"[/tables] Using native DuckDB driver...")
         if _duckdb is None:
             raise HTTPException(status_code=500, detail="DuckDB native driver unavailable")
         # Extract path from DSN
@@ -2530,11 +2532,11 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
         try:
             with open_duck_native(path) as conn:
                 out = _duck_tables_query(conn)
-                print(f"[/tables] Found {len(out)} DuckDB schemas")
+                logger.debug(f"[/tables] Found {len(out)} DuckDB schemas")
                 out += _list_remote_attached_tables(conn, ds.options_json or '{}', db)
                 return TablesOnlyResponse(schemas=out)
         except Exception as e:
-            print(f"[/tables] WARNING: DuckDB path '{path}' failed ({e}), falling back to active path")
+            logger.warning(f"[/tables] WARNING: DuckDB path '{path}' failed ({e}), falling back to active path")
             # DSN path may be stale (file deleted/moved) — fall back to the currently active store
             try:
                 fallback = get_active_duck_path()
@@ -2560,21 +2562,21 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
                         for sch, tbl in rows:
                             by_schema2.setdefault(str(sch), set()).add(str(tbl))
                         out2 = [_TablesSchema(name=sch, tables=sorted(list(tbls))) for sch, tbls in by_schema2.items()]
-                        print(f"[/tables] Fallback found {len(out2)} schemas")
+                        logger.debug(f"[/tables] Fallback found {len(out2)} schemas")
                         return TablesOnlyResponse(schemas=out2)
             except Exception as e2:
-                print(f"[/tables] Fallback also failed: {e2}")
+                logger.warning(f"[/tables] Fallback also failed: {e2}")
             raise HTTPException(status_code=500, detail=f"DuckDB tables query failed: {e}")
     
     # Non-DuckDB: use SQLAlchemy inspector
     try:
-        print(f"[/tables] Creating engine...")
+        logger.debug(f"[/tables] Creating engine...")
         engine = get_engine_from_dsn(dsn)
-        print(f"[/tables] Getting inspector...")
+        logger.debug(f"[/tables] Getting inspector...")
         insp = inspect(engine)
-        print(f"[/tables] Getting schema names...")
+        logger.debug(f"[/tables] Getting schema names...")
         schema_names = insp.get_schema_names()
-        print(f"[/tables] Found {len(schema_names)} schemas")
+        logger.debug(f"[/tables] Found {len(schema_names)} schemas")
         
         # Filter out SQL Server system schemas to speed up
         dialect_name = (engine.dialect.name or '').lower()
@@ -2583,56 +2585,56 @@ def list_tables_only(ds_id: str, db: Session = Depends(get_db)):
                             'db_ddladmin', 'db_backupoperator', 'db_datareader', 'db_datawriter', 'db_denydatareader', 
                             'db_denydatawriter'}
             schema_names = [s for s in schema_names if s not in system_schemas]
-            print(f"[/tables] Filtered to {len(schema_names)} user schemas")
+            logger.debug(f"[/tables] Filtered to {len(schema_names)} user schemas")
         
         out: list[_TablesSchema] = []
-        print(f"[/tables] Connecting to database...")
+        logger.debug(f"[/tables] Connecting to database...")
         with engine.connect() as conn:
-            print(f"[/tables] Connected successfully")
+            logger.debug(f"[/tables] Connected successfully")
             for sch in schema_names:
-                print(f"[/tables] Processing schema: {sch}")
+                logger.debug(f"[/tables] Processing schema: {sch}")
                 try:
-                    print(f"[/tables]   Getting tables...")
+                    logger.debug(f"[/tables]   Getting tables...")
                     tbls = insp.get_table_names(schema=sch)
-                    print(f"[/tables]   Found {len(tbls)} tables")
+                    logger.debug(f"[/tables]   Found {len(tbls)} tables")
                 except Exception as e:
-                    print(f"[/tables]   Error getting tables: {e}")
+                    logger.warning(f"[/tables]   Error getting tables: {e}")
                     tbls = []
                 
-                print(f"[/tables]   Getting views...")
+                logger.debug(f"[/tables]   Getting views...")
                 vws: list[str] = []
                 try:
                     vws = [str(v) for v in insp.get_view_names(schema=sch)]
-                    print(f"[/tables]   Found {len(vws)} views via inspector")
+                    logger.debug(f"[/tables]   Found {len(vws)} views via inspector")
                 except Exception as e:
-                    print(f"[/tables]   Inspector failed, trying INFORMATION_SCHEMA: {e}")
+                    logger.warning(f"[/tables]   Inspector failed, trying INFORMATION_SCHEMA: {e}")
                     # Only try SQL Server sys.views as fallback
                     try:
                         res = conn.execute(text("SELECT v.name FROM sys.views v JOIN sys.schemas s ON s.schema_id = v.schema_id WHERE s.name = :s"), {"s": sch})
                         vws = [str(r[0]) for r in res.fetchall()]
-                        print(f"[/tables]   Found {len(vws)} views via sys.views")
+                        logger.debug(f"[/tables]   Found {len(vws)} views via sys.views")
                     except Exception as e2:
-                        print(f"[/tables]   sys.views also failed: {e2}")
+                        logger.warning(f"[/tables]   sys.views also failed: {e2}")
                         vws = []
                 
                 # Union tables and views; keep unique, sorted for stability
                 combined = sorted(list({*(str(t) for t in tbls), *vws}))
-                print(f"[/tables]   Total: {len(combined)} objects in schema {sch}")
+                logger.debug(f"[/tables]   Total: {len(combined)} objects in schema {sch}")
                 out.append(_TablesSchema(name=sch, tables=combined))
         
-        print(f"[/tables] Finished processing {len(out)} schemas, returning response...")
+        logger.debug(f"[/tables] Finished processing {len(out)} schemas, returning response...")
         try:
             response = TablesOnlyResponse(schemas=out)
-            print(f"[/tables] Response object created successfully")
-            print(f"[/tables] Response has {sum(len(s.tables) for s in response.schemas)} total tables")
+            logger.debug(f"[/tables] Response object created successfully")
+            logger.debug(f"[/tables] Response has {sum(len(s.tables) for s in response.schemas)} total tables")
             return response
         except Exception as resp_err:
-            print(f"[/tables] ERROR creating response: {resp_err}")
+            logger.warning(f"[/tables] ERROR creating response: {resp_err}")
             import traceback
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Failed to create response: {resp_err}")
     except Exception as e:
-        print(f"[/tables] ERROR in main block: {e}")
+        logger.warning(f"[/tables] ERROR in main block: {e}")
         import traceback
         traceback.print_exc()
         mapped = _http_for_db_error(e)

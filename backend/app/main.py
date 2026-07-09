@@ -40,6 +40,12 @@ from .routers import holidays as holidays_router
 from .routers import date_presets as date_presets_router
 from .metrics import counter_inc, gauge_inc, gauge_dec, gauge_set, summary_observe, render_prometheus
 
+import logging
+from .logging_setup import configure_logging
+
+configure_logging()
+logger = logging.getLogger(__name__)
+
 # --- Security: refuse to start with placeholder secret key ---
 _PLACEHOLDER_KEYS = {"BayanSecretKey", "BayanSecretKey-CHANGE-ME", "change-me", ""}
 if (settings.secret_key or "").strip() in _PLACEHOLDER_KEYS:
@@ -143,10 +149,10 @@ async def _startup():
             _starlette_pool = 128
         if _starlette_pool > 0:
             current_default_thread_limiter().total_tokens = _starlette_pool
-            print(f"[startup] anyio thread limiter set to {_starlette_pool}", flush=True)
+            logger.info("[startup] anyio thread limiter set to %s", _starlette_pool)
     except Exception as _lim_err:
         # Non-fatal: anyio API surface varies across versions; fall back to defaults
-        print(f"[startup] anyio limiter tune skipped: {_lim_err}", flush=True)
+        logger.warning("[startup] anyio limiter tune skipped: %s", _lim_err)
     init_db()
     try:
         email = (settings.admin_email or "").strip().lower()
@@ -166,13 +172,13 @@ async def _startup():
             finally:
                 db.close()
     except Exception:
-        pass
+        logger.warning("admin bootstrap failed", exc_info=True)
     # Initialize a single shared DuckDB connection (Option A)
     try:
         init_duck_shared()
     except Exception:
         # Non-fatal in dev; continue startup
-        pass
+        logger.warning("DuckDB shared init failed (continuing)", exc_info=True)
     # Start background scheduler and load jobs from DB (sync + alerts)
     try:
         run_sched = str(os.getenv("RUN_SCHEDULER", "1")).strip().lower() in ("1", "true", "yes", "on")
@@ -191,12 +197,12 @@ async def _startup():
                         gauge_set("scheduler_running", 1.0)
                     except Exception as _we:
                         gauge_set("scheduler_running", 0.0)
-                        print(f"[SCHEDULER_WATCHDOG] Error: {_we}", flush=True)
+                        logger.error("scheduler watchdog error", exc_info=True)
             _wd = threading.Thread(target=_scheduler_watchdog, daemon=True, name="scheduler-watchdog")
             _wd.start()
     except Exception:
         # Non-fatal; admin can refresh via API later
-        pass
+        logger.warning("scheduler startup failed", exc_info=True)
 
 app.include_router(ds_router.router, prefix="/api")
 app.include_router(query_router.router, prefix="/api")

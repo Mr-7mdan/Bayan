@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Tuple
 import re
 import sqlglot
 from sqlglot import exp
 from .sql_dialect_normalizer import normalize_sql_expression
 from .sql_ident import quote_ident, InvalidExpression
+
+logger = logging.getLogger(__name__)
 
 _re_cc = re
 
@@ -511,7 +514,7 @@ def build_sql(
         if agg_alias:
             alias_names.append(agg_alias)
     alias_set = {s.lower() for s in alias_names}
-    print(f"[build_sql] alias_names collected: {alias_names[:10]}")
+    logger.debug(f"[build_sql] alias_names collected: {alias_names[:10]}")
 
     # Detect unpivot transform (first occurrence only)
     unpivot_tr = None
@@ -743,12 +746,12 @@ def build_sql(
             # Normalize SQL dialect (convert MSSQL syntax to target dialect)
             normalized_expr = normalize_sql_expression(normalized_expr, d)
             cc_expr_map[name] = normalized_expr
-            print(f"[build_sql] Added '{name}' to cc_expr_map (expr length={len(normalized_expr)})", flush=True)
+            logger.debug(f"[build_sql] Added '{name}' to cc_expr_map (expr length={len(normalized_expr)})")
 
     # Also populate cc_expr_map from joins so that transforms can reference joined columns by their alias
     # This maps an alias (e.g. "SourceRegion") to its qualified column (e.g. "j1"."SourceRegion")
     if joins:
-        print(f"[build_sql] Augmenting cc_expr_map from {len(joins)} joins...", flush=True)
+        logger.debug(f"[build_sql] Augmenting cc_expr_map from {len(joins)} joins...")
         for i, j in enumerate(joins):
             alias = f"j{i+1}"
             cols = j.get("columns") or []
@@ -781,16 +784,16 @@ def build_sql(
                             # and remain unambiguous in the presence of a JOIN.
                             base_expr = _qcol(d, f"s.{cname}")
                             cc_expr_map[cname] = base_expr
-                            print(f"[build_sql] Added joined column alias '{alias_col}' -> '{expr}' to cc_expr_map; mapped '{cname}' -> '{base_expr}' (base table, conflicts with join column)", flush=True)
+                            logger.debug(f"[build_sql] Added joined column alias '{alias_col}' -> '{expr}' to cc_expr_map; mapped '{cname}' -> '{base_expr}' (base table, conflicts with join column)")
                         else:
                             cc_expr_map[cname] = expr
-                            print(f"[build_sql] Added joined column '{alias_col}' and '{cname}' -> '{expr}' to cc_expr_map", flush=True)
+                            logger.debug(f"[build_sql] Added joined column '{alias_col}' and '{cname}' -> '{expr}' to cc_expr_map")
                     else:
-                        print(f"[build_sql] Added joined column '{alias_col}' -> '{expr}' to cc_expr_map", flush=True)
+                        logger.debug(f"[build_sql] Added joined column '{alias_col}' -> '{expr}' to cc_expr_map")
 
     # Also populate cc_expr_map from transforms (computed/case/replace/etc.)
     # so that later transforms (like case) can inline expressions from earlier transforms
-    print(f"[build_sql] Augmenting cc_expr_map from {len(transforms or [])} transforms...", flush=True)
+    logger.debug(f"[build_sql] Augmenting cc_expr_map from {len(transforms or [])} transforms...")
     for tr in (transforms or []):
         t = str((tr or {}).get("type") or "").lower()
         if t == "computed":
@@ -812,7 +815,7 @@ def build_sql(
                 normalized_expr = _normalize_expr_idents(d, ex, numericify=_num_hint)
                 normalized_expr = normalize_sql_expression(normalized_expr, d)
                 cc_expr_map[nm] = normalized_expr
-                print(f"[build_sql] Added computed transform '{nm}' to cc_expr_map", flush=True)
+                logger.debug(f"[build_sql] Added computed transform '{nm}' to cc_expr_map")
         elif t == "case":
             target = str((tr or {}).get("target") or "").strip()
             cases = (tr or {}).get("cases") or []
@@ -820,7 +823,7 @@ def build_sql(
             if target and cases:
                 expr = _case_expr(d, target, cases, else_val)
                 cc_expr_map[target] = expr
-                print(f"[build_sql] Added case transform '{target}' to cc_expr_map", flush=True)
+                logger.debug(f"[build_sql] Added case transform '{target}' to cc_expr_map")
         elif t == "replace":
             target = str((tr or {}).get("target") or "").strip()
             search = tr.get("search")
@@ -855,21 +858,21 @@ def build_sql(
         if name not in cc_expr_map:
             continue
         
-        print(f"[build_sql] Including custom column '{name}'", flush=True)
+        logger.debug(f"[build_sql] Including custom column '{name}'")
         expr = cc_expr_map[name]
         original_expr = expr
         
         # Check if this expression contains qualified refs to other custom columns
         potential_cc_refs = _re_cc.findall(r'"[a-zA-Z]"\."([^"]+)"', expr)
         if potential_cc_refs:
-            print(f"[build_sql] '{name}' has potential custom col refs: {potential_cc_refs}", flush=True)
+            logger.debug(f"[build_sql] '{name}' has potential custom col refs: {potential_cc_refs}")
             for ref in potential_cc_refs:
                 if ref in cc_expr_map:
-                    print(f"[build_sql]   -> '{ref}' IS in cc_expr_map, will substitute", flush=True)
+                    logger.debug(f"[build_sql]   -> '{ref}' IS in cc_expr_map, will substitute")
                 elif ref.lower() in cc_names_lower:
-                    print(f"[build_sql]   -> '{ref}' (case-insensitive) IS in cc_expr_map", flush=True)
+                    logger.debug(f"[build_sql]   -> '{ref}' (case-insensitive) IS in cc_expr_map")
                 else:
-                    print(f"[build_sql]   -> '{ref}' NOT in cc_expr_map", flush=True)
+                    logger.debug(f"[build_sql]   -> '{ref}' NOT in cc_expr_map")
         
         # Check if this is an arithmetic expression that needs NULL handling
         is_arithmetic = any(op in original_expr for op in ['+', '-', '*', '/'])
@@ -889,7 +892,7 @@ def build_sql(
                 # Add COALESCE for NULL handling in arithmetic expressions
                 if is_arithmetic and d == "mssql":
                     substituted = f"COALESCE({substituted}, 0)"
-                print(f"[build_sql] Substituting [{ref_name}] -> {substituted[:50]}...", flush=True)
+                logger.debug(f"[build_sql] Substituting [{ref_name}] -> {substituted[:50]}...")
                 return f"({substituted})"
             # Check if this looks like a custom column name that we can't resolve
             if ref_name.lower() in cc_names_lower and ref_name not in cc_expr_map:
@@ -908,7 +911,7 @@ def build_sql(
                 substituted = cc_expr_map[col_name]
                 if is_arithmetic and d == "mssql":
                     substituted = f"COALESCE({substituted}, 0)"
-                print(f"[build_sql] Substituting qualified \"s\".\"{col_name}\" -> {substituted[:50]}...", flush=True)
+                logger.debug(f"[build_sql] Substituting qualified \"s\".\"{col_name}\" -> {substituted[:50]}...")
                 return f"({substituted})"
             # Check if this is a custom column name (case-insensitive) that exists but with different case
             for cc_name in cc_expr_map.keys():
@@ -917,7 +920,7 @@ def build_sql(
                     substituted = cc_expr_map[cc_name]
                     if is_arithmetic and d == "mssql":
                         substituted = f"COALESCE({substituted}, 0)"
-                    print(f"[build_sql] Substituting qualified \"s\".\"{col_name}\" (case-insensitive match to '{cc_name}') -> {substituted[:50]}...", flush=True)
+                    logger.debug(f"[build_sql] Substituting qualified \"s\".\"{col_name}\" (case-insensitive match to '{cc_name}') -> {substituted[:50]}...")
                     return f"({substituted})"
             # Mark as unresolved if it looks like a custom column name we know about
             if col_name.lower() in cc_names_lower:
@@ -931,7 +934,7 @@ def build_sql(
         # Debug: log if we found any qualified refs that look like custom columns
         qual_refs_found = _re_cc.findall(r'"[a-zA-Z]"\."([^"]+)"', original_expr)
         if qual_refs_found:
-            print(f"[build_sql] Found qualified refs in '{name}': {qual_refs_found}, cc_expr_map keys: {list(cc_expr_map.keys())[:10]}", flush=True)
+            logger.debug(f"[build_sql] Found qualified refs in '{name}': {qual_refs_found}, cc_expr_map keys: {list(cc_expr_map.keys())[:10]}")
         
         # Replace [Name] and "Name" with their expressions (unqualified)
         expr = _re_cc.sub(r'\[([^\]]+)\]|"([^"]+)"', replace_custom_ref, expr)
@@ -940,7 +943,7 @@ def build_sql(
         # This prevents SQL errors when a custom column references another custom column
         # that can't be resolved (e.g., "s"."VisitType" where VisitType is defined later)
         if unresolved_refs:
-            print(f"[build_sql] SKIP custom column '{name}': unresolved refs to other custom columns: {unresolved_refs}", flush=True)
+            logger.debug(f"[build_sql] SKIP custom column '{name}': unresolved refs to other custom columns: {unresolved_refs}")
             skipped_cc_names.add(name)
             continue
         
@@ -952,14 +955,14 @@ def build_sql(
             if ref.lower() in cc_names_lower:
                 unresolved_final.add(ref)
         if unresolved_final:
-            print(f"[build_sql] SKIP custom column '{name}': still has unresolved custom column refs after substitution: {unresolved_final}", flush=True)
+            logger.debug(f"[build_sql] SKIP custom column '{name}': still has unresolved custom column refs after substitution: {unresolved_final}")
             skipped_cc_names.add(name)
             continue
         
         if substitution_count > 0:
-            print(f"[build_sql] Made {substitution_count} substitutions in '{name}'", flush=True)
-            print(f"[build_sql] Original: {original_expr[:100]}...", flush=True)
-            print(f"[build_sql] Expanded: {expr[:100]}...", flush=True)
+            logger.debug(f"[build_sql] Made {substitution_count} substitutions in '{name}'")
+            logger.debug(f"[build_sql] Original: {original_expr[:100]}...")
+            logger.debug(f"[build_sql] Expanded: {expr[:100]}...")
 
         # For DuckDB, arithmetic custom columns may reference VARCHAR sources (e.g. numeric strings).
         # To ensure the arithmetic operates on numeric types, cast double-quoted identifiers to DOUBLE
@@ -985,7 +988,7 @@ def build_sql(
             expr = str(tr.get("expr") or "")
             # Skip if not explicitly requested and no "*" in base_select
             if not has_star and name.lower() not in requested_cols_lower:
-                print(f"[build_sql] Skipping computed transform '{name}' (not requested)")
+                logger.debug(f"[build_sql] Skipping computed transform '{name}' (not requested)")
                 continue
             if name and expr:
                 # Normalize accidentally concatenated SQL keywords before processing
@@ -1067,7 +1070,7 @@ def build_sql(
             else_val = tr.get("else") or tr.get("else_")
             # Skip if not explicitly requested and no "*" in base_select
             if not has_star and target.lower() not in requested_cols_lower:
-                print(f"[build_sql] Skipping case transform '{target}' (not requested)")
+                logger.debug(f"[build_sql] Skipping case transform '{target}' (not requested)")
                 continue
             if target and cases:
                 # Remap WHEN.left alias 's.' to current base_alias when unpivot is applied
@@ -1120,7 +1123,7 @@ def build_sql(
             repl = tr.get("replace")
             # Skip if not explicitly requested and no "*" in base_select
             if not has_star and target.lower() not in requested_cols_lower:
-                print(f"[build_sql] Skipping replace transform '{target}' (not requested)")
+                logger.debug(f"[build_sql] Skipping replace transform '{target}' (not requested)")
                 continue
             if target is not None and search is not None and repl is not None:
                 src = target
@@ -1137,7 +1140,7 @@ def build_sql(
             r = str(tr.get("replace") or "")
             # Skip if not explicitly requested and no "*" in base_select
             if not has_star and target.lower() not in requested_cols_lower:
-                print(f"[build_sql] Skipping translate transform '{target}' (not requested)")
+                logger.debug(f"[build_sql] Skipping translate transform '{target}' (not requested)")
                 continue
             if target and s:
                 src = target
@@ -1154,7 +1157,7 @@ def build_sql(
             val = tr.get("value")
             # Skip if not explicitly requested and no "*" in base_select
             if not has_star and target.lower() not in requested_cols_lower:
-                print(f"[build_sql] Skipping nullhandling transform '{target}' (not requested)")
+                logger.debug(f"[build_sql] Skipping nullhandling transform '{target}' (not requested)")
                 continue
             if target:
                 src = target
@@ -1520,8 +1523,8 @@ def build_sql(
         else:
             # bare column or *
             colnames.append(_unquote_ident(c.strip()))
-    print(f"[build_sql] Final SELECT columns: {colnames}", flush=True)
-    print(f"[build_sql] Generated SQL (first 500 chars): {sql[:500]}", flush=True)
+    logger.debug(f"[build_sql] Final SELECT columns: {colnames}")
+    logger.debug(f"[build_sql] Generated SQL (first 500 chars): {sql[:500]}")
     return sql, colnames, warnings
 
 

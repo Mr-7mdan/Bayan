@@ -3,17 +3,14 @@ SQLGlot-based SQL generation for multi-dialect support.
 Runs side-by-side with SQLGlot-based SQL builder for multi-dialect query generation.
 """
 import sys
-sys.stderr.write("[SQLGlot] sqlgen_glot.py MODULE LOADED \n")
-sys.stderr.flush()
 from typing import Any, Dict, Optional, List
 import logging
 import re
 import sqlglot
 from sqlglot import exp
-sys.stderr.write(f"[SQLGlot] sqlglot version {sqlglot.__version__} imported \n")
-sys.stderr.flush()
 
 logger = logging.getLogger(__name__)
+logger.debug("[SQLGlot] module loaded; sqlglot version %s", sqlglot.__version__)
 
 
 def _sg_norm_name(name: str) -> str:
@@ -129,8 +126,7 @@ class SQLGlotBuilder:
 
             # MULTI-SERIES: If series array provided, generate UNION ALL query
             if series and len(series) > 0:
-                sys.stderr.write(f"[SQLGlot] Multi-series detected: {len(series)} series\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Multi-series detected: {len(series)} series")
                 return self._build_multi_series_query(
                     source=source,
                     x_field=x_field,
@@ -210,12 +206,10 @@ class SQLGlotBuilder:
                         # Debug: Check CASE statements for completeness
                         if "CASE" in expr_s.upper():
                             has_end = "END" in expr_s.upper()
-                            sys.stderr.write(f"[SQLGlot] CASE expression for '{field}': length={len(expr_s)}, has_END={has_end}\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] CASE expression for '{field}': length={len(expr_s)}, has_END={has_end}")
                             if not has_end:
-                                sys.stderr.write(f"[SQLGlot] ERROR: CASE expression missing END keyword!\n")
-                                sys.stderr.write(f"[SQLGlot] Expression: {expr_s}\n")
-                                sys.stderr.flush()
+                                logger.warning(f"[SQLGlot] ERROR: CASE expression missing END keyword!")
+                                logger.debug(f"[SQLGlot] Expression: {expr_s}")
                         # Strip table aliases (e.g., s.ClientID -> ClientID, src.OrderDate -> OrderDate)
                         # Only strip short lowercase identifiers (typical aliases), not schema names
                         expr_s = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr_s)  # Quoted aliases
@@ -225,8 +219,7 @@ class SQLGlotBuilder:
                         if 'duckdb' in (ds_type or self.dialect).lower():
                             expr_s = re.sub(r'\[([^\]]+)\]', r'"\1"', expr_s)
                         expr_s = expand_aliases(expr_s)
-                        sys.stderr.write(f"[SQLGlot] [OK] Resolving custom column '{field}' in SELECT -> {expr_s[:80]}...\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] [OK] Resolving custom column '{field}' in SELECT -> {expr_s[:80]}...")
                         return expr_s, True
                 
                 # Check if it's a date part pattern
@@ -235,8 +228,7 @@ class SQLGlotBuilder:
                     base_col = match.group(1).strip()
                     kind = match.group(2).lower()
                     expr = self._build_datepart_expr(base_col, kind, ds_type or self.dialect)
-                    sys.stderr.write(f"[SQLGlot] [OK] Resolving date part '{field}' in SELECT -> {expr[:80]}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] [OK] Resolving date part '{field}' in SELECT -> {expr[:80]}")
                     return expr, True
                 
                 return field, False
@@ -262,17 +254,14 @@ class SQLGlotBuilder:
             # Detect 12-month seasonality pattern
             # For seasonality check, use primary x field if array
             x_field_check = x_field[0] if isinstance(x_field, (list, tuple)) and len(x_field) > 0 else x_field
-            sys.stderr.write(f"[SQLGlot] Seasonality check: group_by={group_by}, legend_base_col={legend_base_col}, legend_kind={legend_kind}, x_field={x_field_check}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Seasonality check: group_by={group_by}, legend_base_col={legend_base_col}, legend_kind={legend_kind}, x_field={x_field_check}")
             if (group_by == "month" and 
                 legend_base_col and legend_kind == "year" and 
                 x_field_check and x_field_check == legend_base_col):
                 seasonality_mode = True
-                sys.stderr.write(f"[SQLGlot] [OK] 12-MONTH SEASONALITY ENABLED: x={x_field_check}, legend={legend_raw}, groupBy=month\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] [OK] 12-MONTH SEASONALITY ENABLED: x={x_field_check}, legend={legend_raw}, groupBy=month")
             else:
-                sys.stderr.write(f"[SQLGlot] [SKIP] Seasonality NOT detected\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] [SKIP] Seasonality NOT detected")
             
             # Resolve fields before building query
             # Handle x_field as array (multi-level X) - resolve the primary (first) field,
@@ -280,9 +269,8 @@ class SQLGlotBuilder:
             x_field_for_resolve = x_field[0] if isinstance(x_field, (list, tuple)) and len(x_field) > 0 else x_field
             x_field_resolved, x_is_expr = resolve_field(x_field_for_resolve)
             y_field_resolved, y_is_expr = resolve_field(y_field)
-            sys.stderr.write(f"[SQLGlot] X field resolution: '{x_field}' -> '{x_field_resolved}', is_expr={x_is_expr}\n")
-            sys.stderr.write(f"[SQLGlot] Y field resolution: '{y_field}' -> '{y_field_resolved}', is_expr={y_is_expr}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] X field resolution: '{x_field}' -> '{x_field_resolved}', is_expr={x_is_expr}")
+            logger.debug(f"[SQLGlot] Y field resolution: '{y_field}' -> '{y_field_resolved}', is_expr={y_is_expr}")
 
             # x_field_primary is what we actually use for single-level X:
             # - if resolve_field returned an expression, use that
@@ -296,13 +284,11 @@ class SQLGlotBuilder:
             if legend_fields and len(legend_fields) > 0:
                 if len(legend_fields) == 1:
                     # Single field in array - just resolve it normally
-                    sys.stderr.write(f"[SQLGlot] Single legend field in array: {legend_fields[0]}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Single legend field in array: {legend_fields[0]}")
                     legend_field_resolved, legend_is_expr = resolve_field(legend_fields[0])
                 else:
                     # Multiple fields - concatenate with dialect-aware separator
-                    sys.stderr.write(f"[SQLGlot] Multi-legend detected: {len(legend_fields)} fields: {legend_fields}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Multi-legend detected: {len(legend_fields)} fields: {legend_fields}")
                     
                     # Resolve each field first
                     resolved_fields = []
@@ -323,8 +309,7 @@ class SQLGlotBuilder:
                         legend_field_resolved = " || ' - ' || ".join([f'"{f}"' for f in resolved_fields])
                     
                     legend_is_expr = True
-                    sys.stderr.write(f"[SQLGlot] Multi-legend expression: {legend_field_resolved[:100]}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Multi-legend expression: {legend_field_resolved[:100]}")
             elif legend_field:
                 # Single legend field (not in array) - resolve normally
                 legend_field_resolved, legend_is_expr = resolve_field(legend_field)
@@ -364,17 +349,15 @@ class SQLGlotBuilder:
             
             # X field (with optional time bucketing)
             # Multi-level X: when x_field is an array like ["OrderDate (Day)", "OrderDate (Year)"]
-            sys.stderr.write(f"[SQLGlot] build_aggregation_query received x_field={x_field}, type={type(x_field)}\n")
+            logger.debug(f"[SQLGlot] build_aggregation_query received x_field={x_field}, type={type(x_field)}")
             is_multi_level_x = isinstance(x_field, (list, tuple)) and len(x_field) > 1
             x_field_primary = x_field_primary_resolved
-            sys.stderr.write(f"[SQLGlot] is_multi_level_x={is_multi_level_x}, x_field_primary={x_field_primary}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] is_multi_level_x={is_multi_level_x}, x_field_primary={x_field_primary}")
             
             if x_field:
                 if is_multi_level_x:
                     # MULTI-LEVEL X: Concatenate all x field expressions with '|' delimiter
-                    sys.stderr.write(f"[SQLGlot] Multi-level X detected: {x_field}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Multi-level X detected: {x_field}")
                     x_part_exprs = []
                     x_order_parts = []
                     for xf in x_field:
@@ -416,21 +399,18 @@ class SQLGlotBuilder:
                     # Order by outer level (last) first, then inner levels
                     if x_order_parts:
                         x_order_expr = sqlglot.parse_one(", ".join(reversed(x_order_parts)), dialect=self.dialect)
-                    sys.stderr.write(f"[SQLGlot] Multi-level X expr: {concat_expr[:100]}...\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Multi-level X expr: {concat_expr[:100]}...")
                 elif seasonality_mode:
                     # SEASONALITY MODE: Extract month name/short for x, add numeric month for ordering
-                    sys.stderr.write(f"[SQLGlot] Building 12-month seasonality x-axis for {x_field_primary}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Building 12-month seasonality x-axis for {x_field_primary}")
                     # Build month short expression (Jan, Feb, Mar...)
                     month_expr = self._build_datepart_expr(x_field_primary, "month short", ds_type or self.dialect)
                     x_expr = sqlglot.parse_one(month_expr, dialect=self.dialect)
                     # Build numeric month for ordering (1-12)
                     month_num_expr = self._build_month_number_expr(x_field_primary, ds_type or self.dialect)
                     x_order_expr = sqlglot.parse_one(month_num_expr, dialect=self.dialect)
-                    sys.stderr.write(f"[SQLGlot] Month label expr: {month_expr}\n")
-                    sys.stderr.write(f"[SQLGlot] Month order expr: {month_num_expr}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Month label expr: {month_expr}")
+                    logger.debug(f"[SQLGlot] Month order expr: {month_num_expr}")
                 elif x_is_expr:
                     # Parse as raw SQL expression
                     x_expr = sqlglot.parse_one(x_field_primary, dialect=self.dialect)
@@ -465,25 +445,20 @@ class SQLGlotBuilder:
             
             # Apply WHERE clauses
             if where:
-                sys.stderr.write(f"[SQLGlot] WHERE clause before _apply_where: {where}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] WHERE clause before _apply_where: {where}")
                 query = self._apply_where(query, where, date_field=date_field or x_field, expr_map=expr_map)
-                sys.stderr.write(f"[SQLGlot] WHERE clause applied\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] WHERE clause applied")
             
             # Apply GROUP BY (by position)
-            sys.stderr.write(f"[SQLGlot] Group positions before GROUP BY: {group_positions}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Group positions before GROUP BY: {group_positions}")
             if group_positions:
                 query = query.group_by(*[exp.Literal.number(i) for i in group_positions])
-                sys.stderr.write(f"[SQLGlot] Applied GROUP BY with positions: {group_positions}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Applied GROUP BY with positions: {group_positions}")
             
             # Apply ORDER BY
             if seasonality_mode and x_order_expr:
                 # SEASONALITY MODE: Order by numeric month (_xo), then legend
-                sys.stderr.write(f"[SQLGlot] [OK] Applying seasonality ordering: ORDER BY _xo, legend\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] [OK] Applying seasonality ordering: ORDER BY _xo, legend")
                 # Apply ORDER BY inside the query before wrapping
                 query = query.order_by(exp.Column(this=exp.Identifier(this="_xo", quoted=False)))
                 if legend_field:
@@ -512,20 +487,17 @@ class SQLGlotBuilder:
             # Post-process: Convert SQL Server bracket notation to DuckDB double quotes
             if 'duckdb' in self.dialect.lower():
                 sql = re.sub(r'\[([^\]]+)\]', r'"\1"', sql)
-                sys.stderr.write(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB")
             
             # Print full SQL for debugging
-            logger.info(f"[SQLGlot] Generated SQL ({self.dialect}): {sql[:500]}...")
-            sys.stderr.write(f"[SQLGlot] Generated FULL SQL ({self.dialect}):\n")
-            sys.stderr.write(sql + "\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Generated SQL ({self.dialect}): {sql[:500]}...")
+            logger.debug(f"[SQLGlot] Generated FULL SQL ({self.dialect}):")
+            logger.debug(sql + "")
             return sql
             
         except Exception as e:
             logger.error(f"[SQLGlot] ERROR generating SQL: {e}")
-            sys.stderr.write(f"[SQLGlot] ERROR generating SQL: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[SQLGlot] ERROR generating SQL: {e}")
             raise
     
     def build_distinct_query(
@@ -591,8 +563,7 @@ class SQLGlotBuilder:
                         # Convert SQL Server bracket notation to double quotes for DuckDB
                         if 'duckdb' in (ds_type or self.dialect).lower():
                             expr = re.sub(r'\[([^\]]+)\]', r'"\1"', expr)
-                        sys.stderr.write(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in DISTINCT\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in DISTINCT")
                         return expr, True
                 
                 # Check if it's a date part pattern
@@ -601,8 +572,7 @@ class SQLGlotBuilder:
                     base_col = match.group(1).strip()
                     kind = match.group(2).lower()
                     expr = self._build_datepart_expr(base_col, kind, ds_type or self.dialect)
-                    sys.stderr.write(f"[SQLGlot] [OK] Resolving date part '{field_name}' in DISTINCT\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] [OK] Resolving date part '{field_name}' in DISTINCT")
                     return expr, True
                 
                 return field_name, False
@@ -665,18 +635,15 @@ class SQLGlotBuilder:
             # Post-process: Convert SQL Server bracket notation to DuckDB double quotes
             if 'duckdb' in self.dialect.lower():
                 sql = re.sub(r'\[([^\]]+)\]', r'"\1"', sql)
-                sys.stderr.write(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB")
             
             logger.info(f"[SQLGlot] Generated DISTINCT SQL ({self.dialect}): {sql[:150]}...")
-            sys.stderr.write(f"[SQLGlot] Generated DISTINCT SQL ({self.dialect}): {sql[:150]}...\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Generated DISTINCT SQL ({self.dialect}): {sql[:150]}...")
             return sql
             
         except Exception as e:
             logger.error(f"[SQLGlot] ERROR generating DISTINCT SQL: {e}")
-            sys.stderr.write(f"[SQLGlot] ERROR generating DISTINCT SQL: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[SQLGlot] ERROR generating DISTINCT SQL: {e}")
             raise
     
     def build_period_totals_query(
@@ -727,8 +694,7 @@ class SQLGlotBuilder:
                     # Convert SQL Server bracket notation to double quotes for DuckDB
                     if 'duckdb' in (ds_type or self.dialect).lower():
                         expr = re.sub(r'\[([^\]]+)\]', r'"\1"', expr)
-                    sys.stderr.write(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in period-totals\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in period-totals")
                     return expr, True
                 
                 # Check if it's a date part pattern
@@ -737,8 +703,7 @@ class SQLGlotBuilder:
                     base_col = match.group(1).strip()
                     kind = match.group(2).lower()
                     expr = self._build_datepart_expr(base_col, kind, ds_type or self.dialect)
-                    sys.stderr.write(f"[SQLGlot] [OK] Resolving date part '{field_name}' in period-totals\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] [OK] Resolving date part '{field_name}' in period-totals")
                     return expr, True
                 
                 return field_name, False
@@ -814,18 +779,15 @@ class SQLGlotBuilder:
             # Post-process: Convert SQL Server bracket notation to DuckDB double quotes
             if 'duckdb' in self.dialect.lower():
                 sql = re.sub(r'\[([^\]]+)\]', r'"\1"', sql)
-                sys.stderr.write(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Converted bracket notation to double quotes for DuckDB")
             
             logger.info(f"[SQLGlot] Generated period-totals SQL ({self.dialect}): {sql[:150]}...")
-            sys.stderr.write(f"[SQLGlot] Generated period-totals SQL ({self.dialect}): {sql[:150]}...\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Generated period-totals SQL ({self.dialect}): {sql[:150]}...")
             return sql
             
         except Exception as e:
             logger.error(f"[SQLGlot] ERROR generating period-totals SQL: {e}")
-            sys.stderr.write(f"[SQLGlot] ERROR generating period-totals SQL: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[SQLGlot] ERROR generating period-totals SQL: {e}")
             raise
     
     def _build_aggregation(self, agg: str, y_field: Optional[str], is_expr: bool = False) -> exp.Expression:
@@ -981,8 +943,7 @@ class SQLGlotBuilder:
         This allows derived columns and transforms to work.
         """
         import sys
-        sys.stderr.write(f"[SQLGLOT_WHERE_DEBUG] _apply_where received WHERE keys: {list(where.keys()) if where else 'None'}\n")
-        sys.stderr.flush()
+        logger.debug(f"[SQLGLOT_WHERE_DEBUG] _apply_where received WHERE keys: {list(where.keys()) if where else 'None'}")
         
         # Build a normalized view of expr_map for tolerant WHERE lookups
         normalized_expr_map: Dict[str, str] = {}
@@ -1000,8 +961,7 @@ class SQLGlotBuilder:
 
         try:
             where_work: Dict[str, Any] = dict(where or {})
-            sys.stderr.write(f"[SQLGLOT_WHERE_DEBUG] _apply_where working items: {where_work}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGLOT_WHERE_DEBUG] _apply_where working items: {where_work}")
         except Exception:
             where_work = where or {}
 
@@ -1035,12 +995,10 @@ class SQLGlotBuilder:
                             pass
                 
                 if not int_vals:
-                    sys.stderr.write(f"[SQLGLOT_WHERE_DEBUG] Skipping {k} because values {v} contain no valid ints\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGLOT_WHERE_DEBUG] Skipping {k} because values {v} contain no valid ints")
                     continue
 
-                sys.stderr.write(f"[SQLGLOT_WHERE_DEBUG] Found date part filter: {k} = {int_vals}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGLOT_WHERE_DEBUG] Found date part filter: {k} = {int_vals}")
 
                 if base_col:
                     current = dp_eq.setdefault(base_col, {})
@@ -1049,8 +1007,7 @@ class SQLGlotBuilder:
                     current[kind] = sorted(list(set(existing + int_vals)))
             
             if dp_eq:
-                sys.stderr.write(f"[SQLGLOT_WHERE_DEBUG] Potential date rewrites: {dp_eq}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGLOT_WHERE_DEBUG] Potential date rewrites: {dp_eq}")
 
             for base_col, parts in (dp_eq or {}).items():
                 years = parts.get("year", [])
@@ -1111,12 +1068,10 @@ class SQLGlotBuilder:
                                 final_or = exp.Or(this=final_or, expression=rc)
                             conditions.append(final_or)
                         
-                        sys.stderr.write(f"[SQLGLOT_WHERE_DEBUG] Applied sargable date range rewrite for {base_col} ({len(ranges)} ranges)\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGLOT_WHERE_DEBUG] Applied sargable date range rewrite for {base_col} ({len(ranges)} ranges)")
 
         except Exception as e:
-            sys.stderr.write(f"[SQLGLOT_WHERE_DEBUG] Error in date rewrite: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[SQLGLOT_WHERE_DEBUG] Error in date rewrite: {e}")
             pass
         
         where = where_work
@@ -1147,8 +1102,7 @@ class SQLGlotBuilder:
                     try:
                         def _expand_aliases_where(_expr_s: str, _depth: int = 0) -> str:
                             if _depth > 10:
-                                sys.stderr.write(f"[SQLGlot] WARNING: Max recursion depth reached in WHERE alias expansion\n")
-                                sys.stderr.flush()
+                                logger.debug(f"[SQLGlot] WARNING: Max recursion depth reached in WHERE alias expansion")
                                 return _expr_s
                             expanded = _expr_s
                             try:
@@ -1156,8 +1110,7 @@ class SQLGlotBuilder:
                             except Exception:
                                 matches = []
                             
-                            sys.stderr.write(f"[SQLGlot] WHERE expansion depth={_depth}, found {len(matches)} quoted identifiers\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] WHERE expansion depth={_depth}, found {len(matches)} quoted identifiers")
                             
                             for match in matches:
                                 m_s = str(match or "").strip()
@@ -1166,31 +1119,26 @@ class SQLGlotBuilder:
                                 alias_expr = None
                                 if m_s in expr_map:
                                     alias_expr = expr_map[m_s]
-                                    sys.stderr.write(f"[SQLGlot] Found '{m_s}' in expr_map\n")
-                                    sys.stderr.flush()
+                                    logger.debug(f"[SQLGlot] Found '{m_s}' in expr_map")
                                 else:
                                     alias_expr = normalized_expr_map.get(_sg_norm_name(m_s))
                                     if alias_expr:
-                                        sys.stderr.write(f"[SQLGlot] Found '{m_s}' in normalized_expr_map\n")
-                                        sys.stderr.flush()
+                                        logger.debug(f"[SQLGlot] Found '{m_s}' in normalized_expr_map")
                                 if alias_expr is None:
                                     continue
                                 alias_expr_s = str(alias_expr)
                                 alias_expr_s = re.sub(r'\s+AS\s+"[^"]+"', '', alias_expr_s, flags=re.IGNORECASE)
-                                sys.stderr.write(f"[SQLGlot] Expanding '{m_s}' -> {alias_expr_s[:100]}...\n")
-                                sys.stderr.flush()
+                                logger.debug(f"[SQLGlot] Expanding '{m_s}' -> {alias_expr_s[:100]}...")
                                 expanded = expanded.replace(f'"{m_s}"', f'({alias_expr_s})')
                             if expanded != _expr_s:
-                                sys.stderr.write(f"[SQLGlot] Expression changed, recursing to depth {_depth + 1}\n")
-                                sys.stderr.flush()
+                                logger.debug(f"[SQLGlot] Expression changed, recursing to depth {_depth + 1}")
                                 return _expand_aliases_where(expanded, _depth + 1)
                             return expanded
 
                         expr = _expand_aliases_where(str(expr))
                     except Exception:
                         pass
-                    sys.stderr.write(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in WHERE -> {expr[:80]}...\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] [OK] Resolving custom column '{field_name}' in WHERE -> {expr[:80]}...")
                     # Parse the expression and return it
                     try:
                         return sqlglot.parse_one(expr, dialect=self.dialect), True
@@ -1232,8 +1180,7 @@ class SQLGlotBuilder:
                     if isinstance(value, (list, tuple)) and operator != "ne":
                         value = value[0] if len(value) > 0 else None
                         
-                    sys.stderr.write(f"[SQLGlot] _apply_where: Processing comparison {field}__{operator} = {value}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] _apply_where: Processing comparison {field}__{operator} = {value}")
                     value_expr = None
 
                     if col_override is not None:
@@ -1270,10 +1217,9 @@ class SQLGlotBuilder:
                                     )
                                 else:
                                     value_expr = exp.Literal.string(iso)
-                                sys.stderr.write(
-                                    f"[SQLGlot] _apply_where: Using base date column for {field}__{operator} (iso date bound {iso})\n"
+                                logger.debug(
+                                    "[SQLGlot] _apply_where: Using base date column for %s__%s (iso date bound %s)", field, operator, iso
                                 )
-                                sys.stderr.flush()
                             else:
                                 expr_sql = self._build_datepart_expr(base_col, kind, self.dialect)
                                 col = sqlglot.parse_one(expr_sql, dialect=self.dialect)
@@ -1294,90 +1240,74 @@ class SQLGlotBuilder:
                                     # Ensure we don't compare VARCHAR expressions to numeric literals
                                     if isinstance(value, (int, float)):
                                         value = str(int(value)) if isinstance(value, int) else str(value)
-                                sys.stderr.write(f"[SQLGlot] _apply_where: Using datepart expr for {field} -> {expr_sql}\n")
-                                sys.stderr.flush()
+                                logger.debug(f"[SQLGlot] _apply_where: Using datepart expr for {field} -> {expr_sql}")
                         except Exception as e:
                             logger.warning(f"[SQLGlot] Failed to build datepart expr for '{field}': {e}")
                             # Fallback to regular resolution path below
                             resolved, is_custom = resolve_where_field(field)
                             if is_custom:
                                 col = resolved
-                                sys.stderr.write(f"[SQLGlot] _apply_where: Resolved {field} to custom column expression\n")
-                                sys.stderr.flush()
+                                logger.debug(f"[SQLGlot] _apply_where: Resolved {field} to custom column expression")
                             else:
                                 col = exp.Column(this=exp.Identifier(this=field, quoted=True))
-                                sys.stderr.write(f"[SQLGlot] _apply_where: Using column {field}\n")
-                                sys.stderr.flush()
+                                logger.debug(f"[SQLGlot] _apply_where: Using column {field}")
                     elif col_override is None:
                         # Try to resolve as custom column first
                         resolved, is_custom = resolve_where_field(field)
                         if is_custom:
                             col = resolved
-                            sys.stderr.write(f"[SQLGlot] _apply_where: Resolved {field} to custom column expression\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] _apply_where: Resolved {field} to custom column expression")
                         else:
                             col = exp.Column(this=exp.Identifier(this=field, quoted=True))
-                            sys.stderr.write(f"[SQLGlot] _apply_where: Using column {field}\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] _apply_where: Using column {field}")
                     
                     # Build condition expression
                     condition = None
                     lit_value = value_expr if value_expr is not None else self._to_literal(value)
                     if operator == "gte":
                         condition = col >= lit_value
-                        sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} >= {value}\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] _apply_where: Applied {field} >= {value}")
                     elif operator == "gt":
                         condition = col > lit_value
-                        sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} > {value}\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] _apply_where: Applied {field} > {value}")
                     elif operator == "lte":
                         condition = col <= lit_value
-                        sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} <= {value}\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] _apply_where: Applied {field} <= {value}")
                     elif operator == "lt":
                         condition = col < lit_value
-                        sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} < {value}\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] _apply_where: Applied {field} < {value}")
                     elif operator == "ne":
                         # NOT EQUALS: use NOT IN for arrays, != for scalars
                         if isinstance(value, (list, tuple)) and len(value) > 0:
                             literals = [self._to_literal(v) for v in value]
                             condition = ~col.isin(*literals)
-                            sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} NOT IN {value}\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] _apply_where: Applied {field} NOT IN {value}")
                         else:
                             condition = col != lit_value
-                            sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} != {value}\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] _apply_where: Applied {field} != {value}")
                     elif operator in {"contains", "notcontains", "startswith", "endswith"}:
                         # String matching operators
                         if operator == "contains":
                             pattern = f"%{value}%"
                             condition = col.like(self._to_literal(pattern))
-                            sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} LIKE '%{value}%'\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] _apply_where: Applied {field} LIKE '%{value}%'")
                         elif operator == "notcontains":
                             pattern = f"%{value}%"
                             condition = ~col.like(self._to_literal(pattern))
-                            sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} NOT LIKE '%{value}%'\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] _apply_where: Applied {field} NOT LIKE '%{value}%'")
                         elif operator == "startswith":
                             pattern = f"{value}%"
                             condition = col.like(self._to_literal(pattern))
-                            sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} LIKE '{value}%'\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] _apply_where: Applied {field} LIKE '{value}%'")
                         elif operator == "endswith":
                             pattern = f"%{value}"
                             condition = col.like(self._to_literal(pattern))
-                            sys.stderr.write(f"[SQLGlot] _apply_where: Applied {field} LIKE '%{value}'\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] _apply_where: Applied {field} LIKE '%{value}'")
                     else:
                         # Unknown operator, treat as regular field name
                         col = exp.Column(this=exp.Identifier(this=key, quoted=True))
                         condition = col == self._to_literal(value)
-                        sys.stderr.write(f"[SQLGlot] _apply_where: Unknown operator {operator}, treating as equality\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] _apply_where: Unknown operator {operator}, treating as equality")
                     
                     # Collect conditions instead of applying immediately
                     if condition is not None:
@@ -1422,8 +1352,7 @@ class SQLGlotBuilder:
                     try:
                         expr_sql = self._build_datepart_expr(base_col, kind, self.dialect)
                         col = sqlglot.parse_one(expr_sql, dialect=self.dialect)
-                        sys.stderr.write(f"[SQLGlot] _apply_where: Using datepart expr for {key} -> {expr_sql}\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] _apply_where: Using datepart expr for {key} -> {expr_sql}")
                     except Exception as e:
                         logger.warning(f"[SQLGlot] Failed to build datepart expr for '{key}': {e}")
                         resolved, is_custom = resolve_where_field(key)
@@ -1458,8 +1387,7 @@ class SQLGlotBuilder:
             for condition in conditions[1:]:
                 combined_condition = combined_condition & condition
             query = query.where(combined_condition)
-            sys.stderr.write(f"[SQLGlot] _apply_where: Applied {len(conditions)} conditions combined with AND\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] _apply_where: Applied {len(conditions)} conditions combined with AND")
         
         return query
     
@@ -1627,14 +1555,12 @@ class SQLGlotBuilder:
                     else:
                         expr = normalized_expr_map.get(_sg_norm_name(field))
                 if expr is not None:
-                    sys.stderr.write(f"[SQLGlot] Pivot: Resolved '{field}' -> {expr[:100]}...\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Pivot: Resolved '{field}' -> {expr[:100]}...")
                     expr = re.sub(r'"[a-z][a-z_]{0,4}"\.', '', expr)  # Quoted aliases
                     expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases
                     return expr, True
                 else:
-                    sys.stderr.write(f"[SQLGlot] Pivot: '{field}' not in expr_map (has {len(expr_map) if expr_map else 0} entries, keys={list(expr_map.keys()) if expr_map else []})\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Pivot: '{field}' not in expr_map (has {len(expr_map) if expr_map else 0} entries, keys={list(expr_map.keys()) if expr_map else []})")
                 
                 # Check date parts
                 match = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", field, flags=re.IGNORECASE)
@@ -1642,38 +1568,31 @@ class SQLGlotBuilder:
                     base_col = match.group(1).strip()
                     kind = match.group(2).lower()
                     expr = self._build_datepart_expr(base_col, kind, normalized_dialect)
-                    sys.stderr.write(f"[SQLGlot] Pivot: Resolved date part '{field}' -> {expr[:100]}...\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Pivot: Resolved date part '{field}' -> {expr[:100]}...")
                     return expr, True
                 
-                sys.stderr.write(f"[SQLGlot] Pivot: '{field}' is a plain column (no custom expr, no date part)\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Pivot: '{field}' is a plain column (no custom expr, no date part)")
                 return field, False
             
             # Build base query (support subqueries or aliased sources)
             s_source = str(source).strip()
-            sys.stderr.write(f"[SQLGlot] build_pivot_query: source parameter (first 200 chars): {s_source[:200]}\n")
-            sys.stderr.write(f"[SQLGlot] build_pivot_query: source starts with '(': {s_source.startswith('(')}\n")
-            sys.stderr.write(f"[SQLGlot] build_pivot_query: source starts with 'select': {s_source.lower().startswith('select')}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] build_pivot_query: source parameter (first 200 chars): {s_source[:200]}")
+            logger.debug(f"[SQLGlot] build_pivot_query: source starts with '(': {s_source.startswith('(')}")
+            logger.debug(f"[SQLGlot] build_pivot_query: source starts with 'select': {s_source.lower().startswith('select')}")
             try:
                 # If the source looks like a subquery or raw SELECT, parse it as an expression
                 if s_source.startswith("(") or s_source.lower().startswith("select"):
                     table_expr = sqlglot.parse_one(s_source, dialect=normalized_dialect)
-                    sys.stderr.write(f"[SQLGlot] build_pivot_query: Parsed source as subquery/SELECT\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] build_pivot_query: Parsed source as subquery/SELECT")
                 else:
                     table_expr = exp.to_table(s_source, dialect=normalized_dialect)
-                    sys.stderr.write(f"[SQLGlot] build_pivot_query: Converted source to table\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] build_pivot_query: Converted source to table")
             except Exception as e:
                 # Fallback to table conversion
-                sys.stderr.write(f"[SQLGlot] build_pivot_query: Exception parsing source: {e}, falling back to table conversion\n")
-                sys.stderr.flush()
+                logger.warning(f"[SQLGlot] build_pivot_query: Exception parsing source: {e}, falling back to table conversion")
                 table_expr = exp.to_table(s_source, dialect=normalized_dialect)
             query = exp.select("*").from_(table_expr)
-            sys.stderr.write(f"[SQLGlot] build_pivot_query: Initial query FROM clause: {query.sql(dialect=normalized_dialect)[:200]}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] build_pivot_query: Initial query FROM clause: {query.sql(dialect=normalized_dialect)[:200]}")
             
             # Resolve all dimension fields (deduplicate to avoid "column specified multiple times" errors)
             all_dims_raw = rows + cols
@@ -1806,8 +1725,7 @@ class SQLGlotBuilder:
                             return expanded
                         
                         val_resolved = expand_aliases(val_resolved)
-                        sys.stderr.write(f"[SQLGlot] Pivot: Expanded aliases in value expression: {val_resolved[:200]}...\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] Pivot: Expanded aliases in value expression: {val_resolved[:200]}...")
                         
                         # For DuckDB, wrap each base column reference with numeric cleaning
                         # to handle VARCHAR columns that need to be cast to numbers before addition
@@ -1819,8 +1737,7 @@ class SQLGlotBuilder:
                                 # Wrap each column with numeric cleaning
                                 return f'(COALESCE(TRY_CAST(REGEXP_REPLACE(CAST("{col_name}" AS TEXT), \'[^0-9\\\\.-]\', \'\') AS DOUBLE), TRY_CAST("{col_name}" AS DOUBLE), 0.0))'
                             val_resolved = re.sub(col_pattern, wrap_column, val_resolved)
-                            sys.stderr.write(f"[SQLGlot] Pivot: Wrapped columns with numeric cleaning: {val_resolved[:200]}...\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] Pivot: Wrapped columns with numeric cleaning: {val_resolved[:200]}...")
                     
                     # DuckDB numeric cleaning
                     if "duckdb" in normalized_dialect.lower():
@@ -1864,15 +1781,13 @@ class SQLGlotBuilder:
                 if normalized_dialect == 'tsql':
                     # SQL Server requires actual column references, not positions
                     # Use string-based GROUP BY to force column names instead of positions
-                    sys.stderr.write(f"[SQLGlot] Pivot: GROUP BY columns for SQL Server: {[str(c) for c in group_columns]}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Pivot: GROUP BY columns for SQL Server: {[str(c) for c in group_columns]}")
                     # Don't use .group_by() as it may simplify to positions - manually add to SQL
                     # We'll handle this after generating the base query
                     final_query = final_query.group_by(*group_columns)
                 else:
                     # Other dialects support positions
-                    sys.stderr.write(f"[SQLGlot] Pivot: GROUP BY positions: {group_positions}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] Pivot: GROUP BY positions: {group_positions}")
                     final_query = final_query.group_by(*[exp.Literal.number(i) for i in group_positions])
             
             # Add ORDER BY (by position for all dialects - ORDER BY supports positions everywhere)
@@ -1892,27 +1807,23 @@ class SQLGlotBuilder:
                 group_by_cols = ", ".join([c.sql(dialect=normalized_dialect) for c in group_columns])
                 # Find and replace the GROUP BY clause (re is imported at module level)
                 sql = re.sub(r'GROUP BY (\d+(?:, \d+)*)', f'GROUP BY {group_by_cols}', sql, flags=re.IGNORECASE)
-                sys.stderr.write(f"[SQLGlot] Fixed GROUP BY for SQL Server: GROUP BY {group_by_cols}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Fixed GROUP BY for SQL Server: GROUP BY {group_by_cols}")
             
-            sys.stderr.write(f"[SQLGlot] Generated PIVOT SQL ({normalized_dialect}): {sql}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Generated PIVOT SQL ({normalized_dialect}): {sql}")
             
             # GUARD: Check for unexpanded custom columns
             if expr_map:
                 try:
                     for alias in expr_map:
                          if f'"{alias}"' in sql or f'[{alias}]' in sql:
-                             sys.stderr.write(f"[SQLGlot] WARNING: Custom column alias '{alias}' found in generated SQL! This may cause 'Column not found' errors if not materialized.\n")
-                             sys.stderr.flush()
+                             logger.warning(f"[SQLGlot] WARNING: Custom column alias '{alias}' found in generated SQL! This may cause 'Column not found' errors if not materialized.")
                 except Exception:
                     pass
 
             return sql
             
         except Exception as e:
-            sys.stderr.write(f"[SQLGlot] Pivot query error: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[SQLGlot] Pivot query error: {e}")
             raise
     
     def _build_multi_series_query(
@@ -2015,9 +1926,8 @@ class SQLGlotBuilder:
                     return sql[:cut_pos]
                 
                 stripped_query = strip_top_level_clauses(single_query)
-                sys.stderr.write(f"[SQLGlot] Original query length: {len(single_query)}, stripped length: {len(stripped_query)}\n")
-                sys.stderr.write(f"[SQLGlot] Stripped query (first 200 chars): {stripped_query[:200]}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Original query length: {len(single_query)}, stripped length: {len(stripped_query)}")
+                logger.debug(f"[SQLGlot] Stripped query (first 200 chars): {stripped_query[:200]}")
                 single_query = stripped_query
                 
                 if has_legend:
@@ -2039,13 +1949,11 @@ class SQLGlotBuilder:
                     # Just series name as legend
                     wrapped = f"SELECT x, '{series_name}' as legend, value FROM ({single_query}) AS _s{idx}"
                 
-                sys.stderr.write(f"[SQLGlot] Wrapped query for series '{series_name}' (first 300 chars): {wrapped[:300]}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Wrapped query for series '{series_name}' (first 300 chars): {wrapped[:300]}")
                 queries.append(wrapped)
                 
             except Exception as e:
-                sys.stderr.write(f"[SQLGlot] Error building query for series '{series_name}': {e}\n")
-                sys.stderr.flush()
+                logger.warning(f"[SQLGlot] Error building query for series '{series_name}': {e}")
                 continue
         
         if not queries:
@@ -2053,8 +1961,7 @@ class SQLGlotBuilder:
         
         # Combine with UNION ALL
         combined = " UNION ALL ".join(queries)
-        sys.stderr.write(f"[SQLGlot] Combined query (first 500 chars): {combined[:500]}\n")
-        sys.stderr.flush()
+        logger.debug(f"[SQLGlot] Combined query (first 500 chars): {combined[:500]}")
         
         # Add ORDER BY and LIMIT to outer query
         final_sql = f"SELECT * FROM ({combined}) AS _multi_series"
@@ -2064,8 +1971,7 @@ class SQLGlotBuilder:
         has_seasonality_ordering = "ORDER BY _xo" in combined
         
         if has_seasonality_ordering:
-            sys.stderr.write(f"[SQLGlot] Skipping outer ORDER BY - queries have seasonality ordering\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Skipping outer ORDER BY - queries have seasonality ordering")
         elif order_by:
             if order_by.lower() == "value":
                 final_sql += f" ORDER BY value {order.upper()}"
@@ -2079,11 +1985,10 @@ class SQLGlotBuilder:
         if limit:
             final_sql += f" LIMIT {limit}"
         
-        sys.stderr.write(f"[SQLGlot] Generated multi-series SQL with {len(queries)} series\n")
-        sys.stderr.write(f"[SQLGlot] Final multi-series SQL (first 500 chars): {final_sql[:500]}\n")
-        sys.stderr.write(f"[SQLGlot] Full multi-series SQL:\n")
-        sys.stderr.write(final_sql + "\n")
-        sys.stderr.flush()
+        logger.debug(f"[SQLGlot] Generated multi-series SQL with {len(queries)} series")
+        logger.debug(f"[SQLGlot] Final multi-series SQL (first 500 chars): {final_sql[:500]}")
+        logger.debug(f"[SQLGlot] Full multi-series SQL:")
+        logger.debug(final_sql + "")
         return final_sql
 
 
@@ -2106,24 +2011,20 @@ def should_use_sqlglot(user_id: Optional[str] = None) -> bool:
         >>> should_use_sqlglot("user1")  # True
         >>> should_use_sqlglot("user3")  # False
     """
-    sys.stderr.write(f"[SQLGlot] * should_use_sqlglot() CALLED with user_id={user_id}\n")
-    sys.stderr.flush()
+    logger.debug(f"[SQLGlot] * should_use_sqlglot() CALLED with user_id={user_id}")
     from .config import settings
     
     # DEBUG: Always log what we see
-    sys.stderr.write(f"[SQLGlot] Config check: enable_sqlglot={settings.enable_sqlglot}, sqlglot_users='{settings.sqlglot_users}', user_id={user_id}\n")
-    sys.stderr.flush()
+    logger.debug(f"[SQLGlot] Config check: enable_sqlglot={settings.enable_sqlglot}, sqlglot_users='{settings.sqlglot_users}', user_id={user_id}")
     
     # Global flag disabled?
     if not settings.enable_sqlglot:
-        sys.stderr.write(f"[SQLGlot] DISABLED by feature flag\n")
-        sys.stderr.flush()
+        logger.debug(f"[SQLGlot] DISABLED by feature flag")
         return False
     
     # No user filtering or wildcard?
     if not settings.sqlglot_users or settings.sqlglot_users.strip() == "*":
-        sys.stderr.write(f"[SQLGlot] ENABLED for all users (wildcard or empty)\n")
-        sys.stderr.flush()
+        logger.debug(f"[SQLGlot] ENABLED for all users (wildcard or empty)")
         return True
     
     # Check if user is in allowed list

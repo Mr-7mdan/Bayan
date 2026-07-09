@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
@@ -8,6 +9,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from .config import settings
 from .timeutil import as_utc
+
+logger = logging.getLogger(__name__)
 
 # Timezone used for all cron triggers and scheduler clock.
 # Configured via SCHEDULER_TIMEZONE env var (see config.py). Defaults to UTC.
@@ -38,7 +41,7 @@ def ensure_scheduler_started() -> BackgroundScheduler:
         _scheduler.start()
     elif not _scheduler.running:
         # Scheduler daemon thread died — restart it and reload all jobs
-        print("[SCHEDULER] WARNING: Scheduler was not running — restarting!", flush=True)
+        logger.debug("[SCHEDULER] WARNING: Scheduler was not running — restarting!")
         try:
             _scheduler.shutdown(wait=False)
         except Exception:
@@ -49,9 +52,9 @@ def ensure_scheduler_started() -> BackgroundScheduler:
         try:
             schedule_all_jobs()
             schedule_all_alert_jobs()
-            print("[SCHEDULER] Reloaded all jobs after restart", flush=True)
+            logger.debug("[SCHEDULER] Reloaded all jobs after restart")
         except Exception as e:
-            print(f"[SCHEDULER] Failed to reload jobs: {e}", flush=True)
+            logger.warning(f"[SCHEDULER] Failed to reload jobs: {e}")
     return _scheduler
 
 
@@ -169,7 +172,7 @@ def schedule_all_jobs() -> dict:
             misfire_grace_time=3600,
         )
     except Exception as _ae:
-        print(f"[SCHEDULER] Failed to register audit:purge: {_ae}", flush=True)
+        logger.warning(f"[SCHEDULER] Failed to register audit:purge: {_ae}")
 
     # --- Catch-up: fire any sync job missed since the last run ---
     # Handles server restarts where APScheduler recalculates next_run_time into the
@@ -198,7 +201,7 @@ def schedule_all_jobs() -> dict:
                         if _last.astimezone(_tz) >= _candidate:
                             continue  # Already ran for this slot
                     # Fire catch-up
-                    print(f"[SYNC_CATCHUP] Firing catch-up for task={t.id} (missed {_candidate})", flush=True)
+                    logger.debug(f"[SYNC_CATCHUP] Firing catch-up for task={t.id} (missed {_candidate})")
                     sched.add_job(
                         func=run_task_job,
                         trigger='date',
@@ -211,14 +214,14 @@ def schedule_all_jobs() -> dict:
                         misfire_grace_time=600,
                     )
                 except Exception as _ce:
-                    print(f"[SYNC_CATCHUP] Error for task {t.id}: {_ce}", flush=True)
+                    logger.warning(f"[SYNC_CATCHUP] Error for task {t.id}: {_ce}")
         finally:
             try:
                 _catchup_db.close()
             except Exception:
                 pass
     except Exception as _catchup_err:
-        print(f"[SYNC_CATCHUP] Catch-up failed: {_catchup_err}", flush=True)
+        logger.warning(f"[SYNC_CATCHUP] Catch-up failed: {_catchup_err}")
 
     return {"added": added, "updated": updated, "removed": removed, "total": len(desired)}
 
@@ -258,7 +261,7 @@ def _auto_reset_stuck(db, ds_id: str, stale_threshold_minutes: int = 30) -> int:
                 is_stuck = elapsed > timedelta(minutes=stale_threshold_minutes)
                 reason = f"no progress for {elapsed.total_seconds()/60:.0f}min (threshold={stale_threshold_minutes}min)"
             if is_stuck:
-                print(f"[AUTO_RESET_STUCK] Resetting stuck sync: task_id={st.task_id}, progress={st.progress_current}/{st.progress_total}, {reason}", flush=True)
+                logger.debug(f"[AUTO_RESET_STUCK] Resetting stuck sync: task_id={st.task_id}, progress={st.progress_current}/{st.progress_total}, {reason}")
                 st.in_progress = False
                 st.cancel_requested = False
                 st.progress_current = None
@@ -269,13 +272,13 @@ def _auto_reset_stuck(db, ds_id: str, stale_threshold_minutes: int = 30) -> int:
                 reset_count += 1
             else:
                 elapsed_str = f"{(now - as_utc(last_activity)).total_seconds()/60:.0f}min" if last_activity else "?"
-                print(f"[AUTO_RESET_STUCK] Sync still active: task_id={st.task_id}, progress={st.progress_current}/{st.progress_total}, last_activity={elapsed_str} ago", flush=True)
+                logger.debug(f"[AUTO_RESET_STUCK] Sync still active: task_id={st.task_id}, progress={st.progress_current}/{st.progress_total}, last_activity={elapsed_str} ago")
         if reset_count:
             db.commit()
-            print(f"[AUTO_RESET_STUCK] Reset {reset_count} stuck syncs for datasource {ds_id}", flush=True)
+            logger.debug(f"[AUTO_RESET_STUCK] Reset {reset_count} stuck syncs for datasource {ds_id}")
         return reset_count
     except Exception as e:
-        print(f"[AUTO_RESET_STUCK] Error: {e}", flush=True)
+        logger.warning(f"[AUTO_RESET_STUCK] Error: {e}")
         try:
             db.rollback()
         except Exception:
@@ -336,7 +339,7 @@ def run_task_job(ds_id: str, task_id: str) -> None:
         # workers that never reach a batch boundary to honor cancel_requested).
         _auto_reset_stuck(db, ds_id, stale_threshold_minutes=30)
     except Exception as e:
-        print(f"[SYNC_JOB] auto-reset failed task={task_id} ds={ds_id}: {e}", flush=True)
+        logger.warning(f"[SYNC_JOB] auto-reset failed task={task_id} ds={ds_id}: {e}")
     finally:
         try:
             db.close()
@@ -350,12 +353,12 @@ def run_task_job(ds_id: str, task_id: str) -> None:
     try:
         fut.result(timeout=timeout)
     except FutureTimeout:
-        print(f"[SYNC_JOB] TIMEOUT task={task_id} ds={ds_id} after {timeout}s — requesting abort", flush=True)
+        logger.warning(f"[SYNC_JOB] TIMEOUT task={task_id} ds={ds_id} after {timeout}s — requesting abort")
         _request_cancel(task_id)
     except Exception as e:
         # Catch ALL exceptions to prevent killing the scheduler daemon thread.
         # APScheduler silently dies if the job function raises.
-        print(f"[SYNC_JOB] FAILED task={task_id} ds={ds_id}: {e}", flush=True)
+        logger.warning(f"[SYNC_JOB] FAILED task={task_id} ds={ds_id}: {e}")
 
 
 def list_jobs() -> list[dict]:

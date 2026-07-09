@@ -387,7 +387,7 @@ def _ensure_table_schema(engine: Engine, table: str, sample: Dict[str, Any]) -> 
     if _duckdb is not None:
         try:
             if DEBUG:
-                print(f"[api_ingest] ensure_table_schema: using native duckdb for table={table}", flush=True)
+                logger.debug(f"[api_ingest] ensure_table_schema: using native duckdb for table={table}")
             con = open_duck_native(settings.duckdb_path)
             try:
                 existing: Dict[str, str] = {}
@@ -418,7 +418,7 @@ def _ensure_table_schema(engine: Engine, table: str, sample: Dict[str, Any]) -> 
             try:
                 logger.exception("native ensure_table_schema failed for %s: %s", table, str(e))
                 if DEBUG:
-                    print(f"[api_ingest] native ensure_table_schema failed: {e}", flush=True)
+                    logger.warning(f"[api_ingest] native ensure_table_schema failed: {e}")
             except Exception:
                 pass
             # Fall through to SQLAlchemy path as last resort
@@ -523,7 +523,7 @@ def _insert_rows(engine: Engine, table: str, rows: List[Dict[str, Any]]) -> int:
     if _duckdb is not None:
         try:
             if DEBUG:
-                print(f"[api_ingest] insert_rows: using native duckdb for table={table} rows={len(rows)}", flush=True)
+                logger.debug(f"[api_ingest] insert_rows: using native duckdb for table={table} rows={len(rows)}")
             con = open_duck_native(settings.duckdb_path)
             try:
                 con.executemany(sql, payload_vals)
@@ -538,7 +538,7 @@ def _insert_rows(engine: Engine, table: str, rows: List[Dict[str, Any]]) -> int:
             try:
                 logger.exception("native insert_rows failed for %s: %s", table, str(e))
                 if DEBUG:
-                    print(f"[api_ingest] native insert_rows failed: {e}", flush=True)
+                    logger.warning(f"[api_ingest] native insert_rows failed: {e}")
             except Exception:
                 pass
             # Fall through to SQLAlchemy path as last resort
@@ -667,7 +667,7 @@ def run_api_sync(
     try:
         logger.info("run_api_sync start: dest_table=%s mode=%s", dest_table, mode)
         if DEBUG:
-            print(f"[api_ingest] run_api_sync start dest={dest_table} mode={mode}", flush=True)
+            logger.debug(f"[api_ingest] run_api_sync start dest={dest_table} mode={mode}")
     except Exception:
         pass
     endpoint = cfg.get('endpoint') or cfg.get('urlTemplate') or ''
@@ -813,11 +813,11 @@ def run_api_sync(
             _mask_params(params),
         )
         if DEBUG:
-            print(f"[api_ingest] request {method} {url} params={_mask_params(params)}", flush=True)
+            logger.debug(f"[api_ingest] request {method} {url} params={_mask_params(params)}")
         if window_start or window_end:
             logger.info("sequence window: start=%s end=%s", window_start, window_end)
             if DEBUG:
-                print(f"[api_ingest] sequence window: {window_start}..{window_end}", flush=True)
+                logger.debug(f"[api_ingest] sequence window: {window_start}..{window_end}")
     except Exception:
         pass
 
@@ -836,7 +836,7 @@ def run_api_sync(
             logger.info("HTTP response: status=%s ct=%s len=%s csv_hint=%s fmt_param=%s -> is_csv=%s",
                         status, ct, len(text_body or ''), hint, fmt_param, is_csv)
             if DEBUG:
-                print(f"[api_ingest] response status={status} ct={ct} len={len(text_body or '')} hint={hint} fmt={fmt_param} is_csv={is_csv}", flush=True)
+                logger.debug(f"[api_ingest] response status={status} ct={ct} len={len(text_body or '')} hint={hint} fmt={fmt_param} is_csv={is_csv}")
         except Exception:
             is_csv = _is_csv_format(rh, params, cfg)
         if is_csv:
@@ -844,10 +844,10 @@ def run_api_sync(
             try:
                 logger.info("parsed CSV rows: %d", len(items))
                 if DEBUG:
-                    print(f"[api_ingest] parsed CSV rows: {len(items)}", flush=True)
+                    logger.debug(f"[api_ingest] parsed CSV rows: {len(items)}")
                     if items:
                         try:
-                            print(f"[api_ingest] csv first row keys: {list(items[0].keys())[:15]}", flush=True)
+                            logger.debug(f"[api_ingest] csv first row keys: {list(items[0].keys())[:15]}")
                         except Exception:
                             pass
             except Exception:
@@ -861,7 +861,7 @@ def run_api_sync(
             try:
                 logger.info("parsed JSON items: %d", len(items))
                 if DEBUG:
-                    print(f"[api_ingest] parsed JSON items: {len(items)}", flush=True)
+                    logger.debug(f"[api_ingest] parsed JSON items: {len(items)}")
             except Exception:
                 pass
     elif pagetype == 'page':
@@ -971,7 +971,7 @@ def run_api_sync(
         try:
             logger.info("flattened rows: 0 (no data parsed)")
             if DEBUG:
-                print("[api_ingest] flattened rows: 0", flush=True)
+                logger.debug("[api_ingest] flattened rows: 0")
         except Exception:
             pass
         return {"row_count": 0, "windowStart": window_start, "windowEnd": window_end}
@@ -988,13 +988,13 @@ def run_api_sync(
         try:
             logger.info("no non-empty rows after parsing; nothing to insert")
             if DEBUG:
-                print("[api_ingest] no non-empty rows after parsing", flush=True)
+                logger.debug("[api_ingest] no non-empty rows after parsing")
         except Exception:
             pass
         return {"row_count": 0, "windowStart": window_start, "windowEnd": window_end}
     try:
         if DEBUG:
-            print(f"[api_ingest] sample keys={list(sample.keys())[:10]}", flush=True)
+            logger.debug(f"[api_ingest] sample keys={list(sample.keys())[:10]}")
     except Exception:
         pass
     try:
@@ -1005,15 +1005,15 @@ def run_api_sync(
             sample_types = { str(k): type(v).__name__ for k, v in (sample.items() if isinstance(sample, dict) else []) }
             logger.exception("ensure_table_schema failed for %s: %s; sample_keys=%s; sample_types=%s", dest_table, str(e), list(sample.keys())[:10] if isinstance(sample, dict) else None, sample_types)
             if DEBUG:
-                print(f"[api_ingest] ensure_table_schema failed: {e}", flush=True)
-                print(f"[api_ingest] sample_types: {sample_types}", flush=True)
+                logger.warning(f"[api_ingest] ensure_table_schema failed: {e}")
+                logger.debug(f"[api_ingest] sample_types: {sample_types}")
         except Exception:
             pass
         raise
     try:
         logger.info("ensure table %s: %d cols (sample keys=%s)", dest_table, len(cols), list(flat[0].keys())[:10])
         if DEBUG:
-            print(f"[api_ingest] ensure table {dest_table}: {len(cols)} cols", flush=True)
+            logger.debug(f"[api_ingest] ensure table {dest_table}: {len(cols)} cols")
     except Exception:
         pass
 
@@ -1030,7 +1030,7 @@ def run_api_sync(
     try:
         logger.info("inserted rows: %d into %s", row_count, dest_table)
         if DEBUG:
-            print(f"[api_ingest] inserted rows: {row_count} into {dest_table}", flush=True)
+            logger.debug(f"[api_ingest] inserted rows: {row_count} into {dest_table}")
     except Exception:
         pass
 

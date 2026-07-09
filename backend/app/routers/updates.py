@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 from ..config import settings
 from ..models import User, SessionLocal
 from ..auth import require_admin
+
+logger = logging.getLogger(__name__)
 from ..authz import require_user
 from sqlalchemy.orm import Session
 
@@ -232,23 +235,21 @@ async def apply_update(
     try:
         if dest.suffixes[-2:] == [".tar", ".gz"]:
             import tarfile
-            print(f"[EXTRACT] Extracting {dest} to {sd / 'extracted'}", file=sys.stderr)
+            logger.warning(f"[EXTRACT] Extracting {dest} to {sd / 'extracted'}")
             with tarfile.open(dest, "r:gz") as tf:
                 members = tf.getmembers()
-                print(f"[EXTRACT] Archive contains {len(members)} files/dirs", file=sys.stderr)
+                logger.warning(f"[EXTRACT] Archive contains {len(members)} files/dirs")
                 tf.extractall(sd / "extracted")
-                print(f"[EXTRACT] Extraction completed", file=sys.stderr)
+                logger.warning(f"[EXTRACT] Extraction completed")
         elif dest.suffix == ".zip":
             import zipfile
-            print(f"[EXTRACT] Extracting {dest} to {sd / 'extracted'}", file=sys.stderr)
+            logger.warning(f"[EXTRACT] Extracting {dest} to {sd / 'extracted'}")
             with zipfile.ZipFile(dest, 'r') as zf:
-                print(f"[EXTRACT] Archive contains {len(zf.namelist())} files/dirs", file=sys.stderr)
+                logger.warning(f"[EXTRACT] Archive contains {len(zf.namelist())} files/dirs")
                 zf.extractall(sd / "extracted")
-                print(f"[EXTRACT] Extraction completed", file=sys.stderr)
+                logger.warning(f"[EXTRACT] Extraction completed")
     except Exception as e:
-        print(f"[ERROR] Failed to extract archive: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+        logger.warning(f"[ERROR] Failed to extract archive: {e}", exc_info=True)
 
     # Persist applied frontend version for display
     if component == "frontend":
@@ -305,11 +306,11 @@ def _copy_overlay(src: Path, dst: Path, ignore_names: Optional[set[str]] = None)
             shutil.copy2(p, dst / name)
             copied_files.append(name)
     
-    print(f"[COPY_OVERLAY] Source: {src}", file=sys.stderr)
-    print(f"[COPY_OVERLAY] Dest: {dst}", file=sys.stderr)
-    print(f"[COPY_OVERLAY] Copied {len(copied_dirs)} dirs: {copied_dirs[:10]}", file=sys.stderr)
-    print(f"[COPY_OVERLAY] Copied {len(copied_files)} files: {copied_files[:10]}", file=sys.stderr)
-    print(f"[COPY_OVERLAY] Skipped: {skipped}", file=sys.stderr)
+    logger.warning(f"[COPY_OVERLAY] Source: {src}")
+    logger.warning(f"[COPY_OVERLAY] Dest: {dst}")
+    logger.warning(f"[COPY_OVERLAY] Copied {len(copied_dirs)} dirs: {copied_dirs[:10]}")
+    logger.warning(f"[COPY_OVERLAY] Copied {len(copied_files)} files: {copied_files[:10]}")
+    logger.warning(f"[COPY_OVERLAY] Skipped: {skipped}")
 
 
 def _ensure_current_pointer(component_dir: Path, version_dir: Path) -> Path:
@@ -445,13 +446,11 @@ async def promote_update(
                 except Exception:
                     source_dir = target
             
-            print(f"[UPDATE] Copying from {source_dir} to {backend_dir}", file=sys.stderr)
+            logger.warning(f"[UPDATE] Copying from {source_dir} to {backend_dir}")
             _copy_overlay(source_dir, backend_dir, ignore_names={'.env', '.data', 'logs', 'venv', '__pycache__', 'dist'})
-            print(f"[UPDATE] Copy completed successfully", file=sys.stderr)
+            logger.warning(f"[UPDATE] Copy completed successfully")
         except Exception as e:
-            print(f"[ERROR] Failed to copy files during promote: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
+            logger.warning(f"[ERROR] Failed to copy files during promote: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Failed to copy files: {e}")
         # Update APP_VERSION in .env to reflect the promoted version
         try:
@@ -463,7 +462,7 @@ async def promote_update(
                 if updated != content:
                     env_file.write_text(updated, encoding='utf-8')
         except Exception as e:
-            print(f"[WARN] Failed to update APP_VERSION in .env: {e}", file=sys.stderr)
+            logger.warning(f"[WARN] Failed to update APP_VERSION in .env: {e}")
         if os.name == 'nt' and restart:
             restarted = _restart_service_win('BayanAPIUvicorn')
         elif restart:

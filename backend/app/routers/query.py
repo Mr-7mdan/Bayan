@@ -197,9 +197,8 @@ def _build_expr_map_helper(ds: Any, source_name: str, ds_type: str, _apply_scope
                 # Debug: Log full expression for CASE statements
                 if "CASE" in expr.upper():
                     logger.info(f"[expr_map] Custom column '{col['name']}' CASE expression: {expr}")
-                    sys.stderr.write(f"[expr_map] Custom column '{col['name']}' has CASE expression length={len(expr)}\n")
-                    sys.stderr.write(f"[expr_map] Expression: {expr}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[expr_map] Custom column '{col['name']}' has CASE expression length={len(expr)}")
+                    logger.debug(f"[expr_map] Expression: {expr}")
         
         # From computed transforms
         transforms = ds_transforms.get("transforms") or []
@@ -286,15 +285,13 @@ def _build_datepart_expr_helper(base_col: str, kind: str, dialect: str) -> str:
 def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: str, ds_type: str) -> dict:
     """Resolve derived column names to SQL expressions in WHERE clause - module level helper"""
     import sys
-    sys.stderr.write(f"[SQLGlot] _resolve_derived_columns_in_where_helper CALLED with where keys: {list(where.keys()) if where else 'None'}\n")
-    sys.stderr.flush()
+    logger.debug(f"[SQLGlot] _resolve_derived_columns_in_where_helper CALLED with where keys: {list(where.keys()) if where else 'None'}")
     
     if not where:
         return where
     
     if not ds:
-        sys.stderr.write("[SQLGlot] No datasource provided for resolution\n")
-        sys.stderr.flush()
+        logger.debug("[SQLGlot] No datasource provided for resolution")
         return where
     
     try:
@@ -329,9 +326,8 @@ def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: 
         expr_map = _build_expr_map_helper(ds, source_name, ds_type, _apply_scope_for_helper, None)
         
         # Resolve WHERE clause
-        sys.stderr.write(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}\n")
-        sys.stderr.write(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}\n")
-        sys.stderr.flush()
+        logger.debug(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}")
+        logger.debug(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}")
         
         # Build case-insensitive fallback map
         expr_map_lower = {k.lower(): v for k, v in expr_map.items()}
@@ -352,8 +348,7 @@ def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: 
                 expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)  # Unquoted aliases like s.
                 # Rebuild key with operator suffix if present
                 resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
-                sys.stderr.write(f"[SQLGlot] [OK] Resolved custom column '{key}' -> {resolved_key[:80]}...\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] [OK] Resolved custom column '{key}' -> {resolved_key[:80]}...")
                 resolved[resolved_key] = value
                 resolved_count += 1
             # Check if it's a date part pattern like "OrderDate (Year)"
@@ -365,8 +360,7 @@ def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: 
                     expr = _build_datepart_expr_helper(base_col, kind, ds_type)
                     # Rebuild key with operator suffix if present
                     resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
-                    sys.stderr.write(f"[SQLGlot] [OK] Resolved date part '{key}' -> {resolved_key[:80]}...\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] [OK] Resolved date part '{key}' -> {resolved_key[:80]}...")
                     resolved[resolved_key] = value
                     resolved_count += 1
                 else:
@@ -374,14 +368,12 @@ def _resolve_derived_columns_in_where_helper(where: dict, ds: Any, source_name: 
             else:
                 resolved[key] = value
         
-        sys.stderr.write(f"[SQLGlot] Resolution complete: {resolved_count}/{len(where)} columns resolved\n")
-        sys.stderr.flush()
+        logger.debug(f"[SQLGlot] Resolution complete: {resolved_count}/{len(where)} columns resolved")
         return resolved
         
     except Exception as e:
         logger.error(f"[SQLGlot] Failed to resolve derived columns: {e}", exc_info=True)
-        sys.stderr.write(f"[SQLGlot] Failed to resolve derived columns: {e}\n")
-        sys.stderr.flush()
+        logger.warning(f"[SQLGlot] Failed to resolve derived columns: {e}")
         return where
 
 
@@ -484,15 +476,15 @@ def _apply_duck_mysql_attachments(conn, attachments: list, db_session) -> None:
             from ..models import Datasource as _DS
             ref_ds = db_session.get(_DS, ref_ds_id)
             if not ref_ds:
-                sys.stderr.write(f"[RemoteAttach] Datasource {ref_ds_id} not found for alias '{alias}'\n")
+                logger.debug(f"[RemoteAttach] Datasource {ref_ds_id} not found for alias '{alias}'")
                 continue
             enc = getattr(ref_ds, 'connection_encrypted', None)
             if not enc:
-                sys.stderr.write(f"[RemoteAttach] No connection string for datasource {ref_ds_id}\n")
+                logger.debug(f"[RemoteAttach] No connection string for datasource {ref_ds_id}")
                 continue
             attach_type = _duck_attach_type(getattr(ref_ds, 'type', '') or '')
             if not attach_type:
-                sys.stderr.write(f"[RemoteAttach] Unsupported type '{getattr(ref_ds, 'type', '')}' for alias '{alias}'\n")
+                logger.debug(f"[RemoteAttach] Unsupported type '{getattr(ref_ds, 'type', '')}' for alias '{alias}'")
                 continue
             try:
                 conn.execute(f"INSTALL {attach_type}")
@@ -510,21 +502,20 @@ def _apply_duck_mysql_attachments(conn, attachments: list, db_session) -> None:
                 attach_str = _build_mysql_attach_str(info, db_override)
             except ValueError as e:
                 # invalid character in a credential field — never log the value
-                sys.stderr.write(f"[RemoteAttach] ATTACH '{alias}' rejected: {e}\n")
+                logger.debug(f"[RemoteAttach] ATTACH '{alias}' rejected: {e}")
                 continue
             try:
                 conn.execute(f"ATTACH '{attach_str}' AS {quote_ident(alias)} (TYPE {attach_type})")
-                sys.stderr.write(f"[RemoteAttach] Attached '{alias}' ({attach_type}) → {info.get('host')}/{info.get('database')}\n")
+                logger.debug(f"[RemoteAttach] Attached '{alias}' ({attach_type}) → {info.get('host')}/{info.get('database')}")
             except Exception as e:
                 msg = str(e).lower()
                 if 'already' in msg or 'exists' in msg:
                     pass  # Already attached on the shared connection
                 else:
                     # Scrub any credential the DuckDB exception may echo back.
-                    sys.stderr.write(f"[RemoteAttach] ATTACH '{alias}' ({info.get('host')}) failed: {_scrub_secrets(e, [info.get('password'), attach_str])}\n")
+                    logger.warning(f"[RemoteAttach] ATTACH '{alias}' ({info.get('host')}) failed: {_scrub_secrets(e, [info.get('password'), attach_str])}")
         except Exception as e:
-            sys.stderr.write(f"[RemoteAttach] Error processing '{alias}': {type(e).__name__}\n")
-    sys.stderr.flush()
+            logger.warning(f"[RemoteAttach] Error processing '{alias}': {type(e).__name__}")
 
 
 def _duck_has_table(table: Optional[str]) -> bool:
@@ -572,7 +563,7 @@ def _resolve_join_catalog(ds_transforms: dict) -> dict:
                         ).fetchone()
                         if _jrow:
                             _jj["targetTable"] = f"{_jrow[0]}.{_jt}"
-                            print(f"[CatalogResolve/join] '{_jt}' -> '{_jj['targetTable']}'", flush=True)
+                            logger.debug(f"[CatalogResolve/join] '{_jt}' -> '{_jj['targetTable']}'")
                     except Exception:
                         pass
     except Exception:
@@ -1134,10 +1125,9 @@ def _referenced_cols_in_expr(expr: str) -> set[str]:
         # DEBUG: Check if we successfully removed qualified references
         if '"s"' in remaining:
             import sys
-            sys.stderr.write(f"[DEBUG _referenced_cols_in_expr] WARNING: 's' still in remaining after qualified removal!\n")
-            sys.stderr.write(f"[DEBUG _referenced_cols_in_expr] Remaining (first 200 chars): {remaining[:200]}\n")
-            sys.stderr.write(f"[DEBUG _referenced_cols_in_expr] Qualified matches found: {len(qualified_matches)}\n")
-            sys.stderr.flush()
+            logger.debug(f"[DEBUG _referenced_cols_in_expr] WARNING: 's' still in remaining after qualified removal!")
+            logger.debug(f"[DEBUG _referenced_cols_in_expr] Remaining (first 200 chars): {remaining[:200]}")
+            logger.debug(f"[DEBUG _referenced_cols_in_expr] Qualified matches found: {len(qualified_matches)}")
         
         # Now search for bare identifiers in the remaining expression (after removing qualified refs)
         # Bare bracketed identifiers [Col]
@@ -1201,8 +1191,7 @@ def _referenced_cols_in_expr(expr: str) -> set[str]:
     if 's' in cols:
         try:
             import sys
-            sys.stderr.write(f"[DEBUG _referenced_cols_in_expr] Discarding alias 's' from refs: {cols}\n")
-            sys.stderr.flush()
+            logger.debug(f"[DEBUG _referenced_cols_in_expr] Discarding alias 's' from refs: {cols}")
         except Exception:
             pass
         cols.discard('s')
@@ -1276,7 +1265,7 @@ def _filter_by_basecols(ds_tr: dict, base_cols: set[str]) -> dict:
             expr_corrected = _auto_correct_column_case(expr, base_cols)
             refs = _referenced_cols_in_expr(expr_corrected)
             can_accept = (not refs) or refs.issubset(allowed)
-            print(f"[_filter_by_basecols] Checking computed '{name}': expr='{expr[:50]}', refs={refs}, allowed_sample={list(allowed)[:10]}, can_accept={can_accept}", flush=True)
+            logger.debug(f"[_filter_by_basecols] Checking computed '{name}': expr='{expr[:50]}', refs={refs}, allowed_sample={list(allowed)[:10]}, can_accept={can_accept}")
             return (can_accept, name)
         if t == 'case':
             tgt_name = _norm_name(str((tr or {}).get('target') or ''))
@@ -1298,9 +1287,9 @@ def _filter_by_basecols(ds_tr: dict, base_cols: set[str]) -> dict:
     progress = True
     passes = 0
     import sys
-    print(f"[_filter_by_basecols] Starting with {len(ccs)} custom columns, {len(trs)} transforms", flush=True)
-    print(f"[_filter_by_basecols] Custom column names: {[cc.get('name') for cc in ccs]}", flush=True)
-    print(f"[_filter_by_basecols] Base columns available: {sorted(base_l)}", flush=True)
+    logger.debug(f"[_filter_by_basecols] Starting with {len(ccs)} custom columns, {len(trs)} transforms")
+    logger.debug(f"[_filter_by_basecols] Custom column names: {[cc.get('name') for cc in ccs]}")
+    logger.debug(f"[_filter_by_basecols] Base columns available: {sorted(base_l)}")
     # Up to 5 passes to resolve simple dependency chains
     while progress and passes < 5:
         progress = False
@@ -1315,10 +1304,10 @@ def _filter_by_basecols(ds_tr: dict, base_cols: set[str]) -> dict:
                 taken_cc[i] = True
                 if name:
                     allowed.add(name)
-                    print(f"[_filter_by_basecols] Pass {passes}: Accepted custom column '{name}'", flush=True)
+                    logger.debug(f"[_filter_by_basecols] Pass {passes}: Accepted custom column '{name}'")
                 progress = True
             else:
-                print(f"[_filter_by_basecols] Pass {passes}: Rejected custom column '{cc.get('name')}' - missing refs", flush=True)
+                logger.debug(f"[_filter_by_basecols] Pass {passes}: Rejected custom column '{cc.get('name')}' - missing refs")
         # Try accept transforms
         for i, tr in enumerate(trs):
             if taken_tr[i]:
@@ -1329,16 +1318,16 @@ def _filter_by_basecols(ds_tr: dict, base_cols: set[str]) -> dict:
                 taken_tr[i] = True
                 if prod:
                     allowed.add(prod)
-                    print(f"[_filter_by_basecols] Pass {passes}: Accepted transform '{prod}'", flush=True)
+                    logger.debug(f"[_filter_by_basecols] Pass {passes}: Accepted transform '{prod}'")
                 progress = True
 
     # Preserve original order for accepted items
     out_cc = [cc for i, cc in enumerate(ccs) if taken_cc[i]]
     out_tr = [tr for i, tr in enumerate(trs) if taken_tr[i]]
-    print(f"[_filter_by_basecols] Final: {len(out_cc)} custom columns, {len(out_tr)} transforms accepted", flush=True)
+    logger.debug(f"[_filter_by_basecols] Final: {len(out_cc)} custom columns, {len(out_tr)} transforms accepted")
     dropped_cc = [cc.get('name') for i, cc in enumerate(ccs) if not taken_cc[i]]
     if dropped_cc:
-        print(f"[_filter_by_basecols] Dropped custom columns: {dropped_cc}", flush=True)
+        logger.debug(f"[_filter_by_basecols] Dropped custom columns: {dropped_cc}")
 
     return {
         'customColumns': out_cc,
@@ -1382,12 +1371,11 @@ def _resolve_table_name(ds: Any, source_table_id: str | None, source_name: str |
     if isinstance((opts or {}).get("transforms"), dict):
         ds_tr = (opts or {}).get("transforms") or {}
         all_custom_cols = ds_tr.get('customColumns', [])
-        sys.stderr.write(f"[Query] Applying scope filter for source: {payload.source}\n")
-        sys.stderr.write(f"[Query] Total custom columns before scope filter: {len(all_custom_cols)}\n")
+        logger.debug(f"[Query] Applying scope filter for source: {payload.source}")
+        logger.debug(f"[Query] Total custom columns before scope filter: {len(all_custom_cols)}")
         for col in all_custom_cols:
             scope = col.get('scope', {})
-            sys.stderr.write(f"[Query]   - {col.get('name')}: level={scope.get('level')}, table={scope.get('table')}\n")
-        sys.stderr.flush()
+            logger.debug(f"[Query]   - {col.get('name')}: level={scope.get('level')}, table={scope.get('table')}")
         def _apply_scope(model: dict, src: str):
             if not isinstance(model, dict):
                 return None
@@ -1406,19 +1394,16 @@ def _resolve_table_name(ds: Any, source_table_id: str | None, source_name: str |
                     lvl = (sc or {}).get('level')
                     if not lvl:
                         out.append(it)
-                        sys.stderr.write(f"[Query] Custom column '{col_name}' has no level, including it\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[Query] Custom column '{col_name}' has no level, including it")
                         continue
                     if str(lvl).lower() == 'datasource':
                         out.append(it)
-                        sys.stderr.write(f"[Query] Custom column '{col_name}' is datasource-level, including it\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[Query] Custom column '{col_name}' is datasource-level, including it")
                     elif str(lvl).lower() == 'table':
                         t = (sc or {}).get('table')
                         if t:
                             matches = _matches_table(str(t), str(src))
-                            sys.stderr.write(f"[Query] Custom column '{col_name}' scope table '{t}' vs source '{src}': {'MATCH' if matches else 'NO MATCH'}\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[Query] Custom column '{col_name}' scope table '{t}' vs source '{src}': {'MATCH' if matches else 'NO MATCH'}")
                             if matches:
                                 out.append(it)
                     elif str(lvl).lower() == 'widget':
@@ -1477,7 +1462,7 @@ def _resolve_table_name(ds: Any, source_table_id: str | None, source_name: str |
         elif len(result) == 4:
             base_sql, _cols_unused, _warns, _ = result
         else:
-            print(f"[preview_pivot_sql] Unexpected build_sql return count: {len(result)}")
+            logger.debug(f"[preview_pivot_sql] Unexpected build_sql return count: {len(result)}")
             base_sql = result[0] if result else ""
         base_from_sql = f" FROM ({base_sql}) AS _base"
 
@@ -1770,7 +1755,7 @@ async def _run_cancellable_in_pool(request: Optional[Request], sync_fn) -> Query
         # Watcher resolved first → client disconnected.
         n = cancel_token.cancel()
         if n:
-            print(f"[cancellation] client disconnected; interrupted {n} DuckDB connection(s)", flush=True)
+            logger.debug(f"[cancellation] client disconnected; interrupted {n} DuckDB connection(s)")
         # Give the executor a brief window to unwind so the connection is
         # returned to the pool cleanly. After that, surrender — the pool
         # is bounded and DuckDB.interrupt() will eventually kick in.
@@ -1783,7 +1768,7 @@ async def _run_cancellable_in_pool(request: Optional[Request], sync_fn) -> Query
         # FastAPI / server shutdown cancelled the endpoint coroutine.
         n = cancel_token.cancel()
         if n:
-            print(f"[cancellation] endpoint cancelled; interrupted {n} DuckDB connection(s)", flush=True)
+            logger.debug(f"[cancellation] endpoint cancelled; interrupted {n} DuckDB connection(s)")
         raise
     finally:
         if not watcher.done():
@@ -1974,8 +1959,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                         db_path = settings.duckdb_path
 
             try:
-                sys.stderr.write(f"[DEBUG] DuckDB native db_path={db_path}\n")
-                sys.stderr.flush()
+                logger.debug(f"[DEBUG] DuckDB native db_path={db_path}")
             except Exception:
                 pass
 
@@ -2033,7 +2017,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                                             'alias': _pfx_ds.name,
                                             'datasourceId': str(_pfx_ds.id),
                                         })
-                                        print(f"[run_query/duck] Auto-attach catalog '{_pfx}' → datasource '{_pfx_ds.name}' ({_pfx_ds.id})", flush=True)
+                                        logger.debug(f"[run_query/duck] Auto-attach catalog '{_pfx}' → datasource '{_pfx_ds.name}' ({_pfx_ds.id})")
                                 except Exception:
                                     pass
                         except Exception:
@@ -2073,7 +2057,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                     counter_inc("query_cache_miss_total", {"endpoint": "query", "kind": "data"})
                 except Exception:
                     pass
-                print(f"[run_query/duck] db_path={db_path} datasourceId={payload.datasourceId} remote_attachments={len(_remote_attachments)}", flush=True)
+                logger.debug(f"[run_query/duck] db_path={db_path} datasourceId={payload.datasourceId} remote_attachments={len(_remote_attachments)}")
                 # For DuckDB queries that JOIN a remote MySQL-attached catalog table with local tables,
                 # DuckDB cannot push the outer LIMIT down past the JOIN, so it does a full remote table
                 # scan before LIMIT is applied — this hangs for large MySQL tables.
@@ -2087,7 +2071,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                 if _remote_attachments and ' JOIN ' in sql_native.upper():
                     _is_agg_query = bool(re.search(r'\b(SUM|COUNT|AVG|MIN|MAX)\s*\(', sql_native, re.IGNORECASE))
                     if _is_agg_query:
-                        print(f"[run_query/duck] Aggregation query — skipping remote scan cap for full data access", flush=True)
+                        logger.debug(f"[run_query/duck] Aggregation query — skipping remote scan cap for full data access")
                     else:
                         _remote_3part = re.compile(
                             r'("[^"]+"\s*\.\s*"[^"]+"\s*\.\s*"[^"]+")\s+AS\s+(\w+)',
@@ -2097,9 +2081,9 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                             return f'(SELECT * FROM {m.group(1)} LIMIT {_inner_limit}) AS {m.group(2)}'
                         _rewritten = _remote_3part.sub(_cap_remote_scan, sql_native)
                         if _rewritten != sql_native:
-                            print(f"[run_query/duck] Capped remote scan to {_inner_limit} rows for JOIN preview", flush=True)
+                            logger.debug(f"[run_query/duck] Capped remote scan to {_inner_limit} rows for JOIN preview")
                             sql_native = _rewritten
-                print(f"[run_query/duck] SQL (first 800):\n{sql_native[:800]}", flush=True)
+                logger.debug(f"[run_query/duck] SQL (first 800):\n{sql_native[:800]}")
                 with open_duck_native(db_path) as conn:
                     _apply_duck_mysql_attachments(conn, _remote_attachments, db)
                     try:
@@ -2109,11 +2093,11 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                     try:
                         cur = conn.execute(sql_native, values)
                     except Exception as _duck_exec_err:
-                        print(f"[run_query/duck] EXECUTE ERROR: {type(_duck_exec_err).__name__}: {_duck_exec_err}", flush=True)
+                        logger.warning(f"[run_query/duck] EXECUTE ERROR: {type(_duck_exec_err).__name__}: {_duck_exec_err}")
                         raise
                     desc = getattr(cur, 'description', None) or []
                     cols = [str(col[0]) for col in desc]
-                    print(f"[run_query/duck] Execute OK, cols={cols[:5]}", flush=True)
+                    logger.debug(f"[run_query/duck] Execute OK, cols={cols[:5]}")
                     rows = []
                     try:
                         batch_size = int(os.environ.get("DUCKDB_FETCHMANY", "1000") or "1000")
@@ -2129,7 +2113,7 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                             for r in chunk:
                                 rows.append([_json_safe_cell(x) for x in r])
                     except Exception as _fetch_err:
-                        print(f"[run_query/duck] FETCHMANY ERROR: {type(_fetch_err).__name__}: {_fetch_err}", flush=True)
+                        logger.warning(f"[run_query/duck] FETCHMANY ERROR: {type(_fetch_err).__name__}: {_fetch_err}")
                         raise
                 _cache_set(key, cols, rows)
 
@@ -2444,7 +2428,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     x_raw = spec.x if hasattr(spec, 'x') else None
     y_raw = spec.y if hasattr(spec, 'y') else None
     agg_raw = spec.agg if hasattr(spec, 'agg') else None
-    print(f"[SPEC_DEBUG] run_query_spec called, source={spec.source}, x={x_raw}, y={y_raw}, agg={agg_raw}, where keys={list(spec.where.keys()) if hasattr(spec, 'where') and spec.where else []}", flush=True)
+    logger.debug(f"[SPEC_DEBUG] run_query_spec called, source={spec.source}, x={x_raw}, y={y_raw}, agg={agg_raw}, where keys={list(spec.where.keys()) if hasattr(spec, 'where') and spec.where else []}")
     
     # Save __weekends config before _resolve_date_presets strips UI meta keys (needed for avg_wday)
     _spec_weekends = 'SAT_SUN'
@@ -2559,7 +2543,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         _pre_parts = str(payload.spec.source or '').split('.')
         if len(_pre_parts) == 3:
             payload.spec.source = f"{_pre_parts[1]}.{_pre_parts[2]}"
-            print(f"[CatalogResolve] Stripped catalog prefix: {'.'.join(_pre_parts)} -> {payload.spec.source}", flush=True)
+            logger.debug(f"[CatalogResolve] Stripped catalog prefix: {'.'.join(_pre_parts)} -> {payload.spec.source}")
     except Exception:
         pass
 
@@ -2581,11 +2565,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 if _rrow:
                     _resolved_cat = str(_rrow[0])
                     payload.spec.source = f"{_resolved_cat}.{payload.spec.source}"
-                    print(f"[CatalogResolve] '{_src_parts[0]}.{_src_parts[1]}' -> '{payload.spec.source}'", flush=True)
+                    logger.debug(f"[CatalogResolve] '{_src_parts[0]}.{_src_parts[1]}' -> '{payload.spec.source}'")
                 else:
-                    print(f"[CatalogResolve] No remote catalog found for '{_src_parts[0]}.{_src_parts[1]}' (stays 2-part)", flush=True)
+                    logger.debug(f"[CatalogResolve] No remote catalog found for '{_src_parts[0]}.{_src_parts[1]}' (stays 2-part)")
     except Exception as _cr_err:
-        print(f"[CatalogResolve] ERROR: {_cr_err}", flush=True)
+        logger.warning(f"[CatalogResolve] ERROR: {_cr_err}")
 
     # Override ds_type to 'duckdb' when the source will route to DuckDB native.
     # This ensures all SQL generation (quoting, functions) uses DuckDB dialect
@@ -2598,15 +2582,15 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     _explicit_non_duck = ds is not None and 'duckdb' not in (getattr(ds, 'type', '') or '').lower()
     if _spec_src_parts >= 3 and not _explicit_non_duck:
         ds_type = 'duckdb'
-        print(f"[CatalogResolve] ds_type forced to 'duckdb' (3-part source: {payload.spec.source})", flush=True)
+        logger.debug(f"[CatalogResolve] ds_type forced to 'duckdb' (3-part source: {payload.spec.source})")
     elif _spec_src_parts >= 3 and _explicit_non_duck:
         # Revert to original 2-part source so the native datasource query works correctly
         _orig_parts = (payload.spec.source or '').split('.')
         payload.spec.source = '.'.join(_orig_parts[1:])
-        print(f"[CatalogResolve] Reverted 3-part source to '{payload.spec.source}' (explicit {ds_type} datasource)", flush=True)
+        logger.debug(f"[CatalogResolve] Reverted 3-part source to '{payload.spec.source}' (explicit {ds_type} datasource)")
     elif prefer_local and _duck_has_table(payload.spec.source) and not _explicit_non_duck:
         ds_type = 'duckdb'
-        print(f"[CatalogResolve] ds_type forced to 'duckdb' (prefer_local + duck_has: {payload.spec.source})", flush=True)
+        logger.debug(f"[CatalogResolve] ds_type forced to 'duckdb' (prefer_local + duck_has: {payload.spec.source})")
 
     # Helpers available to all branches
     def _q_ident(name: str) -> str:
@@ -2722,17 +2706,15 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             # Debug: Show custom columns before scope filtering
             import sys
             raw_custom_cols = (raw_transforms.get("customColumns") or [])
-            sys.stderr.write(f"[WHERE_DEBUG] source_name='{source_name}', raw custom columns count: {len(raw_custom_cols)}\n")
-            sys.stderr.write(f"[WHERE_DEBUG] raw custom column names: {[c.get('name') for c in raw_custom_cols if isinstance(c, dict)]}\n")
-            sys.stderr.flush()
+            logger.debug(f"[WHERE_DEBUG] source_name='{source_name}', raw custom columns count: {len(raw_custom_cols)}")
+            logger.debug(f"[WHERE_DEBUG] raw custom column names: {[c.get('name') for c in raw_custom_cols if isinstance(c, dict)]}")
             
             ds_transforms = _apply_scope(raw_transforms, source_name)
             
             # Debug: Show custom columns after scope filtering
             filtered_custom_cols = ds_transforms.get("customColumns") or []
-            sys.stderr.write(f"[WHERE_DEBUG] After scope filtering, custom columns count: {len(filtered_custom_cols)}\n")
-            sys.stderr.write(f"[WHERE_DEBUG] filtered custom column names: {[c.get('name') for c in filtered_custom_cols if isinstance(c, dict)]}\n")
-            sys.stderr.flush()
+            logger.debug(f"[WHERE_DEBUG] After scope filtering, custom columns count: {len(filtered_custom_cols)}")
+            logger.debug(f"[WHERE_DEBUG] filtered custom column names: {[c.get('name') for c in filtered_custom_cols if isinstance(c, dict)]}")
             
             # From customColumns
             custom_cols = ds_transforms.get("customColumns") or []
@@ -2745,8 +2727,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             
             # From computed transforms
             transforms = ds_transforms.get("transforms") or []
-            sys.stderr.write(f"[WHERE_DEBUG] Processing {len(transforms)} transforms\n")
-            sys.stderr.flush()
+            logger.debug(f"[WHERE_DEBUG] Processing {len(transforms)} transforms")
             for t in transforms:
                 if isinstance(t, dict):
                     t_type = t.get("type")
@@ -2758,20 +2739,16 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         expr = _normalize_expr_idents(ds_type, t["expr"])
                         if t_name:
                             expr_map[t_name] = expr
-                            sys.stderr.write(f"[WHERE_DEBUG] Added computed transform '{t_name}'\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[WHERE_DEBUG] Added computed transform '{t_name}'")
                     elif t_type == "case":
                         # Handle case transforms
-                        sys.stderr.write(f"[WHERE_DEBUG] Building case expression for '{t_name}'\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[WHERE_DEBUG] Building case expression for '{t_name}'")
                         case_expr = _build_case_expression(t)
                         if case_expr and t_name:
                             expr_map[t_name] = case_expr
-                            sys.stderr.write(f"[WHERE_DEBUG] Added case transform '{t_name}': {case_expr[:80]}...\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[WHERE_DEBUG] Added case transform '{t_name}': {case_expr[:80]}...")
                         else:
-                            sys.stderr.write(f"[WHERE_DEBUG] Failed to build case expression for '{t_name}'\n")
-                            sys.stderr.flush()
+                            logger.warning(f"[WHERE_DEBUG] Failed to build case expression for '{t_name}'")
         
         except Exception as e:
             logger.error(f"[SQLGlot] Failed to build expr_map: {e}")
@@ -2782,15 +2759,13 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     def _resolve_derived_columns_in_where(where: dict, ds: Any, source_name: str, ds_type: str) -> dict:
         """Resolve derived column names to SQL expressions in WHERE clause"""
         import sys
-        sys.stderr.write(f"[SQLGlot] _resolve_derived_columns_in_where CALLED with where keys: {list(where.keys()) if where else 'None'}\n")
-        sys.stderr.flush()
+        logger.debug(f"[SQLGlot] _resolve_derived_columns_in_where CALLED with where keys: {list(where.keys()) if where else 'None'}")
         
         if not where:
             return where
         
         if not ds:
-            sys.stderr.write("[SQLGlot] No datasource provided for resolution\n")
-            sys.stderr.flush()
+            logger.debug("[SQLGlot] No datasource provided for resolution")
             return where
         
         try:
@@ -2798,9 +2773,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             expr_map = _build_expr_map(ds, source_name, ds_type)
             
             # Resolve WHERE clause
-            sys.stderr.write(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}\n")
-            sys.stderr.write(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Built expr_map with {len(expr_map)} entries: {list(expr_map.keys())}")
+            logger.debug(f"[SQLGlot] WHERE keys to resolve: {list(where.keys())}")
             
             # Build case-insensitive fallback map
             expr_map_lower = {k.lower(): v for k, v in expr_map.items()}
@@ -2823,8 +2797,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     # Recursively expand nested transform references (e.g., Brinks references SourceRegion/DestRegion)
                     def _expand_nested_transforms(expr_str: str, depth: int = 0) -> str:
                         if depth > 10:
-                            sys.stderr.write(f"[SQLGlot] WARNING: Max recursion depth reached in nested transform expansion\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] WARNING: Max recursion depth reached in nested transform expansion")
                             return expr_str
                         expanded = expr_str
                         # Find all quoted identifiers in the expression
@@ -2840,8 +2813,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                                 # Replace the reference with the nested expression
                                 expanded = expanded.replace(f'"{match}"', f'({nested_expr})')
                                 changed = True
-                                sys.stderr.write(f"[SQLGlot] Expanded nested transform '{match}' in WHERE clause\n")
-                                sys.stderr.flush()
+                                logger.debug(f"[SQLGlot] Expanded nested transform '{match}' in WHERE clause")
                         # Recurse if we made changes
                         if changed:
                             return _expand_nested_transforms(expanded, depth + 1)
@@ -2851,8 +2823,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     
                     # Rebuild key with operator suffix if present
                     resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
-                    sys.stderr.write(f"[SQLGlot] [OK] Resolved custom column '{key}' -> {resolved_key[:80]}...\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SQLGlot] [OK] Resolved custom column '{key}' -> {resolved_key[:80]}...")
                     resolved[resolved_key] = value
                     resolved_count += 1
                 # Check if it's a date part pattern like "OrderDate (Year)"
@@ -2864,8 +2835,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         expr = _build_datepart_expr(base_col, kind, ds_type)
                         # Rebuild key with operator suffix if present
                         resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
-                        sys.stderr.write(f"[SQLGlot] [OK] Resolved date part '{key}' -> {resolved_key[:80]}...\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] [OK] Resolved date part '{key}' -> {resolved_key[:80]}...")
                         resolved[resolved_key] = value
                         resolved_count += 1
                     else:
@@ -2873,14 +2843,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 else:
                     resolved[key] = value
             
-            sys.stderr.write(f"[SQLGlot] Resolution complete: {resolved_count}/{len(where)} columns resolved\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Resolution complete: {resolved_count}/{len(where)} columns resolved")
             return resolved
             
         except Exception as e:
             logger.error(f"[SQLGlot] Failed to resolve derived columns: {e}", exc_info=True)
-            sys.stderr.write(f"[SQLGlot] Failed to resolve derived columns: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[SQLGlot] Failed to resolve derived columns: {e}")
             return where
     
     def _build_case_expression(case_transform: dict) -> str:
@@ -3030,7 +2998,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             for it in filt(arr):
                 target = str((it or {}).get('targetTable') or '').strip()
                 if target and _matches_table(target, source_name):
-                    print(f"[_apply_scope] Skipping self-join (targetTable={target!r} == source={source_name!r})", flush=True)
+                    logger.debug(f"[_apply_scope] Skipping self-join (targetTable={target!r} == source={source_name!r})")
                     continue
                 out.append(it)
             return out
@@ -3044,11 +3012,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     # Resolve WHERE clause early (for both aggregated and non-aggregated paths)
     # This ensures custom columns are expanded to their SQL expressions
     where_resolved = None
-    sys.stderr.write(f"[SPEC_DEBUG] About to check WHERE resolution, hasattr={hasattr(payload.spec, 'where')}, where={payload.spec.where if hasattr(payload.spec, 'where') else 'NO ATTR'}\n")
-    sys.stderr.flush()
+    logger.debug(f"[SPEC_DEBUG] About to check WHERE resolution, hasattr={hasattr(payload.spec, 'where')}, where={payload.spec.where if hasattr(payload.spec, 'where') else 'NO ATTR'}")
     if hasattr(payload.spec, 'where') and payload.spec.where:
-        sys.stderr.write(f"[SPEC_DEBUG] Calling _resolve_derived_columns_in_where with WHERE keys: {list(payload.spec.where.keys())}\n")
-        sys.stderr.flush()
+        logger.debug(f"[SPEC_DEBUG] Calling _resolve_derived_columns_in_where with WHERE keys: {list(payload.spec.where.keys())}")
         try:
             where_resolved = _resolve_derived_columns_in_where(
                 payload.spec.where,
@@ -3056,18 +3022,14 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 payload.spec.source,
                 ds_type
             )
-            sys.stderr.write(f"[SPEC_DEBUG] WHERE resolution completed, resolved keys: {list(where_resolved.keys()) if where_resolved else 'None'}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SPEC_DEBUG] WHERE resolution completed, resolved keys: {list(where_resolved.keys()) if where_resolved else 'None'}")
         except Exception as e:
             logger.warning(f"[SQLGlot] Failed to resolve WHERE clause: {e}")
-            sys.stderr.write(f"[SQLGlot] Failed to resolve WHERE clause: {e}\n")
-            sys.stderr.flush()
             import traceback
             traceback.print_exc()
             where_resolved = None
     else:
-        sys.stderr.write(f"[SPEC_DEBUG] Skipping WHERE resolution (no where clause or empty)\n")
-        sys.stderr.flush()
+        logger.debug(f"[SPEC_DEBUG] Skipping WHERE resolution (no where clause or empty)")
 
     # If chart semantics are provided, build an aggregated SQL (generic) and delegate to /query
     spec = payload.spec
@@ -3180,9 +3142,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     _pav_sql = _pav_res[0] if _pav_res else ""
                     if _pav_sql:
                         _period_from_sql = f"({_pav_sql}) AS _pav_base"
-                        print(f"[AvgPeriod] Using transform subquery for computed column '{val_field}' (dialect={d})", flush=True)
+                        logger.debug(f"[AvgPeriod] Using transform subquery for computed column '{val_field}' (dialect={d})")
             except Exception as _pav_e:
-                print(f"[AvgPeriod] Transform subquery build failed: {_pav_e}", flush=True)
+                logger.warning(f"[AvgPeriod] Transform subquery build failed: {_pav_e}")
 
         # ── Auto-detect Unix timestamp columns via INFORMATION_SCHEMA ──────────
         _avg_is_unix = False
@@ -3202,11 +3164,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 if _probe_res.rows:
                     _col_dtype = str(_probe_res.rows[0][0]).lower()
                     _avg_is_unix = _col_dtype in ('int', 'bigint', 'tinyint', 'smallint', 'mediumint', 'integer')
-                    print(f"[AvgPeriod] Col '{date_field}' DATA_TYPE={_col_dtype!r} → is_unix={_avg_is_unix}", flush=True)
+                    logger.debug(f"[AvgPeriod] Col '{date_field}' DATA_TYPE={_col_dtype!r} → is_unix={_avg_is_unix}")
                 else:
-                    print(f"[AvgPeriod] INFORMATION_SCHEMA probe returned no rows for col '{date_field}'", flush=True)
+                    logger.debug(f"[AvgPeriod] INFORMATION_SCHEMA probe returned no rows for col '{date_field}'")
             except Exception as _pe:
-                print(f"[AvgPeriod] Unix-detection probe failed: {_pe}", flush=True)
+                logger.warning(f"[AvgPeriod] Unix-detection probe failed: {_pe}")
 
         # ── Wrap date column in unix→datetime if integer column ────────────────
         if _avg_is_unix:
@@ -3362,10 +3324,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 else:
                     _lds_where = f" WHERE {_lds_pred}"
                 sql_lds = f"SELECT {_lds_num} AS value FROM {_period_from_sql}{_lds_where}"
-            print(f"[LastDailySum] val={val_field}, date={date_field}, is_unix={_avg_is_unix}", flush=True)
-            print(f"[LastDailySum] SQL: {sql_lds[:800]}", flush=True)
+            logger.debug(f"[LastDailySum] val={val_field}, date={date_field}, is_unix={_avg_is_unix}")
+            logger.debug(f"[LastDailySum] SQL: {sql_lds[:800]}")
             if params_avg:
-                print(f"[LastDailySum] params: { {k: v for k, v in list(params_avg.items())[:10]} }", flush=True)
+                logger.debug(f"[LastDailySum] params: { {k: v for k, v in list(params_avg.items())[:10]} }")
             _lds_ds_id = None if ('duckdb' in (ds_type or '')) or (prefer_local and _duck_has_table(spec.source)) else payload.datasourceId
             _lds_req = QueryRequest(sql=sql_lds, datasourceId=_lds_ds_id, limit=1, offset=0, includeTotal=False, params=params_avg or None)
             return run_query(_lds_req, db)
@@ -3401,10 +3363,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 f"{num_expr} * 1.0 / NULLIF({den_expr}, 0) AS value "
                 f"FROM {_period_from_sql}{where_clause}"
             )
-        print(f"[AvgPeriod] agg={agg}, source={spec.source}, val_col={val_field}, date_col={date_field}, is_unix={_avg_is_unix}, numerator={avg_numerator}, weekends={_spec_weekends}, holidays={len(_holiday_dates) if _holiday_dates else 0}", flush=True)
-        print(f"[AvgPeriod] SQL: {sql_avg[:800]}", flush=True)
+        logger.debug(f"[AvgPeriod] agg={agg}, source={spec.source}, val_col={val_field}, date_col={date_field}, is_unix={_avg_is_unix}, numerator={avg_numerator}, weekends={_spec_weekends}, holidays={len(_holiday_dates) if _holiday_dates else 0}")
+        logger.debug(f"[AvgPeriod] SQL: {sql_avg[:800]}")
         if params_avg:
-            print(f"[AvgPeriod] params: { {k: v for k, v in list(params_avg.items())[:10]} }", flush=True)
+            logger.debug(f"[AvgPeriod] params: { {k: v for k, v in list(params_avg.items())[:10]} }")
 
         _avg_ds_id = None if ('duckdb' in (ds_type or '')) or (prefer_local and _duck_has_table(spec.source) and not _explicit_non_duck) else payload.datasourceId
         _avg_req   = QueryRequest(sql=sql_avg, datasourceId=_avg_ds_id, limit=1, offset=0, includeTotal=False, params=params_avg or None)
@@ -3417,11 +3379,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 _nv = _r[_c.index('num_val')] if 'num_val' in _c else '?'
                 _dv = _r[_c.index('den_val')] if 'den_val' in _c else '?'
                 _vv = _r[_c.index('value')]   if 'value'   in _c else '?'
-                print(f"[AvgPeriod] num_val={_nv}, den_val={_dv}, result={_vv}", flush=True)
+                logger.debug(f"[AvgPeriod] num_val={_nv}, den_val={_dv}, result={_vv}")
             else:
-                print("[AvgPeriod] query returned no rows", flush=True)
+                logger.debug("[AvgPeriod] query returned no rows")
         except Exception as _le:
-            print(f"[AvgPeriod] result logging failed: {_le}", flush=True)
+            logger.warning(f"[AvgPeriod] result logging failed: {_le}")
 
         return _avg_res
 
@@ -3506,9 +3468,9 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     _mav_sql = _mav_bres[0] if _mav_bres else ""
                     if _mav_sql:
                         _ma_from_sql = f"({_mav_sql}) AS _mav_base"
-                        print(f"[MovingAvg] Using transform subquery for computed column '{val_field}' (dialect={d})", flush=True)
+                        logger.debug(f"[MovingAvg] Using transform subquery for computed column '{val_field}' (dialect={d})")
             except Exception as _mav_e:
-                print(f"[MovingAvg] Transform subquery build failed: {_mav_e}", flush=True)
+                logger.warning(f"[MovingAvg] Transform subquery build failed: {_mav_e}")
 
         # ── Build WHERE from spec.where ────────────────────────────────────────
         _ma_where_parts: list[str] = []
@@ -3598,10 +3560,10 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             )
             _ma_limit = 1
 
-        print(f"[MovingAvg] agg={agg}, N={_ma_window}, series={_ma_is_series}, val={val_field}, date={date_field}", flush=True)
-        print(f"[MovingAvg] SQL: {sql_ma[:800]}", flush=True)
+        logger.debug(f"[MovingAvg] agg={agg}, N={_ma_window}, series={_ma_is_series}, val={val_field}, date={date_field}")
+        logger.debug(f"[MovingAvg] SQL: {sql_ma[:800]}")
         if _ma_params:
-            print(f"[MovingAvg] params: { {k: v for k, v in list(_ma_params.items())[:10]} }", flush=True)
+            logger.debug(f"[MovingAvg] params: { {k: v for k, v in list(_ma_params.items())[:10]} }")
 
         _ma_ds_id = None if ('duckdb' in (ds_type or '')) or (prefer_local and _duck_has_table(spec.source) and not _explicit_non_duck) else payload.datasourceId
         _ma_req   = QueryRequest(sql=sql_ma, datasourceId=_ma_ds_id, limit=_ma_limit, offset=0, includeTotal=False, params=_ma_params or None)
@@ -3755,24 +3717,24 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                             if m:
                                 expr = _build_datepart_expr_helper(m.group(1).strip(), m.group(2).lower(), ds_type)
                                 if f"({expr})" == str(key).strip():
-                                    sys.stderr.write(f"[SPEC_DEBUG] Using alias '{col}' instead of resolved expr\n")
+                                    logger.debug(f"[SPEC_DEBUG] Using alias '{col}' instead of resolved expr")
                                     return _q_ident(col)
                 return str(key)
             # Check if the column (including date part aliases) is already in the transformed subquery
             # Use case-insensitive lookup for DuckDB quoted identifiers
             if ds_transforms and _actual_cols:
-                print(f"[WHERE_LHS_DEBUG] Looking for key='{key}' in _actual_cols (len={len(_actual_cols)})", flush=True)
+                logger.debug(f"[WHERE_LHS_DEBUG] Looking for key='{key}' in _actual_cols (len={len(_actual_cols)})")
                 # Try exact match first
                 if key in _actual_cols:
-                    print(f"[WHERE_LHS_DEBUG] Exact match found: '{key}'", flush=True)
+                    logger.debug(f"[WHERE_LHS_DEBUG] Exact match found: '{key}'")
                     return _q_ident(key)
                 # Try case-insensitive match
                 key_lower = key.lower()
                 for col in _actual_cols:
                     if col.lower() == key_lower:
-                        print(f"[WHERE_LHS_DEBUG] Case-insensitive match: '{key}' -> '{col}'", flush=True)
+                        logger.debug(f"[WHERE_LHS_DEBUG] Case-insensitive match: '{key}' -> '{col}'")
                         return _q_ident(col)  # Use the actual column name with correct casing
-                print(f"[WHERE_LHS_DEBUG] No match found for '{key}'. _actual_cols sample: {list(_actual_cols)[:10]}", flush=True)
+                logger.debug(f"[WHERE_LHS_DEBUG] No match found for '{key}'. _actual_cols sample: {list(_actual_cols)[:10]}")
             m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
             if m:
                 # If the alias is already in _actual_cols, use it directly
@@ -3787,8 +3749,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         # instead of resolved expressions which reference base table columns not in outer scope
         uses_transform_subquery = "_base" in base_from_sql
         where_to_use = (payload.spec.where if hasattr(payload, 'spec') and hasattr(payload.spec, 'where') else {}) if uses_transform_subquery else (where_resolved if where_resolved else (payload.spec.where if hasattr(payload, 'spec') and hasattr(payload.spec, 'where') else {}))
-        sys.stderr.write(f"[SPEC_DEBUG] Non-agg query: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, uses_transform_subquery = {uses_transform_subquery}\n")
-        sys.stderr.flush()
+        logger.debug(f"[SPEC_DEBUG] Non-agg query: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, uses_transform_subquery = {uses_transform_subquery}")
         if where_to_use:
             for k, v in where_to_use.items():
                 if k in ("start", "startDate", "end", "endDate"):
@@ -3847,8 +3808,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
         else:
             _eff_ds_id = payload.datasourceId
         _prefer_duck_has = (_eff_ds_id is None)
-        print(f"[spec->run_query] prefer_local={prefer_local} source_parts={_source_part_count} datasourceId={_eff_ds_id}", flush=True)
-        print(f"[spec->run_query] sql_inner (first 400): {sql_inner[:400]}", flush=True)
+        logger.debug(f"[spec->run_query] prefer_local={prefer_local} source_parts={_source_part_count} datasourceId={_eff_ds_id}")
+        logger.debug(f"[spec->run_query] sql_inner (first 400): {sql_inner[:400]}")
         q = QueryRequest(
             sql=sql_inner,
             datasourceId=_eff_ds_id,
@@ -3931,7 +3892,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             else:
                 base_sql = result2[0] if result2 else ""
             base_from_sql = f" FROM ({base_sql}) AS _base"
-            print(f"[BASE_FROM_SQL] Set to transform subquery, length={len(base_from_sql)}", flush=True)
+            logger.debug(f"[BASE_FROM_SQL] Set to transform subquery, length={len(base_from_sql)}")
 
             # Validate that spec fields (x, y, legend) still exist after applying transforms
             # Use the ACTUAL columns returned by build_sql, plus probed base columns (for s.* cases)
@@ -4121,12 +4082,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 'where': _validated_where,
                 'series': _validated_series,
             })
-            sys.stderr.write(f"[SPEC_DEBUG] After spec copy: _validated_where keys = {list(_validated_where.keys()) if _validated_where else 'None'}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SPEC_DEBUG] After spec copy: _validated_where keys = {list(_validated_where.keys()) if _validated_where else 'None'}")
         else:
             # Direct table/view reference; quote per dialect (handles schema-qualified)
             base_from_sql = f" FROM {_q_source(spec.source)}"
-            print(f"[BASE_FROM_SQL] ELSE branch: Using raw table, ds_transforms={bool(ds_transforms)}", flush=True)
+            logger.debug(f"[BASE_FROM_SQL] ELSE branch: Using raw table, ds_transforms={bool(ds_transforms)}")
             
             # Still validate spec fields even without transforms (custom columns at datasource level)
             # Probe base columns (preserve original case)
@@ -4282,8 +4242,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 'where': _validated_where,
                 'series': _validated_series,
             })
-            sys.stderr.write(f"[SPEC_DEBUG] After spec copy (no transforms): _validated_where keys = {list(_validated_where.keys()) if _validated_where else 'None'}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SPEC_DEBUG] After spec copy (no transforms): _validated_where keys = {list(_validated_where.keys()) if _validated_where else 'None'}")
         # Handle x as either string or array (extract first element if array)
         x_raw = spec.x or (spec.select[0] if spec.select else None)
         if isinstance(x_raw, (list, tuple)) and len(x_raw) > 0:
@@ -4314,7 +4273,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                                 if m:
                                     expr = _build_datepart_expr_helper(m.group(1).strip(), m.group(2).lower(), ds_type)
                                     if f"({expr})" == str(key).strip():
-                                        sys.stderr.write(f"[SPEC_DEBUG] Scalar agg: Using alias '{col}' instead of resolved expr\n")
+                                        logger.debug(f"[SPEC_DEBUG] Scalar agg: Using alias '{col}' instead of resolved expr")
                                         return _q_ident(col)
                     return str(key)
                 if ds_transforms and _actual_cols:
@@ -4325,7 +4284,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     key_lower = key.lower()
                     for col in _actual_cols:
                         if col.lower() == key_lower:
-                            print(f"[WHERE_LHS_SCALAR] Case-insensitive match: '{key}' -> '{col}'", flush=True)
+                            logger.debug(f"[WHERE_LHS_SCALAR] Case-insensitive match: '{key}' -> '{col}'")
                             return _q_ident(col)
                 m = re.match(r"^(.*)\s*\((Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)\)$", str(key), flags=re.IGNORECASE)
                 if m:
@@ -4340,8 +4299,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             # instead of resolved expressions which reference base table columns not in outer scope
             uses_transform_subquery = "_base" in base_from_sql
             where_to_use = spec.where if uses_transform_subquery else (where_resolved if where_resolved else spec.where)
-            sys.stderr.write(f"[SPEC_DEBUG] Scalar agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}, uses_transform_subquery = {uses_transform_subquery}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SPEC_DEBUG] Scalar agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}, uses_transform_subquery = {uses_transform_subquery}")
             if where_to_use:
                 for k, v in where_to_use.items():
                     if k in ("start", "startDate", "end", "endDate"):
@@ -4394,13 +4352,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         where_clauses.append(f"{_where_lhs(base_col)} = :{pname}")
                         params[pname] = _coerce_filter_value(base_col, v)
             where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-            sys.stderr.write(f"[SCALAR_AGG_DEBUG] where_sql: {where_sql[:300]}\n")
-            sys.stderr.write(f"[SCALAR_AGG_DEBUG] params: {params}\n")
-            sys.stderr.write(f"[SCALAR_AGG_DEBUG] base_from_sql: {base_from_sql[:400] if base_from_sql else 'None'}\n")
-            sys.stderr.write(f"[SCALAR_AGG_DEBUG] ds_transforms exists: {bool(ds_transforms)}\n")
-            sys.stderr.write(f"[SCALAR_AGG_DEBUG] _actual_cols count: {len(_actual_cols) if '_actual_cols' in locals() else 'NOT SET'}\n")
-            sys.stderr.write(f"[SCALAR_AGG_DEBUG] series_scalar: {bool(series_scalar and len(series_scalar) > 0)}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SCALAR_AGG_DEBUG] where_sql: {where_sql[:300]}")
+            logger.debug(f"[SCALAR_AGG_DEBUG] params: {params}")
+            logger.debug(f"[SCALAR_AGG_DEBUG] base_from_sql: {base_from_sql[:400] if base_from_sql else 'None'}")
+            logger.debug(f"[SCALAR_AGG_DEBUG] ds_transforms exists: {bool(ds_transforms)}")
+            logger.debug(f"[SCALAR_AGG_DEBUG] _actual_cols count: {len(_actual_cols) if '_actual_cols' in locals() else 'NOT SET'}")
+            logger.debug(f"[SCALAR_AGG_DEBUG] series_scalar: {bool(series_scalar and len(series_scalar) > 0)}")
 
             if series_scalar and len(series_scalar) > 0:
                 union_parts = []
@@ -4539,8 +4496,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     else:
                         value_expr = f"{agg.upper()}({_q_ident(spec.y)})"
             inner = f"SELECT 'total' as x, {value_expr} as value{base_from_sql}"
-            sys.stderr.write(f"[SCALAR_AGG_DEBUG] sql_inner: {(inner + where_sql)[:400]}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SCALAR_AGG_DEBUG] sql_inner: {(inner + where_sql)[:400]}")
             # Apply datasource defaults (order/TopN) when present
             order_seg = " ORDER BY 1"  # only x column exists in this branch
             limit_override: int | None = None
@@ -4559,9 +4515,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 if by == "x": order_seg = f" ORDER BY 1 {dir_}"
                 elif by == "value": order_seg = f" ORDER BY 2 {dir_}"
             sql_inner = inner + where_sql + order_seg
-            sys.stderr.write(f"[SCALAR_AGG_SQL] sql_inner (first 600): {sql_inner[:600]}\n")
-            sys.stderr.write(f"[SCALAR_AGG_SQL] params: {params}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SCALAR_AGG_SQL] sql_inner (first 600): {sql_inner[:600]}")
+            logger.debug(f"[SCALAR_AGG_SQL] params: {params}")
             eff_limit = min(int(limit_override or (lim or 1000)), int(lim or 1000)) if (limit_override or lim) else (limit_override or 1000)
             q = QueryRequest(
                 sql=sql_inner,
@@ -4574,7 +4529,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 preferLocalTable=spec.source,
             )
             result = run_query(q, db)
-            print(f"[SCALAR_AGG_RESULT] rows={len(result.rows)}, data={result.rows[:3]}", flush=True)
+            logger.debug(f"[SCALAR_AGG_RESULT] rows={len(result.rows)}, data={result.rows[:3]}")
             return result
 
         # Special case: no X field but legend is present - group by legend only
@@ -4817,7 +4772,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 # NEW PATH: SQLGlot SQL generation
                 try:
                     logger.info(f"[SQLGlot] ENABLED for user={actorId}, dialect={ds_type}")
-                    print(f"[SQLGlot] ENABLED for user={actorId}, dialect={ds_type}")
+                    logger.debug(f"[SQLGlot] ENABLED for user={actorId}, dialect={ds_type}")
                     
                     # Build expr_map for custom column resolution
                     expr_map = {}
@@ -4887,12 +4842,11 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                     series_val = spec.series if hasattr(spec, 'series') and isinstance(spec.series, list) else None
                     
                     # Debug: Log WHERE before passing to builder
-                    sys.stderr.write(f"[SPEC_DEBUG] Passing WHERE to build_aggregation_query: {where_resolved}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[SPEC_DEBUG] Passing WHERE to build_aggregation_query: {where_resolved}")
                     
                     # Pass x_raw (full array for multi-level X) instead of x_col (first element only)
                     x_field_for_builder = x_raw if x_raw else (spec.x if hasattr(spec, 'x') else None)
-                    print(f"[SQLGlot] x_field_for_builder = {x_field_for_builder}, x_raw = {x_raw}, spec.x = {spec.x if hasattr(spec, 'x') else 'N/A'}")
+                    logger.debug(f"[SQLGlot] x_field_for_builder = {x_field_for_builder}, x_raw = {x_raw}, spec.x = {spec.x if hasattr(spec, 'x') else 'N/A'}")
                     sql_inner = builder.build_aggregation_query(
                         source=spec.source,
                         x_field=x_field_for_builder,  # Pass full array for multi-level X support
@@ -4912,7 +4866,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                         legend_fields=legend_fields_val,  # Multi-legend support
                     )
                     logger.info(f"[SQLGlot] Generated: {sql_inner[:150]}...")
-                    print(f"[SQLGlot] Generated: {sql_inner[:150]}...")
+                    logger.debug(f"[SQLGlot] Generated: {sql_inner[:150]}...")
                     
                     # Create query request and execute
                     eff_limit = lim or 1000
@@ -4932,12 +4886,12 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 except Exception as e:
                     # SQLGlot failed, fall back to legacy
                     logger.error(f"[SQLGlot] ERROR: {e}")
-                    print(f"[SQLGlot] ERROR: {e}")
+                    logger.warning(f"[SQLGlot] ERROR: {e}")
                     counter_inc("sqlglot_errors_total", {"dialect": ds_type, "error": str(type(e).__name__)})
                     if not settings.enable_legacy_fallback:
                         logger.error(f"[SQLGlot] /query/spec: LEGACY FALLBACK DISABLED - Re-raising error")
                         raise HTTPException(status_code=500, detail=f"SQLGlot query generation failed: {e}")
-                    print(f"[SQLGlot] /query/spec: Falling back to legacy SQL builder")
+                    logger.debug(f"[SQLGlot] /query/spec: Falling back to legacy SQL builder")
                     use_sqlglot = False
             
             # LEGACY PATH: Continue with existing SQL string building
@@ -5027,7 +4981,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                                 if m:
                                     expr = _build_datepart_expr_helper(m.group(1).strip(), m.group(2).lower(), ds_type)
                                     if f"({expr})" == str(key).strip():
-                                        sys.stderr.write(f"[SPEC_DEBUG] X+legend agg: Using alias '{col}' instead of resolved expr\n")
+                                        logger.debug(f"[SPEC_DEBUG] X+legend agg: Using alias '{col}' instead of resolved expr")
                                         return _q_ident(col)
                     return str(key)
                 # Check if the column is already in the transformed subquery
@@ -5051,8 +5005,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
             # instead of resolved expressions which reference base table columns not in outer scope
             uses_transform_subquery = "_base" in base_from_sql
             where_to_use = spec.where if uses_transform_subquery else (where_resolved if where_resolved else spec.where)
-            sys.stderr.write(f"[SPEC_DEBUG] X+legend agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}, uses_transform_subquery = {uses_transform_subquery}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SPEC_DEBUG] X+legend agg path: where_to_use keys = {list(where_to_use.keys()) if where_to_use else 'None'}, where_resolved = {where_resolved is not None}, uses_transform_subquery = {uses_transform_subquery}")
             if where_to_use:
                 for k, v in where_to_use.items():
                     if k in ("start", "startDate", "end", "endDate"):
@@ -5327,7 +5280,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                 # For GROUP BY, we need all the base expressions (not concatenated)
                 multi_level_group_by = ", ".join([e[0] for e in multi_level_x_exprs])
                 
-                print(f"[BACKEND] Multi-level X: {x_raw} -> x_expr={x_expr[:100]}..., group_by={multi_level_group_by}, order={x_order_expr}")
+                logger.debug(f"[BACKEND] Multi-level X: {x_raw} -> x_expr={x_expr[:100]}..., group_by={multi_level_group_by}, order={x_order_expr}")
 
             # Legend: allow derived date-part syntax like "OrderDate (Year|Quarter|Month|Month Name|Month Short|Week|Day|Day Name|Day Short)"
             legend_expr_raw = spec.legend
@@ -5490,7 +5443,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                             f"SELECT {x_expr} as x, {legend_expr} as legend, {value_expr} as value "
                             f"{base_from_sql}{where_sql} GROUP BY 1,2{order_seg_std}"
                         )
-                    print(f"[BACKEND] Built SQL with agg={agg}, value_expr={value_expr}, sql_inner={sql_inner[:200]}")
+                    logger.debug(f"[BACKEND] Built SQL with agg={agg}, value_expr={value_expr}, sql_inner={sql_inner[:200]}")
                 # For non-MSSQL, apply LIMIT on inner query so ORDER BY is respected before pagination
                 if not (("mssql" in ds_type) or ("sqlserver" in ds_type)) and lim:
                     try:
@@ -5619,7 +5572,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
                             if m:
                                 expr = _build_datepart_expr_helper(m.group(1).strip(), m.group(2).lower(), ds_type)
                                 if f"({expr})" == str(key).strip():
-                                    sys.stderr.write(f"[SPEC_DEBUG] Final path: Using alias '{col}' instead of resolved expr\n")
+                                    logger.debug(f"[SPEC_DEBUG] Final path: Using alias '{col}' instead of resolved expr")
                                     return _q_ident(col)
                 return str(key)
             # Check if the column is already in the transformed subquery
@@ -5756,7 +5709,7 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
     # Auto-detect DuckDB datasource if missing (copied from run_query_spec)
     if (not payload.datasourceId) and (ds_info is None):
         import sys
-        print(f"[Distinct] Attempting to auto-detect DuckDB datasource for source '{payload.source}'...", file=sys.stderr)
+        logger.warning(f"[Distinct] Attempting to auto-detect DuckDB datasource for source '{payload.source}'...")
         try:
             from sqlalchemy import select
             stmt = select(Datasource).where(Datasource.type == "duckdb")
@@ -5767,7 +5720,7 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
                     stmt = stmt.where(Datasource.user_id == str(actorId).strip())
             
             local_ds_candidates = list(db.execute(stmt).scalars())
-            print(f"[Distinct] Found {len(local_ds_candidates)} DuckDB candidates", file=sys.stderr)
+            logger.warning(f"[Distinct] Found {len(local_ds_candidates)} DuckDB candidates")
             
             ds_obj = None
             for candidate in local_ds_candidates:
@@ -5793,11 +5746,11 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
                     "options_json": ds_obj.options_json,
                 }
                 ds_type = "duckdb"
-                print(f"[Distinct] Auto-detected DuckDB datasource: {ds_obj.id}", file=sys.stderr)
+                logger.warning(f"[Distinct] Auto-detected DuckDB datasource: {ds_obj.id}")
             else:
-                print(f"[Distinct] No suitable DuckDB datasource found", file=sys.stderr)
+                logger.warning(f"[Distinct] No suitable DuckDB datasource found")
         except Exception as e:
-            print(f"[Distinct] Failed to auto-detect datasource: {e}", file=sys.stderr)
+            logger.warning(f"[Distinct] Failed to auto-detect datasource: {e}")
             import traceback
             traceback.print_exc()
             pass
@@ -5817,7 +5770,7 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
                 if _drow:
                     _resolved_cat = str(_drow[0])
                     payload.source = f"{_resolved_cat}.{payload.source}"
-                    print(f"[Distinct/CatalogResolve] '{_dist_src_parts[0]}.{_dist_src_parts[1]}' -> '{payload.source}'", flush=True)
+                    logger.debug(f"[Distinct/CatalogResolve] '{_dist_src_parts[0]}.{_dist_src_parts[1]}' -> '{payload.source}'")
     except Exception:
         pass
 
@@ -5828,11 +5781,11 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
     _dist_explicit_non_duck = (ds_info is not None) and 'duckdb' not in (ds_info.get('type') or '').lower()
     if _dist_src_parts_count >= 3 and not _dist_explicit_non_duck:
         ds_type = 'duckdb'
-        print(f"[Distinct/CatalogResolve] ds_type forced to 'duckdb' (3-part source: {payload.source})", flush=True)
+        logger.debug(f"[Distinct/CatalogResolve] ds_type forced to 'duckdb' (3-part source: {payload.source})")
     elif _dist_src_parts_count >= 3 and _dist_explicit_non_duck:
         _dist_orig_parts = (payload.source or '').split('.')
         payload.source = '.'.join(_dist_orig_parts[1:])
-        print(f"[Distinct/CatalogResolve] Reverted 3-part source to '{payload.source}' (explicit {ds_type} datasource)", flush=True)
+        logger.debug(f"[Distinct/CatalogResolve] Reverted 3-part source to '{payload.source}' (explicit {ds_type} datasource)")
 
     # Decide routing/dialect without creating a DuckDB SA engine
     route_duck = False
@@ -5906,7 +5859,7 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
                         cur = conn.execute(f"SELECT * FROM {str(payload.source)} WHERE 1=0")
                         desc = getattr(cur, 'description', None) or []
                         cols = set([str(col[0]) for col in desc])
-                        print(f"[_list_cols_for_base] DuckDB: Found {len(cols)} base columns: {sorted(cols)[:10]}", flush=True)
+                        logger.debug(f"[_list_cols_for_base] DuckDB: Found {len(cols)} base columns: {sorted(cols)[:10]}")
                         return cols
                 eng = _engine_for_datasource(db, payload.datasourceId, actorId)
                 with eng.connect() as conn:
@@ -5916,10 +5869,10 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
                         probe = text(f"SELECT * FROM {str(payload.source)} WHERE 1=0")
                     res = conn.execute(probe)
                     cols = set([str(c) for c in res.keys()])
-                    print(f"[_list_cols_for_base] SQL: Found {len(cols)} base columns: {sorted(cols)[:10]}", flush=True)
+                    logger.debug(f"[_list_cols_for_base] SQL: Found {len(cols)} base columns: {sorted(cols)[:10]}")
                     return cols
             except Exception as e:
-                print(f"[_list_cols_for_base] ERROR: {e}", flush=True)
+                logger.warning(f"[_list_cols_for_base] ERROR: {e}")
                 import traceback
                 traceback.print_exc()
                 return set()
@@ -6005,9 +5958,9 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
                 needed_aliases = set()
 
             _keep_joins = True
-            print(f"[/distinct filtering] Requested field: '{payload.field}', root_alias: '{root_alias}'", flush=True)
-            print(f"[/distinct filtering] Transform aliases: {transform_aliases}", flush=True)
-            print(f"[/distinct filtering] Needed aliases for this field: {needed_aliases}", flush=True)
+            logger.debug(f"[/distinct filtering] Requested field: '{payload.field}', root_alias: '{root_alias}'")
+            logger.debug(f"[/distinct filtering] Transform aliases: {transform_aliases}")
+            logger.debug(f"[/distinct filtering] Needed aliases for this field: {needed_aliases}")
             
             # Keep original transforms for schema/column list
             ds_transforms_for_schema = ds_transforms
@@ -6036,14 +5989,14 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
                     )
                 ]
                 dropped_trs = [tr.get('name') for tr in ds_trs if tr not in ds_trs_filtered and tr.get('name')]
-                print(f"[/distinct filtering] Dropped transforms for SQL: {dropped_trs}", flush=True)
+                logger.debug(f"[/distinct filtering] Dropped transforms for SQL: {dropped_trs}")
                 ds_ccs = ds_ccs_filtered
                 ds_trs = ds_trs_filtered
             else:
                 # No alias-based dependencies are required for this field; drop all
                 # custom columns/transforms AND joins to avoid bringing in unused ones.
                 # A base column like "Time" does not need a JOIN to be distinct-queried.
-                print(f"[/distinct filtering] Field is a base column; dropping all transforms/joins for SQL", flush=True)
+                logger.debug(f"[/distinct filtering] Field is a base column; dropping all transforms/joins for SQL")
                 ds_ccs = []
                 ds_trs = []
                 _keep_joins = False
@@ -6077,7 +6030,7 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
         # The legacy builder will handle it if it's a custom column, date part, or regular column
         field_name = str(payload.field)
         base_select_list = ["*", field_name]
-        print(f"[Legacy] /distinct: Adding '{field_name}' to base_select (will be materialized if it's custom/datepart)")
+        logger.debug(f"[Legacy] /distinct: Adding '{field_name}' to base_select (will be materialized if it's custom/datepart)")
 
         _eff_ccs = _sql_transforms.get("customColumns", []) if isinstance(_sql_transforms, dict) else []
         _eff_trs = _sql_transforms.get("transforms", []) if isinstance(_sql_transforms, dict) else []
@@ -6113,14 +6066,14 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
     
     if use_sqlglot:
         try:
-            print(f"[SQLGlot] ENABLED for /distinct endpoint, dialect={dialect}")
+            logger.debug(f"[SQLGlot] ENABLED for /distinct endpoint, dialect={dialect}")
             
             # Build expr_map from datasource so SQLGlot can expand custom columns
             # like ClientCode/ClientType when DISTINCTing over them. We do this
             # even when base_from_sql exists; in that case the expressions will
             # reference base columns that are already projected in the subquery.
-            print(f"[SQLGlot] /distinct: base_from_sql={'EXISTS' if base_from_sql else 'NONE'}")
-            print(f"[SQLGlot] /distinct: effective_source preview: {effective_source[:200] if effective_source else 'NONE'}...")
+            logger.debug(f"[SQLGlot] /distinct: base_from_sql={'EXISTS' if base_from_sql else 'NONE'}")
+            logger.debug(f"[SQLGlot] /distinct: effective_source preview: {effective_source[:200] if effective_source else 'NONE'}...")
             expr_map = {}
             if ds_info:
                 ds_obj = db.get(Datasource, ds_info.get("id"))
@@ -6135,9 +6088,9 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
             where_resolved = None
             if payload.where:
                 field_str = str(payload.field)
-                print(f"[SQLGlot] /distinct: Field='{field_str}', WHERE keys={list(payload.where.keys())}")
+                logger.debug(f"[SQLGlot] /distinct: Field='{field_str}', WHERE keys={list(payload.where.keys())}")
                 where_without_field = {k: v for k, v in payload.where.items() if k != field_str}
-                print(f"[SQLGlot] /distinct: Excluded '{field_str}' from WHERE (original had {len(payload.where)} filters, now {len(where_without_field)})")
+                logger.debug(f"[SQLGlot] /distinct: Excluded '{field_str}' from WHERE (original had {len(payload.where)} filters, now {len(where_without_field)})")
 
                 if where_without_field:
                     if base_from_sql:
@@ -6159,15 +6112,15 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
                 expr_map=expr_map,
                 ds_type=ds_type,
             )
-            print(f"[SQLGlot] Generated DISTINCT SQL: {sql[:150]}...")
+            logger.debug(f"[SQLGlot] Generated DISTINCT SQL: {sql[:150]}...")
             
         except Exception as e:
-            print(f"[SQLGlot] ERROR in /distinct: {e}")
+            logger.warning(f"[SQLGlot] ERROR in /distinct: {e}")
             logger.error(f"[SQLGlot] ERROR in /distinct: {e}", exc_info=True)
             if not settings.enable_legacy_fallback:
                 logger.error(f"[SQLGlot] /distinct: LEGACY FALLBACK DISABLED - Re-raising error")
                 raise HTTPException(status_code=500, detail=f"SQLGlot query generation failed: {e}")
-            print(f"[SQLGlot] /distinct: Falling back to legacy builder")
+            logger.debug(f"[SQLGlot] /distinct: Falling back to legacy builder")
             use_sqlglot = False
     
     if not use_sqlglot:
@@ -6177,11 +6130,11 @@ def distinct_values(payload: DistinctRequest, request: Request, db: Session = De
         # Remove the field being queried
         if str(payload.field) in where_for_legacy:
             del where_for_legacy[str(payload.field)]
-            print(f"[Legacy] /distinct: Excluded '{payload.field}' from WHERE to get all distinct values")
+            logger.debug(f"[Legacy] /distinct: Excluded '{payload.field}' from WHERE to get all distinct values")
         
         # When base_from_sql exists, also skip other filters to avoid "column not found" errors
         if base_from_sql:
-            print(f"[Legacy] base_from_sql exists, skipping remaining WHERE filters (custom columns in subquery)")
+            logger.debug(f"[Legacy] base_from_sql exists, skipping remaining WHERE filters (custom columns in subquery)")
             where_for_legacy = {}  # Skip WHERE filtering when using transformed subquery
         
         sql, params = build_distinct_sql(
@@ -6352,17 +6305,14 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
     actorId = _resolve_public_actor(db, actorId, publicId, token)
     _validate_source(payload.source)
     import sys
-    sys.stderr.write(f"[PIVOT_START] datasourceId={payload.datasourceId}, widgetId={payload.widgetId}, source={payload.source}\n")
-    sys.stderr.flush()
+    logger.debug(f"[PIVOT_START] datasourceId={payload.datasourceId}, widgetId={payload.widgetId}, source={payload.source}")
     # Resolve date presets at execution time
     if getattr(payload, 'where', None):
         payload.where = _resolve_date_presets(payload.where)
     # Determine datasource; optionally route to DuckDB when globally preferred and the source exists locally
-    sys.stderr.write("[DEBUG] Getting engine for datasource...\n")
-    sys.stderr.flush()
+    logger.debug("[DEBUG] Getting engine for datasource...")
     engine = _engine_for_datasource(db, payload.datasourceId, actorId)
-    sys.stderr.write(f"[DEBUG] Got engine: {engine.dialect.name if engine else 'None'}\n")
-    sys.stderr.flush()
+    logger.debug(f"[DEBUG] Got engine: {engine.dialect.name if engine else 'None'}")
     try:
         src = getattr(payload, 'source', None)
         if settings.prefer_local_duckdb and _duck_has_table(src):
@@ -6371,14 +6321,12 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
         pass
     _enforce_rate_limit(request, actorId, "pivot")
     # Detect type; align builder dialect with likely execution route (DuckDB) to avoid mismatches
-    sys.stderr.write("[DEBUG] Detecting datasource type...\n")
-    sys.stderr.flush()
+    logger.debug("[DEBUG] Detecting datasource type...")
     try:
         ds_type = (engine.dialect.name or "").lower()
     except Exception:
         ds_type = ""
-    sys.stderr.write(f"[DEBUG] ds_type={ds_type}\n")
-    sys.stderr.flush()
+    logger.debug(f"[DEBUG] ds_type={ds_type}")
     # Only apply query routing logic if the datasource is remote (not already DuckDB)
     try:
         _prefer_duck = bool(settings.prefer_local_duckdb) and ds_type != "duckdb"
@@ -6495,8 +6443,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
         return col
 
     # Build FROM with datasource-level transforms if any (reuse logic from spec handler)
-    sys.stderr.write("[DEBUG] Starting datasource info loading section...\n")
-    sys.stderr.flush()
+    logger.debug("[DEBUG] Starting datasource info loading section...")
     ds_info = None
     # FALLBACK: If datasourceId not provided, try to infer from widgetId or source
     datasource_id_to_use = payload.datasourceId
@@ -6514,27 +6461,22 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 if '__' in source_table_id:
                     datasource_id_to_use = source_table_id.split('__')[0]
                     import sys
-                    sys.stderr.write(f"[Pivot] Extracted datasourceId from widget sourceTableId: {datasource_id_to_use}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[Pivot] Extracted datasourceId from widget sourceTableId: {datasource_id_to_use}")
         except Exception as e:
             import sys
-            sys.stderr.write(f"[Pivot] Failed to extract datasourceId from widget: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[Pivot] Failed to extract datasourceId from widget: {e}")
     
     # FALLBACK 2: If still no datasourceId, try to find DuckDB datasource that owns this table
     if not datasource_id_to_use and payload.source and ds_type == "duckdb":
         try:
             import sys
-            sys.stderr.write(f"[Pivot] Attempting to find DuckDB datasource for table: {payload.source}\n")
-            sys.stderr.flush()
+            logger.debug(f"[Pivot] Attempting to find DuckDB datasource for table: {payload.source}")
             # Extract table name from source (handle schema.table format)
             table_name = payload.source.split('.')[-1].strip('"').strip('`').strip('[').strip(']')
-            sys.stderr.write(f"[Pivot] Normalized table name: {table_name}\n")
-            sys.stderr.flush()
+            logger.debug(f"[Pivot] Normalized table name: {table_name}")
             # Query all DuckDB datasources
             all_ds = db.query(Datasource).filter(Datasource.type.like('duckdb%')).all()
-            sys.stderr.write(f"[Pivot] Found {len(all_ds)} DuckDB datasources to search\n")
-            sys.stderr.flush()
+            logger.debug(f"[Pivot] Found {len(all_ds)} DuckDB datasources to search")
             for ds_candidate in all_ds:
                 try:
                     opts = json.loads(ds_candidate.options_json or "{}")
@@ -6551,38 +6493,30 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                                 scope_table_norm = scope_table.split('.')[-1].strip('"').strip('`').strip('[').strip(']').lower()
                                 if scope_table_norm == table_name.lower():
                                     datasource_id_to_use = ds_candidate.id
-                                    sys.stderr.write(f"[Pivot] Found matching datasource: {datasource_id_to_use} (matched table: {scope_table})\n")
-                                    sys.stderr.flush()
+                                    logger.debug(f"[Pivot] Found matching datasource: {datasource_id_to_use} (matched table: {scope_table})")
                                     break
                     if datasource_id_to_use:
                         break
                 except Exception as ex:
-                    sys.stderr.write(f"[Pivot] Error checking datasource {ds_candidate.id}: {ex}\n")
-                    sys.stderr.flush()
+                    logger.warning(f"[Pivot] Error checking datasource {ds_candidate.id}: {ex}")
                     continue
             if not datasource_id_to_use:
                 # FALLBACK 3: If only one DuckDB datasource exists, use it
                 if len(all_ds) == 1:
                     datasource_id_to_use = all_ds[0].id
-                    sys.stderr.write(f"[Pivot] Using only DuckDB datasource: {datasource_id_to_use}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[Pivot] Using only DuckDB datasource: {datasource_id_to_use}")
                 else:
-                    sys.stderr.write(f"[Pivot] No matching datasource found for table {table_name} (checked {len(all_ds)} datasources)\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[Pivot] No matching datasource found for table {table_name} (checked {len(all_ds)} datasources)")
         except Exception as e:
             import sys
-            sys.stderr.write(f"[Pivot] Failed to find datasource by table: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[Pivot] Failed to find datasource by table: {e}")
     
     import sys
-    sys.stderr.write(f"[DEBUG] About to check datasource_id_to_use: {datasource_id_to_use}, type={type(datasource_id_to_use)}, bool={bool(datasource_id_to_use)}\n")
-    sys.stderr.flush()
+    logger.debug(f"[DEBUG] About to check datasource_id_to_use: {datasource_id_to_use}, type={type(datasource_id_to_use)}, bool={bool(datasource_id_to_use)}")
     if datasource_id_to_use:
-        sys.stderr.write(f"[DEBUG] Condition is TRUE, entering if block\n")
-        sys.stderr.flush()
+        logger.debug(f"[DEBUG] Condition is TRUE, entering if block")
         import sys
-        sys.stderr.write(f"[Pivot] Loading datasource: {datasource_id_to_use}\n")
-        sys.stderr.flush()
+        logger.debug(f"[Pivot] Loading datasource: {datasource_id_to_use}")
         ds_info = _ds_cache_get(str(datasource_id_to_use))
         if ds_info is None:
             try:
@@ -6598,8 +6532,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     "options_json": ds_obj.options_json,
                 }
                 _ds_cache_set(str(datasource_id_to_use), ds_info)
-        sys.stderr.write(f"[Pivot] Datasource type: {ds_info.get('type') if ds_info else 'None'}\n")
-        sys.stderr.flush()
+        logger.debug(f"[Pivot] Datasource type: {ds_info.get('type') if ds_info else 'None'}")
 
     try:
         if ds_type == "duckdb":
@@ -6681,8 +6614,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         "type": ds_candidate.type,
                         "options_json": ds_candidate.options_json,
                     }
-                    sys.stderr.write(f"[Pivot] Using DuckDB transforms from datasource: {ds_candidate.id}\n")
-                    sys.stderr.flush()
+                    logger.debug(f"[Pivot] Using DuckDB transforms from datasource: {ds_candidate.id}")
     except Exception:
         pass
     ds_transforms_all = {}
@@ -6709,19 +6641,16 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     col_name = (it or {}).get('name', '<unnamed>')
                     if not sc:
                         out.append(it)
-                        sys.stderr.write(f"[Pivot] Custom column '{col_name}' has no scope, including it\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[Pivot] Custom column '{col_name}' has no scope, including it")
                         continue
                     lvl = str(sc.get('level') or '').lower()
                     if lvl == 'datasource':
                         out.append(it)
-                        sys.stderr.write(f"[Pivot] Custom column '{col_name}' is datasource-level, including it\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[Pivot] Custom column '{col_name}' is datasource-level, including it")
                     elif lvl == 'table' and sc.get('table'):
                         scope_table = str(sc.get('table'))
                         matches = _matches_table(scope_table, payload.source)
-                        sys.stderr.write(f"[Pivot] Custom column '{col_name}' scope table '{scope_table}' vs source '{payload.source}': {'MATCH' if matches else 'NO MATCH'}\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[Pivot] Custom column '{col_name}' scope table '{scope_table}' vs source '{payload.source}': {'MATCH' if matches else 'NO MATCH'}")
                         if matches:
                             out.append(it)
                     elif lvl == 'widget':
@@ -6738,8 +6667,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 'joins': filt(ds_tr.get('joins')),
                 'defaults': ds_tr.get('defaults') or {},
             }
-        sys.stderr.write(f"[Pivot] Applying scope filter for source: {payload.source}\n")
-        sys.stderr.flush()
+        logger.debug(f"[Pivot] Applying scope filter for source: {payload.source}")
         _tr_dbg = (opts or {}).get("transforms") if isinstance(opts, dict) else None
         if isinstance(_tr_dbg, dict):
             all_custom_cols = _tr_dbg.get('customColumns', [])
@@ -6747,11 +6675,10 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
             all_custom_cols = (opts or {}).get('customColumns', [])
         else:
             all_custom_cols = []
-        sys.stderr.write(f"[Pivot] Total custom columns before scope filter: {len(all_custom_cols)}\n")
+        logger.debug(f"[Pivot] Total custom columns before scope filter: {len(all_custom_cols)}")
         for col in all_custom_cols:
             scope = col.get('scope') or {}
-            sys.stderr.write(f"[Pivot]   - {col.get('name')}: level={scope.get('level')}, table={scope.get('table')}\n")
-        sys.stderr.flush()
+            logger.debug(f"[Pivot]   - {col.get('name')}: level={scope.get('level')}, table={scope.get('table')}")
         _raw_tr = (opts or {}).get("transforms")
         if (not isinstance(_raw_tr, dict)) and isinstance(opts, dict):
             if any(k in opts for k in ("customColumns", "transforms", "joins", "defaults")):
@@ -6760,8 +6687,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
         ds_transforms = _apply_scope(_raw_tr or {}, payload.source)
         if ds_transforms:
             custom_cols_count = len(ds_transforms.get('customColumns', []))
-            sys.stderr.write(f"[Pivot] Loaded {custom_cols_count} custom columns from datasource transforms after scope filter\n")
-            sys.stderr.flush()
+            logger.debug(f"[Pivot] Loaded {custom_cols_count} custom columns from datasource transforms after scope filter")
     base_from_sql = f" FROM {_q_source(payload.source)}"
     if ds_transforms:
         # Probe columns and filter joins as in aggregated path
@@ -6792,12 +6718,12 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
         # For DuckDB, skip join filtering since we do proper column probing later
         # For other DBs, filter joins based on available columns
         if ds_type and ds_type.lower().startswith('duckdb'):
-            print(f"[Pivot] DuckDB detected: keeping all {len(__joins_all)} joins (will probe with joins applied)")
+            logger.debug(f"[Pivot] DuckDB detected: keeping all {len(__joins_all)} joins (will probe with joins applied)")
             __joins_eff = list(__joins_all or [])
         else:
             __cols = _list_cols_for_agg_base()
             __cols_lower = {c.lower() for c in __cols}  # Case-insensitive comparison
-            print(f"[Pivot] Non-DuckDB: filtering {len(__joins_all)} joins based on {len(__cols)} available columns")
+            logger.debug(f"[Pivot] Non-DuckDB: filtering {len(__joins_all)} joins based on {len(__cols)} available columns")
             __joins_eff = []
             for __j in (__joins_all or []):
                 try:
@@ -6865,10 +6791,10 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
         try:
             # Probe available columns using direct SQL execution
             # Build the transformed source with joins ONLY (no custom columns or transforms)
-            print(f"[Pivot] Probing columns from {payload.source}...")
-            print(f"[Pivot] Number of joins to apply: {len(__joins_eff)}")
+            logger.debug(f"[Pivot] Probing columns from {payload.source}...")
+            logger.debug(f"[Pivot] Number of joins to apply: {len(__joins_eff)}")
             if __joins_eff:
-                print(f"[Pivot] First join: targetTable={__joins_eff[0].get('targetTable')}, sourceKey={__joins_eff[0].get('sourceKey')}, targetKey={__joins_eff[0].get('targetKey')}")
+                logger.debug(f"[Pivot] First join: targetTable={__joins_eff[0].get('targetTable')}, sourceKey={__joins_eff[0].get('sourceKey')}, targetKey={__joins_eff[0].get('targetKey')}")
             try:
                 # Build SQL with joins but NO custom columns or transforms
                 probe_result = build_sql(
@@ -6885,16 +6811,16 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     probe_base_sql = probe_result[0]
                 else:
                     probe_base_sql = f"SELECT * FROM {_q_source(payload.source)}"
-                print(f"[Pivot] Probe SQL preview: {probe_base_sql[:200]}...")
+                logger.debug(f"[Pivot] Probe SQL preview: {probe_base_sql[:200]}...")
             except Exception as probe_ex:
-                print(f"[Pivot] Probe build_sql failed: {probe_ex}, using base table")
+                logger.warning(f"[Pivot] Probe build_sql failed: {probe_ex}, using base table")
                 probe_base_sql = f"SELECT * FROM {_q_source(payload.source)}"
             
             probe_sql = f"SELECT * FROM ({probe_base_sql}) AS _probe LIMIT 0"
             with open_duck_native(None) as conn:
                 probe_cursor = conn.execute(probe_sql)
                 available_cols_lower = {str(col[0]).strip().lower() for col in probe_cursor.description}
-                print(f"[Pivot] Probed {len(available_cols_lower)} columns (including joins): {sorted(list(available_cols_lower)[:20])}")
+                logger.debug(f"[Pivot] Probed {len(available_cols_lower)} columns (including joins): {sorted(list(available_cols_lower)[:20])}")
             
             # Helper to extract column references (re is imported at module level)
             def extract_refs(expr_str: str) -> set[str]:
@@ -6955,7 +6881,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
             transform_deps: dict[str, set[str]] = {}
             
             # FIRST: Filter and process computed transforms
-            print(f"[Pivot] Filtering {len(__transforms_eff)} transforms (phase 1)...")
+            logger.debug(f"[Pivot] Filtering {len(__transforms_eff)} transforms (phase 1)...")
             for t in __transforms_eff:
                 if not isinstance(t, dict):
                     __transforms_eff_filtered.append(t)
@@ -6970,32 +6896,32 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         refs = extract_refs(expr_normalized)
                         missing = refs - available_cols_lower
                         if missing:
-                            print(f"[Pivot] SKIP computed transform '{name}': references missing columns {missing}")
+                            logger.debug(f"[Pivot] SKIP computed transform '{name}': references missing columns {missing}")
                             continue
                         # Track dependencies for reachability analysis
                         transform_deps[name.lower()] = set(refs)
                         # Add this transform's output name to available columns for custom column checks
                         available_with_aliases.add(name.lower())
-                        print(f"[Pivot] OK including computed transform '{name}' (adds alias to available set)")
+                        logger.debug(f"[Pivot] OK including computed transform '{name}' (adds alias to available set)")
                 __transforms_eff_filtered.append(t)
-            print(f"[Pivot] After transforms: available_with_aliases has {len(available_with_aliases)} entries (base + transform outputs)")
+            logger.debug(f"[Pivot] After transforms: available_with_aliases has {len(available_with_aliases)} entries (base + transform outputs)")
             
             # SECOND: Filter custom columns - now they can reference transform outputs
             # Separate custom columns into two groups:
             # 1. "Leaf" columns: only reference base table columns
             # 2. "Derived" columns: reference other custom column/transform aliases
-            print(f"[Pivot] Filtering {len(__custom_cols_all)} custom columns (phase 2)...")
+            logger.debug(f"[Pivot] Filtering {len(__custom_cols_all)} custom columns (phase 2)...")
             custom_cols_leaf = []  # Only reference base columns
             custom_cols_derived = []  # Reference other custom columns
             
             for cc in __custom_cols_all:
                 if not isinstance(cc, dict):
-                    print(f"[Pivot] Skipping non-dict custom column: {type(cc)}")
+                    logger.debug(f"[Pivot] Skipping non-dict custom column: {type(cc)}")
                     continue
                 name = cc.get("name")
                 expr = cc.get("expr")
                 if not name or not expr:
-                    print(f"[Pivot] Skipping custom column with missing name/expr: name={name}, expr={bool(expr)}")
+                    logger.debug(f"[Pivot] Skipping custom column with missing name/expr: name={name}, expr={bool(expr)}")
                     continue
                     
                 expr_str = str(expr)
@@ -7005,7 +6931,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 missing = refs - available_with_aliases
                 if missing:
                     # Use ASCII-only markers for Windows console compatibility
-                    print(f"[Pivot] SKIP custom column '{name}': expr='{expr_str[:50]}', refs={refs}, missing={missing}")
+                    logger.debug(f"[Pivot] SKIP custom column '{name}': expr='{expr_str[:50]}', refs={refs}, missing={missing}")
                     continue
                 
                 # Track dependencies for reachability analysis
@@ -7014,11 +6940,11 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 refs_custom_aliases = refs - available_cols_lower
                 if refs_custom_aliases:
                     # This column references other custom columns/transforms - exclude from _base subquery
-                    print(f"[Pivot] OK including custom column '{name}' (derived, will be computed in outer query)")
+                    logger.debug(f"[Pivot] OK including custom column '{name}' (derived, will be computed in outer query)")
                     custom_cols_derived.append(cc)
                 else:
                     # This column only references base columns - include in _base subquery
-                    print(f"[Pivot] OK including custom column '{name}' (leaf)")
+                    logger.debug(f"[Pivot] OK including custom column '{name}' (leaf)")
                     custom_cols_leaf.append(cc)
                 
                 # Add this custom column's alias to available columns for subsequent checks
@@ -7090,27 +7016,27 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     name = (t.get("name") or "").strip().lower()
                     if name and (name in needed_aliases):
                         __transforms_eff.append(t)
-                print(f"[Pivot] Reachability filter: kept {len(__custom_cols_eff)}/{before_cc} custom columns, {len(__transforms_eff)}/{before_tr} transforms")
+                logger.debug(f"[Pivot] Reachability filter: kept {len(__custom_cols_eff)}/{before_cc} custom columns, {len(__transforms_eff)}/{before_tr} transforms")
             else:
                 # No alias-based dependencies needed for this pivot; safe to drop computed
                 # custom columns and transforms entirely from _base.
-                print(f"[Pivot] Reachability filter: no custom aliases referenced; dropping all customColumns/transforms from _base")
+                logger.debug(f"[Pivot] Reachability filter: no custom aliases referenced; dropping all customColumns/transforms from _base")
                 __custom_cols_eff = []
                 __transforms_eff = [t for t in __transforms_eff_filtered if not (isinstance(t, dict) and t.get("type") == "computed")]
 
-            print(f"[Pivot] Final: {len(__custom_cols_eff)} custom columns, {len(__transforms_eff)} transforms")
+            logger.debug(f"[Pivot] Final: {len(__custom_cols_eff)} custom columns, {len(__transforms_eff)} transforms")
         except Exception as e:
             import traceback
-            print(f"[Pivot] ERROR filtering custom columns: {e}")
-            print(f"[Pivot] Traceback: {traceback.format_exc()}")
-            print(f"[Pivot] Fallback: using all {len(__custom_cols_all)} custom columns")
+            logger.warning(f"[Pivot] ERROR filtering custom columns: {e}")
+            logger.warning(f"[Pivot] Traceback: {traceback.format_exc()}")
+            logger.debug(f"[Pivot] Fallback: using all {len(__custom_cols_all)} custom columns")
             __custom_cols_eff = list(__custom_cols_all)
             # Keep the already-filtered __transforms_eff as-is (don't overwrite)
 
-        print(f"[Pivot] About to call build_sql with {len(__joins_eff)} joins")
+        logger.debug(f"[Pivot] About to call build_sql with {len(__joins_eff)} joins")
         if __joins_eff:
             for idx, j in enumerate(__joins_eff):
-                print(f"[Pivot]   Join {idx}: joinType={j.get('joinType')}, targetTable={j.get('targetTable')}, sourceKey={j.get('sourceKey')}")
+                logger.debug(f"[Pivot]   Join {idx}: joinType={j.get('joinType')}, targetTable={j.get('targetTable')}, sourceKey={j.get('sourceKey')}")
         result = build_sql(
             dialect=ds_type,
             source=_q_source(payload.source),
@@ -7127,7 +7053,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
         elif len(result) == 4:
             base_sql, _cols_unused, _warns, _ = result
         else:
-            print(f"[Pivot] Unexpected build_sql return count: {len(result)}")
+            logger.debug(f"[Pivot] Unexpected build_sql return count: {len(result)}")
             base_sql = result[0] if result else ""
         base_from_sql = f" FROM ({base_sql}) AS _base"
 
@@ -7373,25 +7299,16 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
             # Derived/complex expression: add alias
             sel_parts.append(f"{e} AS {a}")
     # Check if SQLGlot should be used
-    import sys
-    sys.stderr.write(f"[PIVOT] About to check should_use_sqlglot with actorId={actorId}\n")
-    sys.stderr.flush()
-    print(f"[PIVOT] About to check should_use_sqlglot with actorId={actorId}", flush=True)
-    sys.stdout.flush()
+    logger.debug(f"[PIVOT] About to check should_use_sqlglot with actorId={actorId}")
     use_sqlglot = should_use_sqlglot(actorId)
-    sys.stderr.write(f"[PIVOT] should_use_sqlglot returned: {use_sqlglot}\n")
-    sys.stderr.flush()
-    print(f"[PIVOT] should_use_sqlglot returned: {use_sqlglot}", flush=True)
-    sys.stdout.flush()
+    logger.debug(f"[PIVOT] should_use_sqlglot returned: {use_sqlglot}")
     # SQLGlot now properly handles DuckDB custom columns by materializing them in _base subquery (lines 1700-1747)
     inner = None
     
     if use_sqlglot:
         # NEW PATH: SQLGlot pivot query generation
         try:
-            sys.stderr.write(f"[SQLGlot] Pivot: ENABLED for user={actorId}, dialect={ds_type}\n")
-            sys.stderr.flush()
-            print(f"[SQLGlot] Pivot: ENABLED for user={actorId}, dialect={ds_type}", flush=True)
+            logger.debug(f"[SQLGlot] Pivot: ENABLED for user={actorId}, dialect={ds_type}")
             
             # Initialize transforms early (needed by filtering logic below)
             __transforms_eff = ds_transforms.get('transforms', []) if isinstance(ds_transforms, dict) else []
@@ -7404,7 +7321,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
             if ds_type == 'duckdb':
                 try:
                     # PHASE 1: Probe base table WITHOUT joins to get base columns
-                    print(f"[SQLGlot] Pivot: Phase 1 - Probing base table without joins", flush=True)
+                    logger.debug(f"[SQLGlot] Pivot: Phase 1 - Probing base table without joins")
                     probe_result_base = build_sql(
                         dialect=ds_type,
                         source=_q_source(payload.source),
@@ -7426,7 +7343,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     with open_duck_native(None) as conn:
                         probe_cursor = conn.execute(probe_sql_phase1)
                         base_cols = {str(col[0]).strip() for col in probe_cursor.description}
-                        print(f"[SQLGlot] Pivot: Phase 1 - Found {len(base_cols)} base columns")
+                        logger.debug(f"[SQLGlot] Pivot: Phase 1 - Found {len(base_cols)} base columns")
                     
                     # PHASE 2: Filter joins - keep only those whose sourceKey exists in base_cols
                     # LATERAL joins use ON true and don't require sourceKey validation
@@ -7440,16 +7357,16 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         # LATERAL joins always use ON true, so skip sourceKey validation
                         if join_type == 'lateral':
                             probe_joins_filtered.append(join)
-                            print(f"[SQLGlot] Pivot: Phase 2 - Including LATERAL join (targetTable='{join.get('targetTable')}')")
+                            logger.debug(f"[SQLGlot] Pivot: Phase 2 - Including LATERAL join (targetTable='{join.get('targetTable')}')")
                         elif source_key and source_key.lower() in base_cols_lower:
                             probe_joins_filtered.append(join)
                         else:
-                            print(f"[SQLGlot] Pivot: Phase 2 - Skipping join (sourceKey '{source_key}' not in base table)")
-                    print(f"[SQLGlot] Pivot: Phase 2 - Kept {len(probe_joins_filtered)}/{len(all_joins)} joins")
+                            logger.debug(f"[SQLGlot] Pivot: Phase 2 - Skipping join (sourceKey '{source_key}' not in base table)")
+                    logger.debug(f"[SQLGlot] Pivot: Phase 2 - Kept {len(probe_joins_filtered)}/{len(all_joins)} joins")
                     
                     # PHASE 3: Probe WITH filtered joins to get final column list
                     if probe_joins_filtered:
-                        print(f"[SQLGlot] Pivot: Phase 3 - Probing with {len(probe_joins_filtered)} filtered joins")
+                        logger.debug(f"[SQLGlot] Pivot: Phase 3 - Probing with {len(probe_joins_filtered)} filtered joins")
                         probe_result_final = build_sql(
                             dialect=ds_type,
                             source=_q_source(payload.source),
@@ -7471,36 +7388,31 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         with open_duck_native(None) as conn:
                             probe_cursor = conn.execute(probe_sql_phase3)
                             available_cols = {str(col[0]).strip() for col in probe_cursor.description}
-                            print(f"[SQLGlot] Pivot: Phase 3 - Found {len(available_cols)} total columns (base + joins)")
+                            logger.debug(f"[SQLGlot] Pivot: Phase 3 - Found {len(available_cols)} total columns (base + joins)")
                     else:
                         # No valid joins, use base columns only
                         available_cols = base_cols
-                        print(f"[SQLGlot] Pivot: Phase 3 - No valid joins, using {len(available_cols)} base columns only")
+                        logger.debug(f"[SQLGlot] Pivot: Phase 3 - No valid joins, using {len(available_cols)} base columns only")
                         
                 except Exception as e:
-                    print(f"[SQLGlot] Pivot: Failed to probe columns, skipping validation: {e}")
+                    logger.warning(f"[SQLGlot] Pivot: Failed to probe columns, skipping validation: {e}")
                     import traceback
-                    print(f"[SQLGlot] Pivot: Probe traceback: {traceback.format_exc()}")
+                    logger.warning(f"[SQLGlot] Pivot: Probe traceback: {traceback.format_exc()}")
             else:
-                print(f"[SQLGlot] Pivot: Skipping column probe for remote datasource ({ds_type})")
+                logger.debug(f"[SQLGlot] Pivot: Skipping column probe for remote datasource ({ds_type})")
             
             # Build expr_map for ALL custom columns (including derived ones for resolution)
             # Don't filter by available_cols here - filtering happens later for __custom_cols_sqlglot
-            sys.stderr.write(f"[SQLGlot] Pivot: ds_info is None: {ds_info is None}, ds_transforms custom cols: {len(ds_transforms.get('customColumns', [])) if ds_transforms else 0}\n")
-            sys.stderr.flush()
-            print(f"[SQLGlot] Pivot: ds_info is None: {ds_info is None}, ds_transforms custom cols: {len(ds_transforms.get('customColumns', [])) if ds_transforms else 0}", flush=True)
+            logger.debug(f"[SQLGlot] Pivot: ds_info is None: {ds_info is None}, ds_transforms custom cols: {len(ds_transforms.get('customColumns', [])) if ds_transforms else 0}")
             
             # Build expr_map from ds_transforms (already scope-filtered) when ds_info is None
             if ds_info:
-                sys.stderr.write(f"[SQLGlot] Pivot: Building expr_map from ds_info...\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Pivot: Building expr_map from ds_info...")
                 expr_map = _build_expr_map_helper(ds_info, payload.source, ds_type, _apply_scope, None)
-                sys.stderr.write(f"[SQLGlot] Pivot: expr_map built from ds_info, has {len(expr_map)} entries: {list(expr_map.keys())}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Pivot: expr_map built from ds_info, has {len(expr_map)} entries: {list(expr_map.keys())}")
             else:
                 # Fallback: build expr_map directly from ds_transforms (already loaded and scope-filtered above)
-                sys.stderr.write(f"[SQLGlot] Pivot: Building expr_map from ds_transforms (fallback)...\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Pivot: Building expr_map from ds_transforms (fallback)...")
                 from ..sqlgen import _normalize_expr_idents
                 expr_map = {}
                 if ds_transforms:
@@ -7512,8 +7424,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                                 continue
                             expr = _normalize_expr_idents(ds_type, col["expr"])
                             expr_map[nm] = expr
-                            sys.stderr.write(f"[SQLGlot] Pivot: Added custom column '{nm}' to expr_map (len={len(expr)})\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] Pivot: Added custom column '{nm}' to expr_map (len={len(expr)})")
                     # From computed transforms
                     for t in (ds_transforms.get("transforms") or []):
                         if isinstance(t, dict) and t.get("type") == "computed":
@@ -7523,12 +7434,10 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                                     continue
                                 expr = _normalize_expr_idents(ds_type, t["expr"])
                                 expr_map[nm] = expr
-                                sys.stderr.write(f"[SQLGlot] Pivot: Added computed transform '{nm}' to expr_map (len={len(expr)})\n")
-                                sys.stderr.flush()
-                sys.stderr.write(f"[SQLGlot] Pivot: expr_map built from ds_transforms, has {len(expr_map)} entries: {list(expr_map.keys())}\n")
-                sys.stderr.flush()
+                                logger.debug(f"[SQLGlot] Pivot: Added computed transform '{nm}' to expr_map (len={len(expr)})")
+                logger.debug(f"[SQLGlot] Pivot: expr_map built from ds_transforms, has {len(expr_map)} entries: {list(expr_map.keys())}")
             
-            print(f"[SQLGlot] Pivot: expr_map has {len(expr_map)} entries: {list(expr_map.keys())}", flush=True)
+            logger.debug(f"[SQLGlot] Pivot: expr_map has {len(expr_map)} entries: {list(expr_map.keys())}")
 
             try:
                 needed_aliases: set[str] = set()
@@ -7635,8 +7544,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                             continue
                         expr_map[str(need).strip()] = expr_norm
                         try:
-                            sys.stderr.write(f"[SQLGlot] Pivot: Injected referenced derived field into expr_map: {str(need).strip()}\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] Pivot: Injected referenced derived field into expr_map: {str(need).strip()}")
                         except Exception:
                             pass
                         existing_lower.add(nl)
@@ -7759,7 +7667,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         missing = refs - available_with_aliases_sg
                         if missing:
                             label = alias_name or t_type
-                            print(f"[SQLGlot] Warning: transform '{label}' references missing columns {missing} - including anyway (trusting inlining)")
+                            logger.debug(f"[SQLGlot] Warning: transform '{label}' references missing columns {missing} - including anyway (trusting inlining)")
                             # We used to skip here, but now we trust sqlgen.py to inline dependencies (e.g. refs to custom columns)
                             # continue
 
@@ -7767,11 +7675,11 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         # that subsequent transforms/custom columns may reference.
                         if alias_name:
                             available_with_aliases_sg.add(alias_name.strip().lower())
-                            print(f"[SQLGlot] OK transform '{alias_name}' (adds alias to available set)")
+                            logger.debug(f"[SQLGlot] OK transform '{alias_name}' (adds alias to available set)")
 
                     __transforms_eff_sqlglot.append(t)
 
-                print(f"[SQLGlot] After transforms: available_with_aliases_sg has {len(available_with_aliases_sg)} entries (base + transform outputs)")
+                logger.debug(f"[SQLGlot] After transforms: available_with_aliases_sg has {len(available_with_aliases_sg)} entries (base + transform outputs)")
                 
                 # SECOND: Process custom columns - now they can reference transform outputs
                 custom_cols_leaf_sg = []  # This list will now include ALL custom columns (leaf AND derived)
@@ -7794,7 +7702,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         
                         cc_norm = dict(cc)
                         cc_norm["name"] = cc_name
-                        print(f"[SQLGlot] Including custom column '{cc_name}' (allowing dependencies for inlining)")
+                        logger.debug(f"[SQLGlot] Including custom column '{cc_name}' (allowing dependencies for inlining)")
                         custom_cols_leaf_sg.append(cc_norm)
                         
                         # Add this custom column's alias to available columns
@@ -7804,16 +7712,13 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 # But keep ALL custom columns in expr_map (including derived) for resolution
                 __custom_cols_sqlglot = custom_cols_leaf_sg
                 leaf_names = [cc.get('name') for cc in custom_cols_leaf_sg if isinstance(cc, dict)]
-                sys.stderr.write(f"[SQLGlot] Included {len(leaf_names)} columns in _base: {leaf_names}\n")
-                sys.stderr.flush()
-                print(f"[SQLGlot] Filtered __custom_cols_sqlglot to {len(custom_cols_leaf_sg)} columns")
+                logger.debug(f"[SQLGlot] Included {len(leaf_names)} columns in _base: {leaf_names}")
+                logger.debug(f"[SQLGlot] Filtered __custom_cols_sqlglot to {len(custom_cols_leaf_sg)} columns")
             else:
                 # Probe failed - apply strict filtering to avoid BinderException
                 # IMPORTANT: When probing fails, we MUST filter custom columns that reference
                 # other custom columns, since they can't be resolved in the _base subquery
-                sys.stderr.write(f"[SQLGlot] Probe failed - applying strict custom column filtering\n")
-                sys.stderr.flush()
-                print(f"[SQLGlot] Probe failed - applying strict custom column filtering", flush=True)
+                logger.warning(f"[SQLGlot] Probe failed - applying strict custom column filtering")
                 
                 # First, build a set of ALL custom column and transform alias names (lowercase)
                 all_custom_col_names_sg: set[str] = set()
@@ -7830,8 +7735,8 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     elif t_type in {"case", "replace", "translate", "nullhandling"} and t.get("target"):
                         all_transform_names_sg.add(str(t['target']).lower())
                 all_alias_names_sg = all_custom_col_names_sg | all_transform_names_sg
-                print(f"[SQLGlot] All custom column names: {all_custom_col_names_sg}", flush=True)
-                print(f"[SQLGlot] All transform names: {all_transform_names_sg}", flush=True)
+                logger.debug(f"[SQLGlot] All custom column names: {all_custom_col_names_sg}")
+                logger.debug(f"[SQLGlot] All transform names: {all_transform_names_sg}")
                 
                 # Removed strict filtering of non-leaf columns/transforms.
                 # sqlgen.py's build_sql now handles dependency inlining correctly, so we can
@@ -7843,7 +7748,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     if isinstance(cc, dict) and cc.get("name") and cc.get("expr"):
                         __custom_cols_sqlglot.append(cc)
                 
-                print(f"[SQLGlot] Included {len(__custom_cols_sqlglot)} custom columns (allowing dependencies)", flush=True)
+                logger.debug(f"[SQLGlot] Included {len(__custom_cols_sqlglot)} custom columns (allowing dependencies)")
                 
                 __transforms_eff_sqlglot = []
                 for t in __transforms_eff:
@@ -7858,7 +7763,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         continue
                     __transforms_eff_sqlglot.append(t)
 
-                print(f"[SQLGlot] Final (before reachability): {len(__custom_cols_sqlglot)} custom columns, {len(__transforms_eff_sqlglot)} transforms")
+                logger.debug(f"[SQLGlot] Final (before reachability): {len(__custom_cols_sqlglot)} custom columns, {len(__transforms_eff_sqlglot)} transforms")
             
             # Reachability pruning for SQLGlot path: only keep custom columns/transforms
             # that are reachable from current pivot rows/cols/value and filters.
@@ -7905,9 +7810,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 except Exception:
                     pass
             
-            sys.stderr.write(f"[SQLGlot] Reachability: root aliases from pivot config: {used_alias_roots_sg}\n")
-            sys.stderr.flush()
-            print(f"[SQLGlot] Reachability: root aliases from pivot config: {used_alias_roots_sg}")
+            logger.debug(f"[SQLGlot] Reachability: root aliases from pivot config: {used_alias_roots_sg}")
             
             # Re-add transforms/custom columns that are referenced in WHERE filters but were filtered out
             # This must happen BEFORE reachability analysis so they're included in all_alias_names_sg
@@ -7944,8 +7847,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     if t_name and t_name in where_referenced_cols and t_name not in existing_transform_names:
                         __transforms_eff_sqlglot.append(t)
                         transform_deps_sg[t_name] = set()
-                        sys.stderr.write(f"[SQLGlot] Re-added WHERE-referenced transform: {t_name} (was filtered by scope)\n")
-                        sys.stderr.flush()
+                        logger.debug(f"[SQLGlot] Re-added WHERE-referenced transform: {t_name} (was filtered by scope)")
                 
                 # Re-add missing custom columns from ds_transforms
                 if ds_transforms:
@@ -7957,8 +7859,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         if cc_name in where_referenced_cols and cc_name not in existing_cc_names:
                             __custom_cols_sqlglot.append(cc)
                             custom_deps_sg[cc_name] = set()
-                            sys.stderr.write(f"[SQLGlot] Re-added WHERE-referenced custom column: {cc.get('name')} (was filtered by scope)\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[SQLGlot] Re-added WHERE-referenced custom column: {cc.get('name')} (was filtered by scope)")
             
             all_alias_names_sg = set(custom_deps_sg.keys()) | set(transform_deps_sg.keys())
             needed_aliases_sg: set[str] = set(n for n in all_alias_names_sg if n in used_alias_roots_sg)
@@ -7973,9 +7874,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         needed_aliases_sg.add(dl)
                         queue_sg.append(dl)
             
-            sys.stderr.write(f"[SQLGlot] Reachability: needed aliases after transitive closure: {needed_aliases_sg}\n")
-            sys.stderr.flush()
-            print(f"[SQLGlot] Reachability: needed aliases after transitive closure: {needed_aliases_sg}")
+            logger.debug(f"[SQLGlot] Reachability: needed aliases after transitive closure: {needed_aliases_sg}")
             
             if needed_aliases_sg:
                 before_cc_sg = len(__custom_cols_sqlglot)
@@ -7993,30 +7892,27 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                     if name and (name in needed_aliases_sg):
                         __transforms_eff_sqlglot_new.append(t)
                 __transforms_eff_sqlglot = __transforms_eff_sqlglot_new
-                sys.stderr.write(f"[SQLGlot] Reachability filter: kept {len(__custom_cols_sqlglot)}/{before_cc_sg} custom columns, {len(__transforms_eff_sqlglot)}/{before_tr_sg} transforms\n")
-                sys.stderr.write(f"[SQLGlot] Reachability: kept custom columns: {[cc.get('name') for cc in __custom_cols_sqlglot if isinstance(cc, dict)]}\n")
-                sys.stderr.flush()
-                print(f"[SQLGlot] Reachability filter: kept {len(__custom_cols_sqlglot)}/{before_cc_sg} custom columns, {len(__transforms_eff_sqlglot)}/{before_tr_sg} transforms")
+                logger.debug(f"[SQLGlot] Reachability filter: kept {len(__custom_cols_sqlglot)}/{before_cc_sg} custom columns, {len(__transforms_eff_sqlglot)}/{before_tr_sg} transforms")
+                logger.debug(f"[SQLGlot] Reachability: kept custom columns: {[cc.get('name') for cc in __custom_cols_sqlglot if isinstance(cc, dict)]}")
+                logger.debug(f"[SQLGlot] Reachability filter: kept {len(__custom_cols_sqlglot)}/{before_cc_sg} custom columns, {len(__transforms_eff_sqlglot)}/{before_tr_sg} transforms")
             else:
                 # No alias-based dependencies needed for this pivot; safe to drop computed
                 # custom columns and transforms entirely from _base.
-                sys.stderr.write(f"[SQLGlot] Reachability filter: no custom aliases referenced; dropping all customColumns/computed transforms from _base\n")
-                sys.stderr.flush()
-                print(f"[SQLGlot] Reachability filter: no custom aliases referenced; dropping all customColumns/computed transforms from _base")
+                logger.debug(f"[SQLGlot] Reachability filter: no custom aliases referenced; dropping all customColumns/computed transforms from _base")
                 __custom_cols_sqlglot = []
                 __transforms_eff_sqlglot = [t for t in __transforms_eff_sqlglot if not (isinstance(t, dict) and t.get("type") == "computed")]
             
-            print(f"[SQLGlot] Final (after reachability): {len(__custom_cols_sqlglot)} custom columns, {len(__transforms_eff_sqlglot)} transforms")
+            logger.debug(f"[SQLGlot] Final (after reachability): {len(__custom_cols_sqlglot)} custom columns, {len(__transforms_eff_sqlglot)} transforms")
             
             # If datasource transforms exist, use transformed subquery as source
             # This ensures custom columns and joins are available to pivot dimensions
             effective_source = payload.source
             if ds_transforms:
                 joins_to_use = probe_joins_filtered if (ds_type == 'duckdb' and probe_joins_filtered is not None) else (ds_transforms.get("joins", []) or [])
-                print(f"[SQLGlot] Pivot: Using {len(joins_to_use)} joins for final query")
+                logger.debug(f"[SQLGlot] Pivot: Using {len(joins_to_use)} joins for final query")
                 if joins_to_use:
                     for idx, j in enumerate(joins_to_use):
-                        print(f"[SQLGlot] Pivot:   Join {idx}: joinType={j.get('joinType')}, targetTable={j.get('targetTable')}, sourceKey={j.get('sourceKey')}")
+                        logger.debug(f"[SQLGlot] Pivot:   Join {idx}: joinType={j.get('joinType')}, targetTable={j.get('targetTable')}, sourceKey={j.get('sourceKey')}")
                 
                 # Extract base_sql from legacy builder's construction (lines 1009-1018)
                 # This applies custom columns, transforms, and joins.
@@ -8033,9 +7929,8 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 # are already excluded.
                 cc_names_for_build = [cc.get('name') for cc in __custom_cols_sqlglot if isinstance(cc, dict)]
                 tr_names_for_build = [t.get('name') or t.get('target') for t in __transforms_eff_sqlglot if isinstance(t, dict)]
-                sys.stderr.write(f"[SQLGlot] About to call build_sql with {len(__custom_cols_sqlglot)} custom columns: {cc_names_for_build}\n")
-                sys.stderr.write(f"[SQLGlot] About to call build_sql with {len(__transforms_eff_sqlglot)} transforms: {tr_names_for_build}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] About to call build_sql with {len(__custom_cols_sqlglot)} custom columns: {cc_names_for_build}")
+                logger.debug(f"[SQLGlot] About to call build_sql with {len(__transforms_eff_sqlglot)} transforms: {tr_names_for_build}")
                 base_select_for_build = None
                 try:
                     if ds_type == 'duckdb' and base_cols:
@@ -8089,17 +7984,16 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 elif len(result) == 4:
                     base_sql, _cols_unused, _warns, _ = result
                 else:
-                    print(f"[SQLGlot] Pivot: Unexpected build_sql return count: {len(result)}")
+                    logger.debug(f"[SQLGlot] Pivot: Unexpected build_sql return count: {len(result)}")
                     base_sql = result[0] if result else ""
                 effective_source = f"({base_sql}) AS _base"
                 # Set use_expr_map to None because custom columns and transforms are already
                 # materialized in the _base subquery. build_pivot_query should query them
                 # directly from _base, not try to expand them inline.
                 use_expr_map = None
-                sys.stderr.write(f"[FIXED_CODE_V2] Pivot: Using transformed source (len={len(effective_source)}). use_expr_map set to None (columns materialized in _base).\n")
-                sys.stderr.write(f"[FIXED_CODE_V2] Pivot: About to continue to build_pivot_query call...\n")
-                sys.stderr.flush()
-                print(f"[SQLGlot] Pivot: Using transformed source (has {len(ds_transforms.get('customColumns', []))} customColumns, {len(__joins_eff)} joins)")
+                logger.debug(f"[FIXED_CODE_V2] Pivot: Using transformed source (len={len(effective_source)}). use_expr_map set to None (columns materialized in _base).")
+                logger.debug(f"[FIXED_CODE_V2] Pivot: About to continue to build_pivot_query call...")
+                logger.debug(f"[SQLGlot] Pivot: Using transformed source (has {len(ds_transforms.get('customColumns', []))} customColumns, {len(__joins_eff)} joins)")
 
                 # Optional, detailed join diagnostics for debugging NULL dimensions like VaultName.
                 # Guarded by env var to avoid noisy logs / extra queries.
@@ -8113,8 +8007,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         # Only run when the pivot actually requests VaultName.
                         _need_vault = any(str(x or "").strip().lower() == "vaultname" for x in (r_dims or []))
                         if _need_vault:
-                            sys.stderr.write("[PIVOT_JOIN_DEBUG] enabled\n")
-                            sys.stderr.flush()
+                            logger.debug("[PIVOT_JOIN_DEBUG] enabled")
 
                             # Resolve DuckDB db file path (match run_query behavior as closely as possible).
                             _db_path = None
@@ -8149,8 +8042,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                             except Exception:
                                 _db_path = settings.duckdb_path
 
-                            sys.stderr.write(f"[PIVOT_JOIN_DEBUG] duckdb_path={_db_path}\n")
-                            sys.stderr.flush()
+                            logger.debug(f"[PIVOT_JOIN_DEBUG] duckdb_path={_db_path}")
 
                             # Find the join definition that is expected to produce VaultName.
                             _vault_join = None
@@ -8168,14 +8060,13 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
 
                             if _vault_join:
                                 try:
-                                    sys.stderr.write(
+                                    logger.debug(
                                         "[PIVOT_JOIN_DEBUG] VaultName join="
                                         f" targetTable={_vault_join.get('targetTable')}"
                                         f" sourceKey={_vault_join.get('sourceKey')}"
                                         f" targetKey={_vault_join.get('targetKey')}"
-                                        f" filter={_vault_join.get('filter')}\n"
+                                        f" filter={_vault_join.get('filter')}"
                                     )
-                                    sys.stderr.flush()
                                 except Exception:
                                     pass
 
@@ -8183,11 +8074,9 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                                 try:
                                     cur = conn.execute(sql_text)
                                     rows = cur.fetchall()
-                                    sys.stderr.write(f"[PIVOT_JOIN_DEBUG] {label}: {rows[:10]}\n")
-                                    sys.stderr.flush()
+                                    logger.debug(f"[PIVOT_JOIN_DEBUG] {label}: {rows[:10]}")
                                 except Exception as _e:
-                                    sys.stderr.write(f"[PIVOT_JOIN_DEBUG] {label} failed: {_e}\n")
-                                    sys.stderr.flush()
+                                    logger.warning(f"[PIVOT_JOIN_DEBUG] {label} failed: {_e}")
 
                             # Run diagnostics against the exact base_sql being used.
                             try:
@@ -8239,29 +8128,26 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                                                 f"SELECT CAST(LKP_ID AS VARCHAR) AS lkp_id, EnName FROM {_tt} WHERE lower(trim(LKP_Type))='vault' LIMIT 10",
                                             )
                             except Exception as _e:
-                                sys.stderr.write(f"[PIVOT_JOIN_DEBUG] open/query failed: {_e}\n")
-                                sys.stderr.flush()
+                                logger.warning(f"[PIVOT_JOIN_DEBUG] open/query failed: {_e}")
                 except Exception:
                     pass
             else:
-                print(f"[SQLGlot] Pivot: Using direct source (no transforms)")
+                logger.debug(f"[SQLGlot] Pivot: Using direct source (no transforms)")
                 use_expr_map = expr_map
             
             builder = SQLGlotBuilder(dialect=ds_type)
             
             # Debug logging
-            sys.stderr.write(f"[SQLGlot] Pivot: effective_source contains _base: {'_base' in effective_source}\n")
-            sys.stderr.write(f"[SQLGlot] Pivot: use_expr_map is None: {use_expr_map is None}\n")
-            sys.stderr.write(f"[TRACE] About to process WHERE clause resolution...\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Pivot: effective_source contains _base: {'_base' in effective_source}")
+            logger.debug(f"[SQLGlot] Pivot: use_expr_map is None: {use_expr_map is None}")
+            logger.debug(f"[TRACE] About to process WHERE clause resolution...")
             
             if not use_expr_map and expr_map:
-                print(f"[SQLGlot] Pivot: NOT passing expr_map to build_pivot_query (custom columns already materialized in _base)")
+                logger.debug(f"[SQLGlot] Pivot: NOT passing expr_map to build_pivot_query (custom columns already materialized in _base)")
             
             # Resolve custom columns in WHERE clause (only if not using _base subquery)
             resolved_where = payload.where
-            sys.stderr.write(f"[TRACE] About to resolve WHERE clause. payload.where={payload.where is not None}, expr_map={expr_map is not None}, use_expr_map is None={use_expr_map is None}\n")
-            sys.stderr.flush()
+            logger.debug(f"[TRACE] About to resolve WHERE clause. payload.where={payload.where is not None}, expr_map={expr_map is not None}, use_expr_map is None={use_expr_map is None}")
             # Skip WHERE clause resolution if using _base subquery (use_expr_map is None)
             # because custom columns are already materialized in _base
             if payload.where and expr_map and use_expr_map is not None:
@@ -8276,8 +8162,8 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                             continue
                 except Exception:
                     _expr_map_norm = {}
-                print(f"[SQLGlot] Pivot: Resolving WHERE clause with {len(expr_map)} custom columns")
-                print(f"[SQLGlot] Pivot: WHERE keys before resolution: {list(payload.where.keys())}")
+                logger.debug(f"[SQLGlot] Pivot: Resolving WHERE clause with {len(expr_map)} custom columns")
+                logger.debug(f"[SQLGlot] Pivot: WHERE keys before resolution: {list(payload.where.keys())}")
                 resolved = {}
                 for key, value in payload.where.items():
                     base_key = key.split("__")[0] if "__" in key else key
@@ -8364,15 +8250,14 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         expr = re.sub(r'\b[a-z][a-z_]{0,4}\.', '', expr)
                         resolved_key = f"({expr})" if not op_suffix else f"({expr})__{op_suffix}"
                         resolved[resolved_key] = value
-                        print(f"[SQLGlot] Pivot: Resolved '{key}' -> '{resolved_key[:80]}...'")
+                        logger.debug(f"[SQLGlot] Pivot: Resolved '{key}' -> '{resolved_key[:80]}...'")
                     else:
                         resolved[key] = value
                 resolved_where = resolved
-                print(f"[SQLGlot] Pivot: WHERE keys after resolution: {list(resolved_where.keys())}")
+                logger.debug(f"[SQLGlot] Pivot: WHERE keys after resolution: {list(resolved_where.keys())}")
 
             # Validate dimensions against available columns in _base
-            sys.stderr.write(f"[TRACE] Finished WHERE clause resolution. About to validate dimensions...\n")
-            sys.stderr.flush()
+            logger.debug(f"[TRACE] Finished WHERE clause resolution. About to validate dimensions...")
             
             # Validate dimensions (remove any that were filtered out)
             # This prevents "Column not found" errors when a custom column was excluded
@@ -8389,31 +8274,28 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                         d_lower = str(d).strip().lower()
                         # If it's a custom column but NOT in the valid set, skip it
                         if d_lower in all_cc_names and d_lower not in valid_cc_names:
-                            print(f"[SQLGlot] Pivot: Dropping invalid dimension '{d}' (filtered out custom column)")
+                            logger.debug(f"[SQLGlot] Pivot: Dropping invalid dimension '{d}' (filtered out custom column)")
                             continue
                         valid_dims.append(d)
                     return valid_dims
 
-                sys.stderr.write(f"[SQLGlot] Pivot: Validating dimensions. Rows={len(r_dims)}, Cols={len(c_dims)}\n")
-                sys.stderr.write(f"[SQLGlot] Pivot: r_dims before: {r_dims}\n")
-                sys.stderr.write(f"[SQLGlot] Pivot: c_dims before: {c_dims}\n")
-                sys.stderr.write(f"[SQLGlot] Pivot: valid_cc_names: {valid_cc_names}\n")
-                sys.stderr.write(f"[SQLGlot] Pivot: all_cc_names: {all_cc_names}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Pivot: Validating dimensions. Rows={len(r_dims)}, Cols={len(c_dims)}")
+                logger.debug(f"[SQLGlot] Pivot: r_dims before: {r_dims}")
+                logger.debug(f"[SQLGlot] Pivot: c_dims before: {c_dims}")
+                logger.debug(f"[SQLGlot] Pivot: valid_cc_names: {valid_cc_names}")
+                logger.debug(f"[SQLGlot] Pivot: all_cc_names: {all_cc_names}")
                 r_dims = filter_dims(r_dims)
                 c_dims = filter_dims(c_dims)
-                sys.stderr.write(f"[SQLGlot] Pivot: After validation. Rows={len(r_dims)}, Cols={len(c_dims)}\n")
-                sys.stderr.write(f"[SQLGlot] Pivot: r_dims after: {r_dims}\n")
-                sys.stderr.write(f"[SQLGlot] Pivot: c_dims after: {c_dims}\n")
-                sys.stderr.flush()
+                logger.debug(f"[SQLGlot] Pivot: After validation. Rows={len(r_dims)}, Cols={len(c_dims)}")
+                logger.debug(f"[SQLGlot] Pivot: r_dims after: {r_dims}")
+                logger.debug(f"[SQLGlot] Pivot: c_dims after: {c_dims}")
 
-            sys.stderr.write(f"[SQLGlot] About to call build_pivot_query with:\n")
-            sys.stderr.write(f"  - rows={r_dims}\n")
-            sys.stderr.write(f"  - cols={c_dims}\n")
-            sys.stderr.write(f"  - expr_map={'None' if use_expr_map is None else f'Dict with {len(use_expr_map)} keys'}\n")
-            sys.stderr.write(f"  - effective_source (first 200 chars): {effective_source[:200]}\n")
-            sys.stderr.write(f"  - effective_source contains '_base': {'_base' in effective_source}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] About to call build_pivot_query with:")
+            logger.debug(f"  - rows={r_dims}")
+            logger.debug(f"  - cols={c_dims}")
+            logger.debug(f"  - expr_map={'None' if use_expr_map is None else f'Dict with {len(use_expr_map)} keys'}")
+            logger.debug(f"  - effective_source (first 200 chars): {effective_source[:200]}")
+            logger.debug(f"  - effective_source contains '_base': {'_base' in effective_source}")
             
             inner = builder.build_pivot_query(
                 source=effective_source,
@@ -8430,20 +8312,19 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 date_format=payload.dateFormat if hasattr(payload, 'dateFormat') else None,
                 date_columns=payload.dateColumns if hasattr(payload, 'dateColumns') else None,
             )
-            print(f"[SQLGlot] Pivot: Generated SQL: {inner[:150]}...")
-            sys.stderr.write(f"[DEBUG] Full generated SQL:\n{inner}\n")
-            sys.stderr.write(f"[DEBUG] About to execute pivot query via run_query, SQL length: {len(inner)}\n")
-            sys.stderr.flush()
+            logger.debug(f"[SQLGlot] Pivot: Generated SQL: {inner[:150]}...")
+            logger.debug(f"[DEBUG] Full generated SQL:\n{inner}")
+            logger.debug(f"[DEBUG] About to execute pivot query via run_query, SQL length: {len(inner)}")
             
         except Exception as e:
-            print(f"[SQLGlot] Pivot: Error: {e}")
+            logger.warning(f"[SQLGlot] Pivot: Error: {e}")
             import traceback
-            print(f"[SQLGlot] Pivot: Full traceback:\n{traceback.format_exc()}")
+            logger.warning(f"[SQLGlot] Pivot: Full traceback:\n{traceback.format_exc()}")
             logger.warning(f"[SQLGlot] Pivot query failed: {e}")
             if not settings.enable_legacy_fallback:
                 logger.error(f"[SQLGlot] Pivot: LEGACY FALLBACK DISABLED - Re-raising error")
                 raise HTTPException(status_code=500, detail=f"SQLGlot query generation failed: {e}")
-            print(f"[SQLGlot] Pivot: Falling back to legacy builder")
+            logger.debug(f"[SQLGlot] Pivot: Falling back to legacy builder")
             use_sqlglot = False
     
     if not use_sqlglot:
@@ -8471,19 +8352,16 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
             gb_sql = ""
             order_by = ""
         import sys
-        sys.stderr.write(f"[DEBUG] base_from_sql = {base_from_sql[:200]}\n")
-        sys.stderr.write(f"[DEBUG] ds_transforms exists = {bool(ds_transforms)}, custom_cols = {len(ds_transforms.get('customColumns', [])) if ds_transforms else 0}\n")
-        sys.stderr.flush()
+        logger.debug(f"[DEBUG] base_from_sql = {base_from_sql[:200]}")
+        logger.debug(f"[DEBUG] ds_transforms exists = {bool(ds_transforms)}, custom_cols = {len(ds_transforms.get('customColumns', [])) if ds_transforms else 0}")
         inner = f"SELECT {sel}{base_from_sql}{where_sql}{gb_sql}{order_by}"
 
     # Delegate execution to /query. If no explicit limit is provided, fetch all pages.
     import sys
-    sys.stderr.write(f"[DEBUG] Acquiring semaphore for query execution...\n")
-    sys.stderr.flush()
+    logger.debug(f"[DEBUG] Acquiring semaphore for query execution...")
     _HEAVY_SEM.acquire()
     try:
-        sys.stderr.write(f"[DEBUG] Semaphore acquired, creating QueryRequest...\n")
-        sys.stderr.flush()
+        logger.debug(f"[DEBUG] Semaphore acquired, creating QueryRequest...")
         if payload.limit is not None:
             q = QueryRequest(
                 sql=inner,
@@ -8493,8 +8371,7 @@ def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get
                 includeTotal=False,
                 params=params or None,
             )
-            sys.stderr.write(f"[DEBUG] Calling run_query with limit={payload.limit}...\n")
-            sys.stderr.flush()
+            logger.debug(f"[DEBUG] Calling run_query with limit={payload.limit}...")
             return run_query(q, db, actorId=actorId, publicId=publicId, token=token)
 
         # Default behavior: cap pivot results when limit is omitted to avoid buffering large results.
@@ -8590,8 +8467,7 @@ def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
         )
         return {"sql": sql}
     except Exception as e:
-        sys.stderr.write(f"[pivot/sql] Error generating SQL: {e}\n")
-        sys.stderr.flush()
+        logger.warning(f"[pivot/sql] Error generating SQL: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -8680,14 +8556,12 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
     legend = payload.get("legend")
     y = payload.get("y")
     
-    sys.stderr.write(f"[PT] datasource_id={datasource_id}, ds={ds}, source={source}, legend={legend}\n")
-    sys.stderr.flush()
+    logger.debug(f"[PT] datasource_id={datasource_id}, ds={ds}, source={source}, legend={legend}")
     if ds:
         try:
             opts = json.loads(ds.options_json or "{}")
             raw_transforms = opts.get("transforms") or {}
-            sys.stderr.write(f"[PT] raw_transforms has {len(raw_transforms.get('customColumns', []))} custom columns\n")
-            sys.stderr.flush()
+            logger.debug(f"[PT] raw_transforms has {len(raw_transforms.get('customColumns', []))} custom columns")
             # Apply scope filtering (table-specific transforms)
             def _apply_scope_pt(transforms_dict: dict, source_name: str) -> dict:
                 if not isinstance(transforms_dict, dict):
@@ -8730,13 +8604,10 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
             for cc in (ds_transforms.get('customColumns') or []):
                 if isinstance(cc, dict) and cc.get('name') and cc.get('expr'):
                     expr_map[cc['name']] = cc['expr']
-                    sys.stderr.write(f"[PT] Added custom column '{cc.get('name')}': {cc.get('expr')[:50]}...\n")
-                    sys.stderr.flush()
-            sys.stderr.write(f"[PT] Loaded {len(expr_map)} custom columns: {list(expr_map.keys())}, legend='{legend}'\n")
-            sys.stderr.flush()
+                    logger.debug(f"[PT] Added custom column '{cc.get('name')}': {cc.get('expr')[:50]}...")
+            logger.debug(f"[PT] Loaded {len(expr_map)} custom columns: {list(expr_map.keys())}, legend='{legend}'")
         except Exception as e:
-            sys.stderr.write(f"[PT] Failed to load custom columns: {e}\n")
-            sys.stderr.flush()
+            logger.warning(f"[PT] Failed to load custom columns: {e}")
             pass
     
     # y and legend already defined above for debugging
@@ -8747,8 +8618,8 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
     end = payload.get("end")
     base_where = payload.get("where") or {}
     
-    print(f"[DEBUG period_totals] dateField={date_field}, start={start}, end={end}")
-    print(f"[DEBUG period_totals] base_where keys: {list(base_where.keys())}")
+    logger.debug(f"[DEBUG period_totals] dateField={date_field}, start={start}, end={end}")
+    logger.debug(f"[DEBUG period_totals] base_where keys: {list(base_where.keys())}")
 
     if not date_field or not start or not end:
         raise HTTPException(status_code=400, detail="dateField, start, end are required")
@@ -9138,7 +9009,7 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
                         res = conn.execute(probe)
                         return set([str(c) for c in res.keys()])
             except Exception as e:
-                print(f"[WARN] Failed to probe source columns: {e}", file=sys.stderr)
+                logger.warning(f"[WARN] Failed to probe source columns: {e}")
                 return set()
         
         _base_cols = _list_source_columns()
@@ -9358,7 +9229,7 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
     if use_sqlglot:
         # NEW PATH: SQLGlot SQL generation for period totals
         try:
-            print(f"[SQLGlot] Period-totals: ENABLED for user={actorId}, dialect={dialect_name}")
+            logger.debug(f"[SQLGlot] Period-totals: ENABLED for user={actorId}, dialect={dialect_name}")
             
             # Build expr_map for custom / computed columns using shared helper
             expr_map_local: dict[str, str] = {}
@@ -9395,9 +9266,9 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
                             'defaults': ds_tr.get('defaults') or {},
                         }
                     expr_map_local = _build_expr_map_helper(ds, source, dialect_name, _pt_apply_scope, None)
-                    print(f"[SQLGlot] Period-totals: expr_map has {len(expr_map_local)} entries for legend='{legend}'")
+                    logger.debug(f"[SQLGlot] Period-totals: expr_map has {len(expr_map_local)} entries for legend='{legend}'")
                 except Exception as e:
-                    print(f"[SQLGlot] Period-totals: expr_map build failed: {e}")
+                    logger.warning(f"[SQLGlot] Period-totals: expr_map build failed: {e}")
                     expr_map_local = {}
             
             # Build the aggregation query using SQLGlot
@@ -9421,7 +9292,7 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
             # as a custom column only on some views (e.g. vault reports), not on
             # main.View_CIT_Invoice_Details_PriceList3.
             if legend_names and "ClientCode" in legend_names and "ClientCode" not in (expr_map_local or {}):
-                print("[SQLGlot] Period-totals: legend 'ClientCode' not available on this source; dropping legend for period_totals")
+                logger.debug("[SQLGlot] Period-totals: legend 'ClientCode' not available on this source; dropping legend for period_totals")
                 legend_eff = None
                 legend_names = []
 
@@ -9440,8 +9311,8 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
                 # Use comparison operators for date range
                 where_with_dates[f"{date_field}__gte"] = start
                 where_with_dates[f"{date_field}__lt"] = end
-                print(f"[SQLGlot] Period-totals: Added date filters: {date_field}__gte={start}, {date_field}__lt={end}")
-                print(f"[SQLGlot] Period-totals: where_with_dates keys: {list(where_with_dates.keys())}")
+                logger.debug(f"[SQLGlot] Period-totals: Added date filters: {date_field}__gte={start}, {date_field}__lt={end}")
+                logger.debug(f"[SQLGlot] Period-totals: where_with_dates keys: {list(where_with_dates.keys())}")
             
             # Period totals is essentially an aggregation with optional legend
             sql_inner = builder.build_aggregation_query(
@@ -9478,21 +9349,21 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
                             for pat in patterns:
                                 if pat in sql_inner:
                                     patched = sql_inner.replace(pat, f"{expr} AS legend", 1)
-                                    print(f"[SQLGlot] Period-totals: Patched legend '{legend}' to expression in SQL")
+                                    logger.debug(f"[SQLGlot] Period-totals: Patched legend '{legend}' to expression in SQL")
                                     sql_inner = patched
                                     break
             except Exception as e:
-                print(f"[SQLGlot] Period-totals: Legend patch skipped due to error: {e}")
+                logger.warning(f"[SQLGlot] Period-totals: Legend patch skipped due to error: {e}")
 
-            print(f"[SQLGlot] Period-totals: Generated SQL: {sql_inner[:150]}...")
+            logger.debug(f"[SQLGlot] Period-totals: Generated SQL: {sql_inner[:150]}...")
             
         except Exception as e:
-            print(f"[SQLGlot] Period-totals: Error: {e}")
+            logger.warning(f"[SQLGlot] Period-totals: Error: {e}")
             logger.warning(f"[SQLGlot] Period-totals query failed: {e}")
             if not settings.enable_legacy_fallback:
                 logger.error(f"[SQLGlot] Period-totals: LEGACY FALLBACK DISABLED - Re-raising error")
                 raise HTTPException(status_code=500, detail=f"SQLGlot query generation failed: {e}")
-            print(f"[SQLGlot] Period-totals: Falling back to legacy builder")
+            logger.debug(f"[SQLGlot] Period-totals: Falling back to legacy builder")
             use_sqlglot = False
     
     if not use_sqlglot:

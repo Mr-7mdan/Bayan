@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Optional native duckdb for write paths
 try:
     import duckdb as _duckdb  # type: ignore
@@ -151,7 +155,7 @@ def _apply_mysql_keepalive(dbapi_conn, connection_record):
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
         if hasattr(socket, 'TCP_KEEPCNT'):
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 6)
-        print("[SYNC] TCP keepalive enabled on MySQL connection", flush=True)
+        logger.debug("[SYNC] TCP keepalive enabled on MySQL connection")
     except Exception:
         pass
 from sqlalchemy.engine import Engine
@@ -1338,10 +1342,9 @@ def _create_table_typed(conn, table_name: str, columns: list[str], sample_rows: 
     # Log inferred types for debugging
     try:
         import sys
-        sys.stderr.write(f"[SYNC] Creating table {table_name} with inferred types:\n")
+        logger.debug(f"[SYNC] Creating table {table_name} with inferred types:")
         for c, t in types.items():
-            sys.stderr.write(f"  {c}: {t}\n")
-        sys.stderr.flush()
+            logger.debug(f"  {c}: {t}")
     except Exception:
         pass
     
@@ -1526,7 +1529,7 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
     # Flush stale pooled connections (broken SSCursor leftovers from previous runs)
     try:
         source_engine.dispose()
-        print("[SYNC] Disposed stale connection pool", flush=True)
+        logger.debug("[SYNC] Disposed stale connection pool")
     except Exception:
         pass
 
@@ -1543,9 +1546,9 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                 ).scalar()
                 if _fast is not None:
                     total_rows_to_copy = int(_fast)
-                    print(f"[SYNC] Estimated rows: {total_rows_to_copy}", flush=True)
+                    logger.debug(f"[SYNC] Estimated rows: {total_rows_to_copy}")
     except Exception as e:
-        print(f"[SYNC] Row-count estimate failed: {e}", flush=True)
+        logger.warning(f"[SYNC] Row-count estimate failed: {e}")
         total_rows_to_copy = None
 
     if on_progress:
@@ -1572,7 +1575,7 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
     else:
         batch_sql = f"SELECT {sel_clause} FROM {q_from} WHERE {seq_col_q} > :last ORDER BY {seq_col_q} LIMIT :lim"
 
-    print(f"[SYNC] Paginated mode (single conn): fetch_size={_fetch_size}, starting seq={seq}", flush=True)
+    logger.debug(f"[SYNC] Paginated mode (single conn): fetch_size={_fetch_size}, starting seq={seq}")
 
     def _open_src_conn():
         conn = source_engine.connect()
@@ -1589,13 +1592,13 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
 
     with _open_duck_write_conn(duck_engine) as duck:
         src = _open_src_conn()
-        print(f"[SYNC] Source connection opened", flush=True)
+        logger.debug(f"[SYNC] Source connection opened")
         try:
             while batches < max_batches:
                 if should_abort:
                     try:
                         if should_abort():
-                            print(f"[ABORT] Stopping. batches={batches}, rows={total_rows}", flush=True)
+                            logger.warning(f"[ABORT] Stopping. batches={batches}, rows={total_rows}")
                             return {"row_count": total_rows, "last_sequence_value": max_seq_seen, "aborted": True}
                     except Exception:
                         pass
@@ -1612,10 +1615,10 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                     if not columns:
                         columns = [c.strip() for c in res.keys()]
                     elapsed = time.time() - t0
-                    print(f"[SYNC] Batch {batches}: {len(rows)} rows in {elapsed:.1f}s (seq>{seq})", flush=True)
+                    logger.debug(f"[SYNC] Batch {batches}: {len(rows)} rows in {elapsed:.1f}s (seq>{seq})")
                 except Exception as e:
                     elapsed = time.time() - t0
-                    print(f"[SYNC] Batch {batches} FAILED after {elapsed:.1f}s: {e}", flush=True)
+                    logger.warning(f"[SYNC] Batch {batches} FAILED after {elapsed:.1f}s: {e}")
                     # Close broken connection and try to reconnect
                     try: src.close()
                     except Exception: pass
@@ -1625,14 +1628,14 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                     if reconnects > _MAX_RECONNECTS:
                         raise
                     wait = 2 ** (reconnects - 1)
-                    print(f"[SYNC] Reconnecting in {wait}s (attempt {reconnects}/{_MAX_RECONNECTS})…", flush=True)
+                    logger.debug(f"[SYNC] Reconnecting in {wait}s (attempt {reconnects}/{_MAX_RECONNECTS})…")
                     time.sleep(wait)
                     src = _open_src_conn()
-                    print(f"[SYNC] Reconnected. Resuming from seq>{seq}", flush=True)
+                    logger.debug(f"[SYNC] Reconnected. Resuming from seq>{seq}")
                     continue  # retry this batch on new connection
 
                 if not rows:
-                    print(f"[SYNC] No more rows. Done. batches={batches} total={total_rows}", flush=True)
+                    logger.debug(f"[SYNC] No more rows. Done. batches={batches} total={total_rows}")
                     break
 
                 if on_phase:
@@ -1684,7 +1687,7 @@ def run_sequence_sync(source_engine: Engine, duck_engine: Engine, *,
                         pass
 
                 if len(rows) < _fetch_size:
-                    print(f"[SYNC] Last batch ({len(rows)} rows) — done.", flush=True)
+                    logger.debug(f"[SYNC] Last batch ({len(rows)} rows) — done.")
                     break
         finally:
             try: src.close()
@@ -1781,10 +1784,10 @@ def run_snapshot_sync(source_engine: Engine, duck_engine: Engine, *,
                     try:
                         abort_flag = should_abort()
                         if abort_flag:
-                            print(f"[ABORT] Snapshot sync detected abort flag=True, stopping sync. total_rows={total_rows}", flush=True)
+                            logger.warning(f"[ABORT] Snapshot sync detected abort flag=True, stopping sync. total_rows={total_rows}")
                             return {"row_count": total_rows, "aborted": True}
                     except Exception as e:
-                        print(f"[ABORT] Error checking abort in snapshot sync: {e}", flush=True)
+                        logger.warning(f"[ABORT] Error checking abort in snapshot sync: {e}")
                         pass
                 if on_phase:
                     try: on_phase('fetch')
