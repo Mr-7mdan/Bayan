@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import DOMPurify from 'dompurify'
 import { createPortal } from 'react-dom'
 import { PivotBuilder, type PivotAssignments } from '@/components/builder/PivotBuilder'
@@ -8,276 +8,15 @@ import type { WidgetConfig } from '@/types/widgets'
 import { Api, QueryApi, parseUtcDate, type AlertOut, type AlertCreate, type AlertConfig, type DatasourceOut, type AlertRunOut, type DashboardOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useTheme } from '@/components/providers/ThemeProvider'
+import type { CarriedWidget } from './dialog/types'
+import { ymd, parseCron, buildCron, defaultAggFromSpec } from './dialog/state'
+import { NumberFilterDetails, DateRangeDetails, ValuesFilterPicker } from './dialog/FilterDetails'
 
-// Helper: format date as YYYY-MM-DD using local timezone (not UTC)
-function ymd(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const da = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${da}`
-}
+// Pure helpers (ymd/parseCron/buildCron/defaultAggFromSpec) and the Details
+// subcomponents (NumberFilterDetails/DateRangeDetails/ValuesFilterPicker) now
+// live in ./dialog/state and ./dialog/FilterDetails — imported above.
 
-function parseCron(cron?: string) {
-  try {
-    const s = String(cron || '')
-    const parts = s.trim().split(/\s+/)
-    if (parts.length < 5) return { hh: '09', mm: '00', dows: [1,2,3,4,5] as number[], doms: [] as number[], mode: 'weekly' as const, everyHours: 1 }
-    const mm = parts[0]
-    const hh = parts[1]
-    const domPart = (parts[2] || '*').trim()
-    const dowPart = (parts[4] || '*').trim()
-    const doms = domPart === '*' ? [] : domPart.split(',').map((x)=>parseInt(x,10)).filter((n)=>!isNaN(n) && n>=1 && n<=31)
-    const dows = dowPart === '*' ? [] : dowPart.split(',').map((x) => parseInt(x, 10)).filter((n) => !isNaN(n) && n>=0 && n<=6)
-    // Detect hourly pattern like: mm */N * * *
-    if (/^\*\/\d+$/.test(hh)) {
-      const n = parseInt(hh.split('*/')[1] || '1', 10)
-      return { hh: '00', mm: String(mm).padStart(2,'0'), dows: [], doms: [], mode: 'hourly' as const, everyHours: (isNaN(n) || n<=0 ? 1 : n) }
-    }
-    const mode = doms.length ? 'monthly' as const : 'weekly' as const
-    const wk = dows.length ? dows : [1,2,3,4,5]
-    return { hh: String(hh).padStart(2,'0'), mm: String(mm).padStart(2,'0'), dows: wk, doms, mode, everyHours: 1 }
-  } catch { return { hh: '09', mm: '00', dows: [1,2,3,4,5] as number[], doms: [] as number[], mode: 'weekly' as const, everyHours: 1 } }
-}
-
-function buildCron(time: string, opts: { mode: 'hourly'|'weekly'|'monthly'; dows: number[]; doms: number[]; everyHours?: number }) {
-  try {
-    const [hh, mm] = time.split(':').map((t)=>parseInt(t,10));
-    if (opts.mode === 'hourly') {
-      const every = Math.max(1, Math.min(24, Number(opts.everyHours || 1)))
-      return `0 */${isNaN(every)?1:every} * * *`
-    }
-    if (opts.mode === 'monthly') {
-      const domList = (opts.doms||[]).join(',') || '*'
-      return `${isNaN(mm)?0:mm} ${isNaN(hh)?0:hh} ${domList} * *`
-    }
-    // Convert from standard cron DOW (0=Sun,1=Mon..6=Sat) to APScheduler DOW (0=Mon..6=Sun)
-    const apsDows = (opts.dows||[]).map(d => d === 0 ? 6 : d - 1)
-    const dowList = apsDows.join(',') || '*'
-    return `${isNaN(mm)?0:mm} ${isNaN(hh)?0:hh} * * ${dowList}`
-  } catch { return '0 9 * * 0,1,2,3,4' }
-}
-
-function defaultAggFromSpec(spec: any): string {
-  try {
-    if (spec?.agg && spec.agg !== 'none') return String(spec.agg)
-    if (spec?.measure || spec?.y) return 'sum'
-    if (Array.isArray(spec?.series) && spec.series.length) return String(spec.series?.[0]?.agg || 'sum')
-  } catch {}
-  return 'count'
-}
-
-// Lightweight Details UIs adapted for Alerts dialog Advanced mode
-function NumberFilterDetails({ field, where, onPatch }: { field: string; where?: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
-  type NumberOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'between'
-  const gte = (where as any)?.[`${field}__gte`] as number | undefined
-  const lte = (where as any)?.[`${field}__lte`] as number | undefined
-  const gt = (where as any)?.[`${field}__gt`] as number | undefined
-  const lt = (where as any)?.[`${field}__lt`] as number | undefined
-  const eqArr = (where as any)?.[field] as number[] | undefined
-  const singleEq = (Array.isArray(eqArr) && eqArr.length === 1) ? Number(eqArr[0]) : undefined
-  const initial: { op: NumberOp; a?: number | ''; b?: number | '' } = (() => {
-    if (typeof singleEq === 'number') return { op: 'eq', a: singleEq }
-    if (typeof gt === 'number') return { op: 'gt', a: gt }
-    if (typeof gte === 'number' && typeof lte === 'number') return { op: 'between', a: gte, b: lte }
-    if (typeof gte === 'number') return { op: 'gte', a: gte }
-    if (typeof lt === 'number') return { op: 'lt', a: lt }
-    if (typeof lte === 'number') return { op: 'lte', a: lte }
-    return { op: 'eq', a: '' }
-  })()
-  const [op, setOp] = React.useState<NumberOp>(initial.op)
-  const [a, setA] = React.useState<number | ''>(initial.a ?? '')
-  const [b, setB] = React.useState<number | ''>(initial.b ?? '')
-  React.useEffect(() => {
-    const patch: Record<string, any> = { [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [field]: undefined }
-    const hasNum = (x: any) => typeof x === 'number' && !isNaN(x)
-    switch (op) {
-      case 'eq': if (hasNum(a)) patch[field] = [a]; break
-      case 'ne': if (hasNum(a)) patch[`${field}__ne`] = a; break
-      case 'gt': if (hasNum(a)) patch[`${field}__gt`] = a; break
-      case 'gte': if (hasNum(a)) patch[`${field}__gte`] = a; break
-      case 'lt': if (hasNum(a)) patch[`${field}__lt`] = a; break
-      case 'lte': if (hasNum(a)) patch[`${field}__lte`] = a; break
-      case 'between': if (hasNum(a)) patch[`${field}__gte`] = a; if (hasNum(b)) patch[`${field}__lte`] = b; break
-    }
-    onPatch(patch)
-  }, [op, a, b])
-  return (
-    <div className="rounded-md border bg-card p-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium">Value filter: {field}</div>
-        <div className="flex items-center gap-2">
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined }) }}>Clear</button>
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-2 mt-2 items-center">
-        <select className="col-span-3 sm:col-span-1 px-2 py-1 rounded-md bg-[hsl(var(--secondary)/0.6)] text-xs" value={op} onChange={(e) => setOp(e.target.value as NumberOp)}>
-          <option value="eq">Is equal to</option>
-          <option value="ne">Is not equal to</option>
-          <option value="gt">Is greater than</option>
-          <option value="gte">Is greater or equal</option>
-          <option value="lt">Is less than</option>
-          <option value="lte">Is less than or equal</option>
-          <option value="between">Is between</option>
-        </select>
-        {op !== 'between' ? (
-          <input type="number" className="col-span-3 sm:col-span-2 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={a} onChange={(e) => setA(e.target.value === '' ? '' : Number(e.target.value))} />
-        ) : (
-          <>
-            <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Min" value={a} onChange={(e) => setA(e.target.value === '' ? '' : Number(e.target.value))} />
-            <input type="number" className="col-span-3 sm:col-span-1 h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" placeholder="Max" value={b} onChange={(e) => setB(e.target.value === '' ? '' : Number(e.target.value))} />
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function DateRangeDetails({ field, where, onPatch }: { field: string; where?: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
-  const a0 = (where as any)?.[`${field}__gte`] as string | undefined
-  const b0 = (where as any)?.[`${field}__lt`] as string | undefined
-  const normalizeEnd = (b?: string) => {
-    if (!b) return undefined
-    const d = new Date(`${b}T00:00:00`); if (isNaN(d.getTime())) return undefined
-    d.setDate(d.getDate() + 1)
-    return ymd(d)
-  }
-  const [start, setStart] = React.useState<string>(a0 || '')
-  const [end, setEnd] = React.useState<string>(b0 ? (() => { const d = new Date(b0 + 'T00:00:00'); d.setDate(d.getDate() - 1); return ymd(d) })() : '')
-  React.useEffect(() => {
-    const patch: Record<string, any> = {}
-    patch[`${field}__gte`] = start || undefined
-    patch[`${field}__lt`] = normalizeEnd(end)
-    onPatch(patch)
-  }, [start, end])
-  return (
-    <div className="rounded-md border bg-card p-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium">Date range: {field}</div>
-        <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setStart(''); setEnd(''); onPatch({ [`${field}__gte`]: undefined, [`${field}__lt`]: undefined }) }}>Clear</button>
-      </div>
-      <div className="grid grid-cols-2 gap-2 mt-2 items-center">
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">Start</label>
-          <input type="date" className="h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={start} onChange={(e) => setStart(e.target.value)} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">End</label>
-          <input type="date" className="h-8 px-2 rounded-md border text-[12px] bg-[hsl(var(--secondary)/0.6)]" value={end} onChange={(e) => setEnd(e.target.value)} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const DISTINCT_CACHE = new Map<string, { ts: number; values: string[]; total: number }>()
-const DISTINCT_TTL_MS = 10 * 60 * 1000
-
-function ValuesFilterPicker({ field, datasourceId, source, where, onApply }: { field: string; datasourceId?: string; source?: string; where?: Record<string, any>; onApply: (vals: any[]) => void }) {
-  const [selected, setSelected] = React.useState<any[]>(Array.isArray((where as any)?.[field]) ? ((where as any)[field] as any[]) : [])
-  const [filterQuery, setFilterQuery] = React.useState('')
-  const [samples, setSamples] = React.useState<string[]>([])
-  const [loading, setLoading] = React.useState<boolean>(false)
-  const [total, setTotal] = React.useState<number | null>(null)
-  React.useEffect(() => setSelected(Array.isArray((where as any)?.[field]) ? ((where as any)[field] as any[]) : []), [JSON.stringify(where), field])
-  React.useEffect(() => {
-    let abort = false
-    async function run() {
-      try {
-        if (!source) return
-        setLoading(true)
-        const omitWhere: Record<string, any> = { ...((where || {}) as any) }
-        Object.keys(omitWhere).forEach((k) => { if (k === field || k.startsWith(`${field}__`)) delete (omitWhere as any)[k] })
-        const cacheKey = JSON.stringify({ ds: datasourceId || '', src: source || '', field, where: omitWhere })
-        const cached = DISTINCT_CACHE.get(cacheKey)
-        if (cached && (Date.now() - cached.ts) < DISTINCT_TTL_MS) {
-          if (!abort) { setSamples(cached.values); setTotal(cached.total || cached.values.length) }
-          if (!abort) setLoading(false)
-          return
-        }
-        const pageSize = 5000
-        const acc = new Set<string>()
-        let grandTotal = 0
-
-        const fetchDistinct = async () => {
-          let offset = 0
-          while (!abort) {
-            const spec: any = { source, select: [field], agg: 'distinct', where: Object.keys(omitWhere).length ? omitWhere : undefined, limit: pageSize, offset }
-            const res = await QueryApi.querySpec({ spec, datasourceId, limit: pageSize, offset, includeTotal: true })
-            const cols = (res.columns || []) as string[]
-            const idx = cols.length > 0 ? (cols.indexOf(field) >= 0 ? cols.indexOf(field) : 0) : 0
-            const rows = Array.isArray(res.rows) ? res.rows : []
-            rows.forEach((arr: any) => { const v = Array.isArray(arr) ? arr[idx] : (Array.isArray(arr) ? arr[0] : undefined); if (v !== null && v !== undefined) acc.add(String(v)) })
-            const got = rows.length
-            const tot = Number(res.totalRows || 0)
-            grandTotal = Math.max(grandTotal, tot)
-            offset += got
-            if (got < pageSize || (tot > 0 && offset >= tot)) break
-          }
-        }
-
-        const fetchScan = async () => {
-          let offset = 0
-          while (!abort) {
-            const spec: any = { source, select: [field], where: Object.keys(omitWhere).length ? omitWhere : undefined, limit: pageSize, offset }
-            const res = await QueryApi.querySpec({ spec, datasourceId, limit: pageSize, offset, includeTotal: true })
-            const cols = (res.columns || []) as string[]
-            const idx = cols.length > 0 ? (cols.indexOf(field) >= 0 ? cols.indexOf(field) : 0) : 0
-            const rows = Array.isArray(res.rows) ? res.rows : []
-            rows.forEach((arr: any) => { const v = Array.isArray(arr) ? arr[idx] : (Array.isArray(arr) ? arr[0] : undefined); if (v !== null && v !== undefined) acc.add(String(v)) })
-            const got = rows.length
-            const tot = Number(res.totalRows || 0)
-            grandTotal = Math.max(grandTotal, tot)
-            offset += got
-            if (got < pageSize || (tot > 0 && offset >= tot)) break
-          }
-        }
-
-        let usedFallback = false
-        try { await fetchDistinct() } catch { usedFallback = true }
-        if (!usedFallback && acc.size === 0) { usedFallback = true }
-        if (usedFallback) { await fetchScan() }
-        if (!abort) {
-          const valuesArr = Array.from(acc.values()).sort()
-          const totalNum = grandTotal || acc.size
-          setSamples(valuesArr)
-          setTotal(totalNum)
-          try { DISTINCT_CACHE.set(cacheKey, { ts: Date.now(), values: valuesArr, total: totalNum }) } catch {}
-        }
-      } catch { if (!abort) { setSamples([]); setTotal(0) } }
-      finally { if (!abort) setLoading(false) }
-    }
-    run(); return () => { abort = true }
-  }, [datasourceId, source, field, JSON.stringify(where)])
-  const toggle = (v: any) => { const exists = selected.some((x) => x === v); const next = exists ? selected.filter((x) => x !== v) : [...selected, v]; setSelected(next) }
-  return (
-    <div className="rounded-md border bg-card p-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium">Filter values: {field}</div>
-        <div className="flex items-center gap-2">
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => { setSelected([]); onApply([]) }}>Clear</button>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={() => onApply(selected)}>Apply</button>
-        </div>
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <input className="w-full px-2 py-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)] text-xs" placeholder="Search values" value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} />
-        {loading && <span className="h-4 w-4 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>}
-      </div>
-      <div className="max-h-56 overflow-auto mt-2">
-        <ul className="space-y-1">
-          {samples.filter((s) => String(s).toLowerCase().includes(filterQuery.toLowerCase())).map((v, i) => (
-            <li key={i} className="flex items-center gap-2 text-xs">
-              <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={selected.some((x) => x === v)} onChange={() => toggle(v)} />
-              <span className="truncate max-w-[240px]" title={String(v)}>{String(v)}</span>
-            </li>
-          ))}
-          {!loading && samples.length === 0 && (<li className="text-xs text-muted-foreground">No values found</li>)}
-        </ul>
-      </div>
-    </div>
-  )
-}
-
-export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, alert, widget, parentDashboardId, defaultKind, defaultTemplate }: { open: boolean; mode: 'create'|'edit'; onCloseAction: () => void; onSavedAction: (a: AlertOut) => void; alert?: AlertOut | null; widget?: WidgetConfig | null; parentDashboardId?: string | null; defaultKind?: 'alert'|'notification'; defaultTemplate?: string }) {
+export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, alert, widget, parentDashboardId, defaultKind, defaultTemplate }: { open: boolean; mode: 'create'|'edit'; onCloseAction: () => void; onSavedAction: (a: AlertOut) => void; alert?: AlertOut | null; widget?: CarriedWidget | null; parentDashboardId?: string | null; defaultKind?: 'alert'|'notification'; defaultTemplate?: string }) {
   const { user } = useAuth()
   const { resolved } = useTheme()
   const tabBase = resolved === 'dark' ? 'sidebar-item-dark' : 'sidebar-item-light'
@@ -308,6 +47,12 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   const [renderMode, setRenderMode] = useState<'kpi'|'table'|'chart'|'report'>('kpi')
   const [attachPdf, setAttachPdf] = useState<boolean>(false)
   const [pdfLandscape, setPdfLandscape] = useState<boolean>(false)
+  // Tracks the widgetId we hydrated from a saved alert's render.widgetRef.
+  // The auto-derive-renderMode effect must NOT override the saved render.mode
+  // for this initial widget (the picked widget cfg loads async and would
+  // otherwise clobber a saved 'report' mode → hides Attach PDF/Landscape).
+  // Only a genuine user re-pick (pickWidgetId !== hydrated) should auto-derive.
+  const hydratedPickRef = useRef<string | null>(null)
   const [snapWidth, setSnapWidth] = useState<number>(1000)
   const [snapHeight, setSnapHeight] = useState<number>(280)
   type RecipientToken = { kind: 'contact'|'email'|'phone'|'tag'; label: string; value: string; email?: string; phone?: string; id?: string; name?: string; tag?: string }
@@ -480,7 +225,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     }
   }, [open, mode, defaultKind, defaultTemplate])
 
-  const spec: any = (widget as any)?.querySpec || {}
+  const spec: any = widget?.querySpec || {}
   const wrapSelAt = React.useCallback((idx: number, before: string, after: string) => {
     try {
       const el = phAreaRefs.current[idx]
@@ -582,20 +327,25 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       try {
         const wref = (r as any)?.widgetRef
         if (wref && wref.dashboardId && wref.widgetId) {
-          const curWid = String((widget as any)?.id || '')
-          const curDash = String(((widget as any)?.dashboardId || parentDashboardId || '') || '')
+          const curWid = String(widget?.id || '')
+          const curDash = String((widget?.dashboardId || parentDashboardId || '') || '')
           const refWid = String(wref.widgetId || '')
           const refDash = String(wref.dashboardId || '')
           const same = (!!curWid && !!curDash && curWid === refWid && curDash === refDash)
           if (same) {
             setRendererUseCarried(true)
+            hydratedPickRef.current = null
           } else {
             setRendererUseCarried(false)
             setPickDashId(String(wref.dashboardId))
             setPickWidgetId(String(wref.widgetId))
+            // Mark this picked widget as hydrated so the auto-derive effect
+            // trusts the saved render.mode instead of re-deriving it.
+            hydratedPickRef.current = String(wref.widgetId)
           }
         } else {
           setRendererUseCarried(true)
+          hydratedPickRef.current = null
         }
       } catch {}
       const triggersArr: any[] = Array.isArray(cfg.triggers) ? cfg.triggers : []
@@ -713,9 +463,10 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         setAdvOpen(advEnabled)
       } catch {}
     } else {
-      setName((widget as any)?.title || 'New Alert')
+      setName(widget?.title || 'New Alert')
       setKind(defaultKind || 'alert')
       setEnabled(true)
+      hydratedPickRef.current = null
       setEmailTo('')
       setSmsTo('')
       setRecipTokens([])
@@ -731,7 +482,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         setAggSel(agg)
         const m = (spec?.measure || spec?.y || measureOptions?.[0]?.value || '') as string
         setMeasureSel(m)
-        setAdvDatasourceId(String((widget as any)?.datasourceId || ''))
+        setAdvDatasourceId(String(widget?.datasourceId || ''))
         setAdvSource(String(spec?.source || ''))
         setAdvAgg((agg as any) || 'count')
         setAdvMeasure(String(m || ''))
@@ -752,7 +503,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         setAdvPivot({ values: [], filters: [] })
       }
     }
-  }, [open, mode, alert?.id, (widget as any)?.id, defaultKind, defaultTemplate])
+  }, [open, mode, alert?.id, widget?.id, defaultKind, defaultTemplate])
 
   useEffect(() => {
     if (!advOpen) return
@@ -808,18 +559,22 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     if (!open || kind !== 'notification') return
     if (rendererUseCarried && widget) {
       try {
-        const t = String((widget as any)?.type || '').toLowerCase()
+        const t = String(widget?.type || '').toLowerCase()
         setRenderMode(t === 'report' ? 'report' : t === 'table' ? 'table' : (t === 'chart' ? 'chart' : 'kpi'))
       } catch {}
       return
     }
     if (!rendererUseCarried && pickWidgetCfg) {
+      // Skip auto-derive for the widget we hydrated from saved render.widgetRef —
+      // trust the saved render.mode. Only re-derive when the user picks a
+      // DIFFERENT widget than the one hydrated.
+      if (hydratedPickRef.current && pickWidgetId === hydratedPickRef.current) return
       try {
         const t = String((pickWidgetCfg as any)?.type || '').toLowerCase()
         setRenderMode(t === 'report' ? 'report' : t === 'table' ? 'table' : (t === 'chart' ? 'chart' : 'kpi'))
       } catch {}
     }
-  }, [open, kind, rendererUseCarried, (widget as any)?.type, (pickWidgetCfg as any)?.type])
+  }, [open, kind, rendererUseCarried, pickWidgetId, widget?.type, (pickWidgetCfg as any)?.type])
 
   useEffect(() => {
     if (!advOpen || !advDatasourceId) { setTableList([]); setTablesMeta(null); setAdvTablesLoading(false); return }
@@ -896,8 +651,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   useEffect(() => {
     if (!open || kind !== 'notification') return
     if (!rendererUseCarried) return
-    const wid = (widget as any)?.id ? String((widget as any).id) : ''
-    const dashId = ((widget as any)?.dashboardId || parentDashboardId || '') as string
+    const wid = widget?.id ? String(widget.id) : ''
+    const dashId = (widget?.dashboardId || parentDashboardId || '') as string
     if (!wid || !dashId) { setRefLayout(null); return }
     let cancelled = false
     ;(async () => {
@@ -909,7 +664,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       } catch { if (!cancelled) setRefLayout(null) }
     })()
     return () => { cancelled = true }
-  }, [open, kind, rendererUseCarried, (widget as any)?.id, (widget as any)?.dashboardId, parentDashboardId, user?.id])
+  }, [open, kind, rendererUseCarried, widget?.id, widget?.dashboardId, parentDashboardId, user?.id])
 
   // Keep height in sync with widget aspect ratio when enabled
   useEffect(() => {
@@ -1242,15 +997,15 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         const xVal = advOpen ? (advXValue || undefined) : (xValueSel || undefined)
         const lf = advOpen ? ((advPivot.legend as any) || undefined) : (spec as any)?.legend
         const cat = (() => { try { const v = lf ? (whereObj as any)?.[lf] : undefined; if (Array.isArray(v)) return String(v[0] ?? '') || 'All'; if (v != null) return String(v); return (lf ? 'All' : '—') } catch { return (lf ? 'All' : '—') } })()
-        return { datasourceId: (widget as any)?.datasourceId, source: spec?.source, aggregator: agg, measure: meas, xField: xFld, xValue: xVal, legendField: lf, category: cat, where: whereObj, widgetId: (widget as any)?.id }
+        return { datasourceId: widget?.datasourceId, source: spec?.source, aggregator: agg, measure: meas, xField: xFld, xValue: xVal, legendField: lf, category: cat, where: whereObj, widgetId: widget?.id }
       }
     } catch {}
     return null
-  }, [mode, alert?.id, JSON.stringify((alert as any)?.config || {}), (widget as any)?.id, aggSel, measureSel, xValueSel, advOpen, JSON.stringify(advPivot), advWhere, advAgg, advXValue])
+  }, [mode, alert?.id, JSON.stringify((alert as any)?.config || {}), widget?.id, aggSel, measureSel, xValueSel, advOpen, JSON.stringify(advPivot), advWhere, advAgg, advXValue])
 
   const buildPayload = (): AlertCreate => {
     const triggers: any[] = []
-    const cfgDsId = advOpen ? (advDatasourceId || undefined) : ((mode==='edit' && alert) ? ((alert as any).config?.datasourceId) : ((widget as any)?.datasourceId))
+    const cfgDsId = advOpen ? (advDatasourceId || undefined) : ((mode==='edit' && alert) ? ((alert as any).config?.datasourceId) : (widget?.datasourceId))
 
     if (triggerTimeEnabled) {
       triggers.push({ type: 'time', cron: buildCron(timeOfDay, { mode: scheduleKind, dows: daysOfWeek, doms: daysOfMonth, everyHours }) })
@@ -1358,10 +1113,10 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     const prevRender = (mode === 'edit' && alert) ? ((alert as any).config?.render || {}) : {}
     if (kind === 'notification') {
       let refSpec: any = null
-      let refLabel = (widget as any)?.title || name
-      if (rendererUseCarried && widget && (widget as any)?.querySpec) {
-        refSpec = (widget as any).querySpec
-        refLabel = (widget as any)?.title || name
+      let refLabel = widget?.title || name
+      if (rendererUseCarried && widget && widget?.querySpec) {
+        refSpec = widget.querySpec
+        refLabel = widget?.title || name
       } else if (!rendererUseCarried && pickWidgetCfg && (pickWidgetCfg as any)?.querySpec) {
         refSpec = (pickWidgetCfg as any).querySpec
         refLabel = (pickWidgets.find(w => w.id === pickWidgetId)?.title || name)
@@ -1377,17 +1132,17 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       } else {
         render = { mode: 'kpi', label: refLabel, querySpec: refSpec || kpiSpec || prevRender.querySpec || {}, width: snapWidth, height: snapHeight }
       }
-      if (rendererUseCarried && widget && (widget as any)?.id) {
-        (render as any).widgetRef = { dashboardId: ((widget as any)?.dashboardId || parentDashboardId || ''), widgetId: (widget as any)?.id }
+      if (rendererUseCarried && widget && widget?.id) {
+        (render as any).widgetRef = { dashboardId: (widget?.dashboardId || parentDashboardId || ''), widgetId: widget?.id }
       } else if (!rendererUseCarried && pickDashId && pickWidgetId) {
         (render as any).widgetRef = { dashboardId: pickDashId, widgetId: pickWidgetId }
       } else if (prevRender.widgetRef) {
         (render as any).widgetRef = prevRender.widgetRef
       }
     } else {
-      render = { mode: 'kpi', label: (widget as any)?.title || name, querySpec: kpiSpec || prevRender.querySpec || {}, width: snapWidth, height: snapHeight }
-      if (rendererUseCarried && widget && (widget as any)?.id) {
-        (render as any).widgetRef = { dashboardId: ((widget as any)?.dashboardId || parentDashboardId || ''), widgetId: (widget as any)?.id }
+      render = { mode: 'kpi', label: widget?.title || name, querySpec: kpiSpec || prevRender.querySpec || {}, width: snapWidth, height: snapHeight }
+      if (rendererUseCarried && widget && widget?.id) {
+        (render as any).widgetRef = { dashboardId: (widget?.dashboardId || parentDashboardId || ''), widgetId: widget?.id }
       } else if (!rendererUseCarried && pickDashId && pickWidgetId) {
         (render as any).widgetRef = { dashboardId: pickDashId, widgetId: pickWidgetId }
       } else if (prevRender.widgetRef) {
@@ -1445,14 +1200,14 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
     // Prefer explicit dashboard picked in Header when renderer uses 'Pick from dashboard'
     const payloadDashId = (() => {
       const carried = rendererUseCarried
-      const wDid = (widget as any)?.dashboardId
+      const wDid = widget?.dashboardId
       const aDid = (alert as any)?.dashboardId
       const pDid = parentDashboardId
       // Prefer explicit pick if available; otherwise try carried/widget/parent/alert in order
       if (!carried) return (pickDashId || wDid || aDid || pDid || undefined) as any
       return (wDid || pDid || pickDashId || aDid || undefined) as any
     })()
-    const payloadWidgetId = (widget as any)?.id || (!rendererUseCarried && pickWidgetId ? pickWidgetId : undefined) || (alert as any)?.widgetId || undefined
+    const payloadWidgetId = widget?.id || (!rendererUseCarried && pickWidgetId ? pickWidgetId : undefined) || (alert as any)?.widgetId || undefined
     const payload: AlertCreate = { name, kind, widgetId: payloadWidgetId, dashboardId: payloadDashId, enabled, config: cfg as any }
     return payload
   }
@@ -1538,7 +1293,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                   <div className="flex items-center gap-4 text-xs">
                     <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={chanEmail} onChange={(e)=> setChanEmail(e.target.checked)} /> Email</label>
                     <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={chanSms} onChange={(e)=> setChanSms(e.target.checked)} /> SMS</label>
-                    {chanEmail && renderMode === 'report' && (
+                    {chanEmail && (renderMode === 'report' || attachPdf) && (
                       <>
                         <label className="inline-flex items-center gap-2 ml-2 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> Attach PDF</label>
                         {attachPdf && (
@@ -1584,7 +1339,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                           className="h-4 w-4 accent-[hsl(var(--primary))]"
                           checked={useWidgetAspect}
                           onChange={(e)=> setUseWidgetAspect(e.target.checked)}
-                          disabled={(rendererUseCarried ? (!((widget as any)?.id && (((widget as any)?.dashboardId || parentDashboardId)))) : (!(pickDashId && pickWidgetId)))}
+                          disabled={(rendererUseCarried ? (!(widget?.id && ((widget?.dashboardId || parentDashboardId)))) : (!(pickDashId && pickWidgetId)))}
                         />
                         <span>Use widget dimensions/aspect ratio</span>
                       </label>
@@ -1813,7 +1568,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                     const xValue = advOpen ? '' : xValueSel
                     const filtersObj = (() => { try { return advOpen ? (advWhere.trim()? JSON.parse(advWhere): {}) : (spec?.where || {}) } catch { return {} } })()
                     const filtersHuman = Object.keys(filtersObj).map(k => `${k}=${Array.isArray(filtersObj[k])?filtersObj[k].join('|'):filtersObj[k]}`).join('; ')
-                    const dsId = advOpen ? advDatasourceId : (widget as any)?.datasourceId
+                    const dsId = advOpen ? advDatasourceId : widget?.datasourceId
                     const src = advOpen ? advSource : (spec?.source || '')
                     const thrRaw = String(value || '0')
                     const parts = thrRaw.split(',').map(s=>Number(s.trim())).filter(n=>Number.isFinite(n))
