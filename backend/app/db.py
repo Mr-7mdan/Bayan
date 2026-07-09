@@ -212,6 +212,9 @@ _DUCK_CONFIGURED: bool = False
 # connection *pool* (_DUCK_READ_POOL) instead so they can execute in parallel.
 _DUCK_SHARED_CONN = None
 _DUCK_SHARED_PATH: str | None = None
+# Aliases already ATTACHed onto the shared connection. Replaces the old
+# id(conn)-keyed global dict (which suffered GC id-reuse collisions).
+_DUCK_SHARED_ATTACHED: set[str] = set()
 
 # ── DuckDB read connection pool ────────────────────────────────────
 # A simple thread-safe pool of independent duckdb.connect() handles.
@@ -232,8 +235,20 @@ _DUCK_READ_POOL_SIZE = int(os.environ.get("DUCKDB_READ_POOL_SIZE", "0") or "0") 
 # so that remote catalogs (e.g. "pcma") are visible.
 _DUCK_ATTACH_REGISTRY: list[tuple[str, str]] = []  # [(alias, full_attach_sql), ...]
 _DUCK_ATTACH_REGISTRY_LOCK = _threading.Lock()
-# Per-connection set of aliases already ATTACHed (keyed by id(conn))
-_DUCK_CONN_ATTACHED: dict[int, set[str]] = {}
+
+
+class _TrackedConn:
+    """Pool entry: a duckdb connection + the set of ATTACH aliases replayed onto it.
+
+    Replaces id(conn)-keyed tracking so a GC-recycled object id can never let a
+    fresh connection inherit a dead one's "already attached" set. The set travels
+    with the connection and dies with it — no global dict, no ephemeral leak.
+    """
+    __slots__ = ("conn", "attached")
+
+    def __init__(self, conn):
+        self.conn = conn
+        self.attached: set[str] = set()
 
 
 def register_duck_attach(alias: str, attach_sql: str) -> None:
@@ -246,17 +261,22 @@ def register_duck_attach(alias: str, attach_sql: str) -> None:
         _DUCK_ATTACH_REGISTRY.append((alias, attach_sql))
 
 
-def _replay_attaches_on_conn(conn) -> None:
-    """Replay any registered ATTACH statements that haven't been applied to *conn*."""
+def _replay_attaches_on_conn(conn, attached: set | None = None) -> None:
+    """Replay any registered ATTACH statements that haven't been applied to *conn*.
+
+    *attached* is the caller-owned set of aliases already present on *conn*
+    (the pool's `_TrackedConn.attached`, or the shared conn's
+    `_DUCK_SHARED_ATTACHED`). When None (query.py one-arg callers, ephemeral
+    conns) a throwaway local set is used — the "already"/"exists" handling below
+    makes duplicate replay harmless, so a fresh set just means "replay all". No
+    lock on *attached*: a pooled conn has one borrower at a time and the shared
+    conn's set.add is GIL-atomic; replay is idempotent regardless.
+    """
     with _DUCK_ATTACH_REGISTRY_LOCK:
         if not _DUCK_ATTACH_REGISTRY:
             return
         registry_snapshot = list(_DUCK_ATTACH_REGISTRY)
-    conn_id = id(conn)
-    already = _DUCK_CONN_ATTACHED.get(conn_id)
-    if already is None:
-        already = set()
-        _DUCK_CONN_ATTACHED[conn_id] = already
+    already = attached if attached is not None else set()
     for alias, sql in registry_snapshot:
         if alias in already:
             continue
@@ -288,11 +308,6 @@ def _replay_attaches_on_conn(conn) -> None:
         already.add(alias)
 
 
-def _forget_conn_attached(conn) -> None:
-    """Remove tracking for a connection being closed/discarded."""
-    _DUCK_CONN_ATTACHED.pop(id(conn), None)
-
-
 def _init_duck_read_pool(target: str, size: int = 0) -> None:
     """Pre-populate the read connection pool for *target* path."""
     global _DUCK_READ_POOL, _DUCK_READ_POOL_PATH
@@ -303,18 +318,24 @@ def _init_duck_read_pool(target: str, size: int = 0) -> None:
         _drain_duck_read_pool()
     if _DUCK_READ_POOL is not None:
         return  # already initialized for this path
-    pool_size = size or _DUCK_READ_POOL_SIZE or max(4, (os.cpu_count() or 4) * 2)
+    # Default is capped so a big-core machine doesn't open a huge pool; an
+    # explicit DUCKDB_READ_POOL_SIZE env override is intentionally uncapped.
+    pool_size = size or _DUCK_READ_POOL_SIZE or min(16, max(4, (os.cpu_count() or 4) * 2))
     _DUCK_READ_POOL = _queue.SimpleQueue()
     _DUCK_READ_POOL_PATH = target
     for _ in range(pool_size):
         try:
-            # NOTE: We intentionally do NOT use read_only=True here.
-            # Pool connections need to execute ATTACH statements for remote
-            # catalogs (MySQL/PostgreSQL), which requires write access to the
-            # connection's internal catalog metadata.
+            # NOTE: Pool connections stay read-write on purpose. Two reasons:
+            # (a) duckdb's in-process instance cache raises "different
+            #     configuration" if the same file is opened read_only=True while
+            #     _DUCK_SHARED_CONN already holds it read-write; and
+            # (b) ATTACH replay writes session catalog metadata for remote
+            #     catalogs (MySQL/PostgreSQL), which needs a writable catalog.
+            # Do NOT switch to read_only=True — it also breaks init_duck_shared
+            # ordering, which opens the RW shared conn before building this pool.
             c = _duckdb.connect(target)
             _apply_duck_pragmas(c)
-            _DUCK_READ_POOL.put(c)
+            _DUCK_READ_POOL.put(_TrackedConn(c))
         except Exception:
             pass
 
@@ -329,10 +350,9 @@ def _drain_duck_read_pool() -> None:
     _DUCK_READ_POOL_PATH = None
     while True:
         try:
-            c = pool.get_nowait()
+            t = pool.get_nowait()
             try:
-                _forget_conn_attached(c)
-                c.close()
+                t.conn.close()
             except Exception:
                 pass
         except Exception:
@@ -349,8 +369,8 @@ class _PooledCursorWrap:
     a child cursor may or may not propagate reliably to the parent connection
     depending on the DuckDB version.  By handing out the raw connection we
     guarantee that (a) ATTACH operations persist for the lifetime of the
-    connection (surviving cursor close), (b) the ``_DUCK_CONN_ATTACHED``
-    tracking keyed by ``id(conn)`` stays valid across borrow cycles, and
+    connection (surviving cursor close), (b) the per-connection ATTACH set on
+    the owning ``_TrackedConn`` stays valid across borrow cycles, and
     (c) subsequent borrows of the same connection see the previously
     ATTACHed catalogs via ``_replay_attaches_on_conn``.
 
@@ -360,20 +380,21 @@ class _PooledCursorWrap:
     unchanged.
     """
 
-    __slots__ = ("_conn", "_pool")
+    __slots__ = ("_tracked", "_pool")
 
-    def __init__(self, conn, pool: _queue.SimpleQueue):
-        self._conn = conn
-        # Replay any registered ATTACH statements that this connection is missing
+    def __init__(self, tracked: "_TrackedConn", pool: _queue.SimpleQueue):
+        self._tracked = tracked
+        # Replay any registered ATTACH statements this connection is missing,
+        # tracked by the holder's own set (survives borrow cycles).
         try:
-            _replay_attaches_on_conn(conn)
+            _replay_attaches_on_conn(tracked.conn, tracked.attached)
         except Exception:
             pass
         self._pool = pool
 
     # Proxy attribute access to the connection
     def __getattr__(self, name):
-        return getattr(self._conn, name)
+        return getattr(self._tracked.conn, name)
 
     def __enter__(self):
         # Register with the calling thread's cancel token (set by the
@@ -381,10 +402,10 @@ class _PooledCursorWrap:
         # connection's running SQL via DuckDB's ``interrupt()``.
         try:
             from .cancellation import register_with_current_token
-            register_with_current_token(self._conn)
+            register_with_current_token(self._tracked.conn)
         except Exception:
             pass
-        return self._conn
+        return self._tracked.conn
 
     def __exit__(self, exc_type, exc, tb):
         # Drop the cancel-token registration first so a late cancel cannot
@@ -392,17 +413,40 @@ class _PooledCursorWrap:
         # and potentially handed to another request.
         try:
             from .cancellation import unregister_with_current_token
-            unregister_with_current_token(self._conn)
+            unregister_with_current_token(self._tracked.conn)
         except Exception:
             pass
+        tracked = self._tracked
+        # If the query raised, the connection may be wedged/invalidated.
+        # Health-check it before it re-enters rotation; replace on failure so
+        # the pool stays a constant size.
+        if exc_type is not None:
+            try:
+                tracked.conn.execute("SELECT 1")
+            except Exception:
+                try:
+                    tracked.conn.close()
+                except Exception:
+                    pass
+                tracked = None
+                try:
+                    c = _duckdb.connect(_DUCK_READ_POOL_PATH)
+                    _apply_duck_pragmas(c)
+                    tracked = _TrackedConn(c)
+                except Exception:
+                    # Could not open a replacement — drop it. The pool shrinks
+                    # by one; open_duck_native falls back to the shared conn
+                    # when the pool is empty.
+                    tracked = None
+        if tracked is None:
+            return False
         # Return connection to pool (don't close it)
         try:
-            self._pool.put(self._conn)
+            self._pool.put(tracked)
         except Exception:
             # Pool was drained / replaced; close the connection
             try:
-                _forget_conn_attached(self._conn)
-                self._conn.close()
+                tracked.conn.close()
             except Exception:
                 pass
         return False
@@ -485,6 +529,8 @@ def init_duck_shared(db_path: str | None = None) -> None:
             pass
         _DUCK_SHARED_CONN = None
         _DUCK_SHARED_PATH = None
+        # New connection ⇒ catalogs are gone; forget what was ATTACHed.
+        _DUCK_SHARED_ATTACHED.clear()
     # Open with small retry if engine conflicts exist
     attempts = 0
     while True:
@@ -547,8 +593,8 @@ def open_duck_native(db_path: str | None = None):
     # ── Strategy 1: read pool ────────────────────────────────────────
     if is_default_path and _DUCK_READ_POOL is not None:
         try:
-            conn = _DUCK_READ_POOL.get_nowait()
-            return _PooledCursorWrap(conn, _DUCK_READ_POOL)
+            tracked = _DUCK_READ_POOL.get_nowait()
+            return _PooledCursorWrap(tracked, _DUCK_READ_POOL)
         except Exception:
             pass  # pool exhausted — fall through
 
@@ -556,7 +602,7 @@ def open_duck_native(db_path: str | None = None):
     if is_default_path:
         con = _get_duck_shared(target)
         try:
-            _replay_attaches_on_conn(con)
+            _replay_attaches_on_conn(con, _DUCK_SHARED_ATTACHED)
         except Exception:
             pass
         cur = con.cursor()
@@ -600,7 +646,7 @@ def close_duck_shared() -> None:
     # Clear ATTACH registry — catalogs are connection-scoped
     with _DUCK_ATTACH_REGISTRY_LOCK:
         _DUCK_ATTACH_REGISTRY.clear()
-    _DUCK_CONN_ATTACHED.clear()
+    _DUCK_SHARED_ATTACHED.clear()
     # Drain read pool first (connections hold file handles)
     try:
         _drain_duck_read_pool()
