@@ -113,6 +113,19 @@ class Dashboard(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, onupdate=func.now(), nullable=True)
 
 
+class DashboardVersion(Base):
+    """Prior snapshots of a dashboard's definition (spec 24). Captured on
+    meaningful saves, time-coalesced, pruned to the newest 20 per dashboard."""
+    __tablename__ = "dashboard_versions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    dashboard_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    definition_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class ShareLink(Base):
     __tablename__ = "share_links"
 
@@ -404,13 +417,44 @@ def create_datasource(db, payload: NewDatasourceInput) -> Datasource:
     return ds
 
 
-def save_dashboard(db, user_id: Optional[str], name: str, definition: dict, dash_id: Optional[str] = None) -> Dashboard:
+_VERSION_COALESCE_SEC = 300  # ponytail: 1 version per 5 min per dashboard max; tune via config if users ask
+_VERSION_KEEP = 20           # ponytail: newest 20 per dashboard; bump if users need deeper history
+
+
+def _snapshot_dashboard_version(db, d: Dashboard, actor: Optional[str], force: bool = False) -> None:
+    """Persist the CURRENT (pre-mutation) state of `d` as a version, coalescing
+    autosave churn. Caller invokes this BEFORE overwriting d.name/definition_json."""
+    latest = (db.query(DashboardVersion)
+                .filter(DashboardVersion.dashboard_id == d.id)
+                .order_by(DashboardVersion.created_at.desc()).first())
+    if latest and latest.definition_json == d.definition_json:
+        return  # identical — nothing to keep
+    if not force and latest and latest.created_at and \
+       (datetime.utcnow() - latest.created_at).total_seconds() < _VERSION_COALESCE_SEC:
+        return  # autosave churn — coalesce
+    db.add(DashboardVersion(id=str(uuid4()), dashboard_id=d.id, name=d.name,
+                            definition_json=d.definition_json, created_by=actor))
+    # prune: keep newest _VERSION_KEEP
+    ids = [r.id for r in db.query(DashboardVersion.id)
+             .filter(DashboardVersion.dashboard_id == d.id)
+             .order_by(DashboardVersion.created_at.desc()).offset(_VERSION_KEEP).all()]
+    if ids:
+        db.query(DashboardVersion).filter(DashboardVersion.id.in_(ids)).delete(synchronize_session=False)
+
+
+def save_dashboard(db, user_id: Optional[str], name: str, definition: dict, dash_id: Optional[str] = None,
+                   actor: Optional[str] = None, force_version: bool = False) -> Dashboard:
     if dash_id:
         d: Dashboard | None = db.get(Dashboard, dash_id)
         if not d:
             raise ValueError("Dashboard not found")
+        new_json = json.dumps(definition)
+        # Snapshot the prior state only when the definition actually changes
+        # (or on restore, where force_version keeps restore undoable).
+        if force_version or new_json != d.definition_json:
+            _snapshot_dashboard_version(db, d, actor=(actor or user_id), force=force_version)
         d.name = name
-        d.definition_json = json.dumps(definition)
+        d.definition_json = new_json
     else:
         d = Dashboard(id=str(uuid4()), user_id=user_id, name=name, definition_json=json.dumps(definition))
         db.add(d)
@@ -682,6 +726,8 @@ def delete_dashboard(db, dash_id: str) -> int:
     db.query(EmbedToken).where(EmbedToken.dashboard_id == dash_id).delete()
     # Delete collection items
     db.query(CollectionItem).where(CollectionItem.dashboard_id == dash_id).delete()
+    # Delete version history (spec 24)
+    db.query(DashboardVersion).where(DashboardVersion.dashboard_id == dash_id).delete()
     # Delete dashboard
     deleted = db.query(Dashboard).where(Dashboard.id == dash_id).delete()
     if deleted:

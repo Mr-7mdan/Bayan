@@ -29,6 +29,7 @@ from .routers import periods as periods_router
 from .routers import ai as ai_router
 from .routers import users as users_router
 from .routers import admin as admin_router
+from .routers import backup as backup_router
 from .scheduler import ensure_scheduler_started, schedule_all_jobs, schedule_all_alert_jobs, shutdown_scheduler
 from .routers import alerts as alerts_router
 from .routers import snapshot as snapshot_router
@@ -186,6 +187,8 @@ async def _startup():
             ensure_scheduler_started()
             schedule_all_jobs()
             schedule_all_alert_jobs()
+            from .scheduler import schedule_backup_job
+            schedule_backup_job()
             # Start a background watchdog that checks scheduler health every 5 minutes
             import threading
             def _scheduler_watchdog():
@@ -210,6 +213,7 @@ app.include_router(dashboards_router.router, prefix="/api")
 app.include_router(periods_router.router, prefix="/api")
 app.include_router(users_router.router, prefix="/api")
 app.include_router(admin_router.router, prefix="/api")
+app.include_router(backup_router.router, prefix="/api")
 app.include_router(ai_router.router, prefix="/api")
 app.include_router(alerts_router.router, prefix="/api")
 app.include_router(snapshot_router.router, prefix="/api")

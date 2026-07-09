@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # Wall-clock cap on a single data-sync job before the slot is released (spec 10)
     sync_job_timeout_seconds: int = Field(default=3600, validation_alias=AliasChoices("SYNC_JOB_TIMEOUT_SECONDS"))
 
+    # Metadata backups (spec 24): nightly VACUUM INTO with count-based retention
+    backup_dir: str = Field(default=".data/backups", validation_alias=AliasChoices("BACKUP_DIR"))
+    backup_cron: str = Field(default="30 3 * * *", validation_alias=AliasChoices("BACKUP_CRON"))
+    backup_retention: int = Field(default=14, validation_alias=AliasChoices("BACKUP_RETENTION"))
+    backup_include_duckdb: bool = Field(default=False, validation_alias=AliasChoices("BACKUP_INCLUDE_DUCKDB"))
+
     # Local analytical store (DuckDB)
     duckdb_path: str = Field(default=".data/local.duckdb")
 

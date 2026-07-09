@@ -27,6 +27,7 @@ from ..models import (
     create_embed_token_row,
     revoke_embed_token,
     EmbedToken,
+    DashboardVersion,
     User,
 )
 from ..schemas import (
@@ -78,6 +79,37 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _definition_out(d: Dashboard) -> DashboardOut:
+    """Parse + sanitize a dashboard's stored definition into a DashboardOut,
+    tolerating legacy/invalid shapes (shared by get_dash, get_public, restore)."""
+    from ..schemas import DashboardDefinition as _DashDef
+    try:
+        raw = json.loads(d.definition_json or "{}")
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    layout = raw.get("layout")
+    if not isinstance(layout, list):
+        layout = []
+    widgets = raw.get("widgets")
+    if not isinstance(widgets, dict):
+        widgets = {}
+    options = raw.get("options") if isinstance(raw.get("options"), dict) else None
+    try:
+        widgets = {str(k): (v if isinstance(v, dict) else {}) for k, v in widgets.items()}
+    except Exception:
+        widgets = {}
+    defn = {"layout": layout, "widgets": widgets}
+    if options is not None:
+        defn["options"] = options
+    try:
+        defn_model = _DashDef.model_validate(defn)
+    except Exception:
+        defn_model = _DashDef()
+    return DashboardOut(id=d.id, name=d.name, userId=d.user_id, created_at=d.created_at, definition=defn_model)
 
 
 def _actor_is_admin(db: Session, actor_id: str | None) -> bool:
@@ -257,6 +289,7 @@ def save_dash(payload: DashboardSaveRequest, request: Request, actorId: str | No
             name=payload.name,
             definition=payload.definition.model_dump(),
             dash_id=payload.id,
+            actor=actorId,
         )
         audit("dashboard.update" if is_update else "dashboard.create",
               actor_id=actorId, target_type="dashboard", target_id=d.id, request=request)
@@ -271,6 +304,73 @@ def save_dash(payload: DashboardSaveRequest, request: Request, actorId: str | No
         raise HTTPException(status_code=404, detail=str(e))
 
 
+# --- Version history (spec 24) ---
+class DashboardVersionOut(BaseModel):
+    id: str
+    createdAt: datetime = Field(alias="created_at", serialization_alias="createdAt")
+    createdBy: str | None = Field(default=None, alias="created_by", serialization_alias="createdBy")
+    name: str
+    widgetsCount: int
+
+
+@router.get("/{dash_id}/versions", response_model=list[DashboardVersionOut])
+def list_dashboard_versions(dash_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+    d = load_dashboard(db, dash_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    # Read permission: owner, admin, or shared ro/rw
+    if not _actor_is_admin(db, actorId):
+        actor = (actorId or "").strip()
+        if d.user_id and d.user_id != actor:
+            perm = get_share_permission(db, d.id, actor)
+            if perm not in ("ro", "rw"):
+                raise HTTPException(status_code=403, detail="Forbidden")
+    rows = (
+        db.query(DashboardVersion)
+        .filter(DashboardVersion.dashboard_id == dash_id)
+        .order_by(DashboardVersion.created_at.desc())
+        .all()
+    )
+    out: list[DashboardVersionOut] = []
+    for r in rows:
+        # Parse only to count widgets — never return full definitions in the list
+        try:
+            widgets = (json.loads(r.definition_json or "{}") or {}).get("widgets") or {}
+            wc = len(widgets) if isinstance(widgets, dict) else 0
+        except Exception:
+            wc = 0
+        out.append(DashboardVersionOut(id=r.id, created_at=r.created_at, created_by=r.created_by, name=r.name, widgetsCount=wc))
+    return out
+
+
+@router.post("/{dash_id}/versions/{version_id}/restore", response_model=DashboardOut)
+def restore_dashboard_version(dash_id: str, version_id: str, request: Request, userId: str | None = Query(default=None), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+    d = load_dashboard(db, dash_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    # Write permission: owner, admin, or 'rw'
+    actor = actorId if settings.auth_enforce else (userId or actorId or "dev_user")
+    if _actor_is_admin(db, actor):
+        actor = d.user_id or actor  # bypass checks
+    if d.user_id and d.user_id != actor:
+        perm = get_share_permission(db, d.id, actor)
+        if perm != "rw":
+            raise HTTPException(status_code=403, detail="No write permission for this dashboard")
+    version = db.get(DashboardVersion, version_id)
+    if not version or version.dashboard_id != dash_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+    try:
+        definition = json.loads(version.definition_json or "{}")
+    except Exception:
+        definition = {}
+    # force_version=True snapshots the pre-restore state so restore is undoable
+    d = save_dashboard(db, user_id=d.user_id, name=version.name, definition=definition,
+                       dash_id=dash_id, actor=actorId, force_version=True)
+    audit("dashboard.version.restore", actor_id=actorId, target_type="dashboard", target_id=dash_id,
+          request=request, details={"versionId": version_id})
+    return _definition_out(d)
+
+
 @router.get("/{dash_id}", response_model=DashboardOut)
 def get_dash(dash_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     d = load_dashboard(db, dash_id)
@@ -283,38 +383,7 @@ def get_dash(dash_id: str, actorId: str | None = Depends(actor_id_optional), db:
             perm = get_share_permission(db, d.id, actor)
             if perm not in ("ro", "rw"):
                 raise HTTPException(status_code=403, detail="Forbidden")
-    # Parse and sanitize definition to avoid schema validation 500s on legacy/invalid shapes
-    try:
-        raw = json.loads(d.definition_json or "{}")
-    except Exception:
-        raw = {}
-    if not isinstance(raw, dict):
-        raw = {}
-    layout = raw.get("layout")
-    if not isinstance(layout, list):
-        layout = []
-    widgets = raw.get("widgets")
-    if not isinstance(widgets, dict):
-        widgets = {}
-    options = raw.get("options") if isinstance(raw.get("options"), dict) else None
-    # Drop non-dict widget configs to prevent schema validation errors
-    try:
-        if isinstance(widgets, dict):
-            widgets = {str(k): (v if isinstance(v, dict) else {}) for k, v in widgets.items()}
-        else:
-            widgets = {}
-    except Exception:
-        widgets = {}
-    defn = {"layout": layout, "widgets": widgets}
-    if options is not None:
-        defn["options"] = options
-    # Validate against schema; fallback to empty if invalid
-    from ..schemas import DashboardDefinition as _DashDef
-    try:
-        defn_model = _DashDef.model_validate(defn)
-    except Exception:
-        defn_model = _DashDef()
-    return DashboardOut(id=d.id, name=d.name, userId=d.user_id, created_at=d.created_at, definition=defn_model)
+    return _definition_out(d)
 
 
 # --- Embed tokens management ---
@@ -554,36 +623,7 @@ def get_public(request: Request, public_id: str, token: str | None = Query(defau
     d = load_dashboard(db, sl.dashboard_id)
     if not d:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    # Sanitize and validate definition to avoid schema 500s on legacy/invalid shapes
-    try:
-        raw = json.loads(d.definition_json or "{}")
-    except Exception:
-        raw = {}
-    if not isinstance(raw, dict):
-        raw = {}
-    layout = raw.get("layout")
-    if not isinstance(layout, list):
-        layout = []
-    widgets = raw.get("widgets")
-    if not isinstance(widgets, dict):
-        widgets = {}
-    options = raw.get("options") if isinstance(raw.get("options"), dict) else None
-    try:
-        if isinstance(widgets, dict):
-            widgets = {str(k): (v if isinstance(v, dict) else {}) for k, v in widgets.items()}
-        else:
-            widgets = {}
-    except Exception:
-        widgets = {}
-    defn = {"layout": layout, "widgets": widgets}
-    if options is not None:
-        defn["options"] = options
-    from ..schemas import DashboardDefinition as _DashDef
-    try:
-        defn_model = _DashDef.model_validate(defn)
-    except Exception:
-        defn_model = _DashDef()
-    return DashboardOut(id=d.id, name=d.name, userId=d.user_id, created_at=d.created_at, definition=defn_model)
+    return _definition_out(d)
 
 
 # --- Export / Import ---
@@ -761,11 +801,8 @@ def import_dashboards(payload: DashboardImportRequest, request: Request, actorId
             # Do not allow overriding other owners; create new instead
             d = None
         if d:
-            d.name = it.name
-            d.definition_json = json.dumps(defn)
-            db.add(d)
-            db.commit()
-            db.refresh(d)
+            # Route through save_dashboard so imports snapshot a version too (spec 24)
+            d = save_dashboard(db, user_id=d.user_id, name=it.name, definition=defn, dash_id=d.id, actor=actor)
         else:
             d = save_dashboard(db, user_id=owner, name=it.name, definition=defn)
             created += 1

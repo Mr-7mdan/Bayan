@@ -105,6 +105,26 @@ def _purge_audit_logs() -> None:
         db.close()
 
 
+def schedule_backup_job() -> None:
+    """Register the nightly metadata-backup job (spec 24), same static pattern
+    as audit:purge. Inherits RUN_SCHEDULER gating from main.py startup."""
+    from .backup import run_backup
+    sched = ensure_scheduler_started()
+    try:
+        trig = CronTrigger.from_crontab(settings.backup_cron, timezone=_SCHEDULER_TZ)
+        sched.add_job(
+            func=run_backup,
+            trigger=trig,
+            id="backup:meta",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+    except Exception as _be:
+        logger.warning(f"[SCHEDULER] Failed to register backup:meta: {_be}")
+
+
 def schedule_all_jobs() -> dict:
     """Sync scheduler state with DB SyncTasks that have schedule_cron and enabled.
     Returns a summary dict with counts.
@@ -375,7 +395,7 @@ def list_jobs() -> list[dict]:
         elif j.id.startswith("alert:"):
             info.update({"alertId": (j.kwargs or {}).get("alert_id")})
             out.append(info)
-        elif j.id.startswith("audit:"):
+        elif j.id.startswith("audit:") or j.id.startswith("backup:"):
             out.append(info)
     # Sort by next run
     out.sort(key=lambda x: x.get("nextRunAt") or "")
