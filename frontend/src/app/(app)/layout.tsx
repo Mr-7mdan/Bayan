@@ -103,6 +103,8 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
   // Sidebar state: apply auto-minimize only on the builder route; elsewhere default open
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     try {
+      // Mobile: start collapsed (off-canvas overlay) so content isn't crushed.
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) return false
       const onBuilder = pathname === '/' || (pathname?.startsWith('/builder') ?? false)
       if (onBuilder) {
         return localStorage.getItem('builder_auto_min_sidebar') === '0'
@@ -118,6 +120,8 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
   // When navigating into the builder route, auto-minimize if the builder-only pref is enabled
   useEffect(() => {
     try {
+      // Mobile: always collapse the overlay sidebar on navigation.
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) { setSidebarOpen(false); return }
       const onBuilder = pathname === '/' || (pathname?.startsWith('/builder') ?? false)
       if (onBuilder) {
         const enabled = localStorage.getItem('builder_auto_min_sidebar') !== '0'
@@ -130,15 +134,19 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
   if (loading || !user) return null
 
   return (
-    <div className={`h-screen grid ${sidebarOpen ? 'grid-cols-[272px,1fr]' : 'grid-cols-[0px,1fr]'} transition-[grid-template-columns] duration-200`}>
+    <div className={`h-screen grid grid-cols-[0px,1fr] ${sidebarOpen ? 'lg:grid-cols-[272px,1fr]' : 'lg:grid-cols-[0px,1fr]'} transition-[grid-template-columns] duration-200`}>
       <a
         href="#main"
         className="sr-only focus:not-sr-only fixed top-2 left-2 z-[9999] rounded-md bg-[hsl(var(--card))] px-3 py-2 text-sm font-medium text-[hsl(var(--foreground))] shadow-card bayan-focus-ring"
       >
         Skip to content
       </a>
+      {/* Mobile backdrop when the off-canvas sidebar is open */}
+      {sidebarOpen && (
+        <div className="lg:hidden fixed inset-0 z-40 bg-black/40" onClick={toggleSidebar} aria-hidden />
+      )}
       <Sidebar hidden={!sidebarOpen} />
-      <div className="h-screen flex flex-col min-h-0 min-w-0">
+      <div className="col-start-2 h-screen flex flex-col min-h-0 min-w-0">
         <Navbar sidebarOpen={sidebarOpen} onToggleSidebarAction={toggleSidebar} />
         <main id="main" tabIndex={-1} className={`p-0 min-h-0 min-w-0 flex-1 overflow-auto bg-[hsl(var(--background))]`}>
           {children}

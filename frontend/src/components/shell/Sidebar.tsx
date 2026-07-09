@@ -187,7 +187,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
 
   return (
     <aside
-      className={`${wrapCls} h-full w-[272px] flex flex-col transform ${hidden ? '-translate-x-full rtl:translate-x-full opacity-0' : 'translate-x-0 opacity-100'} transition-transform duration-200 ease-out`}
+      className={`${wrapCls} h-full w-[272px] flex flex-col transform max-lg:fixed max-lg:inset-y-0 max-lg:start-0 max-lg:z-50 max-lg:shadow-modal ${hidden ? '-translate-x-full rtl:translate-x-full opacity-0' : 'translate-x-0 opacity-100'} transition-transform duration-200 ease-out`}
     >
       <div className="px-4 py-3 border-b border-[hsl(var(--border))] flex justify-center">
         <Link href="/home" aria-label="Home" className="inline-flex items-center">
