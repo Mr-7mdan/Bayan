@@ -47,6 +47,9 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
       setResolved(r)
       const root = document.documentElement
       // Always reset any inline overrides before applying new ones
+      // Suppress transitions for the switch frame so every themed property
+      // doesn't animate at once (rainbow-flash). Removed after styles commit.
+      try { root.setAttribute('data-theme-switching', '') } catch {}
       try {
         const VAR_KEYS = [
           '--foreground','--muted-foreground',
@@ -82,6 +85,12 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
       } catch {
         // noop
       }
+      // Double rAF: first fires before paint, second after the new theme committed.
+      try {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          try { root.removeAttribute('data-theme-switching') } catch {}
+        }))
+      } catch {}
     }
 
     apply(theme)

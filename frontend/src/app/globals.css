@@ -98,6 +98,14 @@
   --dur-base: 220ms;
 }
 
+/* Theme-switch guard: ThemeProvider sets data-theme-switching for the switch
+   frame so themed properties snap instead of all animating at once. */
+:root[data-theme-switching] *,
+:root[data-theme-switching] *::before,
+:root[data-theme-switching] *::after {
+  transition: none !important;
+}
+
 /* Dark theme — avoid pure black/white, desaturate, communicate depth */
 .dark {
   /* Backgrounds from image */
