@@ -580,14 +580,23 @@ def _resolve_join_catalog(ds_transforms: dict) -> dict:
     return ds_transforms
 
 
+# Query rate limiting (token bucket). ON by default; 0 disables a bucket.
+# Defaults sized so an interactive dashboard load (bursts of ~20 widget queries)
+# survives without a 429. See spec 12-rate-limiting-defaults.md and .env.example.
 _Q_RATE = 0
 _Q_BURST = 0
+_Q_RATE_GLOBAL = 0
+_Q_BURST_GLOBAL = 0
 try:
-    _Q_RATE = int(os.environ.get("QUERY_RATE_PER_SEC", "0") or "0")
-    _Q_BURST = int(os.environ.get("QUERY_BURST", "0") or "0")
+    _Q_RATE = int(os.environ.get("QUERY_RATE_PER_SEC", "5") or "0")
+    _Q_BURST = int(os.environ.get("QUERY_BURST", "20") or "0")
+    _Q_RATE_GLOBAL = int(os.environ.get("QUERY_RATE_GLOBAL_PER_SEC", "50") or "0")
+    _Q_BURST_GLOBAL = int(os.environ.get("QUERY_BURST_GLOBAL", "100") or "0")
 except Exception:
     _Q_RATE = 0
     _Q_BURST = 0
+    _Q_RATE_GLOBAL = 0
+    _Q_BURST_GLOBAL = 0
 _TB_LOCK = threading.Lock()
 _TB_STATE: Dict[str, Tuple[float, float]] = {}
 
@@ -639,21 +648,21 @@ def _get_redis():
     except Exception:
         return None
 
-def _tb_redis_take(actor_id: Optional[str]) -> Optional[int]:
-    if not actor_id:
+def _tb_redis_take(key: Optional[str], rate: int, burst: int) -> Optional[int]:
+    if not key:
         return None
-    if _Q_RATE <= 0 or _Q_BURST <= 0:
+    if rate <= 0 or burst <= 0:
         return None
     r = _get_redis()
     if not r:
         return None
-    key = f"{_REDIS_PREFIX}:{str(actor_id).strip()}"
+    rkey = f"{_REDIS_PREFIX}:{str(key).strip()}"
     now = int(time.time())
     try:
         if _RL_SHA:
-            res = r.evalsha(_RL_SHA, 1, key, str(_Q_RATE), str(_Q_BURST), str(now))
+            res = r.evalsha(_RL_SHA, 1, rkey, str(rate), str(burst), str(now))
         else:
-            res = r.eval(_RL_LUA, 1, key, str(_Q_RATE), str(_Q_BURST), str(now))
+            res = r.eval(_RL_LUA, 1, rkey, str(rate), str(burst), str(now))
         try:
             val = int(res)
         except Exception:
@@ -668,30 +677,58 @@ def _tb_redis_take(actor_id: Optional[str]) -> Optional[int]:
     except Exception:
         return None
 
-def _throttle_take(actor_id: Optional[str]) -> Optional[int]:
-    if not actor_id:
+def _throttle_take(key: Optional[str], rate: int, burst: int) -> Optional[int]:
+    # rate/burst <= 0 disables this bucket (explicit operator opt-out).
+    if rate <= 0 or burst <= 0:
         return None
-    if _Q_RATE <= 0 or _Q_BURST <= 0:
-        return None
-    # Prefer Redis-backed bucket when configured
+    # Prefer Redis-backed bucket when configured (shared across gunicorn workers)
     if _REDIS_URL:
-        _w = _tb_redis_take(actor_id)
+        _w = _tb_redis_take(key, rate, burst)
         if _w is not None:
             return _w
     now = time.time()
-    k = str(actor_id).strip()
+    k = str(key).strip()
     with _TB_LOCK:
-        tokens, last = _TB_STATE.get(k, (_Q_BURST * 1.0, now))
+        tokens, last = _TB_STATE.get(k, (burst * 1.0, now))
         if now > last:
-            tokens = min(float(_Q_BURST), tokens + (now - last) * float(_Q_RATE))
+            tokens = min(float(burst), tokens + (now - last) * float(rate))
         if tokens >= 1.0:
             tokens -= 1.0
             _TB_STATE[k] = (tokens, now)
             return None
         need = 1.0 - tokens
-        wait = int(math.ceil(need / float(_Q_RATE))) if _Q_RATE > 0 else 1
+        wait = int(math.ceil(need / float(rate))) if rate > 0 else 1
         _TB_STATE[k] = (tokens, now)
         return max(1, wait)
+
+
+def _rl_key(request: Optional[Request], actor_id: Optional[str]) -> str:
+    """Resolve the rate-limit bucket key. Precedence: authenticated user id
+    (spec 02 auth stamps request.state.user_id) -> actorId param -> client IP.
+    Anonymous callers are keyed by IP, never left unlimited."""
+    uid = getattr(getattr(request, "state", None), "user_id", None) if request is not None else None
+    if uid:
+        return f"u:{uid}"
+    if actor_id and str(actor_id).strip():
+        return f"u:{str(actor_id).strip()}"
+    host = request.client.host if (request is not None and request.client) else "unknown"
+    return f"ip:{host}"
+
+
+def _enforce_rate_limit(request: Optional[Request], actor_id: Optional[str], endpoint: str) -> None:
+    """One token charged per HTTP request: global bucket first, then per-user.
+    Raises 429 with an integer Retry-After header when either bucket is empty."""
+    # ponytail: global checked first — a rejected per-user call wastes one global token; negligible
+    wait = _throttle_take("__global__", _Q_RATE_GLOBAL, _Q_BURST_GLOBAL)
+    if wait is None:
+        wait = _throttle_take(_rl_key(request, actor_id), _Q_RATE, _Q_BURST)
+    if wait:
+        try:
+            counter_inc("query_rate_limited_total", {"endpoint": endpoint})
+        except Exception:
+            pass
+        raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(wait)})
+
 
 def get_db():
     db = SessionLocal()
@@ -1777,6 +1814,7 @@ async def run_query_endpoint(
     publicId+token public embed path stays reachable (actorId resolves to
     None) because we use the non-raising optional resolver.
     """
+    _enforce_rate_limit(request, actorId, "query")
     return await _run_cancellable_in_pool(
         request,
         functools.partial(run_query, payload, db, actorId, publicId, token),
@@ -1826,14 +1864,8 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
     # 3-part names (e.g. pcma.mt5.mt5_deals) are DuckDB catalog references — MySQL cannot handle them.
     # Always route to DuckDB native when the source has 3+ parts and DuckDB can serve it.
     route_duck = (payload.datasourceId is None) or (ds_type_lower == "duckdb") or ((_prefer_local or _tbl_part_count >= 3) and _duck_check)
-    if actorId:
-        _ra = _throttle_take(actorId)
-        if _ra:
-            try:
-                counter_inc("query_rate_limited_total", {"endpoint": "query"})
-            except Exception:
-                pass
-            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
+    # Rate limiting enforced once at the HTTP boundary (run_query_endpoint); this
+    # sync impl is also called internally by already-admitted requests — not charged here.
 
     try:
         counter_inc("query_requests_total", {"endpoint": "query"})
@@ -2392,6 +2424,7 @@ async def run_query_spec_endpoint(
     Identity resolved via the auth dependency; publicId+token embed path
     stays reachable (actorId resolves to None).
     """
+    _enforce_rate_limit(request, actorId, "spec")
     return await _run_cancellable_in_pool(
         request,
         functools.partial(run_query_spec, payload, db, actorId, publicId, token),
@@ -2425,11 +2458,7 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
     # Resolve date presets (e.g. __date_preset: "today") to concrete __gte/__lt at execution time
     if hasattr(payload, 'spec') and payload.spec and getattr(payload.spec, 'where', None):
         payload.spec.where = _resolve_date_presets(payload.spec.where)
-    
-    if actorId:
-        _ra = _throttle_take(actorId)
-        if _ra:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
+    # Rate limiting enforced at the HTTP boundary (run_query_spec_endpoint).
     # Determine backend
     is_duckdb = payload.datasourceId is None
     ds = None
@@ -5679,7 +5708,8 @@ def run_query_spec(payload: QuerySpecRequest, db: Session = Depends(get_db), act
 
 
 @router.post("/distinct")
-def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> DistinctResponse:
+def distinct_values(payload: DistinctRequest, request: Request, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> DistinctResponse:
+    _enforce_rate_limit(request, actorId, "distinct")
     _validate_source(payload.source)
     # Resolve date presets at execution time
     if getattr(payload, 'where', None):
@@ -5692,16 +5722,6 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
         gauge_inc("query_inflight", 1.0, {"endpoint": "distinct"})
     except Exception:
         pass
-    if actorId:
-        _ra = _throttle_take(actorId)
-        if _ra:
-            try:
-
-
-                counter_inc("query_rate_limited_total", {"endpoint": "distinct"})
-            except Exception:
-                pass
-            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
     actorId = _resolve_public_actor(db, actorId, publicId, token)
     """Return distinct values for a column (including derived date parts) with optional WHERE.
 
@@ -6321,7 +6341,7 @@ def distinct_values(payload: DistinctRequest, db: Session = Depends(get_db), act
 
 
 @router.post("/pivot", response_model=QueryResponse)
-def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _actor: Optional[str] = Depends(actor_id_optional)) -> QueryResponse:
+def run_pivot(payload: PivotRequest, request: Request, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _actor: Optional[str] = Depends(actor_id_optional)) -> QueryResponse:
     """Server-side pivot aggregation.
     Returns long-form grouped rows: [row_dims..., col_dims..., value].
     """
@@ -6349,10 +6369,7 @@ def run_pivot(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
             engine = get_duckdb_engine()
     except Exception:
         pass
-    if actorId:
-        _ra = _throttle_take(actorId)
-        if _ra:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
+    _enforce_rate_limit(request, actorId, "pivot")
     # Detect type; align builder dialect with likely execution route (DuckDB) to avoid mismatches
     sys.stderr.write("[DEBUG] Detecting datasource type...\n")
     sys.stderr.flush()
@@ -8579,11 +8596,18 @@ def pivot_sql(payload: PivotRequest, db: Session = Depends(get_db), actorId: Opt
 
 
 @router.post("/period-totals")
-def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _actor: Optional[str] = Depends(actor_id_optional)) -> dict:
-    # HTTP requests inject the resolved actor via `_actor` (a str or None); internal
-    # callers pass actorId positionally and leave `_actor` as the Depends sentinel.
+def period_totals(payload: dict, request: Request, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None, _actor: Optional[str] = Depends(actor_id_optional)) -> dict:
+    # HTTP requests inject the resolved actor via `_actor` (a str or None).
     if isinstance(_actor, str):
         actorId = _actor
+    _enforce_rate_limit(request, actorId, "period_totals")
+    return _period_totals_impl(payload, db, actorId, publicId, token)
+
+
+# Internal implementation. Also called per-item by /period-totals/batch and
+# /period-totals/compare WITHOUT re-charging the limiter — one token is already
+# taken at the HTTP boundary, so batch fan-out no longer double/triple-charges.
+def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = None, publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
     # Resolve date presets at execution time
     if payload.get("where"):
         payload["where"] = _resolve_date_presets(payload["where"])
@@ -8595,14 +8619,6 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
         gauge_inc("query_inflight", 1.0, {"endpoint": "period_totals"})
     except Exception:
         pass
-    if actorId:
-        _ra = _throttle_take(actorId)
-        if _ra:
-            try:
-                counter_inc("query_rate_limited_total", {"endpoint": "period_totals"})
-            except Exception:
-                pass
-            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
     actorId = _resolve_public_actor(db, actorId, publicId, token)
     """Compute aggregated totals for a period (start..end), optionally grouped by a legend column.
 
@@ -9659,7 +9675,8 @@ def period_totals(payload: dict, db: Session = Depends(get_db), actorId: Optiona
 
 # --- Period totals batch: accept multiple requests and return a keyed map ---
 @router.post("/period-totals/batch")
-def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+def period_totals_batch(payload: dict, request: Request, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+    _enforce_rate_limit(request, actorId, "period_totals_batch")
     try:
         touch_actor(actorId)
     except Exception:
@@ -9668,10 +9685,6 @@ def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: O
         gauge_inc("query_inflight", 1.0, {"endpoint": "period_totals_batch"})
     except Exception:
         pass
-    if actorId:
-        _ra = _throttle_take(actorId)
-        if _ra:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
     actorId = _resolve_public_actor(db, actorId, publicId, token)
     """Batch variant of period-totals.
 
@@ -9694,8 +9707,8 @@ def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: O
         if not isinstance(item, dict):
             continue
         key = str(item.get("key") or i)
-        # Reuse the same logic as single endpoint
-        results[key] = period_totals(item, db, actorId)
+        # Reuse the same logic as single endpoint (internal impl: not re-charged)
+        results[key] = _period_totals_impl(item, db, actorId)
     try:
         summary_observe("query_duration_ms", int((time.perf_counter() - _bt_start) * 1000), {"endpoint": "period_totals_batch"})
     except Exception:
@@ -9709,7 +9722,8 @@ def period_totals_batch(payload: dict, db: Session = Depends(get_db), actorId: O
 
 # --- Period totals compare: return cur and prev in one call ---
 @router.post("/period-totals/compare")
-def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+def period_totals_compare(payload: dict, request: Request, db: Session = Depends(get_db), actorId: Optional[str] = Depends(actor_id_optional), publicId: Optional[str] = None, token: Optional[str] = None) -> dict:
+    _enforce_rate_limit(request, actorId, "period_totals_compare")
     # Resolve date presets at execution time
     if payload.get("where"):
         payload["where"] = _resolve_date_presets(payload["where"])
@@ -9721,10 +9735,6 @@ def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId:
         gauge_inc("query_inflight", 1.0, {"endpoint": "period_totals_compare"})
     except Exception:
         pass
-    if actorId:
-        _ra = _throttle_take(actorId)
-        if _ra:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(_ra)})
     actorId = _resolve_public_actor(db, actorId, publicId, token)
     """Compare variant: computes current and previous windows in one call.
 
@@ -9753,8 +9763,8 @@ def period_totals_compare(payload: dict, db: Session = Depends(get_db), actorId:
     except Exception:
         pass
     _cmp_start = time.perf_counter()
-    cur = period_totals(cur_payload, db, actorId)
-    prev = period_totals(prev_payload, db, actorId)
+    cur = _period_totals_impl(cur_payload, db, actorId)
+    prev = _period_totals_impl(prev_payload, db, actorId)
     try:
         summary_observe("query_duration_ms", int((time.perf_counter() - _cmp_start) * 1000), {"endpoint": "period_totals_compare"})
     except Exception:
