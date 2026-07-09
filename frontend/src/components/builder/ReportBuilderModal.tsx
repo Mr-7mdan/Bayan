@@ -9,8 +9,11 @@ import { ConditionalRule, ConditionalFormat, OP_OPTIONS, ICON_OPTIONS, ICON_GLYP
 import TableCellsEditorModal from './TableCellsEditorModal'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
-import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine, RiArrowUpLine, RiArrowDownLine, RiBarChart2Line } from '@remixicon/react'
+import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine, RiArrowUpLine, RiArrowDownLine, RiBarChart2Line, RiFunctions, RiCalendarLine, RiQuestionLine, RiPencilLine, RiDownloadLine } from '@remixicon/react'
 import DataExplorerDialogV2 from './DataExplorerDialogV2'
+import { Button, Input, StatusPill, Modal } from '@/components/ui'
+import type { StatusPillState } from '@/components/ui'
+import { useModalFocus } from '@/hooks/useModalFocus'
 
 const genId = () => Math.random().toString(36).slice(2, 10)
 
@@ -141,14 +144,14 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
     <div
       ref={dropRef}
       style={{ position: 'fixed', top: dropPos.top, left: dropPos.left, zIndex: 9999, maxHeight: dropPos.maxHeight, overflowY: 'auto', backgroundColor: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))' }}
-      className="w-52 rounded-md border shadow-xl p-1 text-[11px]"
+      className="w-52 rounded-md border shadow-xl p-1 text-2xs"
     >
       {isEditing && (
-        <p className="text-[9px] text-primary font-semibold uppercase tracking-wide px-2 pt-1 pb-0.5">Replace with…</p>
+        <p className="text-2xs text-primary font-semibold uppercase tracking-wide px-2 pt-1 pb-0.5">Replace with…</p>
       )}
       {allVarNames.length > 0 && (
         <>
-          <p className="text-[9px] text-muted-foreground uppercase tracking-wide px-2 pt-1 pb-0.5">Variables</p>
+          <p className="text-2xs text-muted-foreground uppercase tracking-wide px-2 pt-1 pb-0.5">Variables</p>
           <div className="px-1 pb-1">
             <input
               autoFocus
@@ -157,7 +160,7 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
               onChange={e => setVarSearch(e.target.value)}
               placeholder="Search…"
               style={{ backgroundColor: 'hsl(var(--background))' }}
-              className="w-full h-6 text-[11px] rounded border px-2 outline-none focus:ring-1 focus:ring-primary/40"
+              className="w-full h-6 text-2xs rounded border px-2 outline-none focus:ring-1 focus:ring-primary/40"
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
@@ -168,12 +171,12 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
               </button>
             ))}
             {allVarNames.filter(n => n.toLowerCase().includes(varSearch.toLowerCase())).length === 0 && (
-              <p className="text-[10px] text-muted-foreground px-2 py-1">No matches</p>
+              <p className="text-2xs text-muted-foreground px-2 py-1">No matches</p>
             )}
           </div>
         </>
       )}
-      <p className="text-[9px] text-muted-foreground uppercase tracking-wide px-2 pt-2 pb-0.5">Operators</p>
+      <p className="text-2xs text-muted-foreground uppercase tracking-wide px-2 pt-2 pb-0.5">Operators</p>
       <div className="flex flex-wrap gap-1 px-2 pb-1">
         {OPS.map(op => (
           <button key={op} onClick={() => applyToken({ kind: 'op', value: op })}
@@ -182,7 +185,7 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
           </button>
         ))}
       </div>
-      <p className="text-[9px] text-muted-foreground uppercase tracking-wide px-2 pt-1 pb-0.5">Number</p>
+      <p className="text-2xs text-muted-foreground uppercase tracking-wide px-2 pt-1 pb-0.5">Number</p>
       <div className="flex gap-1 px-2 pb-1.5">
         <input
           type="number"
@@ -205,7 +208,7 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
 
   return (
     <div>
-      <label className="block text-[10px] font-medium text-muted-foreground mb-1">Expression</label>
+      <label className="block text-2xs font-medium text-muted-foreground mb-1">Expression</label>
       <div className="min-h-8 flex flex-wrap gap-1 p-1.5 rounded-md border bg-secondary/40 items-center">
         {/* + button always at the start */}
         <button
@@ -213,7 +216,7 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
           onClick={handleToggle}
           className={`h-5 w-5 rounded-full border flex items-center justify-center transition-colors text-xs shrink-0 ${open && editIdx === null ? 'bg-primary text-primary-foreground border-primary' : 'border-dashed text-muted-foreground hover:text-primary hover:border-primary'}`}
         >+</button>
-        {tokens.length === 0 && <span className="text-[10px] text-muted-foreground/50 select-none">Pick variables and operators…</span>}
+        {tokens.length === 0 && <span className="text-2xs text-muted-foreground/50 select-none">Pick variables and operators…</span>}
         {tokens.map((tok, i) => (
           <span
             key={i}
@@ -222,11 +225,11 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, i)}
             onDragEnd={handleDragEnd}
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium leading-none border cursor-move ${
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-medium leading-none border cursor-move ${
             tok.kind === 'var'
               ? `bg-primary/15 border-primary/25 text-primary ${open && editIdx === i ? 'ring-1 ring-primary' : 'hover:bg-primary/25'}`
               : tok.kind === 'op'
-              ? `bg-secondary text-foreground border-border font-mono text-[13px] ${open && editIdx === i ? 'ring-1 ring-border' : 'hover:bg-secondary/80'}`
+              ? `bg-secondary text-foreground border-border font-mono text-sm ${open && editIdx === i ? 'ring-1 ring-border' : 'hover:bg-secondary/80'}`
               : `bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/25 font-mono ${open && editIdx === i ? 'ring-1 ring-amber-500/50' : 'hover:bg-amber-500/25'}`
           } ${dragIdx === i ? 'opacity-40' : ''}`}>
             <button
@@ -236,7 +239,7 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
               }}
               className={`hover:underline underline-offset-2 ${tok.kind !== 'var' ? 'font-mono' : ''}`}
             >{tok.kind === 'var' ? tok.name : tok.value}</button>
-            <button onClick={() => removeToken(i)} className="ml-0.5 opacity-50 hover:opacity-100 transition-opacity leading-none text-[12px]">×</button>
+            <button onClick={() => removeToken(i)} className="ml-0.5 opacity-50 hover:opacity-100 transition-opacity leading-none text-xs">×</button>
           </span>
         ))}
       </div>
@@ -606,9 +609,9 @@ function VariableEditor({
       <div className="p-3 space-y-2.5">
         {/* Variable Name */}
         <div>
-          <label className="block text-[10px] font-medium text-muted-foreground mb-1">Name</label>
+          <label className="block text-2xs font-medium text-muted-foreground mb-1">Name</label>
           <input
-            className="w-full h-7 text-[11px] rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow font-mono"
+            className="w-full h-7 text-2xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow font-mono"
             value={variable.name}
             onChange={(e) => handleChange({ name: e.target.value })}
             placeholder="variableName"
@@ -616,8 +619,8 @@ function VariableEditor({
         </div>
         {/* Type selector */}
         <div>
-          <label className="block text-[10px] font-medium text-muted-foreground mb-1">Type</label>
-          <select className="w-full h-7 text-[11px] rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={varType} onChange={(e) => handleChange({ type: e.target.value as any })}>
+          <label className="block text-2xs font-medium text-muted-foreground mb-1">Type</label>
+          <select className="w-full h-7 text-2xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={varType} onChange={(e) => handleChange({ type: e.target.value as any })}>
             <option value="query">Query (from datasource)</option>
             <option value="expression">Expression (calculated)</option>
             <option value="datetime">Date / Time</option>
@@ -639,7 +642,7 @@ function VariableEditor({
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Value</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Value</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.datetimeExpr || 'now'} onChange={(e) => handleChange({ datetimeExpr: e.target.value as any })}>
                   <optgroup label="Now">
                     <option value="now">now()</option>
@@ -656,7 +659,7 @@ function VariableEditor({
               </div>
               {['now','today','yesterday','last_working_day','day_before_last_working_day'].includes(variable.datetimeExpr || 'now') && (
               <div>
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Format</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Format</label>
                 <select
                   className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer"
                   value={variable.dateFormat || 'dd MMM yyyy'}
@@ -685,7 +688,7 @@ function VariableEditor({
           <>
             <div className="grid grid-cols-2 gap-2">
               <div className="relative z-10">
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Datasource</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Datasource</label>
                 <div className="flex gap-1">
                   <select className="flex-1 h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={dsId} onChange={(e) => { setDsId(e.target.value); handleChange({ datasourceId: e.target.value }) }}>
                     <option value="">Select…</option>
@@ -703,7 +706,7 @@ function VariableEditor({
                 </div>
               </div>
               <div className="relative">
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Table</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Table</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={source} onChange={(e) => { setSource(e.target.value); handleChange({ source: e.target.value }) }}>
                   <option value="">Select…</option>
                   {tables.map((t: string) => <option key={t} value={t}>{t}</option>)}
@@ -712,14 +715,14 @@ function VariableEditor({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Column</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Column</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.field || ''} onChange={(e) => handleChange({ value: { ...variable.value, field: e.target.value } })}>
                   <option value="">Select…</option>
                   {columns.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Aggregation</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Aggregation</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.agg || 'none'} onChange={(e) => handleChange({ value: { ...variable.value, agg: e.target.value as any, avgDateField: undefined } })}>
                   <optgroup label="Standard">
                     {(['none','count','distinct','avg','sum','min','max'] as const).map((a) => <option key={a} value={a}>{a}</option>)}
@@ -745,20 +748,20 @@ function VariableEditor({
             {variable.value?.agg === 'last_daily_sum' && (
               <div className="space-y-2">
                 <div>
-                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Date column <span className="text-primary">*</span></label>
+                  <label className="block text-2xs font-medium text-muted-foreground mb-1">Date column <span className="text-primary">*</span></label>
                   <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.avgDateField || ''} onChange={(e) => handleChange({ value: { ...variable.value, avgDateField: e.target.value } })}>
                     <option value="">Select…</option>
                     {columns.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
-                <p className="text-[9px] text-muted-foreground">SUM(column) for rows where {variable.value?.avgDateField || 'date col'} = last day in the filtered window</p>
+                <p className="text-2xs text-muted-foreground">SUM(column) for rows where {variable.value?.avgDateField || 'date col'} = last day in the filtered window</p>
               </div>
             )}
             {['avg_daily','avg_wday','avg_weekly','avg_monthly'].includes(variable.value?.agg || '') && (
               <div className="space-y-2">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[10px] font-medium text-muted-foreground mb-1">Numerator</label>
+                    <label className="block text-2xs font-medium text-muted-foreground mb-1">Numerator</label>
                     <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.avgNumerator || 'sum'} onChange={(e) => handleChange({ value: { ...variable.value, avgNumerator: e.target.value as any } })}>
                       <option value="sum">SUM(column)</option>
                       <option value="count">COUNT(column)</option>
@@ -766,16 +769,16 @@ function VariableEditor({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-muted-foreground mb-1">Date column <span className="text-primary">*</span></label>
+                    <label className="block text-2xs font-medium text-muted-foreground mb-1">Date column <span className="text-primary">*</span></label>
                     <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.avgDateField || ''} onChange={(e) => handleChange({ value: { ...variable.value, avgDateField: e.target.value } })}>
                       <option value="">Select…</option>
                       {columns.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                 </div>
-                <p className="text-[9px] text-muted-foreground">{variable.value?.avgNumerator === 'distinct' ? 'COUNT(DISTINCT column)' : variable.value?.avgNumerator === 'count' ? 'COUNT(column)' : 'SUM(column)'} ÷ COUNT(DISTINCT {variable.value?.agg === 'avg_daily' ? 'day' : variable.value?.agg === 'avg_wday' ? 'working day' : variable.value?.agg === 'avg_weekly' ? 'week' : 'month'}){variable.value?.agg === 'avg_wday' ? ' — weekends excluded per app config' : ''}</p>
+                <p className="text-2xs text-muted-foreground">{variable.value?.avgNumerator === 'distinct' ? 'COUNT(DISTINCT column)' : variable.value?.avgNumerator === 'count' ? 'COUNT(column)' : 'SUM(column)'} ÷ COUNT(DISTINCT {variable.value?.agg === 'avg_daily' ? 'day' : variable.value?.agg === 'avg_wday' ? 'working day' : variable.value?.agg === 'avg_weekly' ? 'week' : 'month'}){variable.value?.agg === 'avg_wday' ? ' — weekends excluded per app config' : ''}</p>
                 {variable.value?.agg === 'avg_wday' && (
-                  <label className="inline-flex items-center gap-1.5 text-[10px]">
+                  <label className="inline-flex items-center gap-1.5 text-2xs">
                     <input type="checkbox" className="rounded border-input" checked={!!variable.value?.applyHolidays} onChange={(e) => handleChange({ value: { ...variable.value, applyHolidays: e.target.checked } })} />
                     <span className="text-muted-foreground">Exclude holidays from working days</span>
                   </label>
@@ -785,13 +788,13 @@ function VariableEditor({
             {['ma7','ma14','ma30','ma60'].includes(variable.value?.agg || '') && (
               <div className="space-y-2">
                 <div>
-                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Date column <span className="text-primary">*</span></label>
+                  <label className="block text-2xs font-medium text-muted-foreground mb-1">Date column <span className="text-primary">*</span></label>
                   <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.value?.avgDateField || ''} onChange={(e) => handleChange({ value: { ...variable.value, avgDateField: e.target.value } })}>
                     <option value="">Select…</option>
                     {columns.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
-                <p className="text-[9px] text-muted-foreground">
+                <p className="text-2xs text-muted-foreground">
                   Average of daily SUM({variable.value?.field || 'column'}) over the last {variable.value?.agg === 'ma7' ? '7' : variable.value?.agg === 'ma14' ? '14' : variable.value?.agg === 'ma30' ? '30' : '60'} days ending at the last date in the filtered window.
                 </p>
               </div>
@@ -802,23 +805,23 @@ function VariableEditor({
         {/* Format / Prefix / Suffix - collapsible */}
         {varType !== 'datetime' && (
           <details className="group/fmt">
-            <summary className="text-[10px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1 py-1 hover:text-foreground transition-colors">
-              <span className="transition-transform duration-150 group-open/fmt:rotate-90 text-[8px]">&#9654;</span>
+            <summary className="text-2xs font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1 py-1 hover:text-foreground transition-colors">
+              <span className="transition-transform duration-150 group-open/fmt:rotate-90 text-2xs">&#9654;</span>
               Formatting
             </summary>
             <div className="grid grid-cols-3 gap-2 pt-1.5">
               <div>
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Format</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Format</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.format || 'none'} onChange={(e) => handleChange({ format: e.target.value as any })}>
                   {FORMAT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Prefix</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Prefix</label>
                 <input className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={variable.prefix || ''} onChange={(e) => handleChange({ prefix: e.target.value })} placeholder="$" />
               </div>
               <div>
-                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Suffix</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">Suffix</label>
                 <input className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={variable.suffix || ''} onChange={(e) => handleChange({ suffix: e.target.value })} placeholder="%" />
               </div>
             </div>
@@ -828,17 +831,17 @@ function VariableEditor({
         {/* Conditional Formatting - collapsible */}
         {varType !== 'datetime' && (
           <details className="group/cond">
-            <summary className="text-[10px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1 py-1 hover:text-foreground transition-colors">
-              <span className="transition-transform duration-150 group-open/cond:rotate-90 text-[8px]">&#9654;</span>
+            <summary className="text-2xs font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1 py-1 hover:text-foreground transition-colors">
+              <span className="transition-transform duration-150 group-open/cond:rotate-90 text-2xs">&#9654;</span>
               Conditional Formatting
               {variable.conditionalFormat?.enabled && variable.conditionalFormat.rules?.length > 0 && (
-                <span className="ml-auto text-[9px] text-primary/70">{variable.conditionalFormat.rules.length} rule{variable.conditionalFormat.rules.length === 1 ? '' : 's'}</span>
+                <span className="ml-auto text-2xs text-primary/70">{variable.conditionalFormat.rules.length} rule{variable.conditionalFormat.rules.length === 1 ? '' : 's'}</span>
               )}
             </summary>
             <div className="space-y-2 pt-1.5">
               {/* Enable toggle + icon position + preset buttons */}
               <div className="flex items-center gap-2 flex-wrap">
-                <label className="flex items-center gap-1 text-[10px] cursor-pointer">
+                <label className="flex items-center gap-1 text-2xs cursor-pointer">
                   <input
                     type="checkbox"
                     checked={!!variable.conditionalFormat?.enabled}
@@ -850,14 +853,14 @@ function VariableEditor({
                   Enabled
                 </label>
                 <div className="flex items-center gap-1" title="Icon alignment within the cell">
-                  <span className="text-[9px] text-muted-foreground">Icon</span>
+                  <span className="text-2xs text-muted-foreground">Icon</span>
                   {(['left', 'right'] as const).map(pos => {
                     const current = variable.conditionalFormat?.iconPosition || 'left'
                     return (
                       <button
                         key={pos}
                         type="button"
-                        className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${current === pos ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
+                        className={`text-2xs px-1.5 py-0.5 rounded border transition-colors ${current === pos ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
                         onClick={() => {
                           const cf = variable.conditionalFormat || { enabled: true, rules: [] }
                           handleChange({ conditionalFormat: { ...cf, iconPosition: pos, rules: cf.rules || [] } })
@@ -868,16 +871,16 @@ function VariableEditor({
                     )
                   })}
                 </div>
-                <span className="text-[9px] text-muted-foreground">Presets:</span>
-                <button type="button" className="text-[9px] px-2 py-0.5 rounded border hover:bg-muted transition-colors"
+                <span className="text-2xs text-muted-foreground">Presets:</span>
+                <button type="button" className="text-2xs px-2 py-0.5 rounded border hover:bg-muted transition-colors"
                   onClick={() => handleChange({ conditionalFormat: presetTrendArrows() })}>
                   ▲▼ Arrows
                 </button>
-                <button type="button" className="text-[9px] px-2 py-0.5 rounded border hover:bg-muted transition-colors"
+                <button type="button" className="text-2xs px-2 py-0.5 rounded border hover:bg-muted transition-colors"
                   onClick={() => handleChange({ conditionalFormat: preset4CircleSet() })}>
                   ●●●● 4-Circle
                 </button>
-                <button type="button" className="text-[9px] px-2 py-0.5 rounded border hover:bg-muted transition-colors"
+                <button type="button" className="text-2xs px-2 py-0.5 rounded border hover:bg-muted transition-colors"
                   onClick={() => handleChange({ conditionalFormat: presetHeatmap3() })}>
                   Heatmap
                 </button>
@@ -905,31 +908,31 @@ function VariableEditor({
                   return (
                     <div key={idx} className="border rounded-md p-1.5 bg-secondary/20 space-y-1">
                       <div className="flex items-center gap-1">
-                        <span className="text-[9px] text-muted-foreground">#{idx + 1}</span>
+                        <span className="text-2xs text-muted-foreground">#{idx + 1}</span>
                         <div className="flex-1" />
-                        <button type="button" className="text-[9px] px-1 py-0.5 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                        <button type="button" className="text-2xs px-1 py-0.5 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
                           disabled={idx === 0} onClick={() => moveRule(-1)} title="Move up">▲</button>
-                        <button type="button" className="text-[9px] px-1 py-0.5 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                        <button type="button" className="text-2xs px-1 py-0.5 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
                           disabled={idx === rules.length - 1} onClick={() => moveRule(1)} title="Move down">▼</button>
-                        <button type="button" className="text-[9px] px-1 py-0.5 rounded text-destructive hover:bg-destructive/10"
+                        <button type="button" className="text-2xs px-1 py-0.5 rounded text-destructive hover:bg-destructive/10"
                           onClick={removeRule} title="Delete rule">×</button>
                       </div>
 
                       {/* Row 1: operator + value(s) */}
                       <div className="flex items-center gap-1">
-                        <select className="h-6 text-[10px] rounded border bg-secondary/40 px-1 cursor-pointer"
+                        <select className="h-6 text-2xs rounded border bg-secondary/40 px-1 cursor-pointer"
                           value={rule.op}
                           onChange={(e) => patchRule({ op: e.target.value as any })}>
                           {OP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
-                        <input type="number" step="any" className="h-6 text-[10px] rounded border bg-secondary/40 px-1 w-20"
+                        <input type="number" step="any" className="h-6 text-2xs rounded border bg-secondary/40 px-1 w-20"
                           value={Number.isFinite(rule.value) ? rule.value : ''}
                           onChange={(e) => patchRule({ value: parseFloat(e.target.value) })}
                           placeholder="value" />
                         {rule.op === 'between' && (
                           <>
-                            <span className="text-[9px] text-muted-foreground">and</span>
-                            <input type="number" step="any" className="h-6 text-[10px] rounded border bg-secondary/40 px-1 w-20"
+                            <span className="text-2xs text-muted-foreground">and</span>
+                            <input type="number" step="any" className="h-6 text-2xs rounded border bg-secondary/40 px-1 w-20"
                               value={rule.value2 != null && Number.isFinite(rule.value2) ? rule.value2 : ''}
                               onChange={(e) => patchRule({ value2: parseFloat(e.target.value) })}
                               placeholder="value" />
@@ -939,43 +942,43 @@ function VariableEditor({
 
                       {/* Row 2: icon + colors */}
                       <div className="flex items-center gap-1 flex-wrap">
-                        <select className="h-6 text-[10px] rounded border bg-secondary/40 px-1 cursor-pointer"
+                        <select className="h-6 text-2xs rounded border bg-secondary/40 px-1 cursor-pointer"
                           value={rule.icon || 'none'}
                           onChange={(e) => patchRule({ icon: e.target.value as any })}>
                           {ICON_OPTIONS.map(i => <option key={i.value} value={i.value}>{i.glyph ? `${i.glyph} ${i.label}` : i.label}</option>)}
                         </select>
                         {rule.icon && rule.icon !== 'none' && (
                           <div className="flex items-center gap-0.5" title="Icon color">
-                            <span className="text-[9px] text-muted-foreground">Icon</span>
+                            <span className="text-2xs text-muted-foreground">Icon</span>
                             <input type="color" className="w-5 h-5 rounded border cursor-pointer"
                               value={rule.iconColor || '#16a34a'}
                               onChange={(e) => patchRule({ iconColor: e.target.value })} />
                           </div>
                         )}
                         <div className="flex items-center gap-0.5" title="Text color">
-                          <span className="text-[9px] text-muted-foreground">Text</span>
+                          <span className="text-2xs text-muted-foreground">Text</span>
                           <input type="color" className="w-5 h-5 rounded border cursor-pointer"
                             value={rule.textColor || '#111827'}
                             onChange={(e) => patchRule({ textColor: e.target.value })} />
                           {rule.textColor && (
-                            <button type="button" className="text-[8px] text-muted-foreground hover:text-foreground"
+                            <button type="button" className="text-2xs text-muted-foreground hover:text-foreground"
                               onClick={() => patchRule({ textColor: undefined })}>clear</button>
                           )}
                         </div>
                         <div className="flex items-center gap-0.5" title="Background color">
-                          <span className="text-[9px] text-muted-foreground">Bg</span>
+                          <span className="text-2xs text-muted-foreground">Bg</span>
                           <input type="color" className="w-5 h-5 rounded border cursor-pointer"
                             value={rule.bgColor || '#ffffff'}
                             onChange={(e) => patchRule({ bgColor: e.target.value })} />
                           {rule.bgColor && (
-                            <button type="button" className="text-[8px] text-muted-foreground hover:text-foreground"
+                            <button type="button" className="text-2xs text-muted-foreground hover:text-foreground"
                               onClick={() => patchRule({ bgColor: undefined })}>clear</button>
                           )}
                         </div>
                       </div>
 
                       {/* Preview */}
-                      <div className="text-[9px] text-muted-foreground flex items-center gap-1">
+                      <div className="text-2xs text-muted-foreground flex items-center gap-1">
                         <span>When value is {describeRule(rule)} →</span>
                         <span
                           className="inline-flex items-center gap-0.5 px-1 rounded"
@@ -997,7 +1000,7 @@ function VariableEditor({
 
               {/* Add rule */}
               <button type="button"
-                className="w-full text-[10px] py-1 rounded border border-dashed hover:bg-muted transition-colors flex items-center justify-center gap-1"
+                className="w-full text-2xs py-1 rounded border border-dashed hover:bg-muted transition-colors flex items-center justify-center gap-1"
                 onClick={() => {
                   const cf = variable.conditionalFormat || { enabled: true, rules: [] }
                   const newRule: ConditionalRule = { op: '>', value: 0, icon: 'none' }
@@ -1007,7 +1010,7 @@ function VariableEditor({
               </button>
 
               {(variable.conditionalFormat?.rules?.length || 0) > 0 && (
-                <p className="text-[9px] text-muted-foreground leading-tight">
+                <p className="text-2xs text-muted-foreground leading-tight">
                   Rules are evaluated top-to-bottom; the first match wins. Order rules from most-specific (highest threshold) to least-specific (catch-all) for continuous coverage.
                 </p>
               )}
@@ -1018,14 +1021,14 @@ function VariableEditor({
         {/* Calculations - collapsible */}
         {varType !== 'datetime' && (
           <details className="group/calc">
-            <summary className="text-[10px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1 py-1 hover:text-foreground transition-colors">
-              <span className="transition-transform duration-150 group-open/calc:rotate-90 text-[8px]">&#9654;</span>
+            <summary className="text-2xs font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1 py-1 hover:text-foreground transition-colors">
+              <span className="transition-transform duration-150 group-open/calc:rotate-90 text-2xs">&#9654;</span>
               Calculations
             </summary>
             <div className="space-y-2 pt-1.5">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Multiply by</label>
+                  <label className="block text-2xs font-medium text-muted-foreground mb-1">Multiply by</label>
                   <input
                     type="number"
                     step="any"
@@ -1036,7 +1039,7 @@ function VariableEditor({
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Divide by</label>
+                  <label className="block text-2xs font-medium text-muted-foreground mb-1">Divide by</label>
                   <input
                     type="number"
                     step="any"
@@ -1049,7 +1052,7 @@ function VariableEditor({
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Rounding</label>
+                  <label className="block text-2xs font-medium text-muted-foreground mb-1">Rounding</label>
                   <select
                     className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer"
                     value={variable.roundMode || 'none'}
@@ -1063,7 +1066,7 @@ function VariableEditor({
                 </div>
                 {variable.roundMode && variable.roundMode !== 'none' && (
                   <div>
-                    <label className="block text-[10px] font-medium text-muted-foreground mb-1">Decimal places</label>
+                    <label className="block text-2xs font-medium text-muted-foreground mb-1">Decimal places</label>
                     <input
                       type="number"
                       min="0"
@@ -1097,13 +1100,13 @@ function VariableEditor({
         {/* Filters */}
         {varType === 'query' && (
           <div className="border-t pt-2.5">
-            <label className="block text-[10px] font-medium text-muted-foreground mb-1.5">Filters (WHERE)</label>
+            <label className="block text-2xs font-medium text-muted-foreground mb-1.5">Filters (WHERE)</label>
             <FilterEditor columns={columns} columnMeta={columnsMeta} where={variable.where || {}} onChange={(w) => handleChange({ where: w })} source={source} datasourceId={dsId} widgetId={widgetId} />
           </div>
         )}
         {/* Reverse Sign */}
         {varType !== 'datetime' && (
-          <label className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none">
+          <label className="flex items-center gap-2 text-2xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none">
             <input type="checkbox" className="rounded border-border accent-primary" checked={!!variable.reverseSign} onChange={(e) => handleChange({ reverseSign: e.target.checked })} />
             Reverse sign (multiply result by −1)
           </label>
@@ -1185,7 +1188,7 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
     <div className="rounded-md border bg-card">
       <button
         type="button"
-        className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-medium hover:bg-muted/40 transition-colors rounded-md"
+        className="w-full flex items-center justify-between px-2.5 py-1.5 text-2xs font-medium hover:bg-muted/40 transition-colors rounded-md"
         onClick={() => setExpanded(e => !e)}
       >
         <span className="flex items-center gap-1.5">
@@ -1193,20 +1196,20 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
           Filter: {field}
         </span>
         {activeCount > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium">{activeCount} active</span>
+          <span className="text-2xs px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium">{activeCount} active</span>
         )}
       </button>
       {expanded && (
         <div className="px-2.5 pb-2.5 border-t space-y-2 pt-2">
           <div className="flex items-center justify-between">
-            <div className="text-[10px] text-muted-foreground">Select values</div>
+            <div className="text-2xs text-muted-foreground">Select values</div>
             <div className="flex items-center gap-1.5">
-              <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setSel([]); onApply([]) }}>Clear</button>
-              <button className="text-[10px] px-1.5 py-0.5 rounded border bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => onApply(sel)}>Apply</button>
+              <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setSel([]); onApply([]) }}>Clear</button>
+              <button className="text-2xs px-1.5 py-0.5 rounded border bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => onApply(sel)}>Apply</button>
             </div>
           </div>
-          <input className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" placeholder="Search values" value={search} onChange={e => setSearch(e.target.value)} />
-          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+          <input className="w-full px-2 py-1 rounded bg-secondary/60 text-2xs" placeholder="Search values" value={search} onChange={e => setSearch(e.target.value)} />
+          <div className="flex items-center justify-between text-2xs text-muted-foreground">
             <span>{sel.length} of {samples.length} selected{loading && <span className="ml-1 opacity-60">(loading…)</span>}</span>
             <div className="flex gap-2">
               <button className="hover:text-foreground" onClick={() => setSel([...filtered])}>Select All</button>
@@ -1216,19 +1219,19 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
           <div className="max-h-44 overflow-auto">
             <ul className="space-y-0.5">
               {filtered.map((v, i) => (
-                <li key={i} className="flex items-center gap-2 text-[11px]">
+                <li key={i} className="flex items-center gap-2 text-2xs">
                   <input type="checkbox" className="rounded" checked={sel.includes(v)} onChange={() => toggle(v)} />
                   <span className="truncate max-w-[200px]" title={String(v)}>{String(v)}</span>
                 </li>
               ))}
               {sel.filter(v => !filtered.includes(v)).map((v, i) => (
-                <li key={`s-${i}`} className="flex items-center gap-2 text-[11px] opacity-60">
+                <li key={`s-${i}`} className="flex items-center gap-2 text-2xs opacity-60">
                   <input type="checkbox" className="rounded" checked onChange={() => toggle(v)} />
                   <span className="truncate max-w-[200px]">{String(v)} (selected)</span>
                 </li>
               ))}
-              {filtered.length === 0 && !loading && <li className="text-[10px] text-muted-foreground">No values available</li>}
-              {loading && filtered.length === 0 && <li className="text-[10px] text-muted-foreground">Loading…</li>}
+              {filtered.length === 0 && !loading && <li className="text-2xs text-muted-foreground">No values available</li>}
+              {loading && filtered.length === 0 && <li className="text-2xs text-muted-foreground">Loading…</li>}
             </ul>
           </div>
         </div>
@@ -1368,16 +1371,16 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
   return (
     <div className="rounded-md border bg-card p-2 space-y-2">
       <div className="flex items-center justify-between">
-        <div className="text-[11px] font-medium">Date rule: {field}</div>
-        <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setConfig({ ...DEFAULT_PRESET }); setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gte`]: undefined, [`${field}__gt`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined, [`${field}__date_preset`]: undefined, [`${field}__op`]: undefined }) }}>Clear</button>
+        <div className="text-2xs font-medium">Date rule: {field}</div>
+        <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setConfig({ ...DEFAULT_PRESET }); setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gte`]: undefined, [`${field}__gt`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined, [`${field}__date_preset`]: undefined, [`${field}__op`]: undefined }) }}>Clear</button>
       </div>
-      <div className="flex items-center gap-3 text-[11px]">
+      <div className="flex items-center gap-3 text-2xs">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={() => setMode('preset')} /> Preset</label>
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='custom'} onChange={() => setMode('custom')} /> Custom</label>
       </div>
       
       {/* Operator selector - shown for both modes */}
-      <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={op} onChange={e => { const newOp = e.target.value as DateOp; setOp(newOp); if (mode === 'preset') applyPreset(config, newOp) }}>
+      <select className="w-full px-2 py-1 rounded bg-secondary/60 text-2xs" value={op} onChange={e => { const newOp = e.target.value as DateOp; setOp(newOp); if (mode === 'preset') applyPreset(config, newOp) }}>
         <option value="eq">Equals</option>
         <option value="ne">Not equals</option>
         <option value="gt">Greater than (after)</option>
@@ -1390,7 +1393,7 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
       {mode === 'preset' ? (
         <div className="space-y-1.5">
           {/* Quick Pick dropdown */}
-          <select className="w-full px-2 py-1 rounded bg-secondary/60 text-[11px]" value={selectedQuickPick ?? ''} onChange={e => {
+          <select className="w-full px-2 py-1 rounded bg-secondary/60 text-2xs" value={selectedQuickPick ?? ''} onChange={e => {
             const label = e.target.value
             const qp = QUICK_PICKS.find(q => q.label === label)
             if (qp) { setConfig({ ...qp.config }); applyPreset(qp.config) }
@@ -1406,56 +1409,56 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
           {/* Composable dimension controls */}
           <div className="grid grid-cols-2 gap-1.5">
             <div>
-              <span className="text-[10px] text-muted-foreground">Period</span>
-              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-[11px]" value={config.period} onChange={e => { const next = { ...config, period: e.target.value as any }; setConfig(next); applyPreset(next) }}>
+              <span className="text-2xs text-muted-foreground">Period</span>
+              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-2xs" value={config.period} onChange={e => { const next = { ...config, period: e.target.value as any }; setConfig(next); applyPreset(next) }}>
                 {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <span className="text-[10px] text-muted-foreground">Offset</span>
-              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-[11px]" value={config.offset} onChange={e => { const next = { ...config, offset: e.target.value as any }; setConfig(next); applyPreset(next) }}>
+              <span className="text-2xs text-muted-foreground">Offset</span>
+              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-2xs" value={config.offset} onChange={e => { const next = { ...config, offset: e.target.value as any }; setConfig(next); applyPreset(next) }}>
                 {OFFSET_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <span className="text-[10px] text-muted-foreground">As Of</span>
-              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-[11px]" value={config.as_of} onChange={e => { const next = { ...config, as_of: e.target.value as any }; setConfig(next); applyPreset(next) }}>
+              <span className="text-2xs text-muted-foreground">As Of</span>
+              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-2xs" value={config.as_of} onChange={e => { const next = { ...config, as_of: e.target.value as any }; setConfig(next); applyPreset(next) }}>
                 {AS_OF_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <span className="text-[10px] text-muted-foreground">Range Mode</span>
-              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-[11px]" value={config.range_mode} onChange={e => { const next = { ...config, range_mode: e.target.value as any }; setConfig(next); applyPreset(next) }}>
+              <span className="text-2xs text-muted-foreground">Range Mode</span>
+              <select className="w-full px-1.5 py-0.5 rounded bg-secondary/60 text-2xs" value={config.range_mode} onChange={e => { const next = { ...config, range_mode: e.target.value as any }; setConfig(next); applyPreset(next) }}>
                 {RANGE_MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <label className="inline-flex items-center gap-1 text-[10px]">
+            <label className="inline-flex items-center gap-1 text-2xs">
               <input type="checkbox" checked={config.include_weekends} onChange={e => { const next = { ...config, include_weekends: e.target.checked }; setConfig(next); applyPreset(next) }} />
               <span className="text-muted-foreground">Include Weekends</span>
             </label>
-            <label className="inline-flex items-center gap-1 text-[10px]">
+            <label className="inline-flex items-center gap-1 text-2xs">
               <input type="checkbox" checked={config.apply_holidays} onChange={e => { const next = { ...config, apply_holidays: e.target.checked }; setConfig(next); applyPreset(next) }} />
               <span className="text-muted-foreground">Apply Holidays</span>
             </label>
           </div>
-          {preview.label && <p className="text-[10px] text-muted-foreground">{preview.loading ? 'Resolving…' : preview.label}</p>}
-          <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => applyPreset(config)}>Apply</button>
+          {preview.label && <p className="text-2xs text-muted-foreground">{preview.loading ? 'Resolving…' : preview.label}</p>}
+          <button className="text-2xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => applyPreset(config)}>Apply</button>
         </div>
       ) : (
         <div className="space-y-2">
           {op === 'between' ? (
             <div className="flex gap-2 items-center">
-              <input type="date" className="flex-1 h-7 px-1 rounded border text-[11px] bg-secondary/60" placeholder="Start date" value={a} onChange={e => setA(e.target.value)} />
-              <span className="text-[10px] text-muted-foreground">to</span>
-              <input type="date" className="flex-1 h-7 px-1 rounded border text-[11px] bg-secondary/60" placeholder="End date" value={b} onChange={e => setB(e.target.value)} />
+              <input type="date" className="flex-1 h-7 px-1 rounded border text-2xs bg-secondary/60" placeholder="Start date" value={a} onChange={e => setA(e.target.value)} />
+              <span className="text-2xs text-muted-foreground">to</span>
+              <input type="date" className="flex-1 h-7 px-1 rounded border text-2xs bg-secondary/60" placeholder="End date" value={b} onChange={e => setB(e.target.value)} />
             </div>
           ) : (
-            <input type="date" className="w-full h-7 px-1 rounded border text-[11px] bg-secondary/60" value={a} onChange={e => setA(e.target.value)} />
+            <input type="date" className="w-full h-7 px-1 rounded border text-2xs bg-secondary/60" value={a} onChange={e => setA(e.target.value)} />
           )}
           <div className="flex justify-end">
-            <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={applyCustom}>Apply</button>
+            <button className="text-2xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90" onClick={applyCustom}>Apply</button>
           </div>
         </div>
       )}
@@ -1498,19 +1501,19 @@ function StringRuleEditor({ field, where, onPatch }: { field: string; where: Rec
   return (
     <div className="rounded-md border bg-card p-2 space-y-2">
       <div className="flex items-center justify-between">
-        <div className="text-[11px] font-medium">String rule: {field}</div>
+        <div className="text-2xs font-medium">String rule: {field}</div>
         <div className="flex items-center gap-1.5">
-          <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setVal(''); onPatch({ [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
-          <button className="text-[10px] px-1.5 py-0.5 rounded border bg-primary text-primary-foreground hover:bg-primary/90" onClick={apply}>Apply</button>
+          <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setVal(''); onPatch({ [field]: undefined, [`${field}__contains`]: undefined, [`${field}__notcontains`]: undefined, [`${field}__startswith`]: undefined, [`${field}__endswith`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
+          <button className="text-2xs px-1.5 py-0.5 rounded border bg-primary text-primary-foreground hover:bg-primary/90" onClick={apply}>Apply</button>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-1.5 items-center">
-        <select className="col-span-1 px-1 py-1 rounded bg-secondary/60 text-[11px]" value={op} onChange={e => setOp(e.target.value as StrOp)}>
+        <select className="col-span-1 px-1 py-1 rounded bg-secondary/60 text-2xs" value={op} onChange={e => setOp(e.target.value as StrOp)}>
           <option value="contains">Contains</option><option value="not_contains">Not contains</option>
           <option value="eq">Equals</option><option value="ne">Not equals</option>
           <option value="starts_with">Starts with</option><option value="ends_with">Ends with</option>
         </select>
-        <input className="col-span-2 h-7 px-2 rounded border text-[11px] bg-secondary/60" placeholder="Value (comma-separated)" value={val} onChange={e => setVal(e.target.value)} />
+        <input className="col-span-2 h-7 px-2 rounded border text-2xs bg-secondary/60" placeholder="Value (comma-separated)" value={val} onChange={e => setVal(e.target.value)} />
       </div>
     </div>
   )
@@ -1552,24 +1555,24 @@ function NumberRuleEditor({ field, where, onPatch }: { field: string; where: Rec
   return (
     <div className="rounded-md border bg-card p-2 space-y-2">
       <div className="flex items-center justify-between">
-        <div className="text-[11px] font-medium">Number filter: {field}</div>
+        <div className="text-2xs font-medium">Number filter: {field}</div>
         <div className="flex items-center gap-1.5">
-          <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setA(''); setB2(''); onPatch({ [field]: undefined, [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
-          <button className="text-[10px] px-1.5 py-0.5 rounded border bg-primary text-primary-foreground hover:bg-primary/90" onClick={apply}>Apply</button>
+          <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setA(''); setB2(''); onPatch({ [field]: undefined, [`${field}__gt`]: undefined, [`${field}__gte`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined }) }}>Clear</button>
+          <button className="text-2xs px-1.5 py-0.5 rounded border bg-primary text-primary-foreground hover:bg-primary/90" onClick={apply}>Apply</button>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-1.5 items-center">
-        <select className="col-span-1 px-1 py-1 rounded bg-secondary/60 text-[11px]" value={op} onChange={e => setOp(e.target.value as NumOp)}>
+        <select className="col-span-1 px-1 py-1 rounded bg-secondary/60 text-2xs" value={op} onChange={e => setOp(e.target.value as NumOp)}>
           <option value="eq">Equals</option><option value="ne">Not equals</option>
           <option value="gt">Greater than</option><option value="gte">Greater or equal</option>
           <option value="lt">Less than</option><option value="lte">Less or equal</option>
           <option value="between">Between</option>
         </select>
         {op !== 'between' ? (
-          <input type="number" className="col-span-2 h-7 px-2 rounded border text-[11px] bg-secondary/60" value={a} onChange={e => setA(e.target.value === '' ? '' : Number(e.target.value))} />
+          <input type="number" className="col-span-2 h-7 px-2 rounded border text-2xs bg-secondary/60" value={a} onChange={e => setA(e.target.value === '' ? '' : Number(e.target.value))} />
         ) : (
-          <><input type="number" className="col-span-1 h-7 px-1 rounded border text-[11px] bg-secondary/60" placeholder="Min" value={a} onChange={e => setA(e.target.value === '' ? '' : Number(e.target.value))} />
-          <input type="number" className="col-span-1 h-7 px-1 rounded border text-[11px] bg-secondary/60" placeholder="Max" value={b2} onChange={e => setB2(e.target.value === '' ? '' : Number(e.target.value))} /></>
+          <><input type="number" className="col-span-1 h-7 px-1 rounded border text-2xs bg-secondary/60" placeholder="Min" value={a} onChange={e => setA(e.target.value === '' ? '' : Number(e.target.value))} />
+          <input type="number" className="col-span-1 h-7 px-1 rounded border text-2xs bg-secondary/60" placeholder="Max" value={b2} onChange={e => setB2(e.target.value === '' ? '' : Number(e.target.value))} /></>
         )}
       </div>
     </div>
@@ -1643,16 +1646,16 @@ function ReportFieldFilter({ field, source, datasourceId, widgetId, dbType, wher
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <span className="text-[11px] font-medium truncate max-w-[140px]" title={field}>{field}</span>
-          <span className="text-[9px] px-1 py-0.5 rounded bg-secondary/60 text-muted-foreground">{kind}</span>
+          <span className="text-2xs font-medium truncate max-w-[140px]" title={field}>{field}</span>
+          <span className="text-2xs px-1 py-0.5 rounded bg-secondary/60 text-muted-foreground">{kind}</span>
         </div>
         <button className="text-destructive hover:bg-destructive/10 rounded p-0.5" onClick={onRemove} title="Remove filter">
           <RiCloseLine className="h-3 w-3" />
         </button>
       </div>
       <div className="flex items-center gap-1.5">
-        <button className={`text-[10px] px-2 py-0.5 rounded border ${tab==='manual' ? 'bg-secondary' : ''}`} onClick={() => setTab('manual')}>Manual</button>
-        <button className={`text-[10px] px-2 py-0.5 rounded border ${tab==='rule' ? 'bg-secondary' : ''}`} onClick={() => setTab('rule')}>Rule</button>
+        <button className={`text-2xs px-2 py-0.5 rounded border ${tab==='manual' ? 'bg-secondary' : ''}`} onClick={() => setTab('manual')}>Manual</button>
+        <button className={`text-2xs px-2 py-0.5 rounded border ${tab==='rule' ? 'bg-secondary' : ''}`} onClick={() => setTab('rule')}>Rule</button>
       </div>
       {tab === 'manual' ? (
         <ManualFilterValues field={field} source={source} datasourceId={datasourceId} widgetId={widgetId} selected={currentSelected} onApply={handleManualApply} />
@@ -1732,7 +1735,7 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
     <div
       ref={dropRef}
       style={{ position: 'fixed', top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999, backgroundColor: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))' }}
-      className="rounded-md border shadow-xl p-1.5 text-[11px]"
+      className="rounded-md border shadow-xl p-1.5 text-2xs"
     >
       <input
         autoFocus
@@ -1741,7 +1744,7 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
         onChange={e => setPickSearch(e.target.value)}
         placeholder="Search columns…"
         style={{ backgroundColor: 'hsl(var(--background))' }}
-        className="w-full h-6 text-[11px] rounded border px-2 mb-1 outline-none focus:ring-1 focus:ring-primary/40"
+        className="w-full h-6 text-2xs rounded border px-2 mb-1 outline-none focus:ring-1 focus:ring-primary/40"
       />
       <div className="max-h-52 overflow-y-auto">
         {filteredPick.map(c => (
@@ -1751,7 +1754,7 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
           </button>
         ))}
         {filteredPick.length === 0 && (
-          <p className="text-[10px] text-muted-foreground px-2 py-1">
+          <p className="text-2xs text-muted-foreground px-2 py-1">
             {availableFields.length === 0 ? 'All fields already added' : 'No matching fields'}
           </p>
         )}
@@ -1775,7 +1778,7 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
           onRemove={() => removeFilter(field)}
         />
       ))}
-      <button ref={addBtnRef} className="text-[11px] text-primary hover:underline flex items-center gap-1" onClick={openPicker}>
+      <button ref={addBtnRef} className="text-2xs text-primary hover:underline flex items-center gap-1" onClick={openPicker}>
         <RiAddLine className="h-3 w-3" /> Add filter
       </button>
       {dropdown}
@@ -1801,7 +1804,7 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
   return (
     <div className="space-y-2">
       {/* URL / Upload toggle */}
-      <div className="flex rounded border overflow-hidden h-6 text-[11px]">
+      <div className="flex rounded border overflow-hidden h-6 text-2xs">
         <button
           className={`flex-1 transition-colors ${tab === 'url' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'}`}
           onClick={() => setTab('url')}
@@ -1814,7 +1817,7 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
 
       {tab === 'url' ? (
         <div>
-          <label className="block text-[11px] text-muted-foreground mb-1">Image URL</label>
+          <label className="block text-2xs text-muted-foreground mb-1">Image URL</label>
           <input
             className="w-full h-7 text-xs rounded border bg-secondary/60 px-2"
             value={img.url?.startsWith('data:') ? '' : (img.url || '')}
@@ -1824,7 +1827,7 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
         </div>
       ) : (
         <div>
-          <label className="block text-[11px] text-muted-foreground mb-1">Image File</label>
+          <label className="block text-2xs text-muted-foreground mb-1">Image File</label>
           <input
             ref={fileInputRef}
             type="file"
@@ -1850,11 +1853,11 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
       )}
 
       <div>
-        <label className="block text-[11px] text-muted-foreground mb-1">Alt Text</label>
+        <label className="block text-2xs text-muted-foreground mb-1">Alt Text</label>
         <input className="w-full h-7 text-xs rounded border bg-secondary/60 px-2" value={img.alt || ''} onChange={(e) => patch({ alt: e.target.value })} placeholder="Image description" />
       </div>
       <div>
-        <label className="block text-[11px] text-muted-foreground mb-1">Object Fit</label>
+        <label className="block text-2xs text-muted-foreground mb-1">Object Fit</label>
         <select className="w-full h-7 text-xs rounded border bg-secondary/60 px-2" value={img.objectFit || 'contain'} onChange={(e) => patch({ objectFit: e.target.value as any })}>
           <option value="contain">Contain</option>
           <option value="cover">Cover</option>
@@ -1885,15 +1888,15 @@ function ElementProps({
     const patch = (p: Partial<typeof lbl>) => onUpdate({ ...element, label: { ...lbl, ...p } })
     return (
       <div className="space-y-2">
-        <label className="block text-[11px] text-muted-foreground">Text <span className="text-[10px] opacity-60">Use {'{{varName}}'} for variables</span></label>
+        <label className="block text-2xs text-muted-foreground">Text <span className="text-2xs opacity-60">Use {'{{varName}}'} for variables</span></label>
         <textarea className="w-full h-16 text-xs rounded border bg-secondary/60 px-2 py-1 resize-none" value={lbl.text} onChange={(e) => patch({ text: e.target.value })} />
         {variables.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            <span className="text-[10px] text-muted-foreground">Insert:</span>
+            <span className="text-2xs text-muted-foreground">Insert:</span>
             {variables.map((v) => (
               <button
                 key={v.id}
-                className="text-[10px] px-1.5 py-0.5 rounded border border-primary/30 bg-primary/5 hover:bg-primary/15 text-primary"
+                className="text-2xs px-1.5 py-0.5 rounded border border-primary/30 bg-primary/5 hover:bg-primary/15 text-primary"
                 onClick={() => patch({ text: (lbl.text || '') + `{{${v.name}}}` })}
               >
                 {`{{${v.name}}}`}
@@ -1903,19 +1906,19 @@ function ElementProps({
         )}
         <div className="grid grid-cols-3 gap-2">
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">Size</label>
-            <input type="number" className="w-full h-6 text-[11px] rounded border bg-secondary/60 px-1" value={lbl.fontSize || 14} onChange={(e) => patch({ fontSize: +e.target.value })} />
+            <label className="block text-2xs text-muted-foreground mb-0.5">Size</label>
+            <input type="number" className="w-full h-6 text-2xs rounded border bg-secondary/60 px-1" value={lbl.fontSize || 14} onChange={(e) => patch({ fontSize: +e.target.value })} />
           </div>
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">Weight</label>
-            <select className="w-full h-6 text-[11px] rounded border bg-secondary/60 px-1" value={lbl.fontWeight || 'normal'} onChange={(e) => patch({ fontWeight: e.target.value as any })}>
+            <label className="block text-2xs text-muted-foreground mb-0.5">Weight</label>
+            <select className="w-full h-6 text-2xs rounded border bg-secondary/60 px-1" value={lbl.fontWeight || 'normal'} onChange={(e) => patch({ fontWeight: e.target.value as any })}>
               <option value="normal">Normal</option>
               <option value="semibold">Semi</option>
               <option value="bold">Bold</option>
             </select>
           </div>
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">H. Align</label>
+            <label className="block text-2xs text-muted-foreground mb-0.5">H. Align</label>
             <div className="flex rounded border overflow-hidden h-6">
               {(['left','center','right'] as const).map((a, i) => (
                 <button key={a} title={a.charAt(0).toUpperCase()+a.slice(1)} onClick={() => patch({ align: a })}
@@ -1930,7 +1933,7 @@ function ElementProps({
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">V. Align</label>
+            <label className="block text-2xs text-muted-foreground mb-0.5">V. Align</label>
             <div className="flex rounded border overflow-hidden h-6">
               {(['top','middle','bottom'] as const).map((a, i) => (
                 <button key={a} title={a.charAt(0).toUpperCase()+a.slice(1)} onClick={() => patch({ verticalAlign: a })}
@@ -1943,26 +1946,26 @@ function ElementProps({
             </div>
           </div>
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">Color</label>
+            <label className="block text-2xs text-muted-foreground mb-0.5">Color</label>
             <input type="color" className="w-full h-6 rounded border cursor-pointer" value={lbl.color || '#000000'} onChange={(e) => patch({ color: e.target.value })} />
           </div>
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">Background</label>
+            <label className="block text-2xs text-muted-foreground mb-0.5">Background</label>
             <input type="color" className="w-full h-6 rounded border cursor-pointer" value={lbl.backgroundColor || '#ffffff'} onChange={(e) => patch({ backgroundColor: e.target.value })} />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">Border</label>
-            <select className="w-full h-6 text-[11px] rounded border bg-secondary/60 px-1" value={lbl.borderStyle || 'none'} onChange={(e) => patch({ borderStyle: e.target.value as any })}>
+            <label className="block text-2xs text-muted-foreground mb-0.5">Border</label>
+            <select className="w-full h-6 text-2xs rounded border bg-secondary/60 px-1" value={lbl.borderStyle || 'none'} onChange={(e) => patch({ borderStyle: e.target.value as any })}>
               <option value="none">None</option>
               <option value="solid">Solid</option>
               <option value="dashed">Dashed</option>
             </select>
           </div>
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">Padding</label>
-            <input type="number" className="w-full h-6 text-[11px] rounded border bg-secondary/60 px-1" value={lbl.padding ?? 4} onChange={(e) => patch({ padding: +e.target.value })} />
+            <label className="block text-2xs text-muted-foreground mb-0.5">Padding</label>
+            <input type="number" className="w-full h-6 text-2xs rounded border bg-secondary/60 px-1" value={lbl.padding ?? 4} onChange={(e) => patch({ padding: +e.target.value })} />
           </div>
         </div>
       </div>
@@ -1975,7 +1978,7 @@ function ElementProps({
     return (
       <div className="space-y-3">
         <div>
-          <label className="block text-[11px] text-muted-foreground mb-1">Link to Dashboard Widget</label>
+          <label className="block text-2xs text-muted-foreground mb-1">Link to Dashboard Widget</label>
           <select
             className="w-full h-7 text-xs rounded border bg-secondary/60 px-2 focus:ring-1 focus:ring-primary/40 outline-none"
             value={current?.widgetId || ''}
@@ -1991,14 +1994,14 @@ function ElementProps({
             ))}
           </select>
           {chartWidgets.length === 0 && (
-            <p className="text-[10px] text-muted-foreground/70 mt-1">No chart or KPI widgets found on this dashboard.</p>
+            <p className="text-2xs text-muted-foreground/70 mt-1">No chart or KPI widgets found on this dashboard.</p>
           )}
         </div>
         {current?.widgetId && (
           <div className="rounded-md border bg-primary/5 px-3 py-2 flex items-start gap-2">
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-primary font-medium truncate">Linked: {current.title || current.widgetId}</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Renders live inside the report.</p>
+              <p className="text-2xs text-primary font-medium truncate">Linked: {current.title || current.widgetId}</p>
+              <p className="text-2xs text-muted-foreground mt-0.5">Renders live inside the report.</p>
             </div>
             <button
               title="Unlink widget"
@@ -2020,7 +2023,7 @@ function ElementProps({
   if (element.type === 'spaceholder') {
     return (
       <div className="space-y-2">
-        <label className="block text-[11px] text-muted-foreground">Variable</label>
+        <label className="block text-2xs text-muted-foreground">Variable</label>
         <select className="w-full h-7 text-xs rounded border bg-secondary/60 px-2" value={element.variableId || ''} onChange={(e) => onUpdate({ ...element, variableId: e.target.value })}>
           <option value="">Select variable…</option>
           {variables.map((v) => <option key={v.id} value={v.id}>{`{{${v.name}}}`}</option>)}
@@ -2195,34 +2198,34 @@ function ElementProps({
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2">
-          <button className="text-[11px] px-2 py-1 rounded border hover:bg-muted flex items-center gap-1" onClick={addRow}><RiAddLine className="h-3 w-3" />Row</button>
-          <button className="text-[11px] px-2 py-1 rounded border hover:bg-muted flex items-center gap-1" onClick={addCol}><RiAddLine className="h-3 w-3" />Column</button>
-          <span className="text-[11px] text-muted-foreground ml-auto">{tbl.rows}×{tbl.cols}</span>
+          <button className="text-2xs px-2 py-1 rounded border hover:bg-muted flex items-center gap-1" onClick={addRow}><RiAddLine className="h-3 w-3" />Row</button>
+          <button className="text-2xs px-2 py-1 rounded border hover:bg-muted flex items-center gap-1" onClick={addCol}><RiAddLine className="h-3 w-3" />Column</button>
+          <span className="text-2xs text-muted-foreground ml-auto">{tbl.rows}×{tbl.cols}</span>
         </div>
 
         {/* Table Style */}
         <details className="group/details" open>
-          <summary className="text-[11px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1">▸ Table Style</summary>
+          <summary className="text-2xs font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1">▸ Table Style</summary>
           <div className="mt-1.5 space-y-1.5 pl-1">
             <div className="grid grid-cols-3 gap-1.5">
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">Border</label>
-                <select className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.borderStyle || 'solid'} onChange={(e) => patchTbl({ borderStyle: e.target.value as any })}>
+                <label className="block text-2xs text-muted-foreground mb-0.5">Border</label>
+                <select className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.borderStyle || 'solid'} onChange={(e) => patchTbl({ borderStyle: e.target.value as any })}>
                   <option value="solid">Solid</option>
                   <option value="dashed">Dashed</option>
                   <option value="none">None</option>
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">Border Color</label>
+                <label className="block text-2xs text-muted-foreground mb-0.5">Border Color</label>
                 <input type="color" className="w-full h-5 rounded border cursor-pointer" value={tbl.borderColor || '#e5e7eb'} onChange={(e) => patchTbl({ borderColor: e.target.value })} />
               </div>
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">Radius</label>
-                <input type="number" className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.borderRadius ?? 0} onChange={(e) => patchTbl({ borderRadius: Math.max(0, +e.target.value) })} min="0" />
+                <label className="block text-2xs text-muted-foreground mb-0.5">Radius</label>
+                <input type="number" className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.borderRadius ?? 0} onChange={(e) => patchTbl({ borderRadius: Math.max(0, +e.target.value) })} min="0" />
               </div>
             </div>
-            <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
+            <label className="flex items-center gap-1.5 text-2xs text-muted-foreground cursor-pointer">
               <input type="checkbox" checked={!!tbl.stripedRows} onChange={(e) => patchTbl({ stripedRows: e.target.checked })} /> Striped rows
             </label>
           </div>
@@ -2230,34 +2233,34 @@ function ElementProps({
 
         {/* Header Style */}
         <details className="group/details">
-          <summary className="text-[11px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1">▸ Header Style</summary>
+          <summary className="text-2xs font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1">▸ Header Style</summary>
           <div className="mt-1.5 space-y-1.5 pl-1">
             <div className="grid grid-cols-2 gap-1.5">
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">Background</label>
+                <label className="block text-2xs text-muted-foreground mb-0.5">Background</label>
                 <input type="color" className="w-full h-5 rounded border cursor-pointer" value={tbl.headerBg || '#f3f4f6'} onChange={(e) => patchTbl({ headerBg: e.target.value })} />
               </div>
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">Text Color</label>
+                <label className="block text-2xs text-muted-foreground mb-0.5">Text Color</label>
                 <input type="color" className="w-full h-5 rounded border cursor-pointer" value={tbl.headerColor || '#111827'} onChange={(e) => patchTbl({ headerColor: e.target.value })} />
               </div>
             </div>
             <div className="grid grid-cols-3 gap-1.5">
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">Size</label>
-                <input type="number" className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.headerFontSize ?? 12} onChange={(e) => patchTbl({ headerFontSize: +e.target.value })} min="8" max="32" />
+                <label className="block text-2xs text-muted-foreground mb-0.5">Size</label>
+                <input type="number" className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.headerFontSize ?? 12} onChange={(e) => patchTbl({ headerFontSize: +e.target.value })} min="8" max="32" />
               </div>
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">Weight</label>
-                <select className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.headerFontWeight || 'bold'} onChange={(e) => patchTbl({ headerFontWeight: e.target.value as any })}>
+                <label className="block text-2xs text-muted-foreground mb-0.5">Weight</label>
+                <select className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.headerFontWeight || 'bold'} onChange={(e) => patchTbl({ headerFontWeight: e.target.value as any })}>
                   <option value="normal">Normal</option>
                   <option value="semibold">Semi</option>
                   <option value="bold">Bold</option>
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">H-Align</label>
-                <select className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.headerAlign || 'left'} onChange={(e) => patchTbl({ headerAlign: e.target.value as any })}>
+                <label className="block text-2xs text-muted-foreground mb-0.5">H-Align</label>
+                <select className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.headerAlign || 'left'} onChange={(e) => patchTbl({ headerAlign: e.target.value as any })}>
                   <option value="left">Left</option>
                   <option value="center">Center</option>
                   <option value="right">Right</option>
@@ -2266,16 +2269,16 @@ function ElementProps({
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">V-Align</label>
-                <select className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.headerVerticalAlign || 'middle'} onChange={(e) => patchTbl({ headerVerticalAlign: e.target.value as any })}>
+                <label className="block text-2xs text-muted-foreground mb-0.5">V-Align</label>
+                <select className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.headerVerticalAlign || 'middle'} onChange={(e) => patchTbl({ headerVerticalAlign: e.target.value as any })}>
                   <option value="top">Top</option>
                   <option value="middle">Middle</option>
                   <option value="bottom">Bottom</option>
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">Height (px)</label>
-                <input type="number" className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.headerHeight ?? ''} onChange={(e) => patchTbl({ headerHeight: e.target.value ? +e.target.value : undefined })} placeholder="Auto" min="16" />
+                <label className="block text-2xs text-muted-foreground mb-0.5">Height (px)</label>
+                <input type="number" className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.headerHeight ?? ''} onChange={(e) => patchTbl({ headerHeight: e.target.value ? +e.target.value : undefined })} placeholder="Auto" min="16" />
               </div>
             </div>
           </div>
@@ -2284,34 +2287,34 @@ function ElementProps({
         {/* Subheader Style */}
         {tbl.subheaders && (
           <details className="group/details">
-            <summary className="text-[11px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1">▸ Subheader Style</summary>
+            <summary className="text-2xs font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1">▸ Subheader Style</summary>
             <div className="mt-1.5 space-y-1.5 pl-1">
               <div className="grid grid-cols-2 gap-1.5">
                 <div>
-                  <label className="block text-[10px] text-muted-foreground mb-0.5">Background</label>
+                  <label className="block text-2xs text-muted-foreground mb-0.5">Background</label>
                   <input type="color" className="w-full h-5 rounded border cursor-pointer" value={tbl.subheaderBg || tbl.headerBg || '#f3f4f6'} onChange={(e) => patchTbl({ subheaderBg: e.target.value })} />
                 </div>
                 <div>
-                  <label className="block text-[10px] text-muted-foreground mb-0.5">Text Color</label>
+                  <label className="block text-2xs text-muted-foreground mb-0.5">Text Color</label>
                   <input type="color" className="w-full h-5 rounded border cursor-pointer" value={tbl.subheaderColor || tbl.headerColor || '#111827'} onChange={(e) => patchTbl({ subheaderColor: e.target.value })} />
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 <div>
-                  <label className="block text-[10px] text-muted-foreground mb-0.5">Size</label>
-                  <input type="number" className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.subheaderFontSize ?? 11} onChange={(e) => patchTbl({ subheaderFontSize: +e.target.value })} min="8" max="32" />
+                  <label className="block text-2xs text-muted-foreground mb-0.5">Size</label>
+                  <input type="number" className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.subheaderFontSize ?? 11} onChange={(e) => patchTbl({ subheaderFontSize: +e.target.value })} min="8" max="32" />
                 </div>
                 <div>
-                  <label className="block text-[10px] text-muted-foreground mb-0.5">Weight</label>
-                  <select className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.subheaderFontWeight || 'normal'} onChange={(e) => patchTbl({ subheaderFontWeight: e.target.value as any })}>
+                  <label className="block text-2xs text-muted-foreground mb-0.5">Weight</label>
+                  <select className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.subheaderFontWeight || 'normal'} onChange={(e) => patchTbl({ subheaderFontWeight: e.target.value as any })}>
                     <option value="normal">Normal</option>
                     <option value="semibold">Semi</option>
                     <option value="bold">Bold</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] text-muted-foreground mb-0.5">H-Align</label>
-                  <select className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.subheaderAlign || 'left'} onChange={(e) => patchTbl({ subheaderAlign: e.target.value as any })}>
+                  <label className="block text-2xs text-muted-foreground mb-0.5">H-Align</label>
+                  <select className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.subheaderAlign || 'left'} onChange={(e) => patchTbl({ subheaderAlign: e.target.value as any })}>
                     <option value="left">Left</option>
                     <option value="center">Center</option>
                     <option value="right">Right</option>
@@ -2319,14 +2322,14 @@ function ElementProps({
                 </div>
               </div>
               <div>
-                <label className="block text-[10px] text-muted-foreground mb-0.5">V-Align</label>
-                <select className="w-full h-5 text-[10px] rounded border bg-secondary/60 px-0.5" value={tbl.subheaderVerticalAlign || 'middle'} onChange={(e) => patchTbl({ subheaderVerticalAlign: e.target.value as any })}>
+                <label className="block text-2xs text-muted-foreground mb-0.5">V-Align</label>
+                <select className="w-full h-5 text-2xs rounded border bg-secondary/60 px-0.5" value={tbl.subheaderVerticalAlign || 'middle'} onChange={(e) => patchTbl({ subheaderVerticalAlign: e.target.value as any })}>
                   <option value="top">Top</option>
                   <option value="middle">Middle</option>
                   <option value="bottom">Bottom</option>
                 </select>
               </div>
-              <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
+              <label className="flex items-center gap-1.5 text-2xs text-muted-foreground cursor-pointer">
                 <input type="checkbox" checked={!!tbl.mergeBlankSubheaders} onChange={(e) => patchTbl({ mergeBlankSubheaders: e.target.checked })} /> Merge headers with blank subheaders
               </label>
             </div>
@@ -2336,8 +2339,8 @@ function ElementProps({
         {/* Headers */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="block text-[11px] text-muted-foreground">Headers</label>
-            <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted" onClick={toggleSubheaders}>
+            <label className="block text-2xs text-muted-foreground">Headers</label>
+            <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted" onClick={toggleSubheaders}>
               {tbl.subheaders ? 'Remove' : 'Add'} Subheaders
             </button>
           </div>
@@ -2348,14 +2351,14 @@ function ElementProps({
                 <React.Fragment key={ci}>
                   <div className="flex items-center gap-1">
                     <input 
-                      className="h-6 text-[11px] rounded border bg-secondary/60 px-1 flex-1" 
+                      className="h-6 text-2xs rounded border bg-secondary/60 px-1 flex-1" 
                       value={header.text} 
                       onChange={(e) => updateHeader(ci, e.target.value)} 
                       placeholder="Header text"
                     />
                     <input 
                       type="number" 
-                      className="h-6 text-[11px] rounded border bg-secondary/60 px-1 w-12" 
+                      className="h-6 text-2xs rounded border bg-secondary/60 px-1 w-12" 
                       value={header.colspan || 1} 
                       onChange={(e) => updateHeaderColspan(ci, +e.target.value)}
                       min="1"
@@ -2366,7 +2369,7 @@ function ElementProps({
                   {ci < tbl.headers.length - 1 && (
                     <div className="flex items-center gap-1 pl-1">
                       <button
-                        className="text-[9px] text-muted-foreground hover:text-foreground hover:bg-muted px-1 rounded border border-dashed border-muted-foreground/40 leading-4"
+                        className="text-2xs text-muted-foreground hover:text-foreground hover:bg-muted px-1 rounded border border-dashed border-muted-foreground/40 leading-4"
                         title="Insert header after this one"
                         onClick={() => insertColAt(ci)}
                       >+ insert</button>
@@ -2381,12 +2384,12 @@ function ElementProps({
         {/* Subheaders */}
         {tbl.subheaders && (
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-1">Subheaders</label>
+            <label className="block text-2xs text-muted-foreground mb-1">Subheaders</label>
             <div className="flex gap-1 flex-wrap">
               {tbl.subheaders.map((sh, ci) => (
                 <input 
                   key={ci}
-                  className="h-6 text-[11px] rounded border bg-secondary/60 px-1 w-20" 
+                  className="h-6 text-2xs rounded border bg-secondary/60 px-1 w-20" 
                   value={sh} 
                   onChange={(e) => updateSubheader(ci, e.target.value)} 
                   placeholder={`Sub ${ci + 1}`}
@@ -2398,7 +2401,7 @@ function ElementProps({
 
         {/* Column Widths */}
         <details className="group/details">
-          <summary className="text-[11px] font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1">▸ Column Widths (%)</summary>
+          <summary className="text-2xs font-medium text-muted-foreground cursor-pointer select-none flex items-center gap-1">▸ Column Widths (%)</summary>
           <div className="mt-1.5 pl-1">
             <div className="flex gap-1 flex-wrap">
               {(() => {
@@ -2409,10 +2412,10 @@ function ElementProps({
                 const widths = tbl.colWidths || Array(actualCols).fill(0)
                 return Array.from({ length: actualCols }, (_, ci) => (
                   <div key={ci} className="flex flex-col items-center">
-                    <span className="text-[9px] text-muted-foreground">{ci + 1}</span>
+                    <span className="text-2xs text-muted-foreground">{ci + 1}</span>
                     <input
                       type="number"
-                      className="h-5 text-[10px] rounded border bg-secondary/60 px-0.5 w-12 text-center"
+                      className="h-5 text-2xs rounded border bg-secondary/60 px-0.5 w-12 text-center"
                       value={widths[ci] || ''}
                       onChange={(e) => {
                         const w = [...widths]
@@ -2428,7 +2431,7 @@ function ElementProps({
                 ))
               })()}
             </div>
-            <p className="text-[9px] text-muted-foreground mt-1">Set % width per column. Leave 0 or empty for auto.</p>
+            <p className="text-2xs text-muted-foreground mt-1">Set % width per column. Leave 0 or empty for auto.</p>
           </div>
         </details>
 
@@ -2436,18 +2439,18 @@ function ElementProps({
         <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-2.5">
           <div className="flex items-center justify-between mb-1.5">
             <div>
-              <label className="block text-[11px] font-medium">Cells</label>
-              <p className="text-[10px] text-muted-foreground leading-tight">{tbl.rows} row{tbl.rows === 1 ? '' : 's'} × {tbl.cols} col{tbl.cols === 1 ? '' : 's'}</p>
+              <label className="block text-2xs font-medium">Cells</label>
+              <p className="text-2xs text-muted-foreground leading-tight">{tbl.rows} row{tbl.rows === 1 ? '' : 's'} × {tbl.cols} col{tbl.cols === 1 ? '' : 's'}</p>
             </div>
             <button
               type="button"
-              className="text-[11px] px-2.5 py-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--muted))] flex items-center gap-1.5 cursor-pointer transition-colors"
+              className="text-2xs px-2.5 py-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--muted))] flex items-center gap-1.5 cursor-pointer transition-colors"
               onClick={() => setCellsEditorOpen(true)}
             >
               <RiTableLine className="h-3.5 w-3.5" /> Open editor
             </button>
           </div>
-          <p className="text-[10px] text-muted-foreground leading-snug">
+          <p className="text-2xs text-muted-foreground leading-snug">
             Edit cell content, merge cells, reorder rows, and tune row backgrounds + borders in a full-screen editor.
           </p>
         </div>
@@ -2507,7 +2510,7 @@ function CellVarSelect({ value, variables, onChange }: {
     <div ref={containerRef} className="relative flex-1 min-w-0">
       <button
         type="button"
-        className="w-full flex items-center gap-0.5 bg-transparent text-[9px] font-mono text-left min-w-0 outline-none"
+        className="w-full flex items-center gap-0.5 bg-transparent text-2xs font-mono text-left min-w-0 outline-none"
         onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}
         onMouseDown={(e) => e.stopPropagation()}
         title={selected?.name || 'Select variable…'}
@@ -2525,7 +2528,7 @@ function CellVarSelect({ value, variables, onChange }: {
           <div className="p-1.5 border-b">
             <input
               ref={searchRef}
-              className="w-full h-6 text-[10px] rounded border bg-secondary/60 px-1.5 outline-none focus:ring-1 focus:ring-primary/40"
+              className="w-full h-6 text-2xs rounded border bg-secondary/60 px-1.5 outline-none focus:ring-1 focus:ring-primary/40"
               placeholder="Search variables…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -2534,18 +2537,18 @@ function CellVarSelect({ value, variables, onChange }: {
           <div className="max-h-52 overflow-y-auto py-0.5">
             <button
               type="button"
-              className="w-full text-left text-[9px] font-mono px-2 py-1 hover:bg-muted text-muted-foreground"
+              className="w-full text-left text-2xs font-mono px-2 py-1 hover:bg-muted text-muted-foreground"
               onClick={() => { onChange(''); setOpen(false) }}
             >
               (none)
             </button>
             {filtered.length === 0 ? (
-              <div className="text-[9px] text-muted-foreground text-center py-3 italic">No results</div>
+              <div className="text-2xs text-muted-foreground text-center py-3 italic">No results</div>
             ) : filtered.map(v => (
               <button
                 key={v.id}
                 type="button"
-                className={`w-full text-left text-[9px] font-mono px-2 py-1 hover:bg-muted truncate block ${v.id === value ? 'text-primary font-semibold bg-primary/5' : ''}`}
+                className={`w-full text-left text-2xs font-mono px-2 py-1 hover:bg-muted truncate block ${v.id === value ? 'text-primary font-semibold bg-primary/5' : ''}`}
                 onClick={() => { onChange(v.id); setOpen(false) }}
               >
                 {v.name}
@@ -2791,7 +2794,7 @@ function InlineTableEditor({
   }
 
   return (
-    <table ref={tableRef} className="w-full border-collapse text-[11px]" style={{ tableLayout: 'fixed', borderWidth: '1px', borderStyle: table.borderStyle || 'solid', borderColor: table.borderColor || 'hsl(var(--border))' }}>
+    <table ref={tableRef} className="w-full border-collapse text-2xs" style={{ tableLayout: 'fixed', borderWidth: '1px', borderStyle: table.borderStyle || 'solid', borderColor: table.borderColor || 'hsl(var(--border))' }}>
       <colgroup>
         {Array.from({ length: actualCols }, (_, i) => (
           <col key={i} style={{ width: table.colWidths?.[i] ? `${table.colWidths[i]}%` : undefined }} />
@@ -2832,7 +2835,7 @@ function InlineTableEditor({
                     onClick={(e) => e.stopPropagation()}
                   />
                   {(header.colspan || 1) > 1 && (
-                    <span className="text-[8px] text-muted-foreground bg-primary/10 px-1 rounded shrink-0" title={`Spans ${header.colspan} columns`}>
+                    <span className="text-2xs text-muted-foreground bg-primary/10 px-1 rounded shrink-0" title={`Spans ${header.colspan} columns`}>
                       ×{header.colspan}
                     </span>
                   )}
@@ -2840,7 +2843,7 @@ function InlineTableEditor({
                     type="number"
                     min="1"
                     max={table.cols}
-                    className="w-8 bg-transparent border border-border/40 rounded text-[8px] px-1 py-0.5 shrink-0"
+                    className="w-8 bg-transparent border border-border/40 rounded text-2xs px-1 py-0.5 shrink-0"
                     value={header.colspan || 1}
                     onChange={(e) => updateHeaderColspan(ci, +e.target.value)}
                     onClick={(e) => e.stopPropagation()}
@@ -2939,7 +2942,7 @@ function InlineTableEditor({
                 <div className="flex items-center gap-0.5 relative">
                   {cell.type === 'text' ? (
                     <input
-                      className="flex-1 bg-transparent border-none outline-none text-[10px] min-w-0"
+                      className="flex-1 bg-transparent border-none outline-none text-2xs min-w-0"
                       style={{ textAlign: cs?.align || 'left' }}
                       value={cell.text || ''}
                       onChange={(e) => updateCell(ri, ci, { text: e.target.value })}
@@ -2947,7 +2950,7 @@ function InlineTableEditor({
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : cell.type === 'period' ? (
-                    <span className="flex-1 text-[9px] font-mono text-primary/80 truncate select-none" title={PERIOD_LABEL[cell.datetimeExpr || ''] || cell.datetimeExpr || 'Period'}>
+                    <span className="flex-1 text-2xs font-mono text-primary/80 truncate select-none" title={PERIOD_LABEL[cell.datetimeExpr || ''] || cell.datetimeExpr || 'Period'}>
                       {PERIOD_LABEL[cell.datetimeExpr || ''] || cell.datetimeExpr || <span className="text-muted-foreground italic">No period</span>}
                     </span>
                   ) : (
@@ -2958,7 +2961,7 @@ function InlineTableEditor({
                     />
                   )}
                   <button
-                    className={`text-[9px] px-0.5 rounded shrink-0 transition-colors ${isMenuOpen ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-muted-foreground'}`}
+                    className={`text-2xs px-0.5 rounded shrink-0 transition-colors ${isMenuOpen ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-muted-foreground'}`}
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => { e.stopPropagation(); setCellMenuOpen(isMenuOpen ? null : { row: ri, col: ci }) }}
                     title="Cell options"
@@ -2969,15 +2972,15 @@ function InlineTableEditor({
                     <div className="absolute z-50 right-0 top-full mt-1 border rounded-lg shadow-lg p-2 min-w-[200px] space-y-2" style={{ backgroundColor: 'hsl(var(--card))' }} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
                       {/* Type toggle */}
                       <div className="flex gap-1">
-                        <button className={`flex-1 text-[10px] py-1 rounded-md transition-colors ${cell.type === 'text' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
+                        <button className={`flex-1 text-2xs py-1 rounded-md transition-colors ${cell.type === 'text' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
                           onClick={() => { updateCell(ri, ci, { type: 'text', text: cell.type === 'spaceholder' ? '' : cell.text, variableId: undefined, datetimeExpr: undefined }); }}>
                           Text
                         </button>
-                        <button className={`flex-1 text-[10px] py-1 rounded-md transition-colors ${cell.type === 'spaceholder' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
+                        <button className={`flex-1 text-2xs py-1 rounded-md transition-colors ${cell.type === 'spaceholder' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
                           onClick={() => { updateCell(ri, ci, { type: 'spaceholder', text: undefined, variableId: cell.variableId || '', datetimeExpr: undefined }); }}>
                           Variable
                         </button>
-                        <button className={`flex-1 text-[10px] py-1 rounded-md transition-colors ${cell.type === 'period' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
+                        <button className={`flex-1 text-2xs py-1 rounded-md transition-colors ${cell.type === 'period' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
                           onClick={() => { updateCell(ri, ci, { type: 'period', text: undefined, variableId: undefined, datetimeExpr: cell.datetimeExpr || 'last_week' }); }}>
                           Period
                         </button>
@@ -2986,9 +2989,9 @@ function InlineTableEditor({
                       {/* Period selector — shown when type is period */}
                       {cell.type === 'period' && (
                         <div>
-                          <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Period</label>
+                          <label className="block text-2xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Period</label>
                           <select
-                            className="w-full h-6 text-[10px] rounded border bg-secondary/40 px-1 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
+                            className="w-full h-6 text-2xs rounded border bg-secondary/40 px-1 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
                             value={cell.datetimeExpr || 'last_week'}
                             onChange={(e) => updateCell(ri, ci, { datetimeExpr: e.target.value })}
                           >
@@ -3004,19 +3007,19 @@ function InlineTableEditor({
                       )}
 
                       <div className="border-t pt-2">
-                        <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Formatting</div>
+                        <div className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Formatting</div>
                         {/* Font size + weight + italic */}
                         <div className="grid grid-cols-3 gap-1 mb-1.5">
                           <div>
-                            <label className="block text-[8px] text-muted-foreground mb-0.5">Size</label>
-                            <input type="number" min="6" max="32" className="w-full h-5 text-[9px] rounded border bg-secondary/40 px-1 focus:ring-1 focus:ring-primary/40 outline-none"
+                            <label className="block text-2xs text-muted-foreground mb-0.5">Size</label>
+                            <input type="number" min="6" max="32" className="w-full h-5 text-2xs rounded border bg-secondary/40 px-1 focus:ring-1 focus:ring-primary/40 outline-none"
                               value={cs?.fontSize || ''} placeholder="—"
                               onChange={(e) => updateCell(ri, ci, { style: { ...cs, fontSize: e.target.value ? +e.target.value : undefined } })}
                             />
                           </div>
                           <div>
-                            <label className="block text-[8px] text-muted-foreground mb-0.5">Weight</label>
-                            <select className="w-full h-5 text-[9px] rounded border bg-secondary/40 px-0.5 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
+                            <label className="block text-2xs text-muted-foreground mb-0.5">Weight</label>
+                            <select className="w-full h-5 text-2xs rounded border bg-secondary/40 px-0.5 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
                               value={cs?.fontWeight || 'normal'}
                               onChange={(e) => updateCell(ri, ci, { style: { ...cs, fontWeight: e.target.value as any } })}>
                               <option value="normal">Normal</option>
@@ -3025,8 +3028,8 @@ function InlineTableEditor({
                             </select>
                           </div>
                           <div>
-                            <label className="block text-[8px] text-muted-foreground mb-0.5">Style</label>
-                            <select className="w-full h-5 text-[9px] rounded border bg-secondary/40 px-0.5 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
+                            <label className="block text-2xs text-muted-foreground mb-0.5">Style</label>
+                            <select className="w-full h-5 text-2xs rounded border bg-secondary/40 px-0.5 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
                               value={cs?.fontStyle || 'normal'}
                               onChange={(e) => updateCell(ri, ci, { style: { ...cs, fontStyle: e.target.value as any } })}>
                               <option value="normal">Normal</option>
@@ -3038,19 +3041,19 @@ function InlineTableEditor({
                         {/* Colors */}
                         <div className="grid grid-cols-2 gap-1 mb-1.5">
                           <div>
-                            <label className="block text-[8px] text-muted-foreground mb-0.5">Text Color</label>
+                            <label className="block text-2xs text-muted-foreground mb-0.5">Text Color</label>
                             <div className="flex items-center gap-1">
                               <input type="color" className="w-5 h-5 rounded border cursor-pointer shrink-0" value={cs?.color || '#000000'}
                                 onChange={(e) => updateCell(ri, ci, { style: { ...cs, color: e.target.value } })} />
-                              {cs?.color && <button className="text-[8px] text-muted-foreground hover:text-foreground" onClick={() => updateCell(ri, ci, { style: { ...cs, color: undefined } })}>clear</button>}
+                              {cs?.color && <button className="text-2xs text-muted-foreground hover:text-foreground" onClick={() => updateCell(ri, ci, { style: { ...cs, color: undefined } })}>clear</button>}
                             </div>
                           </div>
                           <div>
-                            <label className="block text-[8px] text-muted-foreground mb-0.5">Background</label>
+                            <label className="block text-2xs text-muted-foreground mb-0.5">Background</label>
                             <div className="flex items-center gap-1">
                               <input type="color" className="w-5 h-5 rounded border cursor-pointer shrink-0" value={cs?.backgroundColor || '#ffffff'}
                                 onChange={(e) => updateCell(ri, ci, { style: { ...cs, backgroundColor: e.target.value === '#ffffff' ? undefined : e.target.value } })} />
-                              {cs?.backgroundColor && <button className="text-[8px] text-muted-foreground hover:text-foreground" onClick={() => updateCell(ri, ci, { style: { ...cs, backgroundColor: undefined } })}>clear</button>}
+                              {cs?.backgroundColor && <button className="text-2xs text-muted-foreground hover:text-foreground" onClick={() => updateCell(ri, ci, { style: { ...cs, backgroundColor: undefined } })}>clear</button>}
                             </div>
                           </div>
                         </div>
@@ -3058,10 +3061,10 @@ function InlineTableEditor({
                         {/* Alignment */}
                         <div className="grid grid-cols-2 gap-1 mb-1.5">
                           <div>
-                            <label className="block text-[8px] text-muted-foreground mb-0.5">H-Align</label>
+                            <label className="block text-2xs text-muted-foreground mb-0.5">H-Align</label>
                             <div className="flex gap-0.5">
                               {(['left', 'center', 'right'] as const).map(a => (
-                                <button key={a} className={`flex-1 text-[9px] py-0.5 rounded border transition-colors ${cs?.align === a ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
+                                <button key={a} className={`flex-1 text-2xs py-0.5 rounded border transition-colors ${cs?.align === a ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
                                   onClick={() => updateCell(ri, ci, { style: { ...cs, align: a } })}>
                                   {a === 'left' ? '⇤' : a === 'center' ? '⇔' : '⇥'}
                                 </button>
@@ -3069,10 +3072,10 @@ function InlineTableEditor({
                             </div>
                           </div>
                           <div>
-                            <label className="block text-[8px] text-muted-foreground mb-0.5">V-Align</label>
+                            <label className="block text-2xs text-muted-foreground mb-0.5">V-Align</label>
                             <div className="flex gap-0.5">
                               {(['top', 'middle', 'bottom'] as const).map(a => (
-                                <button key={a} className={`flex-1 text-[9px] py-0.5 rounded border transition-colors ${cs?.verticalAlign === a ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
+                                <button key={a} className={`flex-1 text-2xs py-0.5 rounded border transition-colors ${cs?.verticalAlign === a ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
                                   onClick={() => updateCell(ri, ci, { style: { ...cs, verticalAlign: a } })}>
                                   {a === 'top' ? '⬆' : a === 'middle' ? '⬌' : '⬇'}
                                 </button>
@@ -3083,8 +3086,8 @@ function InlineTableEditor({
 
                         {/* Number format */}
                         <div>
-                          <label className="block text-[8px] text-muted-foreground mb-0.5">Number Format</label>
-                          <select className="w-full h-5 text-[9px] rounded border bg-secondary/40 px-1 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
+                          <label className="block text-2xs text-muted-foreground mb-0.5">Number Format</label>
+                          <select className="w-full h-5 text-2xs rounded border bg-secondary/40 px-1 cursor-pointer focus:ring-1 focus:ring-primary/40 outline-none"
                             value={cs?.numberFormat || 'none'}
                             onChange={(e) => updateCell(ri, ci, { style: { ...cs, numberFormat: e.target.value as any } })}>
                             <option value="none">None</option>
@@ -3100,7 +3103,7 @@ function InlineTableEditor({
 
                       {/* Reset */}
                       {cs && Object.keys(cs).some(k => (cs as any)[k] !== undefined) && (
-                        <button className="w-full text-[9px] text-muted-foreground hover:text-foreground border rounded py-0.5 hover:bg-muted transition-colors mt-1"
+                        <button className="w-full text-2xs text-muted-foreground hover:text-foreground border rounded py-0.5 hover:bg-muted transition-colors mt-1"
                           onClick={() => updateCell(ri, ci, { style: undefined })}>
                           Reset formatting
                         </button>
@@ -3109,32 +3112,32 @@ function InlineTableEditor({
                       {/* Row actions */}
                       <div className="border-t pt-2 mt-1 space-y-1">
                         <button
-                          className={`w-full text-[9px] text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri === 0 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
+                          className={`w-full text-2xs text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri === 0 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
                           disabled={ri === 0}
                           onClick={() => { moveRowUp(ri); setDeleteConfirmRow(null) }}>
                           <RiArrowUpLine className="h-3 w-3 shrink-0" />Move row up
                         </button>
                         <button
-                          className={`w-full text-[9px] text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri >= table.rows - 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
+                          className={`w-full text-2xs text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri >= table.rows - 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
                           disabled={ri >= table.rows - 1}
                           onClick={() => { moveRowDown(ri); setDeleteConfirmRow(null) }}>
                           <RiArrowDownLine className="h-3 w-3 shrink-0" />Move row down
                         </button>
-                        <button className="w-full text-[9px] text-left px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1.5"
+                        <button className="w-full text-2xs text-left px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1.5"
                           onClick={() => { insertRowAbove(ri); setDeleteConfirmRow(null) }}>
                           <RiAddLine className="h-3 w-3 shrink-0" />Insert row above
                         </button>
                         {deleteConfirmRow === ri ? (
                           <div className="flex items-center gap-1">
-                            <span className="text-[9px] text-destructive flex-1">Delete this row?</span>
-                            <button className="text-[9px] px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+                            <span className="text-2xs text-destructive flex-1">Delete this row?</span>
+                            <button className="text-2xs px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
                               onClick={() => deleteRow(ri)}>Yes</button>
-                            <button className="text-[9px] px-1.5 py-0.5 rounded border hover:bg-muted transition-colors"
+                            <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors"
                               onClick={() => setDeleteConfirmRow(null)}>No</button>
                           </div>
                         ) : (
                           <button
-                            className={`w-full text-[9px] text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                            className={`w-full text-2xs text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
                               table.rows <= 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-destructive/10 text-destructive'
                             }`}
                             disabled={table.rows <= 1}
@@ -3157,15 +3160,15 @@ function InlineTableEditor({
                           const btnLabel = isWhole ? 'Delete column' : 'Delete sub-column'
                           return deleteConfirmCol === ci ? (
                             <div className="flex items-center gap-1">
-                              <span className="text-[9px] text-destructive flex-1">{confirmMsg}</span>
-                              <button className="text-[9px] px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+                              <span className="text-2xs text-destructive flex-1">{confirmMsg}</span>
+                              <button className="text-2xs px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
                                 onClick={() => deleteColumn(ci)}>Yes</button>
-                              <button className="text-[9px] px-1.5 py-0.5 rounded border hover:bg-muted transition-colors"
+                              <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors"
                                 onClick={() => setDeleteConfirmCol(null)}>No</button>
                             </div>
                           ) : (
                             <button
-                              className={`w-full text-[9px] text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                              className={`w-full text-2xs text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
                                 table.cols <= 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-destructive/10 text-destructive'
                               }`}
                               disabled={table.cols <= 1}
@@ -3328,9 +3331,9 @@ function GridCanvas({
               {/* Element preview */}
               <div className="h-full w-full overflow-hidden rounded-sm bg-card/80 border border-border/60">
                 {el.type === 'chart' && (
-                  <div className="h-full flex flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="h-full flex flex-col items-center justify-center gap-1 text-2xs text-muted-foreground">
                     <RiBarChart2Line className="h-5 w-5 text-[hsl(var(--chart-2))]" />
-                    <span className="text-[10px] text-center px-1 truncate w-full text-center">{el.chart?.title || 'Unlinked Chart'}</span>
+                    <span className="text-2xs text-center px-1 truncate w-full text-center">{el.chart?.title || 'Unlinked Chart'}</span>
                   </div>
                 )}
                 {el.type === 'label' && (
@@ -3347,7 +3350,7 @@ function GridCanvas({
                   </div>
                 )}
                 {el.type === 'image' && (
-                  <div className="h-full flex items-center justify-center text-[11px] text-muted-foreground">
+                  <div className="h-full flex items-center justify-center text-2xs text-muted-foreground">
                     {el.image?.url ? (
                       <img src={el.image.url} alt="" className="w-full h-full object-contain" />
                     ) : (
@@ -3356,13 +3359,13 @@ function GridCanvas({
                   </div>
                 )}
                 {el.type === 'spaceholder' && (
-                  <div className="h-full flex items-center justify-center text-[11px] text-primary/70 font-mono">
+                  <div className="h-full flex items-center justify-center text-2xs text-primary/70 font-mono">
                     {`{{${variables.find(v => v.id === el.variableId)?.name || '?'}}}`}
                   </div>
                 )}
                 {el.type === 'table' && el.table && !isSelected && (
                   <div className="h-full w-full overflow-auto p-1">
-                    <table className="w-full border-collapse text-[11px]" style={{ tableLayout: 'fixed', borderWidth: '1px', borderStyle: el.table.borderStyle || 'solid', borderColor: el.table.borderColor || 'hsl(var(--border))' }}>
+                    <table className="w-full border-collapse text-2xs" style={{ tableLayout: 'fixed', borderWidth: '1px', borderStyle: el.table.borderStyle || 'solid', borderColor: el.table.borderColor || 'hsl(var(--border))' }}>
                       <colgroup>
                         {(() => {
                           const previewCols = el.table!.headers.reduce((s, h) => s + ((typeof h === 'string' ? 1 : h.colspan) || 1), 0)
@@ -3421,7 +3424,7 @@ function GridCanvas({
                               const defBStyle = el.table!.borderStyle || 'solid'
                               const defBColor = el.table!.borderColor || 'hsl(var(--border))'
                               return (
-                              <td key={ci} colSpan={cspan} rowSpan={rspan} className="px-1 py-0.5 text-[10px]" style={{
+                              <td key={ci} colSpan={cspan} rowSpan={rspan} className="px-1 py-0.5 text-2xs" style={{
                                 borderWidth: '1px', borderStyle: defBStyle, borderColor: defBColor,
                                 ...(rs?.borderTopStyle ? { borderTopStyle: rs.borderTopStyle } : {}),
                                 ...(rs?.borderTopColor ? { borderTopColor: rs.borderTopColor } : {}),
@@ -3442,7 +3445,7 @@ function GridCanvas({
                                 textOverflow: el.table!.wrapText ? undefined : 'ellipsis',
                               }}>
                                 {cell.type === 'text' ? (cell.text || '') : (
-                                  <span className="text-primary/60 font-mono text-[9px]">{`{{${variables.find(v => v.id === cell.variableId)?.name || '?'}}}`}</span>
+                                  <span className="text-primary/60 font-mono text-2xs">{`{{${variables.find(v => v.id === cell.variableId)?.name || '?'}}}`}</span>
                                 )}
                               </td>
                               )
@@ -3527,6 +3530,18 @@ export default function ReportBuilderModal({
   const renameInputRef = useRef<HTMLInputElement>(null)
   const varListRef = useRef<HTMLDivElement>(null)
 
+  // ── Dirty tracking + draft autosave + safe close ──
+  const draftKey = `reportBuilderDraft_${config.id}`
+  const serialize = useCallback((s: ReportState) => JSON.stringify(s), [])
+  const savedRef = useRef<string>('')
+  const [dirty, setDirty] = useState(false)
+  const [saveState, setSaveState] = useState<StatusPillState>('idle')
+  const [draftOffer, setDraftOffer] = useState<ReportState | null>(null)
+  const [confirmClose, setConfirmClose] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+
   // Suspend background query recalculations while the builder is open
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -3543,21 +3558,45 @@ export default function ReportBuilderModal({
     row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [selectedVarId])
 
-  // Sync state if config changes externally
+  // Sync state if config changes externally; seed dirty baseline + offer draft restore
   useEffect(() => {
     if (!open) return
     const r = config.options?.report
-    if (r) {
-      setState({
-        gridCols: r.gridCols || 12,
-        gridRows: r.gridRows || 20,
-        cellSize: r.cellSize || 30,
-        elements: r.elements || [],
-        variables: r.variables || [],
-        showGridLines: r.showGridLines !== false,
-      })
+    const base: ReportState = {
+      gridCols: r?.gridCols || 12,
+      gridRows: r?.gridRows || 20,
+      cellSize: r?.cellSize || 30,
+      elements: r?.elements || [],
+      variables: r?.variables || [],
+      showGridLines: r?.showGridLines !== false,
     }
-  }, [open, config.id])
+    setState(base)
+    savedRef.current = serialize(base)
+    setDirty(false)
+    setSaveState('idle')
+    // Offer to restore an autosaved draft that differs from the saved report
+    try {
+      const raw = localStorage.getItem(draftKey)
+      if (raw) {
+        const d = JSON.parse(raw) as ReportState
+        if (d && serialize(d) !== savedRef.current) setDraftOffer(d)
+        else { setDraftOffer(null); localStorage.removeItem(draftKey) }
+      } else setDraftOffer(null)
+    } catch { setDraftOffer(null) }
+  }, [open, config.id, serialize, draftKey])
+
+  // Dirty detection + autosave draft to localStorage
+  useEffect(() => {
+    if (!open) return
+    const cur = serialize(state)
+    const isDirty = cur !== savedRef.current
+    setDirty(isDirty)
+    if (isDirty) {
+      if (saveState !== 'idle') setSaveState('idle')
+      try { localStorage.setItem(draftKey, cur) } catch {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, open, serialize, draftKey])
 
   const selectedEl = state.elements.find((el) => el.id === selectedId) || null
 
@@ -3622,6 +3661,8 @@ export default function ReportBuilderModal({
     setSelectedVarId((prev) => (prev === id ? null : prev))
   }, [])
 
+  // Save persists to the parent config and clears dirty/draft — but keeps the
+  // builder open so you can Save → Export → keep editing without losing place.
   const handleSave = () => {
     const next: WidgetConfig = {
       ...config,
@@ -3638,19 +3679,88 @@ export default function ReportBuilderModal({
       },
     }
     onSaveAction(next)
+    savedRef.current = serialize(state)
+    setDirty(false)
+    setSaveState('saved')
+    try { localStorage.removeItem(draftKey) } catch {}
+  }
+
+  // Close, confirming first if there are unsaved changes.
+  const requestClose = useCallback(() => {
+    if (dirty) { setConfirmClose(true); return }
+    onCloseAction()
+  }, [dirty, onCloseAction])
+
+  const discardAndClose = () => {
+    try { localStorage.removeItem(draftKey) } catch {}
+    setConfirmClose(false)
     onCloseAction()
   }
+
+  const restoreDraft = () => {
+    if (!draftOffer) return
+    setState(draftOffer)
+    setDraftOffer(null)
+  }
+
+  const dismissDraft = () => {
+    setDraftOffer(null)
+    try { localStorage.removeItem(draftKey) } catch {}
+  }
+
+  // Export uses the existing server-side render path (Api.downloadReportPdf →
+  // /alerts/report-pdf/{dashboardId}/{widgetId}). It renders the *persisted*
+  // report, so Save (and publish) first if there are unsaved changes.
+  const handleExport = async () => {
+    setExportError(null)
+    let dashboardId: string | null = null
+    try {
+      const params = new URLSearchParams(window.location.search)
+      dashboardId = params.get('id') || localStorage.getItem('dashboardId')
+    } catch { /* noop */ }
+    if (!dashboardId) { setExportError('Save the dashboard first to enable export.'); return }
+    setExporting(true)
+    try {
+      const blob = await Api.downloadReportPdf(dashboardId, config.id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(config.title || 'report').replace(/[^\w.-]+/g, '_')}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // Align the selected element within the canvas grid (single-select; the
+  // property panel has no multi-select, so distribute is N/A here).
+  const alignSelected = (axis: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => {
+    if (!selectedEl) return
+    const patch: Partial<ReportElement> = {}
+    if (axis === 'left') patch.gridX = 0
+    else if (axis === 'right') patch.gridX = Math.max(0, state.gridCols - selectedEl.gridW)
+    else if (axis === 'hcenter') patch.gridX = Math.max(0, Math.floor((state.gridCols - selectedEl.gridW) / 2))
+    else if (axis === 'top') patch.gridY = 0
+    else if (axis === 'bottom') patch.gridY = Math.max(0, state.gridRows - selectedEl.gridH)
+    else if (axis === 'vcenter') patch.gridY = Math.max(0, Math.floor((state.gridRows - selectedEl.gridH) / 2))
+    updateElement(selectedEl.id, patch)
+  }
+
+  const panelRef = useModalFocus<HTMLDivElement>(open, requestClose)
 
   if (!open) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-background rounded-xl border shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200" style={{ width: '96vw', height: '92vh', maxWidth: '1600px' }}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Report Builder" className="bg-background rounded-lg border border-[hsl(var(--border))] shadow-modal flex flex-col anim-menu-in" style={{ width: '96vw', height: '92vh', maxWidth: '1600px' }}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b bg-card shrink-0">
           <div className="flex items-center gap-3">
-            <button onClick={onCloseAction} className="text-muted-foreground hover:text-foreground p-1.5 rounded-md hover:bg-secondary transition-colors" title="Close">
+            <button onClick={requestClose} className="text-muted-foreground hover:text-foreground p-1.5 rounded-md hover:bg-secondary transition-colors" title="Close">
               <RiArrowLeftLine className="h-4 w-4" />
             </button>
             <div className="h-5 w-px bg-border" />
@@ -3660,16 +3770,57 @@ export default function ReportBuilderModal({
               </div>
               <div>
                 <h2 className="text-sm font-semibold leading-tight">Report Builder</h2>
-                <span className="text-[10px] text-muted-foreground leading-none">{config.title} · {state.elements.length} elements · {state.variables.length} variables</span>
+                <span className="text-2xs text-muted-foreground leading-none">{config.title} · {state.elements.length} elements · {state.variables.length} variables</span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button className="flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm transition-all active:scale-[0.97]" onClick={handleSave}>
-              <RiSave3Line className="h-3.5 w-3.5" /> Save Report
+            {exportError && <span className="text-2xs text-[hsl(var(--danger))] max-w-[220px] truncate" title={exportError}>{exportError}</span>}
+            {dirty
+              ? <span className="inline-flex items-center gap-1 text-2xs font-medium text-[hsl(var(--warning))]"><span className="h-1.5 w-1.5 rounded-full bg-current" />Unsaved changes</span>
+              : <StatusPill state={saveState} />}
+            <button
+              type="button"
+              onClick={() => setHelpOpen(v => !v)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              title="Keyboard shortcuts"
+              aria-label="Keyboard shortcuts"
+            >
+              <RiQuestionLine className="h-4 w-4" />
             </button>
+            <Button variant="outline" size="sm" icon={<RiDownloadLine className="h-3.5 w-3.5" />} loading={exporting} onClick={handleExport}>Export PDF</Button>
+            <Button variant="primary" size="sm" icon={<RiSave3Line className="h-3.5 w-3.5" />} onClick={handleSave}>Save Report</Button>
           </div>
         </div>
+
+        {/* Keyboard shortcuts help popover */}
+        {helpOpen && (
+          <div className="absolute end-4 top-14 z-[210] w-64 rounded-lg border border-[hsl(var(--border))] bg-popover text-popover-foreground shadow-popover anim-menu-in">
+            <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-3 py-2">
+              <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">Keyboard shortcuts</span>
+              <button type="button" onClick={() => setHelpOpen(false)} aria-label="Close" className="text-muted-foreground hover:text-foreground"><RiCloseLine className="h-3.5 w-3.5" /></button>
+            </div>
+            <ul className="px-3 py-2 space-y-1.5 text-xs">
+              {[['Delete / Backspace', 'Remove selected element'], ['Arrow keys', 'Nudge selected element'], ['Click', 'Select element'], ['Drag', 'Move / resize on canvas']].map(([k, d]) => (
+                <li key={k} className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{d}</span>
+                  <kbd className="shrink-0 rounded border border-[hsl(var(--border))] bg-muted px-1.5 py-0.5 text-2xs font-medium">{k}</kbd>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Draft restore offer */}
+        {draftOffer && (
+          <div className="flex items-center gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--warning)/0.1)] px-4 py-2">
+            <span className="text-xs text-foreground">An unsaved draft was found for this report.</span>
+            <div className="ms-auto flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={dismissDraft}>Discard draft</Button>
+              <Button variant="secondary" size="sm" onClick={restoreDraft}>Restore draft</Button>
+            </div>
+          </div>
+        )}
 
         {/* Body: Rail | Drawer | Canvas | Smart Panel */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -3687,7 +3838,7 @@ export default function ReportBuilderModal({
                   {tab === 'elements' && <RiTableLine className="h-3.5 w-3.5" />}
                   {tab === 'variables' && <RiHashtag className="h-3.5 w-3.5" />}
                   {tab === 'settings' && <RiSettings3Line className="h-3.5 w-3.5" />}
-                  <span className="text-[7px] font-semibold tracking-wide leading-none capitalize">{tab}</span>
+                  <span className="text-2xs font-semibold tracking-wide leading-none capitalize">{tab}</span>
                 </button>
               </React.Fragment>
             ))}
@@ -3699,44 +3850,44 @@ export default function ReportBuilderModal({
             {/* Elements tab */}
             {leftTab === 'elements' && (<>
               <div className="px-3 py-2 border-b bg-card/60 shrink-0">
-                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Add Element</div>
+                <div className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Add Element</div>
               </div>
               <div className="p-2.5 border-b shrink-0">
                 <div className="grid grid-cols-2 gap-1.5">
-                  <button className="flex flex-col items-center gap-1 text-[11px] px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('label')}>
+                  <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('label')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--chart-1)/0.1)] group-hover:bg-[hsl(var(--chart-1)/0.2)] transition-colors"><RiText className="h-3.5 w-3.5 text-[hsl(var(--chart-1))]" /></div>
                     <span className="text-muted-foreground group-hover:text-foreground transition-colors">Label</span>
                   </button>
-                  <button className="flex flex-col items-center gap-1 text-[11px] px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('image')}>
+                  <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('image')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--chart-3)/0.1)] group-hover:bg-[hsl(var(--chart-3)/0.2)] transition-colors"><RiImageLine className="h-3.5 w-3.5 text-[hsl(var(--chart-3))]" /></div>
                     <span className="text-muted-foreground group-hover:text-foreground transition-colors">Image</span>
                   </button>
-                  <button className="flex flex-col items-center gap-1 text-[11px] px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('table')}>
+                  <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('table')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--success)/0.1)] group-hover:bg-[hsl(var(--success)/0.2)] transition-colors"><RiTableLine className="h-3.5 w-3.5 text-success" /></div>
                     <span className="text-muted-foreground group-hover:text-foreground transition-colors">Table</span>
                   </button>
-                  <button className="flex flex-col items-center gap-1 text-[11px] px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('spaceholder')}>
+                  <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('spaceholder')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--accent)/0.1)] group-hover:bg-[hsl(var(--accent)/0.2)] transition-colors"><RiHashtag className="h-3.5 w-3.5 text-accent" /></div>
                     <span className="text-muted-foreground group-hover:text-foreground transition-colors">Var Slot</span>
                   </button>
-                  <button className="flex flex-col items-center gap-1 text-[11px] px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('chart')}>
+                  <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('chart')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--chart-2)/0.1)] group-hover:bg-[hsl(var(--chart-2)/0.2)] transition-colors"><RiBarChart2Line className="h-3.5 w-3.5 text-[hsl(var(--chart-2))]" /></div>
                     <span className="text-muted-foreground group-hover:text-foreground transition-colors">Chart</span>
                   </button>
                 </div>
               </div>
               <div className="flex items-center justify-between px-3 py-2 border-b bg-card/60 shrink-0">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Layers <span className="text-primary">({state.elements.length})</span></span>
+                <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Layers <span className="text-primary">({state.elements.length})</span></span>
               </div>
               <div className="flex-1 overflow-y-auto px-2 py-1">
                 {state.elements.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <p className="text-[10px] text-muted-foreground">No elements yet</p>
+                    <p className="text-2xs text-muted-foreground">No elements yet</p>
                   </div>
                 ) : state.elements.map((el) => (
                   <div
                     key={el.id}
-                    className={`group flex items-center gap-2 text-[11px] px-2 py-1.5 rounded-md cursor-pointer transition-colors ${selectedId === el.id ? 'bg-primary/10 text-primary ring-1 ring-primary/20' : 'hover:bg-secondary text-foreground/80'}`}
+                    className={`group flex items-center gap-2 text-2xs px-2 py-1.5 rounded-md cursor-pointer transition-colors ${selectedId === el.id ? 'bg-primary/10 text-primary ring-1 ring-primary/20' : 'hover:bg-secondary text-foreground/80'}`}
                     onClick={() => { setSelectedId(el.id); setSelectedVarId(null) }}
                   >
                     {el.type === 'label' && <RiText className="h-3 w-3 shrink-0 text-[hsl(var(--chart-1))]" />}
@@ -3744,7 +3895,7 @@ export default function ReportBuilderModal({
                     {el.type === 'table' && <RiTableLine className="h-3 w-3 shrink-0 text-success" />}
                     {el.type === 'spaceholder' && <RiHashtag className="h-3 w-3 shrink-0 text-accent" />}
                     {el.type === 'chart' && <RiBarChart2Line className="h-3 w-3 shrink-0 text-[hsl(var(--chart-2))]" />}
-                    <span className="truncate flex-1 text-[10px]">{el.type === 'label' ? (el.label?.text?.slice(0, 20) || 'Label') : el.type === 'image' ? 'Image' : el.type === 'table' ? `Table ${el.table?.rows}×${el.table?.cols}` : el.type === 'chart' ? (el.chart?.title || 'Chart (unlinked)') : `{{${state.variables.find(v => v.id === el.variableId)?.name || '?'}}}`}</span>
+                    <span className="truncate flex-1 text-2xs">{el.type === 'label' ? (el.label?.text?.slice(0, 20) || 'Label') : el.type === 'image' ? 'Image' : el.type === 'table' ? `Table ${el.table?.rows}×${el.table?.cols}` : el.type === 'chart' ? (el.chart?.title || 'Chart (unlinked)') : `{{${state.variables.find(v => v.id === el.variableId)?.name || '?'}}}`}</span>
                     <button className="text-destructive hover:bg-destructive/10 rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => { e.stopPropagation(); deleteElement(el.id) }}>
                       <RiDeleteBinLine className="h-3 w-3" />
                     </button>
@@ -3756,29 +3907,29 @@ export default function ReportBuilderModal({
             {/* Variables tab */}
             {leftTab === 'variables' && (<>
               <div className="px-3 py-2 border-b bg-card/60 shrink-0">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Variables <span className="text-primary">({state.variables.length})</span></span>
+                <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Variables <span className="text-primary">({state.variables.length})</span></span>
               </div>
               <div className="px-2 py-1.5 border-b shrink-0">
-                <input type="text" value={varSearch} onChange={e => setVarSearch(e.target.value)} placeholder="Search variables…" className="w-full h-6 text-[10px] rounded border bg-secondary/40 px-2 outline-none focus:ring-1 focus:ring-primary/40 transition-shadow" />
+                <input type="text" value={varSearch} onChange={e => setVarSearch(e.target.value)} placeholder="Search variables…" className="w-full h-6 text-2xs rounded border bg-secondary/40 px-2 outline-none focus:ring-1 focus:ring-primary/40 transition-shadow" />
               </div>
               <div ref={varListRef} className="flex-1 overflow-y-auto">
                 {state.variables.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 px-3 text-center">
                     <RiHashtag className="h-5 w-5 text-muted-foreground/50 mb-2" />
-                    <p className="text-[10px] text-muted-foreground">No variables yet</p>
+                    <p className="text-2xs text-muted-foreground">No variables yet</p>
                   </div>
                 ) : state.variables.filter(v => !varSearch.trim() || v.name.toLowerCase().includes(varSearch.toLowerCase())).map((v) => (
                   <div
                     key={v.id}
                     data-var-id={v.id}
-                    className={`flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-border/40 transition-colors ${selectedVarId === v.id ? 'bg-primary/10' : 'hover:bg-secondary/50'}`}
+                    className={`group flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-border/40 transition-colors ${selectedVarId === v.id ? 'bg-primary/10' : 'hover:bg-secondary/50'}`}
                     onClick={() => { if (renamingVarId !== v.id) { setSelectedVarId(v.id); setSelectedId(null) } }}
                   >
                     <div className="flex-1 min-w-0">
                       {renamingVarId === v.id ? (
                         <input
                           ref={renameInputRef}
-                          className="w-full h-5 text-[10px] font-medium rounded px-1 border bg-background outline-none focus:ring-1 focus:ring-primary/50"
+                          className="w-full h-5 text-2xs font-medium rounded px-1 border bg-background outline-none focus:ring-1 focus:ring-primary/50"
                           value={renameValue}
                           onChange={e => setRenameValue(e.target.value)}
                           onBlur={() => { if (renameValue.trim()) updateVariable(v.id, { ...v, name: renameValue.trim() }); setRenamingVarId(null) }}
@@ -3787,22 +3938,32 @@ export default function ReportBuilderModal({
                           autoFocus
                         />
                       ) : (
-                        <div
-                          className="text-[10px] font-medium truncate"
-                          onDoubleClick={e => { e.stopPropagation(); setRenamingVarId(v.id); setRenameValue(v.name); setSelectedVarId(v.id); setSelectedId(null) }}
-                          title="Double-click to rename"
-                        >{v.name}</div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-2xs font-medium truncate">{v.name}</span>
+                          <button
+                            type="button"
+                            className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
+                            title="Rename variable"
+                            aria-label="Rename variable"
+                            onClick={e => { e.stopPropagation(); setRenamingVarId(v.id); setRenameValue(v.name); setSelectedVarId(v.id); setSelectedId(null) }}
+                          >
+                            <RiPencilLine className="h-3 w-3" />
+                          </button>
+                        </div>
                       )}
-                      <div className="text-[9px] text-muted-foreground truncate">{v.value?.field || v.expression || v.datetimeExpr || '—'}</div>
+                      <div className="text-2xs text-muted-foreground truncate">{v.value?.field || v.expression || v.datetimeExpr || '—'}</div>
                     </div>
-                    <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold shrink-0 ${v.type === 'expression' ? 'bg-amber-500/10 text-amber-600' : v.type === 'datetime' ? 'bg-blue-500/10 text-blue-500' : 'bg-primary/10 text-primary'}`}>
-                      {v.type === 'expression' ? '∑' : v.type === 'datetime' ? '🗓' : 'Q'}
+                    <span
+                      title={v.type === 'expression' ? 'Expression' : v.type === 'datetime' ? 'Date/time' : 'Query'}
+                      className={`inline-flex items-center justify-center h-5 w-5 rounded-full shrink-0 ${v.type === 'expression' ? 'bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))]' : v.type === 'datetime' ? 'bg-[hsl(var(--chart-2)/0.12)] text-[hsl(var(--chart-2))]' : 'bg-primary/10 text-primary'}`}
+                    >
+                      {v.type === 'expression' ? <RiFunctions className="h-3 w-3" /> : v.type === 'datetime' ? <RiCalendarLine className="h-3 w-3" /> : <RiHashtag className="h-3 w-3" />}
                     </span>
                   </div>
                 ))}
               </div>
               <div className="p-2 border-t shrink-0">
-                <button className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg border-2 border-dashed border-primary/30 hover:border-primary/60 hover:bg-primary/5 text-[11px] font-medium text-primary transition-all" onClick={addVariable}>
+                <button className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg border-2 border-dashed border-primary/30 hover:border-primary/60 hover:bg-primary/5 text-2xs font-medium text-primary transition-all" onClick={addVariable}>
                   <RiAddLine className="h-3.5 w-3.5" /> New Variable
                 </button>
               </div>
@@ -3811,24 +3972,24 @@ export default function ReportBuilderModal({
             {/* Settings tab */}
             {leftTab === 'settings' && (<>
               <div className="px-3 py-2 border-b bg-card/60 shrink-0">
-                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Grid Settings</div>
+                <div className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Grid Settings</div>
               </div>
               <div className="p-3 space-y-3">
                 <div className="grid grid-cols-3 gap-1.5">
                   <div>
-                    <label className="block text-[10px] text-muted-foreground mb-0.5">Cols</label>
-                    <input type="number" className="w-full h-7 text-[11px] rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.gridCols} onChange={(e) => setState(s => ({ ...s, gridCols: Math.max(1, +e.target.value) }))} />
+                    <label className="block text-2xs text-muted-foreground mb-0.5">Cols</label>
+                    <input type="number" className="w-full h-7 text-2xs rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.gridCols} onChange={(e) => setState(s => ({ ...s, gridCols: Math.max(1, +e.target.value) }))} />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-muted-foreground mb-0.5">Rows</label>
-                    <input type="number" className="w-full h-7 text-[11px] rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.gridRows} onChange={(e) => setState(s => ({ ...s, gridRows: Math.max(1, +e.target.value) }))} />
+                    <label className="block text-2xs text-muted-foreground mb-0.5">Rows</label>
+                    <input type="number" className="w-full h-7 text-2xs rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.gridRows} onChange={(e) => setState(s => ({ ...s, gridRows: Math.max(1, +e.target.value) }))} />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-muted-foreground mb-0.5">Cell px</label>
-                    <input type="number" className="w-full h-7 text-[11px] rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.cellSize} onChange={(e) => setState(s => ({ ...s, cellSize: Math.max(10, +e.target.value) }))} />
+                    <label className="block text-2xs text-muted-foreground mb-0.5">Cell px</label>
+                    <input type="number" className="w-full h-7 text-2xs rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.cellSize} onChange={(e) => setState(s => ({ ...s, cellSize: Math.max(10, +e.target.value) }))} />
                   </div>
                 </div>
-                <label className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                <label className="flex items-center gap-2 text-2xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                   <input type="checkbox" className="rounded border-border accent-primary" checked={state.showGridLines} onChange={(e) => setState(s => ({ ...s, showGridLines: e.target.checked }))} />
                   Show grid lines
                 </label>
@@ -3841,9 +4002,11 @@ export default function ReportBuilderModal({
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
             {/* Canvas toolbar */}
             <div className="flex items-center gap-3 px-3 py-1.5 border-b bg-card/40 shrink-0">
-              <span className="text-[9px] text-muted-foreground">Del to remove · Arrow keys to move</span>
+              <button type="button" onClick={() => setHelpOpen(true)} className="inline-flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground transition-colors" title="Keyboard shortcuts">
+                <RiQuestionLine className="h-3.5 w-3.5" /> Shortcuts
+              </button>
               <div className="flex-1" />
-              <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+              <label className="flex items-center gap-1.5 text-2xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                 <input type="checkbox" className="rounded border-border accent-primary" checked={state.showGridLines} onChange={(e) => setState(s => ({ ...s, showGridLines: e.target.checked }))} />
                 Grid
               </label>
@@ -3863,13 +4026,13 @@ export default function ReportBuilderModal({
             {/* Status bar */}
             <div className="flex items-center gap-3 px-3 py-1 border-t bg-card/40 shrink-0">
               {selectedEl ? (
-                <><span className="text-[9px] font-medium text-foreground/80 capitalize">{selectedEl.type}</span><span className="text-[9px] text-muted-foreground">X:{selectedEl.gridX} Y:{selectedEl.gridY} W:{selectedEl.gridW} H:{selectedEl.gridH}</span></>
+                <><span className="text-2xs font-medium text-foreground/80 capitalize">{selectedEl.type}</span><span className="text-2xs text-muted-foreground">X:{selectedEl.gridX} Y:{selectedEl.gridY} W:{selectedEl.gridW} H:{selectedEl.gridH}</span></>
               ) : (
-                <span className="text-[9px] text-muted-foreground">Click an element to select</span>
+                <span className="text-2xs text-muted-foreground">Click an element to select</span>
               )}
               <div className="flex-1" />
-              <span className="text-[9px] text-muted-foreground">{state.gridCols} cols · {state.gridRows} rows · {state.cellSize}px</span>
-              <span className="text-[9px] text-primary/80">{state.elements.length} el · {state.variables.length} var</span>
+              <span className="text-2xs text-muted-foreground">{state.gridCols} cols · {state.gridRows} rows · {state.cellSize}px</span>
+              <span className="text-2xs text-primary/80">{state.elements.length} el · {state.variables.length} var</span>
             </div>
           </div>
 
@@ -3879,7 +4042,7 @@ export default function ReportBuilderModal({
             <div className="px-4 py-2.5 border-b bg-card/60 shrink-0">
               {selectedEl ? (
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${selectedEl.type === 'label' ? 'bg-[hsl(var(--chart-1)/0.1)] text-[hsl(var(--chart-1))] border-[hsl(var(--chart-1)/0.25)]' : selectedEl.type === 'image' ? 'bg-[hsl(var(--chart-3)/0.1)] text-[hsl(var(--chart-3))] border-[hsl(var(--chart-3)/0.25)]' : selectedEl.type === 'table' ? 'bg-success/10 text-success border-success/25' : selectedEl.type === 'chart' ? 'bg-[hsl(var(--chart-2)/0.1)] text-[hsl(var(--chart-2))] border-[hsl(var(--chart-2)/0.25)]' : 'bg-accent/10 text-accent border-accent/25'}`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-2xs font-semibold border ${selectedEl.type === 'label' ? 'bg-[hsl(var(--chart-1)/0.1)] text-[hsl(var(--chart-1))] border-[hsl(var(--chart-1)/0.25)]' : selectedEl.type === 'image' ? 'bg-[hsl(var(--chart-3)/0.1)] text-[hsl(var(--chart-3))] border-[hsl(var(--chart-3)/0.25)]' : selectedEl.type === 'table' ? 'bg-success/10 text-success border-success/25' : selectedEl.type === 'chart' ? 'bg-[hsl(var(--chart-2)/0.1)] text-[hsl(var(--chart-2))] border-[hsl(var(--chart-2)/0.25)]' : 'bg-accent/10 text-accent border-accent/25'}`}>
                     {selectedEl.type === 'label' && <RiText className="h-3 w-3" />}
                     {selectedEl.type === 'image' && <RiImageLine className="h-3 w-3" />}
                     {selectedEl.type === 'table' && <RiTableLine className="h-3 w-3" />}
@@ -3893,7 +4056,7 @@ export default function ReportBuilderModal({
                 </div>
               ) : selectedVarId ? (
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-accent/10 text-accent border border-accent/25">
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-2xs font-semibold bg-accent/10 text-accent border border-accent/25">
                     <RiHashtag className="h-3 w-3" /> Variable Editor
                   </span>
                   {(() => {
@@ -3902,9 +4065,9 @@ export default function ReportBuilderModal({
                       <div className="flex items-center gap-1 ml-auto">
                         {confirmDeleteVarId === selectedVarId ? (
                           <>
-                            <span className="text-[9px] text-destructive font-medium">Delete?</span>
-                            <button className="text-[9px] px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground" onClick={() => { deleteVariable(sv.id); setConfirmDeleteVarId(null) }}>Yes</button>
-                            <button className="text-[9px] px-1.5 py-0.5 rounded border hover:bg-muted transition-colors" onClick={() => setConfirmDeleteVarId(null)}>No</button>
+                            <span className="text-2xs text-destructive font-medium">Delete?</span>
+                            <button className="text-2xs px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground" onClick={() => { deleteVariable(sv.id); setConfirmDeleteVarId(null) }}>Yes</button>
+                            <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors" onClick={() => setConfirmDeleteVarId(null)}>No</button>
                           </>
                         ) : (
                           <>
@@ -3917,7 +4080,7 @@ export default function ReportBuilderModal({
                   })()}
                 </div>
               ) : (
-                <p className="text-[11px] text-muted-foreground">Select an element or variable</p>
+                <p className="text-2xs text-muted-foreground">Select an element or variable</p>
               )}
             </div>
 
@@ -3925,13 +4088,40 @@ export default function ReportBuilderModal({
             <div className="flex-1 overflow-y-auto">
               {selectedEl && (
                 <div className="p-3 space-y-3">
-                  <div className="rounded-lg border bg-secondary/30 p-2">
-                    <div className="text-[10px] font-medium text-muted-foreground mb-1.5">Position & Size</div>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      <div><label className="block text-[9px] text-muted-foreground mb-0.5 text-center">X</label><input type="number" className="w-full h-6 text-[11px] rounded-md border bg-background px-1.5 text-center focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={selectedEl.gridX} onChange={(e) => updateElement(selectedEl.id, { gridX: Math.max(0, +e.target.value) })} /></div>
-                      <div><label className="block text-[9px] text-muted-foreground mb-0.5 text-center">Y</label><input type="number" className="w-full h-6 text-[11px] rounded-md border bg-background px-1.5 text-center focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={selectedEl.gridY} onChange={(e) => updateElement(selectedEl.id, { gridY: Math.max(0, +e.target.value) })} /></div>
-                      <div><label className="block text-[9px] text-muted-foreground mb-0.5 text-center">W</label><input type="number" className="w-full h-6 text-[11px] rounded-md border bg-background px-1.5 text-center focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={selectedEl.gridW} onChange={(e) => updateElement(selectedEl.id, { gridW: Math.max(1, +e.target.value) })} /></div>
-                      <div><label className="block text-[9px] text-muted-foreground mb-0.5 text-center">H</label><input type="number" className="w-full h-6 text-[11px] rounded-md border bg-background px-1.5 text-center focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={selectedEl.gridH} onChange={(e) => updateElement(selectedEl.id, { gridH: Math.max(1, +e.target.value) })} /></div>
+                  <div className="rounded-lg border bg-secondary/30 p-2.5 space-y-2.5">
+                    <div className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">Position &amp; Size</div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {([
+                        ['X', selectedEl.gridX, (n: number) => updateElement(selectedEl.id, { gridX: Math.max(0, n) })],
+                        ['Y', selectedEl.gridY, (n: number) => updateElement(selectedEl.id, { gridY: Math.max(0, n) })],
+                        ['W', selectedEl.gridW, (n: number) => updateElement(selectedEl.id, { gridW: Math.max(1, n) })],
+                        ['H', selectedEl.gridH, (n: number) => updateElement(selectedEl.id, { gridH: Math.max(1, n) })],
+                      ] as const).map(([lbl, val, set]) => (
+                        <div key={lbl} className="flex flex-col gap-1">
+                          <label className="text-2xs font-medium text-muted-foreground text-center">{lbl}</label>
+                          <Input size="sm" type="number" className="text-center px-1.5" value={val} onChange={(e) => set(+e.target.value)} />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-2xs font-medium text-muted-foreground">Align to canvas</div>
+                      <div className="flex items-center gap-1">
+                        {([
+                          ['left', RiAlignLeft, 'Align left'],
+                          ['hcenter', RiAlignCenter, 'Center horizontally'],
+                          ['right', RiAlignRight, 'Align right'],
+                        ] as const).map(([axis, Icon, tip]) => (
+                          <button key={axis} type="button" title={tip} aria-label={tip} onClick={() => alignSelected(axis)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[hsl(var(--border))] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"><Icon className="h-4 w-4" /></button>
+                        ))}
+                        <div className="mx-0.5 h-5 w-px bg-border" />
+                        {([
+                          ['top', RiAlignTop, 'Align top'],
+                          ['vcenter', RiAlignVertically, 'Center vertically'],
+                          ['bottom', RiAlignBottom, 'Align bottom'],
+                        ] as const).map(([axis, Icon, tip]) => (
+                          <button key={axis} type="button" title={tip} aria-label={tip} onClick={() => alignSelected(axis)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[hsl(var(--border))] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"><Icon className="h-4 w-4" /></button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                   <div className="border-t pt-3">
@@ -3967,6 +4157,20 @@ export default function ReportBuilderModal({
 
         </div>
       </div>
+
+      <Modal
+        open={confirmClose}
+        onClose={() => setConfirmClose(false)}
+        title="Discard unsaved changes?"
+        description="Your changes to this report haven't been saved. A draft is kept locally so you can restore it next time."
+        size="sm"
+        footer={<>
+          <Button variant="ghost" size="sm" onClick={() => setConfirmClose(false)}>Keep editing</Button>
+          <Button variant="danger" size="sm" onClick={discardAndClose}>Discard &amp; close</Button>
+        </>}
+      >
+        <p className="text-sm text-muted-foreground">You can also cancel and click Save Report to keep your work.</p>
+      </Modal>
     </div>,
     document.body
   )

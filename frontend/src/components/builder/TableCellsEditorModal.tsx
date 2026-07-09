@@ -22,6 +22,7 @@ import {
   RiTextWrap,
 } from '@remixicon/react'
 import type { ReportElement, ReportTableCell, ReportVariable } from '@/types/widgets'
+import { useModalFocus } from '@/hooks/useModalFocus'
 
 type TableT = NonNullable<ReportElement['table']>
 type RowStyle = NonNullable<TableT['rowStyles']>[number]
@@ -161,7 +162,7 @@ function CellPreview({
     const label = v?.name || (cell.variableId ? '?' : '—')
     return (
       <span
-        className={`inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[10px] bg-[hsl(var(--primary)/0.1)] text-[hsl(var(--primary))] max-w-full ${wrapCls}`}
+        className={`inline-flex items-center px-1.5 py-0.5 rounded font-mono text-2xs bg-[hsl(var(--primary)/0.1)] text-[hsl(var(--primary))] max-w-full ${wrapCls}`}
         title={v ? `Variable: ${v.name}` : 'Unassigned variable'}
       >
         {`{{${label}}}`}
@@ -171,7 +172,7 @@ function CellPreview({
   if (cell.type === 'period') {
     return (
       <span
-        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-mono text-[10px] bg-[hsl(var(--secondary))] text-muted-foreground max-w-full ${wrapCls}`}
+        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-mono text-2xs bg-[hsl(var(--secondary))] text-muted-foreground max-w-full ${wrapCls}`}
         title={`Period: ${cell.datetimeExpr || '—'}`}
       >
         <RiTimeLine className="h-2.5 w-2.5 shrink-0" />
@@ -181,10 +182,10 @@ function CellPreview({
   }
   const text = (cell.text || '').trim()
   if (!text) {
-    return <span className="text-muted-foreground/50 text-[10px] italic">empty</span>
+    return <span className="text-muted-foreground/50 text-2xs italic">empty</span>
   }
   return (
-    <span className={`text-[11px] max-w-full ${wrapCls}`} title={text}>
+    <span className={`text-2xs max-w-full ${wrapCls}`} title={text}>
       {text}
     </span>
   )
@@ -238,6 +239,7 @@ export default function TableCellsEditorModal({
 
   const [sel, setSel] = useState<Sel>(null)
   const [dragging, setDragging] = useState(false)
+  const panelRef = useModalFocus<HTMLDivElement>(open, onCloseAction)
 
   const totalCols = useMemo(() => actualColsFromHeaders(tbl.headers), [tbl.headers])
   const covered = useMemo(() => buildCoveredSet(tbl.cells), [tbl.cells])
@@ -533,13 +535,13 @@ export default function TableCellsEditorModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[1300]" role="dialog" aria-modal="true" aria-label="Table formatter">
-      <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onCloseAction} />
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1240px] max-w-[98vw] h-[88vh] flex flex-col rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] shadow-2xl overflow-hidden">
+      <div className="absolute inset-0 bg-black/40" onClick={onCloseAction} />
+      <div ref={panelRef} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1240px] max-w-[98vw] h-[88vh] flex flex-col rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] shadow-modal overflow-hidden">
         {/* Header */}
         <header className="flex items-start justify-between px-5 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))]">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold tracking-tight">Table Formatter</h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <p className="text-2xs text-muted-foreground mt-0.5">
               Format rows, columns, cells. Merge, reorder, control widths, wrap, alignment. Edit cell content from the table preview in the main view.
             </p>
           </div>
@@ -573,7 +575,7 @@ export default function TableCellsEditorModal({
               onClick={() => setWrapText(!wrapText)}
               title={wrapText ? 'Text wraps to multiple lines (click to disable)' : 'Text stays on a single line (click to enable wrap)'}
               aria-pressed={wrapText}
-              className={`text-[11px] h-7 px-2 rounded-md border transition-colors duration-150 cursor-pointer inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${wrapText
+              className={`text-2xs h-7 px-2 rounded-md border transition-colors duration-150 cursor-pointer inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${wrapText
                 ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] border-[hsl(var(--primary))]'
                 : 'border-[hsl(var(--border))] bg-[hsl(var(--background))] hover:bg-[hsl(var(--muted))]'}`}
             >
@@ -581,7 +583,7 @@ export default function TableCellsEditorModal({
             </button>
           </ToolbarGroup>
 
-          <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
+          <div className="ml-auto flex items-center gap-2 text-2xs text-muted-foreground">
             <RiInformationLine className="h-3.5 w-3.5" />
             {sel
               ? <span><span className="font-medium text-foreground">{selSize.h}×{selSize.w}</span> selected</span>
@@ -605,7 +607,7 @@ export default function TableCellsEditorModal({
               <thead>
                 <tr>
                   <th
-                    className="sticky top-0 left-0 z-20 bg-[hsl(var(--muted))] border-r border-b border-[hsl(var(--border))] text-[10px] font-semibold text-muted-foreground p-0 cursor-pointer hover:bg-[hsl(var(--secondary))] transition-colors duration-150"
+                    className="sticky top-0 left-0 z-20 bg-[hsl(var(--muted))] border-r border-b border-[hsl(var(--border))] text-2xs font-semibold text-muted-foreground p-0 cursor-pointer hover:bg-[hsl(var(--secondary))] transition-colors duration-150"
                     onClick={selectAll}
                     title="Select all cells"
                   >
@@ -614,7 +616,7 @@ export default function TableCellsEditorModal({
                   {colHeaderLabels.map((lbl, i) => (
                     <th
                       key={i}
-                      className="sticky top-0 z-10 bg-[hsl(var(--muted))] border-r border-b border-[hsl(var(--border))] px-2 h-7 text-[10px] font-semibold text-muted-foreground truncate cursor-pointer hover:bg-[hsl(var(--secondary))] transition-colors duration-150"
+                      className="sticky top-0 z-10 bg-[hsl(var(--muted))] border-r border-b border-[hsl(var(--border))] px-2 h-7 text-2xs font-semibold text-muted-foreground truncate cursor-pointer hover:bg-[hsl(var(--secondary))] transition-colors duration-150"
                       title={`${lbl} — click to select column`}
                       onClick={() => selectCol(i)}
                     >
@@ -638,7 +640,7 @@ export default function TableCellsEditorModal({
                       >
                         <div className="h-9 px-1 flex items-center gap-0.5">
                           <RiDraggable className="h-3 w-3 text-muted-foreground/60 shrink-0" />
-                          <span className="text-[10px] tabular-nums font-mono text-muted-foreground w-4 text-right">{ri + 1}</span>
+                          <span className="text-2xs tabular-nums font-mono text-muted-foreground w-4 text-right">{ri + 1}</span>
                           {rowHasFmt && (
                             <span className="ml-0.5 inline-block w-1 h-1 rounded-full bg-[hsl(var(--primary))]" title="Row has custom formatting" aria-label="Row formatted" />
                           )}
@@ -680,7 +682,7 @@ export default function TableCellsEditorModal({
                               <CellPreview cell={cell} variables={variables} wrapText={wrapText} />
                             </div>
                             {isMergedAnchor && (
-                              <span className="absolute top-0.5 right-0.5 text-[8px] font-semibold tabular-nums px-1 rounded bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" title={`Merged ${rspan}×${cspan}`}>{rspan}×{cspan}</span>
+                              <span className="absolute top-0.5 right-0.5 text-2xs font-semibold tabular-nums px-1 rounded bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" title={`Merged ${rspan}×${cspan}`}>{rspan}×{cspan}</span>
                             )}
                           </td>
                         )
@@ -697,7 +699,7 @@ export default function TableCellsEditorModal({
             <div className="p-4 space-y-5">
               <div>
                 <h3 className="text-xs font-semibold text-foreground tracking-tight">Selection</h3>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
+                <p className="text-2xs text-muted-foreground mt-0.5">
                   {sel
                     ? <>{(() => { const n = normRect(sel); return `${n.r2 - n.r1 + 1} row${n.r2 - n.r1 ? 's' : ''} × ${n.c2 - n.c1 + 1} col${n.c2 - n.c1 ? 's' : ''}` })()}</>
                     : 'No selection. Click a cell, row number, or column header.'}
@@ -768,7 +770,7 @@ export default function TableCellsEditorModal({
                 </>
               ) : (
                 <div className="rounded-md border border-dashed border-[hsl(var(--border))] p-4 text-center">
-                  <p className="text-[11px] text-muted-foreground leading-snug">
+                  <p className="text-2xs text-muted-foreground leading-snug">
                     Select a cell, click a row number, or click a column header to start formatting.
                   </p>
                 </div>
@@ -778,14 +780,14 @@ export default function TableCellsEditorModal({
         </div>
 
         {/* Status bar */}
-        <footer className="flex items-center justify-between gap-3 px-4 h-9 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[11px] text-muted-foreground">
+        <footer className="flex items-center justify-between gap-3 px-4 h-9 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] text-2xs text-muted-foreground">
           <div className="flex items-center gap-3">
             <span><span className="font-medium text-foreground">{tbl.rows}</span> rows × <span className="font-medium text-foreground">{totalCols}</span> cols</span>
             {wrapText && <><span aria-hidden>•</span><span className="text-[hsl(var(--primary))]">wrap on</span></>}
             {mergedRegionsCount > 0 && <><span aria-hidden>•</span><span><span className="font-medium text-foreground">{mergedRegionsCount}</span> merged region{mergedRegionsCount === 1 ? '' : 's'}</span></>}
             {sel && <><span aria-hidden>•</span><span>Selection <span className="font-medium text-foreground">{selSize.h}×{selSize.w}</span></span></>}
           </div>
-          <div className="flex items-center gap-2 text-[10px]">
+          <div className="flex items-center gap-2 text-2xs">
             <Kbd>⌘M</Kbd> merge <span className="opacity-50">·</span>
             <Kbd>⌘⇧M</Kbd> unmerge <span className="opacity-50">·</span>
             <Kbd>Shift</Kbd>+arrows extend <span className="opacity-50">·</span>
@@ -819,7 +821,7 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className="text-[11px] h-7 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] hover:bg-[hsl(var(--muted))] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors duration-150 inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))]"
+      className="text-2xs h-7 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] hover:bg-[hsl(var(--muted))] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors duration-150 inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))]"
     >
       {icon}{children}
     </button>
@@ -844,7 +846,7 @@ function IconBtn({
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex items-center px-1 py-0.5 rounded border border-[hsl(var(--border))] bg-[hsl(var(--muted))] font-mono text-[9px] tabular-nums text-foreground">
+    <kbd className="inline-flex items-center px-1 py-0.5 rounded border border-[hsl(var(--border))] bg-[hsl(var(--muted))] font-mono text-2xs tabular-nums text-foreground">
       {children}
     </kbd>
   )
@@ -884,7 +886,7 @@ function ColumnWidthEditor({
             type="button"
             role="radio"
             aria-checked={isAuto}
-            className={`px-2 h-7 text-[11px] cursor-pointer transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${isAuto ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'bg-[hsl(var(--background))] text-muted-foreground hover:bg-[hsl(var(--muted))]'}`}
+            className={`px-2 h-7 text-2xs cursor-pointer transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${isAuto ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'bg-[hsl(var(--background))] text-muted-foreground hover:bg-[hsl(var(--muted))]'}`}
             onClick={() => cols.forEach(c => onSetWidthAction(c, undefined))}
           >
             Auto-fit
@@ -893,7 +895,7 @@ function ColumnWidthEditor({
             type="button"
             role="radio"
             aria-checked={!isAuto}
-            className={`px-2 h-7 text-[11px] cursor-pointer transition-colors duration-150 border-l border-[hsl(var(--border))] focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${!isAuto ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'bg-[hsl(var(--background))] text-muted-foreground hover:bg-[hsl(var(--muted))]'}`}
+            className={`px-2 h-7 text-2xs cursor-pointer transition-colors duration-150 border-l border-[hsl(var(--border))] focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${!isAuto ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'bg-[hsl(var(--background))] text-muted-foreground hover:bg-[hsl(var(--muted))]'}`}
             onClick={() => cols.forEach(c => { if (!(colWidths?.[c])) onSetWidthAction(c, 120) })}
           >
             Fixed
@@ -903,7 +905,7 @@ function ColumnWidthEditor({
       <Field label="Width (px)">
         <input
           type="number"
-          className="w-full h-7 text-[11px] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
           min={20}
           max={2000}
           step={10}
@@ -916,7 +918,7 @@ function ColumnWidthEditor({
           }}
         />
       </Field>
-      <p className="text-[10px] text-muted-foreground leading-snug">
+      <p className="text-2xs text-muted-foreground leading-snug">
         Auto-fit columns share the remaining table width equally. Fixed columns hold their pixel width and don't grow.
       </p>
     </div>
@@ -961,7 +963,7 @@ function RowFormattingPanel({
         <h3 className="text-xs font-semibold text-foreground tracking-tight">Row formatting</h3>
         <button
           type="button"
-          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer underline-offset-2 hover:underline"
+          className="text-2xs text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer underline-offset-2 hover:underline"
           onClick={onResetAction}
         >
           Reset row styles
@@ -979,7 +981,7 @@ function RowFormattingPanel({
         <div className="grid grid-cols-2 gap-2">
           <Field label="Weight">
             <select
-              className="w-full h-7 text-[11px] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 cursor-pointer focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
+              className="w-full h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 cursor-pointer focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
               value={single?.fontWeight || 'normal'}
               onChange={(e) => onApplyAction({ fontWeight: e.target.value as any })}
             >
@@ -991,7 +993,7 @@ function RowFormattingPanel({
           <Field label="Size (px)">
             <input
               type="number"
-              className="w-full h-7 text-[11px] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
+              className="w-full h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
               min={8} max={48} step={1}
               value={single?.fontSize ?? ''} placeholder="auto"
               onChange={(e) => onApplyAction({ fontSize: e.target.value ? +e.target.value : undefined })}
@@ -1004,7 +1006,7 @@ function RowFormattingPanel({
         <Field label={wrapText ? 'Height (px)' : 'Height (px) — wrap text to enable'}>
           <input
             type="number"
-            className="w-full h-7 text-[11px] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
             min={20}
             max={500}
             step={4}
@@ -1017,7 +1019,7 @@ function RowFormattingPanel({
             }}
           />
         </Field>
-        <p className="text-[10px] text-muted-foreground leading-snug">
+        <p className="text-2xs text-muted-foreground leading-snug">
           Row height is single-line when wrap is off. Turn wrap on (toolbar above) to set explicit heights for multi-line rows.
         </p>
       </Section>
@@ -1049,7 +1051,7 @@ function RowFormattingPanel({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-2">
-      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h4>
+      <h4 className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h4>
       <div className="space-y-2">{children}</div>
     </div>
   )
@@ -1058,7 +1060,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-[10px] font-medium text-muted-foreground mb-1">{label}</label>
+      <label className="block text-2xs font-medium text-muted-foreground mb-1">{label}</label>
       {children}
     </div>
   )
@@ -1069,7 +1071,7 @@ function ColorField({
 }: { label: string; value: string | undefined; onChangeAction: (v: string | undefined) => void; placeholder: string }) {
   return (
     <div>
-      <label className="block text-[10px] font-medium text-muted-foreground mb-1">{label}</label>
+      <label className="block text-2xs font-medium text-muted-foreground mb-1">{label}</label>
       <div className="flex items-center gap-1.5">
         <input
           type="color"
@@ -1080,7 +1082,7 @@ function ColorField({
         />
         <input
           type="text"
-          className="flex-1 min-w-0 h-7 text-[11px] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 font-mono uppercase focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
+          className="flex-1 min-w-0 h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 font-mono uppercase focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
           value={value || ''}
           placeholder={placeholder}
           onChange={(e) => onChangeAction(e.target.value || undefined)}
@@ -1089,7 +1091,7 @@ function ColorField({
         {value && (
           <button
             type="button"
-            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer"
+            className="text-2xs text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer"
             onClick={() => onChangeAction(undefined)}
             title="Clear"
             aria-label={`Clear ${label}`}
@@ -1117,11 +1119,11 @@ function BorderEditor({
   return (
     <div className="rounded-md border border-[hsl(var(--border))] p-2 bg-[hsl(var(--secondary)/0.25)]">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] font-medium text-muted-foreground">{label} border</span>
+        <span className="text-2xs font-medium text-muted-foreground">{label} border</span>
         {(style || color || width != null) && (
           <button
             type="button"
-            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer"
+            className="text-2xs text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer"
             onClick={() => { onChangeStyleAction(undefined); onChangeColorAction(undefined); onChangeWidthAction(undefined) }}
             title={`Clear ${label} border`}
             aria-label={`Clear ${label} border`}
@@ -1132,7 +1134,7 @@ function BorderEditor({
       </div>
       <div className="grid grid-cols-[1fr_auto_50px] gap-1.5">
         <select
-          className="h-7 text-[11px] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-1.5 cursor-pointer focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
+          className="h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-1.5 cursor-pointer focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
           value={style || ''}
           onChange={(e) => onChangeStyleAction(e.target.value || undefined)}
           aria-label={`${label} border style`}
@@ -1149,7 +1151,7 @@ function BorderEditor({
         />
         <input
           type="number"
-          className="h-7 text-[11px] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-1.5 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
+          className="h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-1.5 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
           min={0} max={10} step={1}
           value={width ?? ''} placeholder="px"
           onChange={(e) => onChangeWidthAction(e.target.value ? +e.target.value : undefined)}
