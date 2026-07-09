@@ -470,7 +470,9 @@ class SQLGlotBuilder:
                 # Order by specified field
                 order_col = exp.Column(this=exp.Identifier(this=order_by, quoted=True))
                 if order.lower() == "desc":
-                    query = query.order_by(order_col, desc=True)
+                    # NOTE: Select.order_by() has no `desc=` kwarg -- it is silently
+                    # swallowed, dropping DESC. Wrap in exp.Ordered so DESC renders.
+                    query = query.order_by(exp.Ordered(this=order_col, desc=True))
                 else:
                     query = query.order_by(order_col)
             elif group_positions:
@@ -618,12 +620,15 @@ class SQLGlotBuilder:
                 query = self._apply_where(query, where, expr_map=expr_map)
             
             # Apply ORDER BY
+            # NOTE: Select.order_by() has no `order=`/`desc=` kwarg -- it is silently
+            # swallowed, dropping DESC. Wrap in exp.Ordered so direction renders.
+            is_desc = order.lower() == "desc"
             if order_by:
                 order_expr = exp.Column(this=exp.Identifier(this=order_by, quoted=True))
-                query = query.order_by(order_expr, order="desc" if order.lower() == "desc" else "asc")
+                query = query.order_by(exp.Ordered(this=order_expr, desc=True) if is_desc else order_expr)
             else:
                 # Default: order by the selected field
-                query = query.order_by(field_expr, order="desc" if order.lower() == "desc" else "asc")
+                query = query.order_by(exp.Ordered(this=field_expr, desc=True) if is_desc else field_expr)
             
             # Apply LIMIT
             if limit and limit > 0:
@@ -2011,20 +2016,20 @@ def should_use_sqlglot(user_id: Optional[str] = None) -> bool:
         >>> should_use_sqlglot("user1")  # True
         >>> should_use_sqlglot("user3")  # False
     """
-    logger.debug(f"[SQLGlot] * should_use_sqlglot() CALLED with user_id={user_id}")
     from .config import settings
-    
-    # DEBUG: Always log what we see
-    logger.debug(f"[SQLGlot] Config check: enable_sqlglot={settings.enable_sqlglot}, sqlglot_users='{settings.sqlglot_users}', user_id={user_id}")
-    
+
+    # Single debug line (hot path: no stderr, no per-branch spam).
+    logger.debug(
+        "should_use_sqlglot user_id=%s enable=%s users=%r",
+        user_id, settings.enable_sqlglot, settings.sqlglot_users,
+    )
+
     # Global flag disabled?
     if not settings.enable_sqlglot:
-        logger.debug(f"[SQLGlot] DISABLED by feature flag")
         return False
-    
+
     # No user filtering or wildcard?
     if not settings.sqlglot_users or settings.sqlglot_users.strip() == "*":
-        logger.debug(f"[SQLGlot] ENABLED for all users (wildcard or empty)")
         return True
     
     # Check if user is in allowed list
