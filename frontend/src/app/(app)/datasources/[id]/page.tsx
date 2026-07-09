@@ -3,13 +3,14 @@
 import { Suspense } from 'react'
 import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Badge, TextInput } from '@tremor/react'
 import { Api, parseUtcDate, type IntrospectResponse, type DatasourceDetailOut, type SyncTaskOut, type LocalStatsResponse } from '@/lib/api'
-import SchemaGraph from '@/components/datasources/SchemaGraph'
 import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 import { RiDatabase2Line, RiTableLine, RiBracesLine } from '@remixicon/react'
+import nextDynamic from 'next/dynamic'
+const SchemaGraph = nextDynamic(() => import('@/components/datasources/SchemaGraph'), { ssr: false })
 
 export const dynamic = 'force-dynamic'
 

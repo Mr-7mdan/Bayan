@@ -6,7 +6,6 @@ import { Api, type DatasourceOut, type TablesOnlyResponse, type IntrospectRespon
 import CustomQueryEditor from '@/components/builder/CustomQueryEditor'
 import { Select, SelectItem } from '@tremor/react'
 import { RiCloseLine, RiPlayFill, RiDownload2Line } from '@remixicon/react'
-import * as ExcelJS from 'exceljs'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useQuery } from '@tanstack/react-query'
 
@@ -136,6 +135,7 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
   const handleDownloadExcel = async () => {
     if (!columns.length || !rows.length) return
     try {
+      const ExcelJS: any = await import('exceljs')
       const workbook = new ExcelJS.Workbook()
       const sheet = workbook.addWorksheet('Results')
 

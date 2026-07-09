@@ -10,6 +10,10 @@ const nextConfig = {
   typedRoutes: true,
   // Silence workspace root inference warning (point to monorepo root if applicable)
   outputFileTracingRoot: __dirname,
+  // Tree-shake barrel imports from icon/UI kits so unused icons/components stay out of chunks
+  experimental: {
+    optimizePackageImports: ['@tremor/react', '@remixicon/react', 'lucide-react'],
+  },
   typescript: {
     // Dangerously allow production builds to successfully complete even if
     // your project has type errors.
