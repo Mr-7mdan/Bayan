@@ -1,3 +1,6 @@
+// NOTE: `label` values are stable English keys — they drive iconFor/badgeFor/groupHome/routes
+// AND double as i18n message keys under the `nav` namespace (src/messages/*.json).
+// Do not translate them here; they are translated at render via useTranslations('nav').
 export type SidebarItem = { type: 'item'; label: string; description?: string; href?: string }
 export type SidebarGroup = { type: 'group'; label: string; position?: 'top' | 'bottom'; items: SidebarItem[] }
 export type SidebarConfig = { sidebar: Array<SidebarItem | SidebarGroup> }

@@ -3,7 +3,9 @@ import { headers } from 'next/headers'
 import type { ReactNode } from 'react'
 import { Suspense } from 'react'
 import './globals.css'
-import { Inter } from 'next/font/google'
+import { Inter, IBM_Plex_Sans_Arabic } from 'next/font/google'
+import { getLocale, getMessages } from 'next-intl/server'
+import { NextIntlClientProvider } from 'next-intl'
 import QueryProvider from '@/components/providers/QueryProvider'
 import AuthProvider from '@/components/providers/AuthProvider'
 import BrandingProvider from '@/components/providers/BrandingProvider'
@@ -14,6 +16,7 @@ import EnvironmentProvider from '@/components/providers/EnvironmentProvider'
 import ErrorReporterProvider from '@/components/providers/ErrorReporterProvider'
 
 const inter = Inter({ subsets: ['latin'] })
+const plexArabic = IBM_Plex_Sans_Arabic({ subsets: ['arabic', 'latin'], weight: ['400', '500', '600', '700'] })
 
 const defaultMetadata: Metadata = {
   title: { default: 'Bayan', template: '%s · Bayan' },
@@ -58,11 +61,16 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const locale = await getLocale()
+  const messages = await getMessages()
+  const dir = locale === 'ar' ? 'rtl' : 'ltr'
+  const fontClass = locale === 'ar' ? plexArabic.className : inter.className
   return (
-    <html lang="en" className="h-full">
-      <body className={`${inter.className} h-full bg-background text-foreground`}>
+    <html lang={locale} dir={dir} className="h-full">
+      <body className={`${fontClass} h-full bg-background text-foreground`}>
         <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
+          <NextIntlClientProvider locale={locale} messages={messages}>
           <EnvironmentProvider>
             <ThemeProvider>
               <FiltersProvider>
@@ -80,6 +88,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               </FiltersProvider>
             </ThemeProvider>
           </EnvironmentProvider>
+          </NextIntlClientProvider>
         </Suspense>
       </body>
     </html>

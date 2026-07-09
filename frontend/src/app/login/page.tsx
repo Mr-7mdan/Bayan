@@ -1,6 +1,7 @@
 "use client"
 
 import { Card, Title, Text } from '@tremor/react'
+import { useTranslations } from 'next-intl'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -10,6 +11,7 @@ import { useTheme } from '@/components/providers/ThemeProvider'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 
 export default function LoginPage() {
+  const t = useTranslations('login')
   const { login } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -88,17 +90,17 @@ export default function LoginPage() {
       router.replace(nextPath as any)
     } catch (err: unknown) {
       // Friendly error messages for common auth failures
-      let msg = 'Could not sign in. Please check your email and password.'
+      let msg = t('errorGeneric')
       try {
         const m = (err instanceof Error ? err.message : String(err || '')).toLowerCase()
         if (m.includes('http 401') || m.includes('invalid credentials')) {
-          msg = 'Invalid email or password.'
+          msg = t('errorInvalid')
         } else if (m.includes('http 429')) {
-          msg = 'Too many attempts. Please wait a moment and try again.'
+          msg = t('errorRateLimited')
         } else if (m.includes('http 5')) {
-          msg = 'Server error. Please try again later.'
+          msg = t('errorServer')
         } else if (m.includes('timed out')) {
-          msg = 'Request timed out. Check your connection and try again.'
+          msg = t('errorTimeout')
         }
       } catch {}
       setError(msg)
@@ -137,24 +139,24 @@ export default function LoginPage() {
           <div className="flex flex-col items-center gap-2">
             <img src="/logo.svg" alt="Bayan" className="h-10 w-auto block dark:hidden" />
             <img src="/logo-dark.svg" alt="Bayan" className="h-10 w-auto hidden dark:block" />
-            <Title className="text-gray-900 dark:text-white">Sign in</Title>
-            <Text className="mt-0 text-gray-600 dark:text-gray-300">Use your account to continue.</Text>
+            <Title className="text-gray-900 dark:text-white">{t('title')}</Title>
+            <Text className="mt-0 text-gray-600 dark:text-gray-300">{t('subtitle')}</Text>
           </div>
           <form onSubmit={onSubmit} className="mt-5 space-y-3">
             <div>
-              <Text className="text-sm text-gray-600 dark:text-gray-300">Email</Text>
+              <Text className="text-sm text-gray-600 dark:text-gray-300">{t('email')}</Text>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-card" />
             </div>
             <div>
-              <Text className="text-sm text-gray-600 dark:text-gray-300">Password</Text>
+              <Text className="text-sm text-gray-600 dark:text-gray-300">{t('password')}</Text>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-card" />
             </div>
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                 <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                <span>Remember me</span>
+                <span>{t('rememberMe')}</span>
               </label>
-              <button type="button" className="text-sm text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setResetOpen(true)}>Forgot password?</button>
+              <button type="button" className="text-sm text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setResetOpen(true)}>{t('forgotPassword')}</button>
             </div>
             {error && <div className="text-sm text-red-600">{error}</div>}
             <button
@@ -162,12 +164,12 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full text-sm px-3 py-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-muted disabled:opacity-60 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950"
             >
-              {loading ? 'Continuing…' : 'Continue'}
+              {loading ? t('submitting') : t('submit')}
             </button>
           </form>
           <div className="mt-4 text-center text-sm text-gray-600 dark:text-gray-300">
-            Don't have an account?{' '}
-            <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setSignupOpen(true)}>Create one</button>
+            {t('noAccount')}{' '}
+            <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setSignupOpen(true)}>{t('createOne')}</button>
           </div>
         </div>
 

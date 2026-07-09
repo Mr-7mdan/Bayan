@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useState, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import { Api, type NotificationOut } from '@/lib/api'
 import { RiCheckLine } from '@remixicon/react'
 import { usePathname, useRouter } from 'next/navigation'
@@ -11,6 +12,7 @@ import CreateDashboardDialog from '@/components/dashboards/CreateDashboardDialog
 
 function AppLayoutContent({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
+  const t = useTranslations('shell')
   const router = useRouter()
   const pathname = usePathname()
   const [notifs, setNotifs] = useState<NotificationOut[]>([])
@@ -139,7 +141,7 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
         <CreateDashboardDialog />
         {/* Global notifications */}
         {!!notifs.length && (
-          <div className="fixed top-6 right-6 z-[200] space-y-2">
+          <div className="fixed top-6 end-6 z-[200] space-y-2">
             {notifs.map((n) => (
               <div key={n.id} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[14px] font-medium text-white shadow-card">
                 <RiCheckLine className="w-5 h-5" />
@@ -150,27 +152,27 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
         )}
         {/* Floating Changelog */}
         {showChangelog && (
-          <div className="fixed bottom-6 right-6 z-[300] w-[420px] max-w-[90vw]">
+          <div className="fixed bottom-6 end-6 z-[300] w-[420px] max-w-[90vw]">
             <div className="rounded-lg border bg-card shadow-lg">
               <div className="px-3 py-2 border-b">
-                <div className="text-sm font-semibold">What's new</div>
-                <div className="text-xs text-muted-foreground">Backend {clBackendVer || '—'} · Frontend {clFrontendVer || '—'}</div>
+                <div className="text-sm font-semibold">{t('whatsNew')}</div>
+                <div className="text-xs text-muted-foreground">{t('backend')} {clBackendVer || '—'} · {t('frontend')} {clFrontendVer || '—'}</div>
               </div>
               <div className="p-3 max-h-[50vh] overflow-auto space-y-3">
                 {clNotesBackend ? (
                   <div>
-                    <div className="text-xs font-medium mb-1">Backend</div>
+                    <div className="text-xs font-medium mb-1">{t('backend')}</div>
                     <div className="text-xs whitespace-pre-wrap">{clNotesBackend}</div>
                   </div>
                 ) : null}
                 {clNotesFrontend ? (
                   <div>
-                    <div className="text-xs font-medium mb-1">Frontend</div>
+                    <div className="text-xs font-medium mb-1">{t('frontend')}</div>
                     <div className="text-xs whitespace-pre-wrap">{clNotesFrontend}</div>
                   </div>
                 ) : null}
                 {!clNotesBackend && !clNotesFrontend && (
-                  <div className="text-xs text-muted-foreground">Updated to the latest version.</div>
+                  <div className="text-xs text-muted-foreground">{t('updatedToLatest')}</div>
                 )}
               </div>
               <div className="px-3 py-2 border-t flex items-center justify-end gap-2">
@@ -183,7 +185,7 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
                     } catch {}
                     setShowChangelog(false)
                   }}
-                >Got it</button>
+                >{t('gotIt')}</button>
               </div>
             </div>
           </div>

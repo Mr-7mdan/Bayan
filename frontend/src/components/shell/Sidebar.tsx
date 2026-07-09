@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import { navConfig, SidebarGroup, SidebarItem } from '@/config/navigation'
 import { useTheme } from '@/components/providers/ThemeProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
@@ -61,9 +62,12 @@ type SidebarCounts = {
 
 function Item({ it, active, nested, badge }: { it: SidebarItem; active: boolean; nested?: boolean; badge?: number }) {
   const { resolved } = useTheme()
+  const t = useTranslations('nav')
   const base = resolved === 'dark' ? 'sidebar-item-dark' : 'sidebar-item-light'
   const activeCls = resolved === 'dark' ? 'sidebar-item-active-dark' : 'sidebar-item-active-light'
-  const cls = `${base} ${active ? activeCls : ''} ${nested ? 'pl-6 pr-3' : ''}`
+  const cls = `${base} ${active ? activeCls : ''} ${nested ? 'ps-6 pe-3' : ''}`
+  // it.label stays the stable English key (drives iconFor/badgeFor); translate at render.
+  const labelText = t(it.label)
   
   // Debug logging for badge
   const shouldShowBadge = typeof badge === 'number' && badge > 0
@@ -74,9 +78,9 @@ function Item({ it, active, nested, badge }: { it: SidebarItem; active: boolean;
   const content = (
     <div className="flex items-center gap-3 w-full">
       <span className={`shrink-0 ${active ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'}`}>{iconFor(it.label)}</span>
-      <span className={`truncate ${active ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'}`}>{it.label}</span>
+      <span className={`truncate ${active ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'}`}>{labelText}</span>
       {shouldShowBadge && (
-        <span className="ml-auto px-1.5 py-0.5 text-[11px] rounded-md bg-[hsl(var(--secondary)/0.6)] text-[hsl(var(--muted-foreground))] ring-1 ring-[hsl(var(--border))]">
+        <span className="ms-auto px-1.5 py-0.5 text-[11px] rounded-md bg-[hsl(var(--secondary)/0.6)] text-[hsl(var(--muted-foreground))] ring-1 ring-[hsl(var(--border))]">
           {badge}
         </span>
       )}
@@ -90,9 +94,9 @@ function Item({ it, active, nested, badge }: { it: SidebarItem; active: boolean;
     }
   }
   return it.href ? (
-    <Link href={it.href as any} onClick={onClick} className={cls} title={it.description || it.label}>{content}</Link>
+    <Link href={it.href as any} onClick={onClick} className={cls} title={it.description || labelText}>{content}</Link>
   ) : (
-    <div className={cls} onClick={onClick} title={it.description || it.label}>{content}</div>
+    <div className={cls} onClick={onClick} title={it.description || labelText}>{content}</div>
   )
 }
 
@@ -101,6 +105,8 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const { resolved } = useTheme()
   const { user } = useAuth()
   const { env } = useEnvironment()
+  const t = useTranslations('nav')
+  const ts = useTranslations('shell')
 
   const nodes = useMemo(() => {
     const base = navConfig.sidebar.filter((x) => (x as SidebarGroup).position !== 'bottom')
@@ -120,7 +126,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
     return base
   }, [user?.role])
 
-  const wrapCls = 'bg-[hsl(var(--background))] border-r border-[hsl(var(--border))] text-[hsl(var(--foreground))]'
+  const wrapCls = 'bg-[hsl(var(--background))] border-e border-[hsl(var(--border))] text-[hsl(var(--foreground))]'
 
   const [counts, setCounts] = useState<SidebarCounts>({ dashboards: 0, datasources: 0, shared: 0, collections: 0, alerts: 0 })
 
@@ -190,7 +196,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
 
   return (
     <aside
-      className={`${wrapCls} h-full w-[272px] flex flex-col transform ${hidden ? '-translate-x-full opacity-0' : 'translate-x-0 opacity-100'} transition-transform duration-200 ease-out`}
+      className={`${wrapCls} h-full w-[272px] flex flex-col transform ${hidden ? '-translate-x-full rtl:translate-x-full opacity-0' : 'translate-x-0 opacity-100'} transition-transform duration-200 ease-out`}
     >
       <div className="px-4 py-3 border-b border-[hsl(var(--border))] flex justify-center">
         <Link href="/home" aria-label="Home" className="inline-flex items-center">
@@ -211,7 +217,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
           if (items.length === 0) return null
           return (
             <div key={`g-${grp.label}`}>
-              <div className="px-4 mt-3 mb-2 text-[11px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">{grp.label}</div>
+              <div className="px-4 mt-3 mb-2 text-[11px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">{t(grp.label)}</div>
               <div className="space-y-1">
                 {items.map((it, j) => {
                   const active = !!(it.href && (it.href === '/' ? pathname === '/' : pathname?.startsWith(it.href)))
@@ -230,7 +236,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
               <div className="w-8 h-8 rounded-full bg-[hsl(var(--secondary))] flex items-center justify-center text-[12px] text-[hsl(var(--muted-foreground))]">
                 {(user?.name || user?.email || 'U').slice(0, 2).toUpperCase()}
               </div>
-              <div className="flex-1 text-sm text-left opacity-90 truncate">{user?.name || user?.email || 'User'}</div>
+              <div className="flex-1 text-sm text-start opacity-90 truncate">{user?.name || user?.email || ts('user')}</div>
               <RiArrowDownSLine className="w-4 h-4 opacity-70" />
             </button>
           </Popover.Trigger>
@@ -243,21 +249,21 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
               className="flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-[hsl(var(--muted))]"
             >
               <RiInformationLine className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-              <span>About</span>
+              <span>{ts('about')}</span>
             </Link>
             <Link
               href={"/users/change-password" as any}
               className="flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-[hsl(var(--muted))]"
             >
               <RiKey2Line className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-              <span>Change Password</span>
+              <span>{ts('changePassword')}</span>
             </Link>
             <Link
               href={"/logout" as any}
               className="flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-[hsl(var(--muted))]"
             >
               <RiLogoutBoxLine className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-              <span>Logout</span>
+              <span>{ts('logout')}</span>
             </Link>
           </Popover.Content>
         </Popover.Root>

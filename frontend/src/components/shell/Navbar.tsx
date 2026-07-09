@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useMemo } from 'react'
+import { useTranslations, useLocale } from 'next-intl'
 import { useTheme } from '@/components/providers/ThemeProvider'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import { RiLayout4Line, RiArrowRightSLine } from '@remixicon/react'
@@ -13,6 +14,15 @@ type Props = { sidebarOpen?: boolean; onToggleSidebarAction?: () => void }
 export default function Navbar({ sidebarOpen = true, onToggleSidebarAction }: Props) {
   const { resolved, darkVariant, setDarkVariant } = useTheme()
   const pathname = usePathname()
+  const tNav = useTranslations('nav')
+  const tShell = useTranslations('shell')
+  const locale = useLocale()
+  // Translate a nav label key at render; fall back to the raw (path-segment) label.
+  const crumbLabel = (label: string) => (tNav.has(label) ? tNav(label) : label)
+  const switchLocale = (l: string) => {
+    document.cookie = `NEXT_LOCALE=${l}; path=/; max-age=31536000; samesite=lax`
+    window.location.reload() // full reload re-renders html lang/dir server-side
+  }
   const wrap = 'bg-[hsl(var(--background))] border-b border-[hsl(var(--border))]'
   // page-level tabs were removed; keep navbar minimal with breadcrumbs only
 
@@ -91,7 +101,7 @@ export default function Navbar({ sidebarOpen = true, onToggleSidebarAction }: Pr
           {/* Sidebar toggle with hover (gray bg) and focus ring (amber) */}
           <button
             type="button"
-            aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+            aria-label={sidebarOpen ? tShell('hideSidebar') : tShell('showSidebar')}
             onClick={onToggleSidebarAction}
             className="group inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950"
           >
@@ -104,12 +114,12 @@ export default function Navbar({ sidebarOpen = true, onToggleSidebarAction }: Pr
               const isLast = i === crumbs.length - 1
               return (
                 <div key={`${c.label}-${i}`} className="flex items-center gap-2">
-                  {i > 0 && <RiArrowRightSLine className="w-4 h-4 opacity-50" />}
+                  {i > 0 && <RiArrowRightSLine className="w-4 h-4 opacity-50 rtl:rotate-180" />}
                   {isLast ? (
-                    <span className="font-medium text-gray-900 dark:text-white">{c.label}</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{crumbLabel(c.label)}</span>
                   ) : (
                     <Link href={(c.href || '#') as any} className="inline-flex items-center h-8 px-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors">
-                      {c.label}
+                      {crumbLabel(c.label)}
                     </Link>
                   )}
                 </div>
@@ -138,6 +148,21 @@ export default function Navbar({ sidebarOpen = true, onToggleSidebarAction }: Pr
               />
             </div>
           )}
+          {/* Language switcher (EN / ع) — sets NEXT_LOCALE cookie and hard-reloads */}
+          <div className="inline-flex items-center rounded-md border border-[hsl(var(--border))] overflow-hidden text-xs">
+            <button
+              type="button"
+              aria-label="English"
+              onClick={() => switchLocale('en')}
+              className={`px-2 h-6 transition-colors ${locale === 'en' ? 'bg-[hsl(var(--muted))] font-medium' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'}`}
+            >EN</button>
+            <button
+              type="button"
+              aria-label="العربية"
+              onClick={() => switchLocale('ar')}
+              className={`px-2 h-6 transition-colors ${locale === 'ar' ? 'bg-[hsl(var(--muted))] font-medium' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'}`}
+            >ع</button>
+          </div>
           <ThemeToggle />
         </div>
       </div>
