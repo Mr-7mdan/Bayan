@@ -6,11 +6,12 @@ import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Select,
 import { Api, type DatasourceOut, type UserRowOut, type DatasourceShareOut } from '@/lib/api'
 import * as Popover from '@radix-ui/react-popover'
 import * as Dialog from '@radix-ui/react-dialog'
-import { RiBuildingLine, RiMapPin2Line, RiUserLine, RiMore2Line, RiCheckLine } from '@remixicon/react'
+import { RiBuildingLine, RiMapPin2Line, RiUserLine, RiMore2Line } from '@remixicon/react'
 import DatasourceDialog, { type DatasourceDialogMode } from '@/components/datasources/DatasourceDialog'
 import DataExplorerDialog from '@/components/builder/DataExplorerDialogV2'
 import ExecuteSqlDialog from '@/components/datasources/ExecuteSqlDialog'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 
 export const dynamic = 'force-dynamic'
 
@@ -210,7 +211,8 @@ function MyDatasourcesPageInner() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [items, setItems] = useState<DatasourceOut[]>([])
-  const [toast, setToast] = useState<string>('')
+  const { notify } = useProgressToast()
+  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|no datasources/i.test(m) ? 'error' : 'success') }
   const [tabIndex, setTabIndex] = useState(0)
   const prevTabIndex = useRef(0)
   const [slideDir, setSlideDir] = useState<'left' | 'right'>('right')
@@ -488,11 +490,6 @@ function MyDatasourcesPageInner() {
           </TabPanels>
         </TabGroup>
       </Card>
-      {!!toast && (
-        <div className="fixed top-6 right-6 z-[100] flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[14px] font-medium text-white">
-          <RiCheckLine className="w-5 h-5" /><span>{toast}</span>
-        </div>
-      )}
       <DatasourceDialog open={dlgOpen} onOpenChangeAction={setDlgOpen} mode={dlgMode} initial={dlgInitial} onCreatedAction={onCreated} onSavedAction={onSaved} />
       {explorerDs && <DataExplorerDialog open={!!explorerDs} onClose={() => setExplorerDs(null)} datasource={explorerDs} />}
       <ExecuteSqlDialog open={!!executeSqlDs} onClose={() => setExecuteSqlDs(null)} datasource={executeSqlDs} />

@@ -109,7 +109,45 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-[hsl(var(--background))]">
+    <div className="min-h-screen flex bg-[hsl(var(--background))]">
+      {/* Brand / product framing panel (desktop only) */}
+      <aside className="relative hidden lg:flex lg:w-1/2 xl:w-3/5 flex-col justify-between overflow-hidden border-e border-[hsl(var(--border))] bg-[hsl(var(--card))] p-12">
+        <div className="flex items-center gap-2">
+          <img src="/logo.svg" alt="Bayan" className="h-9 w-auto block dark:hidden" />
+          <img src="/logo-dark.svg" alt="Bayan" className="h-9 w-auto hidden dark:block" />
+        </div>
+        <div className="relative z-[1] max-w-lg">
+          <h1 className="text-2xl font-semibold text-foreground">{t('title')}</h1>
+          <p className="mt-3 text-base text-muted-foreground">{t('subtitle')}</p>
+        </div>
+        {/* Subtle inline data-viz silhouette in token colors */}
+        <svg
+          aria-hidden
+          viewBox="0 0 480 200"
+          className="pointer-events-none absolute -bottom-2 end-0 w-[110%] max-w-none text-[hsl(var(--primary))] opacity-[0.18]"
+          fill="none"
+        >
+          <rect x="20" y="120" width="34" height="70" rx="4" fill="currentColor" opacity="0.5" />
+          <rect x="72" y="90" width="34" height="100" rx="4" fill="currentColor" opacity="0.6" />
+          <rect x="124" y="140" width="34" height="50" rx="4" fill="currentColor" opacity="0.5" />
+          <rect x="176" y="70" width="34" height="120" rx="4" fill="currentColor" opacity="0.7" />
+          <rect x="228" y="110" width="34" height="80" rx="4" fill="currentColor" opacity="0.5" />
+          <rect x="280" y="50" width="34" height="140" rx="4" fill="currentColor" opacity="0.7" />
+          <rect x="332" y="100" width="34" height="90" rx="4" fill="currentColor" opacity="0.55" />
+          <rect x="384" y="130" width="34" height="60" rx="4" fill="currentColor" opacity="0.5" />
+          <path
+            d="M20 96 L89 70 L141 104 L193 44 L245 82 L297 30 L349 74 L418 54"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity="0.9"
+          />
+        </svg>
+      </aside>
+
+      {/* Form panel */}
+      <div className="flex flex-1 items-center justify-center p-6">
       <Card className="w-full max-w-md p-0 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))]">
         <div className="px-5 py-6">
           {mounted && (
@@ -168,7 +206,7 @@ export default function LoginPage() {
         <Dialog.Root open={signupOpen} onOpenChange={setSignupOpen}>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/40" />
-            <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[hsl(var(--border))] bg-card p-4 shadow-card">
+            <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[hsl(var(--border))] bg-card p-4 shadow-modal">
               <Dialog.Title className="text-lg font-semibold">Create account</Dialog.Title>
               <div className="mt-3 space-y-3">
                 <label className="text-sm block">Full Name
@@ -208,7 +246,7 @@ export default function LoginPage() {
         <Dialog.Root open={resetOpen} onOpenChange={setResetOpen}>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/40" />
-            <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[hsl(var(--border))] bg-card p-4 shadow-card">
+            <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[hsl(var(--border))] bg-card p-4 shadow-modal">
               <Dialog.Title className="text-lg font-semibold">Reset password</Dialog.Title>
               <div className="mt-3 space-y-3">
                 <p className="text-sm text-muted-foreground">Enter your email address and we'll send you a link to reset your password.</p>
@@ -245,6 +283,7 @@ export default function LoginPage() {
           </div>
         </div>
       </Card>
+      </div>
     </div>
   )
 }

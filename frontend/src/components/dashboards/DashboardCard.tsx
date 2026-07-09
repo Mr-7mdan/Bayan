@@ -113,7 +113,7 @@ export default function DashboardCard({
       aria-busy={opening || undefined}
       aria-disabled={opening || undefined}
     >
-      <div className={`relative hover-cover rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] p-4 transition-transform duration-150 ring-1 ring-inset ring-[hsl(var(--border))] ${opening ? 'pulse-border' : `group-hover:ring-[hsl(var(--ring))] group-hover:border-[hsl(var(--ring))] ${menuOpen ? '' : 'group-hover:-translate-y-[1px]'}`}`}>
+      <div className={`relative hover-cover rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] p-4 transition-[transform,box-shadow] duration-150 [transition-timing-function:var(--ease-out)] ring-1 ring-inset ring-[hsl(var(--border))] ${opening ? 'pulse-border' : `group-hover:ring-[hsl(var(--ring))] group-hover:border-[hsl(var(--ring))] group-hover:shadow-card ${menuOpen ? '' : 'group-hover:-translate-y-[1px]'}`}`}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <h4 className="truncate text-[14px] font-medium text-[hsl(var(--foreground))]">{d.name}</h4>

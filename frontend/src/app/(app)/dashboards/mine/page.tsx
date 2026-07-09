@@ -10,7 +10,9 @@ import ImportMappingDialog from '@/components/dashboards/ImportMappingDialog'
 import { Api, type DashboardListItem, type FavoriteOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
-import { RiCheckLine } from '@remixicon/react'
+import { useProgressToast } from '@/components/providers/ProgressToastProvider'
+import { EmptyState } from '@/components/ui'
+import { RiSearchLine, RiDashboardLine, RiAddLine } from '@remixicon/react'
 import * as Dialog from '@radix-ui/react-dialog'
 
 // (no local timeAgo – DashboardCard renders updated/created info)
@@ -60,7 +62,8 @@ export default function MyDashboardsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [items, setItems] = useState<DashboardListItem[]>([])
-  const [toast, setToast] = useState<string>('')
+  const { notify } = useProgressToast()
+  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|no valid|isn't published/i.test(m) ? 'error' : 'success') }
   // Favorites (as ids set for quick lookup)
   const [favIdsSet, setFavIdsSet] = useState<Set<string>>(new Set())
   const [confirmDeleteFor, setConfirmDeleteFor] = useState<DashboardListItem | null>(null)
@@ -213,12 +216,8 @@ export default function MyDashboardsPage() {
         const dash = data.dashboards[0]
         const widgets = Object.values((dash.definition as any)?.widgets || {})
         const widgetsWithCustomCols = widgets.filter((w: any) => Array.isArray(w?.customColumns) && w.customColumns.length > 0)
-        console.log('[Export] Dashboard:', dash.name)
-        console.log('[Export] Total widgets:', widgets.length)
-        console.log('[Export] Widgets with custom columns:', widgetsWithCustomCols.length)
         if (widgetsWithCustomCols.length > 0) {
           widgetsWithCustomCols.forEach((w: any) => {
-            console.log('[Export]   -', w.title, ':', w.customColumns.length, 'custom columns')
           })
         }
       }
@@ -278,7 +277,6 @@ export default function MyDashboardsPage() {
         
         if (unmappedDatasources.length > 0) {
           try {
-            console.log('[Import] Creating new datasources for unmapped:', unmappedDatasources.map((ds: any) => ds.name))
             const res = await Api.importDatasources(unmappedDatasources, user?.id || undefined)
             // Merge only the auto-generated IDs (for unmapped datasources)
             finalDsIdMap = { ...datasourceIdMap, ...(res?.idMap || {}) }
@@ -287,7 +285,6 @@ export default function MyDashboardsPage() {
             // Continue with dashboard import even if datasources fail
           }
         } else {
-          console.log('[Import] All datasources already mapped, skipping datasource creation')
         }
         
         // For mapped datasources, merge transforms (custom columns, joins, etc.) into target datasources
@@ -295,7 +292,6 @@ export default function MyDashboardsPage() {
           const targetDsId = datasourceIdMap[ds.id]
           if (targetDsId && ds.options?.transforms) {
             try {
-              console.log(`[Import] Merging transforms from ${ds.name} into target datasource ${targetDsId}`)
               
               // Fetch current target datasource
               const targetDs = await Api.getDatasource(targetDsId, user?.id || undefined)
@@ -314,7 +310,6 @@ export default function MyDashboardsPage() {
                 if (Array.isArray(importedTransforms.customColumns)) {
                   importedTransforms.customColumns.forEach((col: any) => {
                     if (col.scope?.table && tableNameMap[col.scope.table]) {
-                      console.log(`[Import]   Remapping custom column "${col.name}" scope: ${col.scope.table} → ${tableNameMap[col.scope.table]}`)
                       col.scope.table = tableNameMap[col.scope.table]
                     }
                   })
@@ -324,7 +319,6 @@ export default function MyDashboardsPage() {
                 if (Array.isArray(importedTransforms.transforms)) {
                   importedTransforms.transforms.forEach((t: any) => {
                     if (t.scope?.table && tableNameMap[t.scope.table]) {
-                      console.log(`[Import]   Remapping transform scope: ${t.scope.table} → ${tableNameMap[t.scope.table]}`)
                       t.scope.table = tableNameMap[t.scope.table]
                     }
                   })
@@ -334,7 +328,6 @@ export default function MyDashboardsPage() {
                 if (Array.isArray(importedTransforms.joins)) {
                   importedTransforms.joins.forEach((j: any) => {
                     if (j.scope?.table && tableNameMap[j.scope.table]) {
-                      console.log(`[Import]   Remapping join scope: ${j.scope.table} → ${tableNameMap[j.scope.table]}`)
                       j.scope.table = tableNameMap[j.scope.table]
                     }
                   })
@@ -394,11 +387,8 @@ export default function MyDashboardsPage() {
                 }
               })
               
-              console.log(`[Import]   Merged ${importedCustomCols.length} custom columns, ${importedTransformsList.length} transforms, ${importedJoins.length} joins`)
-              console.log(`[Import]   Total custom columns after merge: ${mergedTransforms.customColumns?.length || 0}`)
               if (mergedTransforms.customColumns && mergedTransforms.customColumns.length > 0) {
                 mergedTransforms.customColumns.forEach((col: any) => {
-                  console.log(`[Import]     - ${col.name} (scope: ${col.scope?.table || 'datasource-level'})`)
                 })
               }
             } catch (err) {
@@ -413,14 +403,9 @@ export default function MyDashboardsPage() {
       dashboards.forEach((dash: any) => {
         const widgets = Object.values((dash.definition as any)?.widgets || {})
         const widgetsWithCustomCols = widgets.filter((w: any) => Array.isArray(w?.customColumns) && w.customColumns.length > 0)
-        console.log('[Import] Dashboard:', dash.name)
-        console.log('[Import] Total widgets:', widgets.length)
-        console.log('[Import] Widgets with custom columns:', widgetsWithCustomCols.length)
         if (widgetsWithCustomCols.length > 0) {
           widgetsWithCustomCols.forEach((w: any) => {
-            console.log('[Import]   -', w.title, ':', w.customColumns.length, 'custom columns')
             w.customColumns.forEach((col: any) => {
-              console.log('[Import]     •', col.name, '=', col.formula)
             })
           })
         }
@@ -454,8 +439,8 @@ export default function MyDashboardsPage() {
       <Card className="p-0 bg-[hsl(var(--background))]">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--background))] border-b border-[hsl(var(--border))]">
           <div>
-            <Title className="text-gray-500 dark:text-white">My Dashboards</Title>
-            <Text className="mt-0 text-gray-500 dark:text-white">View/Create/Edit/Publish/Unpublish your dashboards from here</Text>
+            <Title className="text-foreground">My Dashboards</Title>
+            <Text className="mt-0 text-muted-foreground">View/Create/Edit/Publish/Unpublish your dashboards from here</Text>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -597,7 +582,11 @@ export default function MyDashboardsPage() {
             </div>
             <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}` }>
               {loading && <Text>Loading…</Text>}
-              {!loading && filteredAll.length === 0 && <Text>No dashboards match your search.</Text>}
+              {!loading && filteredAll.length === 0 && (
+                query.trim()
+                  ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title="No matches" hint="No dashboards match your search." />
+                  : <EmptyState icon={<RiDashboardLine className="h-7 w-7" />} title="No dashboards yet" hint="Create your first dashboard to start visualizing your data." primary={{ label: 'New dashboard', icon: <RiAddLine className="h-4 w-4" />, onClick: () => router.push('/builder' as any) }} />
+              )}
               {!loading && visibleAll.map((d) => (
                 <DashboardCard key={d.id} d={d} widthClass="w-full" showMenu context="dashboard"
                   onOpenAction={onEdit} onDuplicateAction={onDuplicate} onPublishOpenAction={onPublishOpen}
@@ -644,7 +633,11 @@ export default function MyDashboardsPage() {
               </div>
               <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}` }>
                 {loading && <Text>Loading…</Text>}
-                {!loading && filteredPublished.length === 0 && <Text>No published dashboards match your search.</Text>}
+                {!loading && filteredPublished.length === 0 && (
+                  query.trim()
+                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title="No matches" hint="No published dashboards match your search." />
+                    : <EmptyState icon={<RiDashboardLine className="h-7 w-7" />} title="No published dashboards" hint="Publish a dashboard to share it with a public link." />
+                )}
                 {!loading && visiblePublished.map((d) => (
                   <DashboardCard key={d.id} d={d} widthClass="w-full" showMenu context="dashboard"
                     onOpenAction={onEdit} onDuplicateAction={onDuplicate} onPublishOpenAction={onPublishOpen}
@@ -701,14 +694,6 @@ export default function MyDashboardsPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-
-      {/* Toast */}
-      {!!toast && (
-        <div className="fixed top-6 right-6 z-[100] flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[14px] font-medium text-white">
-          <RiCheckLine className="w-5 h-5" />
-          <span>{toast}</span>
-        </div>
-      )}
 
       {/* Publish / Share Dialog */}
       <Dialog.Root open={!!publishFor} onOpenChange={(v) => { if (!v) setPublishFor(null) }}>

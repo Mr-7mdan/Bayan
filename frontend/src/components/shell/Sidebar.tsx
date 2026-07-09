@@ -65,19 +65,15 @@ function Item({ it, active, nested, badge }: { it: SidebarItem; active: boolean;
   const t = useTranslations('nav')
   const base = resolved === 'dark' ? 'sidebar-item-dark' : 'sidebar-item-light'
   const activeCls = resolved === 'dark' ? 'sidebar-item-active-dark' : 'sidebar-item-active-light'
-  const cls = `${base} ${active ? activeCls : ''} ${nested ? 'ps-6 pe-3' : ''}`
+  const cls = `group ${base} ${active ? activeCls : ''} ${nested ? 'ps-6 pe-3' : ''} transition-colors [transition-duration:var(--dur-fast)] [transition-timing-function:var(--ease-out)]`
   // it.label stays the stable English key (drives iconFor/badgeFor); translate at render.
   const labelText = t(it.label)
-  
-  // Debug logging for badge
+
   const shouldShowBadge = typeof badge === 'number' && badge > 0
-  if (badge !== undefined) {
-    console.log(`[Item] ${it.label}: badge=${badge}, type=${typeof badge}, shouldShow=${shouldShowBadge}`)
-  }
-  
+
   const content = (
     <div className="flex items-center gap-3 w-full">
-      <span className={`shrink-0 ${active ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'}`}>{iconFor(it.label)}</span>
+      <span className={`shrink-0 transition-colors [transition-duration:var(--dur-fast)] ${active ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--foreground))]'}`}>{iconFor(it.label)}</span>
       <span className={`truncate ${active ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'}`}>{labelText}</span>
       {shouldShowBadge && (
         <span className="ms-auto px-1.5 py-0.5 text-[11px] rounded-md bg-[hsl(var(--secondary)/0.6)] text-[hsl(var(--muted-foreground))] ring-1 ring-[hsl(var(--border))]">
@@ -152,8 +148,6 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
         collections: (res as SidebarCountsResponse | null)?.collectionCount || 0,
         alerts: Array.isArray(alerts) ? alerts.length : 0,
       }
-      console.log('[Sidebar] API response:', res)
-      console.log('[Sidebar] Setting counts:', newCounts)
       setCounts(newCounts)
     }).catch(() => {})
     .finally(() => { busyRef.current = false; lastRunRef.current = Date.now(); try { if (typeof window !== 'undefined') { (window as any).__sidebarCountsLastRunMs = Date.now(); (window as any).__sidebarCountsBusy = false } } catch {} })
@@ -187,9 +181,6 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
         break
       default:
         badge = undefined
-    }
-    if (badge !== undefined) {
-      console.log(`[Sidebar] Badge for "${label}":`, badge, 'counts:', counts)
     }
     return badge
   }

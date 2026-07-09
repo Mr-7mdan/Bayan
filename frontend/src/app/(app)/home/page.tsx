@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Card, Title, Text } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { RiCheckLine } from '@remixicon/react'
+import { RiStarLine, RiFolderSharedLine, RiAddLine, RiRocketLine } from '@remixicon/react'
 import { Api, type DashboardListItem, type CollectionItemOut, type DashboardOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
+import { useProgressToast } from '@/components/providers/ProgressToastProvider'
+import { EmptyState } from '@/components/ui'
 import DashboardCard from '@/components/dashboards/DashboardCard'
 
 // Removed local DashCard in favor of shared DashboardCard
@@ -24,7 +26,9 @@ export default function HomeWorkspacePage() {
   const [favs, setFavs] = useState<DashboardListItem[]>([])
   const [recent, setRecent] = useState<DashboardListItem[]>([])
   const [collab, setCollab] = useState<CollectionItemOut[]>([])
-  const [toast, setToast] = useState<string>('')
+  const { notify } = useProgressToast()
+  // Route the existing setToast(msg) call sites through the unified toast; '' clears are no-ops (auto-dismiss).
+  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|isn't published/i.test(m) ? 'error' : 'success') }
 
   const lastKey = useMemo(() => `lastDashId:${user?.id || 'dev_user'}`, [user?.id])
 
@@ -274,10 +278,24 @@ export default function HomeWorkspacePage() {
       <Card className="p-0 bg-[hsl(var(--background))] min-w-0 w-full overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] min-w-0">
           <div>
-            <Title className="text-gray-500 dark:text-white">Welcome back, {user?.name || 'there'}</Title>
-            <Text className="mt-0 text-gray-500 dark:text-white">Pick up where you left off or explore your recent work</Text>
+            <Title className="text-foreground">Welcome back, {user?.name || 'there'}</Title>
+            <Text className="mt-0 text-muted-foreground">Pick up where you left off or explore your recent work</Text>
           </div>
         </div>
+
+        {/* First-run hint: no dashboards yet */}
+        {recent.length === 0 && (
+          <div className="px-3 py-3">
+            <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+              <EmptyState
+                icon={<RiRocketLine className="h-8 w-8" />}
+                title="Create your first dashboard"
+                hint="Build interactive dashboards from your data sources. Start with a blank canvas and add widgets."
+                primary={{ label: 'New dashboard', icon: <RiAddLine className="h-4 w-4" />, onClick: () => router.push('/builder' as any) }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Continue Working */}
         {last && user?.id && last.userId === user.id && (
@@ -299,6 +317,13 @@ export default function HomeWorkspacePage() {
             <span>Favourites</span>
             <Link href="/dashboards/mine" className="shrink-0 text-xs px-2 py-1 rounded-md border hover:bg-muted">See all</Link>
           </div>
+          {favs.length === 0 ? (
+            <EmptyState
+              icon={<RiStarLine className="h-7 w-7" />}
+              title="No favourites yet"
+              hint="Star dashboards to pin them here for quick access."
+            />
+          ) : (
           <div className="overflow-x-auto no-scrollbar w-full">
             <div className="flex gap-3">
               {favs.slice(0, limFav).map((d) => (
@@ -307,9 +332,11 @@ export default function HomeWorkspacePage() {
               <div ref={favEndRef} className="min-w-[1px]" />
             </div>
           </div>
+          )}
         </div>
 
-        {/* Recent Dashboards */}
+        {/* Recent Dashboards (first-run hint above covers the empty case) */}
+        {recent.length > 0 && (
         <div className="px-3 py-3 min-w-0 max-w-full">
           <div className="mb-2 text-[15px] font-medium text-gray-700 dark:text-gray-200 flex flex-wrap items-center justify-between gap-2 min-w-0 max-w-full">
             <span>Recent Dashboards</span>
@@ -324,6 +351,7 @@ export default function HomeWorkspacePage() {
             </div>
           </div>
         </div>
+        )}
 
         {/* Recent Collections */}
         <div className="px-3 py-3 min-w-0 max-w-full">
@@ -331,6 +359,13 @@ export default function HomeWorkspacePage() {
             <span>Recent Collections</span>
             <Link href="/dashboards/shared" className="shrink-0 text-xs px-2 py-1 rounded-md border hover:bg-muted">See all</Link>
           </div>
+          {collab.length === 0 ? (
+            <EmptyState
+              icon={<RiFolderSharedLine className="h-7 w-7" />}
+              title="No shared collections"
+              hint="Dashboards shared with you will appear here."
+            />
+          ) : (
           <div className="overflow-x-auto no-scrollbar w-full">
             <div className="flex gap-3">
               {collab.slice(0, limCollab).map((it) => {
@@ -353,15 +388,9 @@ export default function HomeWorkspacePage() {
               <div ref={colEndRef} className="min-w-[1px]" />
             </div>
           </div>
+          )}
         </div>
       </Card>
-      {/* Toast */}
-      {!!toast && (
-        <div className="fixed top-6 right-6 z-[100] flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[14px] font-medium text-white">
-          <RiCheckLine className="w-5 h-5" />
-          <span>{toast}</span>
-        </div>
-      )}
 
       {/* Delete confirmation */}
       <Dialog.Root open={!!confirmDeleteFor} onOpenChange={(v) => { if (!v) setConfirmDeleteFor(null) }}>

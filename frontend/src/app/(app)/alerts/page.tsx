@@ -10,6 +10,7 @@ import EmailConfigDialog from '@/components/alerts/EmailConfigDialog'
 import SmsConfigDialog from '@/components/alerts/SmsConfigDialog'
 import AlertDialog from '@/components/alerts/AlertDialog'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 
 function parseISOForJS(iso?: string | null): Date | null {
   try {
@@ -223,7 +224,8 @@ export default function AlertsPage() {
   const [items, setItems] = useState<AlertOut[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [toast, setToast] = useState('')
+  const { notify } = useProgressToast()
+  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid/i.test(m) ? 'error' : 'success') }
   const [dlgAdd, setDlgAdd] = useState(false)
   const [dlgEmail, setDlgEmail] = useState(false)
   const [dlgSms, setDlgSms] = useState(false)
@@ -475,11 +477,6 @@ export default function AlertsPage() {
           )}
         </div>
       </Card>
-      {!!toast && (
-        <div className="fixed top-6 right-6 z-[100] flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[14px] font-medium text-white">
-          <RiRefreshLine className="w-5 h-5" /><span>{toast}</span>
-        </div>
-      )}
       {/* Run progress panel(s) */}
       <div className="fixed bottom-6 right-6 z-[110] space-y-2">
         {Object.entries(runProg).filter(([,v])=>v && v.open).map(([id, prog]) => (

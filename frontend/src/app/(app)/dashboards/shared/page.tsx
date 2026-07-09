@@ -6,8 +6,9 @@ import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Select,
 import { Api, type CollectionItemOut, type FavoriteOut, type DashboardListItem } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import DashboardCard from '@/components/dashboards/DashboardCard'
-import { RiCheckLine } from '@remixicon/react'
-import * as Dialog from '@radix-ui/react-dialog'
+import { RiSearchLine, RiFolderSharedLine } from '@remixicon/react'
+import { useProgressToast } from '@/components/providers/ProgressToastProvider'
+import { EmptyState } from '@/components/ui'
 
 // Using shared DashboardCard
 
@@ -17,7 +18,8 @@ export default function CollectionsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [items, setItems] = useState<CollectionItemOut[]>([])
-  const [toast, setToast] = useState<string>('')
+  const { notify } = useProgressToast()
+  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|isn't published/i.test(m) ? 'error' : 'success') }
   const [tabIndex, setTabIndex] = useState(0)
   const prevTabIndex = useRef(0)
   const [slideDir, setSlideDir] = useState<'left' | 'right'>('right')
@@ -135,8 +137,8 @@ export default function CollectionsPage() {
       <Card className="p-0 bg-[hsl(var(--background))]">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--background))] border-b border-[hsl(var(--border))]">
           <div>
-            <Title className="text-gray-500 dark:text-white">My Collections</Title>
-            <Text className="mt-0 text-gray-500 dark:text-white">View items in your collection</Text>
+            <Title className="text-foreground">My Collections</Title>
+            <Text className="mt-0 text-muted-foreground">View items in your collection</Text>
           </div>
         </div>
         {error && <div className="px-4 py-2 text-sm text-red-600">{error}</div>}
@@ -183,7 +185,11 @@ export default function CollectionsPage() {
               </div>
               <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}`}>
                 {loading && <Text>Loading…</Text>}
-                {!loading && filteredMine.length === 0 && <Text>No items match your search.</Text>}
+                {!loading && filteredMine.length === 0 && (
+                  query.trim()
+                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title="No matches" hint="No collections match your search." />
+                    : <EmptyState icon={<RiFolderSharedLine className="h-7 w-7" />} title="No collections yet" hint="Dashboards you save to collections will appear here." />
+                )}
                 {!loading && visibleMine.map((it) => {
                   const d: DashboardListItem = {
                     id: it.dashboardId,
@@ -247,7 +253,11 @@ export default function CollectionsPage() {
               </div>
               <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}`}>
                 {loading && <Text>Loading…</Text>}
-                {!loading && filteredCollab.length === 0 && <Text>No collaborations match your search.</Text>}
+                {!loading && filteredCollab.length === 0 && (
+                  query.trim()
+                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title="No matches" hint="No collaborations match your search." />
+                    : <EmptyState icon={<RiFolderSharedLine className="h-7 w-7" />} title="No collaborations yet" hint="Dashboards shared with edit access will appear here." />
+                )}
                 {!loading && visibleCollab.map((it) => {
                   const d: DashboardListItem = {
                     id: it.dashboardId,
@@ -283,14 +293,6 @@ export default function CollectionsPage() {
           </TabPanels>
         </TabGroup>
       </Card>
-
-      {/* Toast */}
-      {!!toast && (
-        <div className="fixed top-6 right-6 z-[100] flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[14px] font-medium text-white">
-          <RiCheckLine className="w-5 h-5" />
-          <span>{toast}</span>
-        </div>
-      )}
     </div>
   )
 }

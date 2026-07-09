@@ -2,7 +2,11 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { RiCheckLine, RiErrorWarningLine } from '@remixicon/react'
 import { Api, parseUtcDate, type SyncTaskOut } from '@/lib/api'
+
+type ToastVariant = 'success' | 'error'
+interface ToastNotice { id: number; message: string; variant: ToastVariant; leaving?: boolean }
 
 declare global {
   namespace JSX {
@@ -36,6 +40,8 @@ interface ProgressToastContextValue {
   update: (p: Partial<ProgressToastState>) => void
   // Starts polling sync status for a datasource until all tasks finished
   startMonitoring: (datasourceId: string, actorId?: string) => void
+  // Lightweight success/error toast (replaces per-page inline toast boxes)
+  notify: (message: string, variant?: ToastVariant) => void
 }
 
 const ProgressToastContext = createContext<ProgressToastContextValue | null>(null)
@@ -48,9 +54,24 @@ export function useProgressToast() {
 
 export default function ProgressToastProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<ProgressToastState>({ visible: false })
+  const [notice, setNotice] = useState<ToastNotice | null>(null)
+  const noticeTimers = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const queryClient = useQueryClient()
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const notify = useCallback((message: string, variant: ToastVariant = 'success') => {
+    if (!message) return
+    noticeTimers.current.forEach((t) => clearTimeout(t))
+    noticeTimers.current = []
+    const id = Date.now()
+    setNotice({ id, message, variant })
+    // Trigger exit animation, then unmount
+    noticeTimers.current.push(setTimeout(() => setNotice((n) => (n && n.id === id ? { ...n, leaving: true } : n)), 2400))
+    noticeTimers.current.push(setTimeout(() => setNotice((n) => (n && n.id === id ? null : n)), 2600))
+  }, [])
+
+  useEffect(() => () => { noticeTimers.current.forEach((t) => clearTimeout(t)) }, [])
   const LS_KEY = 'progress_toast_active'
   const persist = useCallback((p: any) => { try { localStorage.setItem(LS_KEY, JSON.stringify(p)) } catch {} }, [])
   const getPersist = useCallback(() => { try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null } catch { return null } }, [])
@@ -171,7 +192,7 @@ export default function ProgressToastProvider({ children }: { children: React.Re
     if (tickRef.current) clearInterval(tickRef.current as unknown as number)
   }, [])
 
-  const value = useMemo(() => ({ state, show, hide, update, startMonitoring }), [state, show, hide, update, startMonitoring])
+  const value = useMemo(() => ({ state, show, hide, update, startMonitoring, notify }), [state, show, hide, update, startMonitoring, notify])
 
   useEffect(() => {
     try {
@@ -186,6 +207,18 @@ export default function ProgressToastProvider({ children }: { children: React.Re
   return (
     <ProgressToastContext.Provider value={value}>
       {children}
+      {notice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed top-6 end-6 z-[10000] flex items-center gap-2 rounded-lg border border-[hsl(var(--border))] bg-card px-4 py-3 text-sm font-medium text-card-foreground shadow-popover ${notice.leaving ? 'anim-toast-out' : 'anim-toast-in'}`}
+        >
+          {notice.variant === 'error'
+            ? <RiErrorWarningLine className="h-5 w-5 text-[hsl(var(--danger))]" />
+            : <RiCheckLine className="h-5 w-5 text-[hsl(var(--success))]" />}
+          <span>{notice.message}</span>
+        </div>
+      )}
       {state.visible && (
         state.minimized ? (
           <div className="fixed bottom-4 right-4 z-[9999] w-[260px] rounded-md border bg-card shadow-card px-3 py-2 cursor-pointer" onClick={() => setState((s: ProgressToastState) => { const n = { ...s, minimized: false, visible: true }; try { const p = getPersist(); if (p) persist({ ...p, minimized: false }) } catch {}; return n })}>
