@@ -153,7 +153,7 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-3 w-max [&_button]:whitespace-nowrap [&_span]:whitespace-nowrap">
       <FilterbarControl
         active={selectedPreset}
         options={presetOptions}

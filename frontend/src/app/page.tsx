@@ -1461,7 +1461,8 @@ export default function HomePage() {
         <section className="min-h-[60vh] rounded-lg border shadow-card p-3 bg-transparent overflow-auto" ref={canvasRef}>
           <div className="min-w-[720px] space-y-2">
             <div className="rounded-md border bg-card p-2">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1 overflow-x-auto no-scrollbar">
                 <GlobalFiltersBar
                   widgets={configs}
                   onApplyMappingAction={(map) => {
@@ -1482,6 +1483,7 @@ export default function HomePage() {
                     })
                   }}
                 />
+                </div>
                 {/* Breakpoint switcher: pick which layout (Desktop/Tablet/Phone) to edit */}
                 <div className="inline-flex rounded-md border overflow-hidden text-xs flex-none" role="group" aria-label="Edit layout for breakpoint">
                   {(['desktop', 'tablet', 'phone'] as BreakpointKey[]).map((bp) => (

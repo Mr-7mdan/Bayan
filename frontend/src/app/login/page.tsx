@@ -113,12 +113,13 @@ export default function LoginPage() {
       {/* Brand / product framing panel (desktop only) */}
       <aside className="relative hidden lg:flex lg:w-1/2 xl:w-3/5 flex-col justify-between overflow-hidden border-e border-[hsl(var(--border))] bg-[hsl(var(--card))] p-12">
         <div className="flex items-center gap-2">
-          <img src="/logo.svg" alt="Bayan" className="h-9 w-auto block dark:hidden" />
-          <img src="/logo-dark.svg" alt="Bayan" className="h-9 w-auto hidden dark:block" />
+          <img src="/bayan-logo.svg" alt="Bayan" className="h-9 w-auto block dark:hidden" />
+          <img src="/bayan-logo-dark.svg" alt="Bayan" className="h-9 w-auto hidden dark:block" />
         </div>
         <div className="relative z-[1] max-w-lg">
-          <h1 className="text-2xl font-semibold text-foreground">{t('title')}</h1>
-          <p className="mt-3 text-base text-muted-foreground">{t('subtitle')}</p>
+          {/* ponytail: product-framing copy, plain English pending i18n sweep */}
+          <h1 className="text-2xl font-semibold text-foreground">Turn your data into decisions.</h1>
+          <p className="mt-3 text-base text-muted-foreground">Build dashboards, reports, and alerts across every data source — in one workspace.</p>
         </div>
         {/* Subtle inline data-viz silhouette in token colors */}
         <svg
@@ -176,8 +177,8 @@ export default function LoginPage() {
             </div>
           )}
           <div className="flex flex-col items-center gap-2">
-            <img src="/logo.svg" alt="Bayan" className="h-10 w-auto block dark:hidden" />
-            <img src="/logo-dark.svg" alt="Bayan" className="h-10 w-auto hidden dark:block" />
+            <img src="/bayan-logo.svg" alt="Bayan" className="h-10 w-auto block dark:hidden" />
+            <img src="/bayan-logo-dark.svg" alt="Bayan" className="h-10 w-auto hidden dark:block" />
             <Title className="text-gray-900 dark:text-white">{t('title')}</Title>
             <Text className="mt-0 text-gray-600 dark:text-gray-300">{t('subtitle')}</Text>
           </div>
