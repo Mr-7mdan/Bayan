@@ -8,6 +8,7 @@ import { useAuth } from '@/components/providers/AuthProvider'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import GridLayout from 'react-grid-layout'
+import { GRIDSIZE_COLS, colsFor, deriveLayouts, reconcileOrphans, rescaleLayout, type BreakpointKey } from '@/lib/gridBreakpoints'
 import * as Dialog from '@radix-ui/react-dialog'
 import KpiCard from '@/components/widgets/KpiCard'
 import ChartCard from '@/components/widgets/ChartCard'
@@ -57,6 +58,10 @@ export default function HomePage() {
   const [token, setToken] = useState<string>('')
   const [isProtected, setIsProtected] = useState<boolean>(false)
   const [layoutState, setLayoutState] = useState<RGLLayout[]>(defaultLayout)
+  // Which breakpoint's layout is currently being edited; layoutState mirrors it.
+  const [editBp, setEditBp] = useState<BreakpointKey>('desktop')
+  // All stored breakpoint layouts (desktop always kept in sync as the legacy mirror).
+  const layoutsRef = useRef<Partial<Record<BreakpointKey, RGLLayout[]>>>({})
   const [aiOpen, setAiOpen] = useState(false)
   const [aiWidgetId, setAiWidgetId] = useState<string | null>(null)
   const [embedOpen, setEmbedOpen] = useState<boolean>(false)
@@ -233,24 +238,21 @@ export default function HomePage() {
     }
   }
 
-  // When grid column count changes, proportionally rescale x/w to preserve layout intent and then clamp.
+  // gridSize only drives the DESKTOP column count; tablet/phone cols are fixed (8/2).
+  // Proportionally rescale x/w of the desktop layout to preserve intent, then clamp.
   useEffect(() => {
-    const colsMap: Record<string, number> = { sm: 24, md: 18, lg: 12, xl: 8 }
-    const dstCols = colsMap[String(dashOptions.gridSize || 'lg')] || 12
+    const dstCols = GRIDSIZE_COLS[String(dashOptions.gridSize || 'lg')] || 12
+    if (editBp !== 'desktop') {
+      // Editing tablet/phone: rescale the stored desktop copy without touching the active view.
+      const d = layoutsRef.current.desktop
+      if (d && d.length) layoutsRef.current.desktop = rescaleLayout(d, dstCols)
+      return
+    }
     setLayoutState((prev) => {
-      const srcCols = Math.max(1, prev.reduce((acc, it) => Math.max(acc, Number(it.x || 0) + Number(it.w || 0)), 0))
-      const ratio = dstCols / srcCols
-      let changed = false
-      const next = prev.map((it) => {
-        // Scale to new column system, then clamp to bounds
-        const scaledW = Math.max(1, Math.round(it.w * ratio))
-        const w = Math.min(scaledW, dstCols)
-        const scaledX = Math.max(0, Math.round(it.x * ratio))
-        const x = Math.min(scaledX, Math.max(0, dstCols - w))
-        if (w !== it.w || x !== it.x) { changed = true; return { ...it, w, x } }
-        return it
-      })
+      const next = rescaleLayout(prev, dstCols)
+      const changed = next.some((it, i) => prev[i] && (it.w !== prev[i].w || it.x !== prev[i].x))
       if (changed) {
+        layoutsRef.current = { ...layoutsRef.current, desktop: next }
         try { scheduleServerSave({ layout: next, widgets: configs }) } catch {}
         return next
       }
@@ -532,7 +534,11 @@ export default function HomePage() {
         } catch {}
         // Optionally show draft quickly for perceived loading, but DO NOT mark hydrated yet
         if (draft?.layout && draft?.widgets) {
-          setLayoutState(draft.layout)
+          const draftLayouts = (draft as any).layouts as Partial<Record<BreakpointKey, RGLLayout[]>> | undefined
+          const draftDesktop = draftLayouts?.desktop ?? draft.layout
+          layoutsRef.current = { ...(draftLayouts || {}), desktop: draftDesktop }
+          setLayoutState(draftDesktop)
+          setEditBp('desktop')
           setConfigs(draft.widgets)
           loadDashboardOptions((draft as any).options)
         }
@@ -543,28 +549,16 @@ export default function HomePage() {
             setDashboardName(res.name || 'New Dashboard')
             setCreatedAt(res.createdAt || null)
             if (def?.layout && def?.widgets) {
-              // Check for orphaned widgets (exist in widgets but not in layout)
-              const layoutIds = new Set(def.layout.map((ly: RGLLayout) => ly.i))
-              const widgetIds = Object.keys(def.widgets)
-              const orphanedIds = widgetIds.filter(id => !layoutIds.has(id))
-              
-              let finalLayout = def.layout
-              if (orphanedIds.length > 0) {
-                // Auto-add orphaned widgets to layout at the bottom
-                const maxY = def.layout.reduce((acc: number, ly: RGLLayout) => Math.max(acc, ly.y + ly.h), 0)
-                const orphanedLayouts: RGLLayout[] = orphanedIds.map((id, idx) => {
-                  const widget = (def.widgets as any)[id]
-                  const type = widget?.type || 'chart'
-                  const size = (type === 'table' || type === 'composition') ? { w: 9, h: 6 } : type === 'chart' ? { w: 6, h: 6 } : { w: 3, h: 2 }
-                  return { i: id, x: 0, y: maxY + (idx * 7), w: size.w, h: size.h }
-                })
-                finalLayout = [...def.layout, ...orphanedLayouts]
-              }
-              
+              // Auto-append orphaned widgets (in widgets, missing from layout) on the desktop layout.
+              const widgetsMap = def.widgets as Record<string, WidgetConfig>
+              const storedLayouts = (def as any).layouts as Partial<Record<BreakpointKey, RGLLayout[]>> | undefined
+              const finalLayout = reconcileOrphans((storedLayouts?.desktop ?? def.layout), widgetsMap)
+              layoutsRef.current = { ...(storedLayouts || {}), desktop: finalLayout }
               setLayoutState(finalLayout)
-              setConfigs(def.widgets as Record<string, WidgetConfig>)
+              setEditBp('desktop')
+              setConfigs(widgetsMap)
               loadDashboardOptions((def as any).options)
-              try { localStorage.setItem('dashboardDraft', JSON.stringify({ ...def, layout: finalLayout })) } catch {}
+              try { localStorage.setItem('dashboardDraft', JSON.stringify({ ...def, layout: finalLayout, layouts: layoutsRef.current })) } catch {}
             }
           } catch { /* ignore */ }
           setHydrated(true)
@@ -593,7 +587,9 @@ export default function HomePage() {
             } catch {}
             const def = res.definition
             if (def?.layout && def?.widgets) {
+              layoutsRef.current = { desktop: def.layout }
               setLayoutState(def.layout)
+              setEditBp('desktop')
               setConfigs(def.widgets as Record<string, WidgetConfig>)
               loadDashboardOptions((def as any).options)
               try { localStorage.setItem('dashboardDraft', JSON.stringify(def)) } catch {}
@@ -642,10 +638,15 @@ export default function HomePage() {
     if (next.x !== panelPos.x || next.y !== panelPos.y) setPanelPos(next)
   }, [vvh, rightCollapsed])
 
-  // Persist draft to localStorage on any change
+  // Persist draft to localStorage on any change (incl. all breakpoint layouts; `layout` mirrors desktop)
   useEffect(() => {
-    try { if (hydrated) localStorage.setItem('dashboardDraft', JSON.stringify({ layout: layoutState, widgets: configs, options: dashOptions })) } catch {}
-  }, [layoutState, configs, dashOptions, hydrated])
+    try {
+      if (hydrated) {
+        const draftLayouts = { ...layoutsRef.current, [editBp]: layoutState }
+        localStorage.setItem('dashboardDraft', JSON.stringify({ layout: draftLayouts.desktop ?? layoutState, widgets: configs, options: dashOptions, layouts: draftLayouts }))
+      }
+    } catch {}
+  }, [layoutState, configs, dashOptions, hydrated, editBp])
 
   // Auto-refresh queries without page reload (builder-only)
   useEffect(() => {
@@ -693,7 +694,17 @@ export default function HomePage() {
             ? { ...wcfg, querySpec: { ...wcfg.querySpec, where: cleaned } }
             : wcfg
         }
-        await Api.saveDashboard({ id: dashboardId, name: dashboardName || 'New Dashboard', userId: user?.id || 'dev_user', definition: { ...(def as any), widgets: sanitizedWidgets, options } })
+        // Merge the active-breakpoint layout into the stored set, reconcile every
+        // breakpoint against the current widgets (so add/remove/duplicate stay consistent
+        // across breakpoints), and always mirror desktop into the legacy `layout` field.
+        const activeLayout = (def.layout || []) as RGLLayout[]
+        const merged: Partial<Record<BreakpointKey, RGLLayout[]>> = { ...layoutsRef.current, [editBp]: activeLayout }
+        for (const bp of Object.keys(merged) as BreakpointKey[]) {
+          merged[bp] = reconcileOrphans(merged[bp] || [], sanitizedWidgets)
+        }
+        layoutsRef.current = merged
+        const desktopLayout = merged.desktop ?? activeLayout
+        await Api.saveDashboard({ id: dashboardId, name: dashboardName || 'New Dashboard', userId: user?.id || 'dev_user', definition: { ...(def as any), layout: desktopLayout, layouts: merged, widgets: sanitizedWidgets, options } })
         userEditedRef.current = false
       } catch {
         // ignore autosave errors
@@ -1051,11 +1062,10 @@ export default function HomePage() {
     }
   }, [layoutState, configs])
 
-  // Compute current columns and apply per-card constraints; clamp to cols like public view
+  // Columns for the breakpoint currently being edited (desktop follows gridSize; tablet=8, phone=2)
   const cols = useMemo(() => {
-    const m: Record<string, number> = { sm: 24, md: 18, lg: 12, xl: 8 }
-    return m[String(dashOptions.gridSize || 'lg')] || 12
-  }, [dashOptions.gridSize])
+    return colsFor(dashOptions.gridSize)[editBp]
+  }, [dashOptions.gridSize, editBp])
   const effectiveLayout = useMemo(() => {
     return layoutState.map((it) => {
       const cfg = configs[it.i]
@@ -1084,12 +1094,27 @@ export default function HomePage() {
     } catch {}
   }, [dashOptions, layoutState, canvasW])
 
-  // Resolve grid canvas width (builder): fixed from options or measured
+  // Resolve grid canvas width (builder). On tablet/phone, preview the device width so the
+  // builder shows how the breakpoint layout renders; desktop keeps the measured/fixed width.
   const gridWidth = useMemo(() => {
     const mode = String((dashOptions as any)?.gridCanvasMode || 'auto')
     const fixed = Number((dashOptions as any)?.gridCanvasWidthPx || 0)
-    return (mode === 'fixed' && fixed > 0) ? fixed : canvasW
-  }, [(dashOptions as any)?.gridCanvasMode, (dashOptions as any)?.gridCanvasWidthPx, canvasW])
+    const base = (mode === 'fixed' && fixed > 0) ? fixed : canvasW
+    if (editBp === 'phone') return 390
+    if (editBp === 'tablet') return Math.min(base, 820)
+    return base
+  }, [(dashOptions as any)?.gridCanvasMode, (dashOptions as any)?.gridCanvasWidthPx, canvasW, editBp])
+
+  // Switch which breakpoint's layout is being edited. Stash the active one, then load the
+  // target (stored, or derived on first visit — derived becomes stored on the next save).
+  const handleEditBpChange = (bp: BreakpointKey) => {
+    if (bp === editBp) return
+    const stashed: Partial<Record<BreakpointKey, RGLLayout[]>> = { ...layoutsRef.current, [editBp]: layoutState }
+    layoutsRef.current = stashed
+    const derived = deriveLayouts({ layout: stashed.desktop, layouts: stashed }, configs, dashOptions.gridSize)
+    setLayoutState(stashed[bp] ?? derived[bp])
+    setEditBp(bp)
+  }
 
   // Quick setters for canvas width mode
   const setCanvasAuto = () => {
@@ -1417,11 +1442,24 @@ export default function HomePage() {
                     })
                   }}
                 />
-
+                {/* Breakpoint switcher: pick which layout (Desktop/Tablet/Phone) to edit */}
+                <div className="inline-flex rounded-md border overflow-hidden text-xs flex-none" role="group" aria-label="Edit layout for breakpoint">
+                  {(['desktop', 'tablet', 'phone'] as BreakpointKey[]).map((bp) => (
+                    <button
+                      key={bp}
+                      type="button"
+                      aria-pressed={editBp === bp}
+                      className={`px-2 py-1 capitalize ${editBp === bp ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                      onClick={() => handleEditBpChange(bp)}
+                    >
+                      {bp}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <GridLayout
-              className="layout"
+              className={editBp === 'desktop' ? 'layout' : 'layout mx-auto'}
               layout={effectiveLayout}
               cols={cols}
               rowHeight={24}

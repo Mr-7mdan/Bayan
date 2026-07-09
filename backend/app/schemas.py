@@ -165,6 +165,9 @@ class PivotRequest(BaseModel):
 # --- Dashboards ---
 class DashboardDefinition(BaseModel):
     layout: List[Dict[str, Any]] = []
+    # Per-breakpoint layouts (desktop/tablet/phone) for the responsive grid (spec 19).
+    # `layout` remains the desktop source of truth for back-compat.
+    layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None
     widgets: Dict[str, Dict[str, Any]] = {}
     # Optional per-dashboard settings (e.g., public page options)
     options: Optional[Dict[str, Any]] = None

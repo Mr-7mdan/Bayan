@@ -4,9 +4,10 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useParams, useSearchParams, usePathname, useRouter } from 'next/navigation'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
-import GridLayout from 'react-grid-layout'
+import { Responsive, WidthProvider } from 'react-grid-layout'
 import { Api } from '@/lib/api'
 import type { RGLLayout } from '@/lib/api'
+import { BREAKPOINTS, colsFor, deriveLayouts, type BreakpointKey } from '@/lib/gridBreakpoints'
 import type { WidgetConfig } from '@/types/widgets'
 import KpiCard from '@/components/widgets/KpiCard'
 import ChartCard from '@/components/widgets/ChartCard'
@@ -19,6 +20,9 @@ import { useTheme } from '@/components/providers/ThemeProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
 
 export const dynamic = 'force-dynamic'
+
+// Module scope so the HOC isn't recreated on every render.
+const ResponsiveGrid = WidthProvider(Responsive)
 
 export default function ViewDashboard() {
   const params = useParams<{ id: string }>()
@@ -38,6 +42,7 @@ export default function ViewDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [layout, setLayout] = useState<RGLLayout[]>([])
+  const [layouts, setLayouts] = useState<Partial<Record<BreakpointKey, RGLLayout[]>> | undefined>(undefined)
   const [widgets, setWidgets] = useState<Record<string, WidgetConfig>>({})
   const [dashboardId, setDashboardId] = useState<string | null>(null)
   const [dashboardName, setDashboardName] = useState<string>('')
@@ -64,7 +69,7 @@ export default function ViewDashboard() {
     const el = canvasRef.current
     const ro = new ResizeObserver(() => {
       const rect = el.getBoundingClientRect()
-      setCanvasW(Math.max(480, Math.floor(rect.width)))
+      setCanvasW(Math.max(320, Math.floor(rect.width)))
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -134,6 +139,7 @@ export default function ViewDashboard() {
         const res = await Api.getDashboardPublic(String(id), token)
         if (!mounted) return
         setLayout(res.definition.layout)
+        setLayouts((res.definition as any).layouts as Partial<Record<BreakpointKey, RGLLayout[]>> | undefined)
         setWidgets(res.definition.widgets as Record<string, WidgetConfig>)
         setDashOptions(((res.definition as any).options || {}) as Record<string, any>)
         setDashboardId(res.id)
@@ -282,37 +288,33 @@ export default function ViewDashboard() {
 
     const showFilters = (dashOptions.publicShowFilters ?? true) === true
     const lockFilters = (dashOptions.publicLockFilters ?? false) === true
-    const cols = (() => {
-      const m: Record<string, number> = { sm: 24, md: 18, lg: 12, xl: 8 }
-      const gs = String((dashOptions as any)?.gridSize || '').trim()
-      if (gs && m[gs]) return m[gs]
-      try {
-        const implied = (layout || []).reduce((acc, it) => Math.max(acc, Number(it.x || 0) + Number(it.w || 0)), 0)
-        if (implied && implied > 0) return implied
-      } catch {}
-      return m['lg'] || 12
-    })()
-    // Match builder runtime: clamp to cols and apply per-card constraints (e.g., spacer minW)
-    const effectiveLayout: RGLLayout[] = (() => {
-      try {
-        return (layout || []).map((it) => {
-          const cfg = widgets[it.i]
-          let minW: number | undefined
-          if (cfg?.type === 'spacer') minW = (cfg.options as any)?.spacer?.minW ?? 2
-          const w = Math.min(it.w, cols)
-          const x = Math.min(it.x, Math.max(0, cols - w))
-          return { ...it, w, x, ...(minW != null ? { minW } : {}) }
-        }) as RGLLayout[]
-      } catch { return layout }
-    })()
-    const gridWidth = (() => {
-      const mode = String((dashOptions as any)?.gridCanvasMode || 'auto')
-      const fixed = Number((dashOptions as any)?.gridCanvasWidthPx || 0)
-      return (mode === 'fixed' && fixed > 0) ? fixed : canvasW
-    })()
+    const bpCols = colsFor((dashOptions as any)?.gridSize)
+    // Derive per-breakpoint layouts from the (possibly single-layout) definition,
+    // then clamp each to its column count and apply per-card constraints (spacer minW).
+    const derived = deriveLayouts({ layout, layouts }, widgets, (dashOptions as any)?.gridSize)
+    const clampBp = (arr: RGLLayout[], cols: number): RGLLayout[] =>
+      arr.map((it) => {
+        const cfg = widgets[it.i]
+        let minW: number | undefined
+        if (cfg?.type === 'spacer') minW = (cfg.options as any)?.spacer?.minW ?? 2
+        const w = Math.min(it.w, cols)
+        const x = Math.min(it.x, Math.max(0, cols - w))
+        return { ...it, w, x, ...(minW != null ? { minW } : {}) }
+      }) as RGLLayout[]
+    const rglLayouts = {
+      desktop: clampBp(derived.desktop, bpCols.desktop),
+      tablet: clampBp(derived.tablet, bpCols.tablet),
+      phone: clampBp(derived.phone, bpCols.phone),
+    }
+    // Honor the explicit fixed-width canvas mode by capping the grid width on desktop.
+    // On tablet/phone the container is narrower than fixedPx so the cap is a no-op.
+    // ponytail: unconditional maxWidth; skips a viewport check WidthProvider makes moot.
+    const fixedMode = String((dashOptions as any)?.gridCanvasMode || 'auto') === 'fixed'
+    const fixedPx = Number((dashOptions as any)?.gridCanvasWidthPx || 0)
+    const wrapMaxWidth = fixedMode && fixedPx > 0 ? fixedPx : undefined
     return (
       <section className="min-h-[60vh] rounded-lg border shadow-card p-3 bg-transparent overflow-auto" ref={canvasRef}>
-        <div className="min-w-[720px] space-y-2">
+        <div className="min-w-0 space-y-2" style={{ maxWidth: wrapMaxWidth }}>
           {showFilters && (
             <div className="rounded-md border bg-card p-2">
               <div className="flex items-center justify-between gap-3">
@@ -320,18 +322,18 @@ export default function ViewDashboard() {
               </div>
             </div>
           )}
-          <GridLayout
+          <ResponsiveGrid
             className="layout"
-            layout={effectiveLayout}
-            cols={cols}
+            layouts={rglLayouts}
+            breakpoints={BREAKPOINTS}
+            cols={bpCols}
             rowHeight={24}
-            width={gridWidth}
             margin={[10, 10]}
             containerPadding={[10, 10]}
             isResizable={false}
             isDraggable={false}
           >
-        {effectiveLayout.map((item) => {
+        {derived.desktop.map((item) => {
           const cfg = widgets[item.i]
           if (!cfg) return (
             <div key={item.i} className="rounded-md border bg-card overflow-hidden" />
@@ -396,11 +398,11 @@ export default function ViewDashboard() {
             </div>
           )
         })}
-          </GridLayout>
+          </ResponsiveGrid>
         </div>
       </section>
     )
-  }, [loading, error, layout, widgets, needToken, tokenInput, router, pathname, titleHeights, dashOptions.publicShowFilters, dashOptions.publicLockFilters, (dashOptions as any).gridSize, canvasW])
+  }, [loading, error, layout, layouts, widgets, needToken, tokenInput, router, pathname, titleHeights, dashOptions.publicShowFilters, dashOptions.publicLockFilters, (dashOptions as any).gridSize, (dashOptions as any).gridCanvasMode, (dashOptions as any).gridCanvasWidthPx])
 
   return (
     <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
