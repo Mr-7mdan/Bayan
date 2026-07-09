@@ -14,6 +14,8 @@ import {
   RiText,
   RiSpace,
   RiFileTextLine,
+  RiArrowGoBackLine,
+  RiArrowGoForwardLine,
 } from '@remixicon/react'
 import { Button, StatusPill } from '@/components/ui'
 import type { StatusPillState } from '@/components/ui'
@@ -58,6 +60,11 @@ type TitleBarProps = {
   // Autosave lifecycle (wired to page.tsx scheduleServerSave)
   saveStatus?: StatusPillState
   onRetrySaveAction?: () => void
+  // Undo/redo (history stack lives in page.tsx)
+  canUndo?: boolean
+  canRedo?: boolean
+  onUndoAction?: () => void
+  onRedoAction?: () => void
 }
 
 const ADD_CARDS: Array<{ kind: AddKind; label: string; desc: string; Icon: ComponentType<any> }> = [
@@ -118,6 +125,10 @@ export default function TitleBar({
   onCanvasFixedCurrentAction,
   saveStatus = 'idle',
   onRetrySaveAction,
+  canUndo = false,
+  canRedo = false,
+  onUndoAction,
+  onRedoAction,
 }: TitleBarProps) {
   const { env } = useEnvironment()
   const trimmedToken = token?.trim() ?? ''
@@ -222,6 +233,30 @@ export default function TitleBar({
         </div>
 
         <div className="flex items-center gap-2" ref={rootRef}>
+          {/* Undo / redo */}
+          <button
+            type="button"
+            className={`${iconBtnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+            onClick={onUndoAction}
+            disabled={!canUndo}
+            title="Undo (Ctrl/Cmd+Z)"
+            aria-label="Undo"
+          >
+            <RiArrowGoBackLine className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={`${iconBtnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+            onClick={onRedoAction}
+            disabled={!canRedo}
+            title="Redo (Ctrl/Cmd+Shift+Z)"
+            aria-label="Redo"
+          >
+            <RiArrowGoForwardLine className="h-4 w-4" aria-hidden="true" />
+          </button>
+
+          <div className="mx-1 h-6 w-px bg-[hsl(var(--border))]" />
+
           {/* Autosave status */}
           <StatusPill state={saveStatus} onRetry={onRetrySaveAction} className="me-1" />
 

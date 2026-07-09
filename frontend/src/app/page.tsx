@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import { Api, type EmbedTokenRowOut, type ShareEntryOut } from '@/lib/api'
@@ -10,12 +10,6 @@ import 'react-resizable/css/styles.css'
 import GridLayout from 'react-grid-layout'
 import { GRIDSIZE_COLS, colsFor, deriveLayouts, reconcileOrphans, rescaleLayout, type BreakpointKey } from '@/lib/gridBreakpoints'
 import { Modal, Button, EmptyState } from '@/components/ui'
-import KpiCard from '@/components/widgets/KpiCard'
-import ChartCard from '@/components/widgets/ChartCard'
-import HeatmapCard from '@/components/widgets/HeatmapCard'
-import TableCard from '@/components/widgets/TableCard'
-import TextCard from '@/components/widgets/TextCard'
-import SpacerCard from '@/components/widgets/SpacerCard'
 import CompositionCard from '@/components/widgets/CompositionCard'
 import ReportCard from '@/components/widgets/ReportCard'
 import DataNavigator from '@/components/builder/DataNavigator'
@@ -27,13 +21,27 @@ import { ConfigUpdateContext } from '@/components/builder/ConfigUpdateContext'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
 import TitleBar from '@/components/builder/TitleBar'
 import WidgetActionsMenu from '@/components/widgets/WidgetActionsMenu'
-import { RiPushpin2Line, RiPushpin2Fill, RiMore2Fill, RiDragMove2Line, RiCloseLine, RiAddLine } from '@remixicon/react'
+import WidgetContent from '@/components/builder/WidgetContent'
+import { useHistory } from '@/hooks/useHistory'
+import { RiMore2Fill, RiDragMove2Line, RiCloseLine, RiAddLine, RiSettings3Line, RiArrowRightSLine } from '@remixicon/react'
 import { createPortal } from 'react-dom'
 import AiAssistDialog from '@/components/ai/AiAssistDialog'
 import { JsonEditor, githubDarkTheme, githubLightTheme } from 'json-edit-react'
 import type { WidgetConfig, CompositionComponent } from '@/types/widgets'
 import type { RGLLayout } from '@/lib/api'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
+
+// Cheap positional equality for two RGL layouts (by id + geometry). Used to skip
+// no-op onLayoutChange commits so grid re-renders don't loop.
+function layoutsEqual(a: RGLLayout[], b: RGLLayout[]): boolean {
+  if (a.length !== b.length) return false
+  const m = new Map(a.map((it) => [it.i, it]))
+  for (const it of b) {
+    const o = m.get(it.i)
+    if (!o || o.x !== it.x || o.y !== it.y || o.w !== it.w || o.h !== it.h) return false
+  }
+  return true
+}
 
 export default function HomePage() {
   const { user } = useAuth()
@@ -85,6 +93,7 @@ export default function HomePage() {
       scheduleServerSave({ layout: layoutState, widgets: next })
       return next
     })
+    scheduleHistoryPushRef.current?.()
   }
 
   // Live metrics: dashboards open/close pings (builder)
@@ -300,49 +309,45 @@ export default function HomePage() {
   })
   // Data Navigator defaults to collapsed independently of sidebar preference
   const [leftCollapsed, setLeftCollapsed] = useState<boolean>(true)
-  const [rightCollapsed, setRightCollapsed] = useState(false)
-  const [configPinned, setConfigPinned] = useState(false)
-  const [useV2Panel, setUseV2Panel] = useState(false)
+  // Docked inspector: collapse to a slim icon rail, and a persisted resizable width (320–480).
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false)
+  const [inspectorWidth, setInspectorWidth] = useState<number>(() => {
+    try { const v = Number(localStorage.getItem('builder_inspector_w')); if (v >= 320 && v <= 480) return v } catch {}
+    return 360
+  })
+  const [inspectorResizing, setInspectorResizing] = useState(false)
+  // V2 configurator is the default (wave C parity reached); V1 remains reachable
+  // via the toggle for one release as fallback.
+  const [useV2Panel, setUseV2Panel] = useState(true)
   const [loadTimes, setLoadTimes] = useState<Record<string, number>>({})
-  // Visual viewport height to keep right configurator sized correctly when DevTools/mobile UI changes the viewport
-  const [vvh, setVvh] = useState<number | null>(null)
-  const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null)
-  const [dragging, setDragging] = useState(false)
-  const [gridInteracting, setGridInteracting] = useState(false) // Track grid drag/resize to gate configurator
+  // Track grid drag/resize via a ref only (no state) so starting a gesture does NOT
+  // trigger a re-render. Read synchronously inside RAF/observer/layoutChange callbacks
+  // to gate height recompute and per-frame layout commits.
+  const gridInteractingRef = useRef(false)
+  const setInteracting = (v: boolean) => { gridInteractingRef.current = v }
   const leftTimerRef = useRef<any>(null)
-  const rightTimerRef = useRef<any>(null)
-  const collapseDelayMs = 200
 
-  const startPanelDrag = (e: any) => {
-    if (!panelPos) return
-    // Ignore drags starting on interactive controls inside the header
-    const t: HTMLElement | null = (e?.target as HTMLElement) || null
-    if (t && t.closest('button, [role="button"], input, select, textarea, a')) return
-    setDragging(true)
-    const startX = e.clientX
-    const startY = e.clientY
-    const orig = { ...panelPos }
-    const vw = window.visualViewport?.width || window.innerWidth
-    const vh = window.visualViewport?.height || window.innerHeight
-    const w = (rightCollapsed ? 44 : 360)
-    const minX = 12, minY = 12
-    const maxX = Math.max(minX, vw - w - 12)
-    const maxY = Math.max(minY, (vvh || vh) - 240 - 12)
+  // Drag the inner (start) edge of the docked inspector to resize it. Raw pointer
+  // tracking — no easing during the drag (the width transition is disabled while resizing).
+  const startInspectorResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    setInspectorResizing(true)
+    const rightEdge = window.innerWidth - 24 // main has px-6 (24px) right padding
     const onMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - startX
-      const dy = ev.clientY - startY
-      const nx = Math.min(Math.max(orig.x + dx, minX), maxX)
-      const ny = Math.min(Math.max(orig.y + dy, minY), maxY)
-      setPanelPos({ x: nx, y: ny })
+      const w = Math.min(480, Math.max(320, rightEdge - ev.clientX))
+      setInspectorWidth(w)
     }
     const onUp = () => {
-      setDragging(false)
+      setInspectorResizing(false)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp, { once: true })
   }
+
+  // Persist inspector width
+  useEffect(() => { try { localStorage.setItem('builder_inspector_w', String(inspectorWidth)) } catch {} }, [inspectorWidth])
 
   // Persist navigator visibility preference
   useEffect(() => { try { localStorage.setItem('show_nav', showNavigator ? '1' : '0') } catch {} }, [showNavigator])
@@ -597,43 +602,6 @@ export default function HomePage() {
     } catch {}
   }, [])
 
-  // Track visual viewport height so fixed overlays (Configurator) resize correctly when the inspector opens/closes
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const update = () => setVvh((window.visualViewport?.height || window.innerHeight))
-    update()
-    const vv = window.visualViewport
-    vv?.addEventListener('resize', update)
-    window.addEventListener('resize', update)
-    return () => {
-      vv?.removeEventListener('resize', update)
-      window.removeEventListener('resize', update)
-    }
-  }, [])
-
-  // Initialize panel position near the right edge once we know viewport
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (panelPos) return
-    const vw = window.visualViewport?.width || window.innerWidth
-    const w = (rightCollapsed ? 44 : 360)
-    const x = Math.max(12, vw - w - 24)
-    const y = 72
-    setPanelPos({ x, y })
-  }, [vvh, rightCollapsed])
-
-  // Keep panel within viewport when viewport or width changes
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!panelPos) return
-    const vw = window.visualViewport?.width || window.innerWidth
-    const w = (rightCollapsed ? 44 : 360)
-    const maxX = Math.max(12, vw - w - 12)
-    const maxY = Math.max(12, (vvh || window.innerHeight) - 240 - 12)
-    const next = { x: Math.min(Math.max(panelPos.x, 12), maxX), y: Math.min(Math.max(panelPos.y, 12), maxY) }
-    if (next.x !== panelPos.x || next.y !== panelPos.y) setPanelPos(next)
-  }, [vvh, rightCollapsed])
-
   // Persist draft to localStorage on any change (incl. all breakpoint layouts; `layout` mirrors desktop)
   useEffect(() => {
     try {
@@ -723,11 +691,67 @@ export default function HomePage() {
   }
   const saveNowRef = useRef(saveNow)
   saveNowRef.current = saveNow
+
+  // ---- Undo/redo history over the editable builder state (layout + widget configs) ----
+  // Snapshots are stored by reference; all builder mutations are immutable so this is safe.
+  const layoutStateRef = useRef(layoutState); layoutStateRef.current = layoutState
+  const configsRef = useRef(configs); configsRef.current = configs
+  type Snapshot = { layout: RGLLayout[]; widgets: Record<string, WidgetConfig> }
+  const history = useHistory<Snapshot>(25)
+
+  // Seed the history baseline once the dashboard has hydrated.
+  const historyInitRef = useRef(false)
   useEffect(() => {
+    if (hydrated && !historyInitRef.current) {
+      historyInitRef.current = true
+      history.reset({ layout: layoutStateRef.current, widgets: configsRef.current })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated])
+
+  // Debounce keystroke-driven config edits into a single history entry.
+  const cfgPushTimerRef = useRef<number | undefined>(undefined)
+  const scheduleHistoryPush = () => {
+    if (cfgPushTimerRef.current) window.clearTimeout(cfgPushTimerRef.current)
+    cfgPushTimerRef.current = window.setTimeout(() => {
+      history.push({ layout: layoutStateRef.current, widgets: configsRef.current })
+    }, 500) as unknown as number
+  }
+  // onConfigChange is declared above this point; reach the latest push fn via a ref.
+  const scheduleHistoryPushRef = useRef(scheduleHistoryPush)
+  scheduleHistoryPushRef.current = scheduleHistoryPush
+
+  const applyHistorySnapshot = (snap: Snapshot | null) => {
+    if (!snap) return
+    // Instant application — never animated (keyboard/toolbar initiated).
+    setLayoutState(snap.layout)
+    setConfigs(snap.widgets)
+    userEditedRef.current = true
+    scheduleServerSave({ layout: snap.layout, widgets: snap.widgets })
+  }
+  const doUndo = () => applyHistorySnapshot(history.undo())
+  const doRedo = () => applyHistorySnapshot(history.redo())
+  const doUndoRef = useRef(doUndo); doUndoRef.current = doUndo
+  const doRedoRef = useRef(doRedo); doRedoRef.current = doRedo
+
+  useEffect(() => {
+    const inEditable = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+    }
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+      const meta = e.metaKey || e.ctrlKey
+      if (!meta) return
+      if (e.key === 's' || e.key === 'S') { e.preventDefault(); void saveNowRef.current(); return }
+      if (e.key === 'z' || e.key === 'Z') {
+        if (inEditable(e.target)) return
         e.preventDefault()
-        void saveNowRef.current()
+        if (e.shiftKey) doRedoRef.current(); else doUndoRef.current()
+        return
+      }
+      if (e.key === 'y' || e.key === 'Y') { // Windows-style redo
+        if (inEditable(e.target)) return
+        e.preventDefault(); doRedoRef.current()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -912,7 +936,9 @@ export default function HomePage() {
       setSelectedId(id)
     }
     userEditedRef.current = true
-    scheduleServerSave({ layout: nextLayout, widgets: { ...configs, [id]: cfg } })
+    const nextWidgets = { ...configs, [id]: cfg }
+    scheduleServerSave({ layout: nextLayout, widgets: nextWidgets })
+    history.push({ layout: nextLayout, widgets: nextWidgets })
     return id
   }
   const addCard = (kind: WidgetConfig['type']) => {
@@ -936,7 +962,10 @@ export default function HomePage() {
     setLayoutState((prev: RGLLayout[]) => ([...prev, nextLayoutItem]))
     setSelectedId(id)
     userEditedRef.current = true
-    scheduleServerSave({ layout: [...layoutState, nextLayoutItem], widgets: { ...configs, [id]: cfg } })
+    const addLayout = [...layoutState, nextLayoutItem]
+    const addWidgets = { ...configs, [id]: cfg }
+    scheduleServerSave({ layout: addLayout, widgets: addWidgets })
+    history.push({ layout: addLayout, widgets: addWidgets })
   }
   const deleteCard = (id: string) => {
     setConfigs((prev: Record<string, WidgetConfig>) => {
@@ -946,7 +975,10 @@ export default function HomePage() {
     setLayoutState((prev: RGLLayout[]) => prev.filter((it) => it.i !== id))
     if (selectedId === id) setSelectedId(null)
     userEditedRef.current = true
-    scheduleServerSave({ layout: layoutState.filter((it) => it.i !== id), widgets: Object.fromEntries(Object.entries(configs).filter(([k]) => k !== id)) as any })
+    const delLayout = layoutState.filter((it) => it.i !== id)
+    const delWidgets = Object.fromEntries(Object.entries(configs).filter(([k]) => k !== id)) as Record<string, WidgetConfig>
+    scheduleServerSave({ layout: delLayout, widgets: delWidgets })
+    history.push({ layout: delLayout, widgets: delWidgets })
   }
   const duplicateCard = (id: string) => {
     const src = configs[id]; if (!src) return
@@ -957,7 +989,10 @@ export default function HomePage() {
     const ly: RGLLayout = srcLy ? { ...srcLy, i: newId, y: srcLy.y + srcLy.h } : { i: newId, x: 0, y: layoutState.reduce((a: number, it: RGLLayout) => Math.max(a, it.y + it.h), 0), w: 3, h: 2 }
     setLayoutState((prev: RGLLayout[]) => ([...prev, ly]))
     userEditedRef.current = true
-    scheduleServerSave({ layout: [...layoutState, ly], widgets: { ...configs, [newId]: cfg } })
+    const dupLayout = [...layoutState, ly]
+    const dupWidgets = { ...configs, [newId]: cfg }
+    scheduleServerSave({ layout: dupLayout, widgets: dupWidgets })
+    history.push({ layout: dupLayout, widgets: dupWidgets })
   }
 
   async function onSetToken(val?: string) {
@@ -1033,20 +1068,41 @@ export default function HomePage() {
       return changed ? next : prev
     })
   }
+  // Keep the observer callback pointing at the latest recalc (which closes over `configs`).
+  const recalcHeightsRef = useRef(recalcHeights)
+  recalcHeightsRef.current = recalcHeights
   useEffect(() => {
     recalcHeights()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configs, canvasW])
+  // ONE shared ResizeObserver for all grid items, rAF-batched, skipped while a
+  // drag/resize gesture is in progress. Replaces the previous per-item observers
+  // that were re-created on every layout change (a setState→reflow loop).
+  const heightRafRef = useRef<number | null>(null)
+  const sharedHeightRoRef = useRef<ResizeObserver | null>(null)
   useEffect(() => {
-    // watch content size changes of each item
-    const observers: ResizeObserver[] = []
+    const ro = new ResizeObserver(() => {
+      if (gridInteractingRef.current) return
+      if (heightRafRef.current != null) return
+      heightRafRef.current = requestAnimationFrame(() => {
+        heightRafRef.current = null
+        recalcHeightsRef.current()
+      })
+    })
+    sharedHeightRoRef.current = ro
+    return () => {
+      ro.disconnect()
+      if (heightRafRef.current != null) { cancelAnimationFrame(heightRafRef.current); heightRafRef.current = null }
+    }
+  }, [])
+  useEffect(() => {
+    const ro = sharedHeightRoRef.current
+    if (!ro) return
+    ro.disconnect()
     layoutState.forEach((it) => {
       const el = itemRefs.current[it.i]
-      if (!el) return
-      const ro = new ResizeObserver(() => recalcHeights())
-      ro.observe(el)
-      observers.push(ro)
+      if (el) ro.observe(el)
     })
-    return () => observers.forEach((o) => o.disconnect())
   }, [layoutState])
 
   // Measure per-item widget-title heights to provide reservedTop for ChartCard measurement layout
@@ -1299,50 +1355,11 @@ export default function HomePage() {
     return () => { if (typeof window !== 'undefined') window.removeEventListener('chart-load-time', handler as EventListener) }
   }, [])
 
-  // Global popover detector: watch for Radix/Tremor popovers and gate configurator hover while they're active
-  useEffect(() => {
-    if (typeof document === 'undefined' || typeof window === 'undefined') return
-    const body = document.body as any
-    const w = window as any
-    const st = (w.__actionsMenuState ||= { count: 0, timeoutId: null as any })
-    const popoverSelectors = [
-      '[data-radix-popper-content-wrapper]',
-      '[data-radix-portal]',
-      '[role="listbox"]',
-      '[role="menu"]',
-      '[role="dialog"]',
-      '.tremor-Select-popover',
-      '.filterbar-popover',
-    ].join(',')
-    let activePopovers = new Set<Element>()
-    const updateGate = () => {
-      const currentPopovers = new Set(Array.from(document.querySelectorAll(popoverSelectors)))
-      const added = Array.from(currentPopovers).filter(el => !activePopovers.has(el))
-      const removed = Array.from(activePopovers).filter(el => !currentPopovers.has(el))
-      added.forEach(() => {
-        if (st.timeoutId) { window.clearTimeout(st.timeoutId); st.timeoutId = null }
-        st.count = Math.max(0, Number(st.count || 0)) + 1
-        body.dataset.actionsMenuOpen = '1'
-      })
-      removed.forEach(() => {
-        const prev = Math.max(0, Number(st.count || 0))
-        if (prev <= 0) return
-        st.count = prev - 1
-        if (st.count === 0) {
-          if (st.timeoutId) window.clearTimeout(st.timeoutId)
-          st.timeoutId = window.setTimeout(() => {
-            try { delete body.dataset.actionsMenuOpen } catch {}
-            st.timeoutId = null
-          }, 300)
-        }
-      })
-      activePopovers = currentPopovers
-    }
-    const observer = new MutationObserver(updateGate)
-    observer.observe(document.body, { childList: true, subtree: true })
-    updateGate() // Initial check
-    return () => { observer.disconnect() }
-  }, [])
+  // NOTE: the body-wide MutationObserver that used to populate
+  // `body.dataset.actionsMenuOpen` here was removed — it was a redundant third
+  // writer of a flag already maintained by WidgetActionsMenu and
+  // FilterbarControl, and its only reader (the old floating configurator's
+  // hover-collapse) no longer exists now that the inspector is docked.
 
   return (
     <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
@@ -1405,10 +1422,14 @@ export default function HomePage() {
         onCanvasAutoAction={setCanvasAuto}
         onCanvasFixedAction={setCanvasFixed}
         onCanvasFixedCurrentAction={setCanvasFixedCurrent}
+        canUndo={history.canUndo}
+        canRedo={history.canRedo}
+        onUndoAction={doUndo}
+        onRedoAction={doRedo}
       />
       <main
         className="relative w-full grid gap-4 py-4 min-h-[calc(100vh-56px)] mx-auto px-6"
-        style={{ gridTemplateColumns: showNavigator ? `${leftCollapsed ? '44px' : '280px'} 1fr` : '1fr' }}
+        style={{ gridTemplateColumns: showNavigator ? `${leftCollapsed ? '44px' : '280px'} minmax(0,1fr) auto` : `minmax(0,1fr) auto` }}
       >
         {/* Data Navigator (left) */}
         {showNavigator && (
@@ -1497,23 +1518,32 @@ export default function HomePage() {
               containerPadding={[10,10]}
               isResizable
               isDraggable
-              draggableHandle=".widget-title"
+              draggableHandle=".widget-title, .widget-drag-handle"
               draggableCancel=".no-drag, .widget-title button"
-              onLayoutChange={(ly: any) => setLayoutState(ly as RGLLayout[])}
-              onDragStart={() => setGridInteracting(true)}
+              onLayoutChange={(ly: any) => {
+                // Commit ONLY non-gesture layout changes (e.g. compaction on load).
+                // During a drag/resize, RGL renders the preview internally — we commit
+                // the final geometry in onDragStop/onResizeStop instead, so charts don't
+                // re-render every frame. Skip no-op commits to avoid a render loop.
+                if (gridInteractingRef.current) return
+                setLayoutState((prev) => (layoutsEqual(prev, ly as RGLLayout[]) ? prev : (ly as RGLLayout[])))
+              }}
+              onDragStart={() => setInteracting(true)}
               onDragStop={(ly: any) => {
-                setGridInteracting(false)
+                setInteracting(false)
                 userEditedRef.current = true
                 const next = ly as RGLLayout[]
                 setLayoutState(next)
+                history.push({ layout: next, widgets: configs })
                 scheduleServerSave({ layout: next, widgets: configs })
               }}
-              onResizeStart={() => setGridInteracting(true)}
+              onResizeStart={() => setInteracting(true)}
               onResizeStop={(ly: any) => {
-                setGridInteracting(false)
+                setInteracting(false)
                 userEditedRef.current = true
                 const next = ly as RGLLayout[]
                 setLayoutState(next)
+                history.push({ layout: next, widgets: configs })
                 scheduleServerSave({ layout: next, widgets: configs })
               }}
             >
@@ -1524,7 +1554,7 @@ export default function HomePage() {
                 return (
                   <div
                     key={ly.i}
-                    className={`h-full min-h-0 flex flex-col rounded-md overflow-hidden ${cfg.options?.cardFill === 'transparent' ? 'bg-transparent border-0 shadow-none' : 'border bg-card'}`}
+                    className={`group relative h-full min-h-0 flex flex-col rounded-md overflow-hidden ${cfg.options?.cardFill === 'transparent' ? 'bg-transparent border-0 shadow-none' : 'border bg-card'}`}
                     onMouseDownCapture={(ev) => {
                       try {
                         const t = ev.target as HTMLElement | null
@@ -1534,8 +1564,18 @@ export default function HomePage() {
                     }}
                     ref={setItemRef(ly.i)}
                   >
+                    {/* Headerless widgets: hover-visible drag handle (part of the draggable selector). */}
+                    {!showHeader && (
+                      <div
+                        className="widget-drag-handle absolute top-1 start-1 z-10 rounded border bg-card/90 p-0.5 text-muted-foreground cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--dur-fast)] ease-[var(--ease-out)] motion-reduce:transition-none"
+                        title="Drag to move"
+                        aria-label="Drag to move widget"
+                      >
+                        <RiDragMove2Line className="h-4 w-4" aria-hidden="true" />
+                      </div>
+                    )}
                     {showHeader && (
-                      <div className="widget-title flex-none px-3 py-2 bg-secondary/60 border-b text-sm font-medium border-l-2 border-l-[hsl(var(--header-accent))] flex items-center justify-between">
+                      <div className="widget-title flex-none px-3 py-2 bg-secondary/60 border-b text-sm font-medium border-l-2 border-l-[hsl(var(--header-accent))] flex items-center justify-between cursor-grab active:cursor-grabbing">
                         <span className="truncate" title={cfg.title}>
                           {cfg.title}
                           {((cfg.type === 'chart' || cfg.type === 'table') && (cfg.options as any)?.showLoadTime) ? (
@@ -1578,74 +1618,9 @@ export default function HomePage() {
                       </div>
                     )}
                     <div className="p-3 flex-1 min-h-0 flex flex-col">
-                      {cfg.type === 'kpi' && (
-                        <ErrorBoundary name="KpiCard">
-                          <KpiCard
-                            title={cfg.title}
-                            sql={cfg.sql}
-                            datasourceId={cfg.datasourceId}
-                            queryMode={cfg.queryMode}
-                            querySpec={cfg.querySpec as any}
-                            options={cfg.options}
-                            pivot={cfg.pivot as any}
-                            widgetId={cfg.id}
-                          />
-                        </ErrorBoundary>
-                      )}
-                      {cfg.type === 'chart' && (
-                        <ErrorBoundary name="ChartCard">
-                          {((cfg as any).chartType === 'heatmap') ? (
-                            <HeatmapCard
-                              title={cfg.title}
-                              sql={cfg.sql}
-                              datasourceId={cfg.datasourceId}
-                              options={cfg.options}
-                              queryMode={cfg.queryMode as any}
-                              querySpec={cfg.querySpec as any}
-                              widgetId={cfg.id}
-                            />
-                          ) : (
-                            <ChartCard
-                              title={cfg.title}
-                              sql={cfg.sql}
-                              datasourceId={cfg.datasourceId}
-                              type={(cfg as any).chartType || 'line'}
-                              options={cfg.options}
-                              queryMode={cfg.queryMode}
-                              querySpec={cfg.querySpec as any}
-                              customColumns={cfg.customColumns}
-                              widgetId={cfg.id}
-                              pivot={cfg.pivot}
-                              layout="measure"
-                              reservedTop={titleHeights[ly.i] ?? 0}
-                            />
-                          )}
-                        </ErrorBoundary>
-                      )}
-                      {cfg.type === 'table' && (
-                        <ErrorBoundary name="TableCard">
-                          <TableCard
-                            title={cfg.title}
-                            sql={cfg.sql}
-                            datasourceId={cfg.datasourceId}
-                            options={cfg.options as any}
-                            queryMode={cfg.queryMode as any}
-                            querySpec={cfg.querySpec as any}
-                            widgetId={cfg.id}
-                            customColumns={cfg.customColumns as any}
-                            pivot={cfg.pivot as any}
-                          />
-                        </ErrorBoundary>
-                      )}
-                      {cfg.type === 'text' && (
-                        <ErrorBoundary name="TextCard">
-                          <TextCard title={cfg.title} options={cfg.options} />
-                        </ErrorBoundary>
-                      )}
-                      {cfg.type === 'spacer' && (
-                        <ErrorBoundary name="SpacerCard">
-                          <SpacerCard options={cfg.options} />
-                        </ErrorBoundary>
+                      {/* Pure display widgets are memoized so drags / selection don't re-render ECharts/ag-grid. */}
+                      {(cfg.type === 'kpi' || cfg.type === 'chart' || cfg.type === 'table' || cfg.type === 'text' || cfg.type === 'spacer') && (
+                        <WidgetContent cfg={cfg} reservedTop={titleHeights[ly.i] ?? 0} />
                       )}
                       {cfg.type === 'composition' && (
                         <ErrorBoundary name="CompositionCard">
@@ -1707,142 +1682,73 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Configurator overlay (appears only when a widget is selected) */}
+        {/* Docked inspector (right). Shares the flex/grid layout so the canvas shrinks —
+            no overlap. Resizable (320–480px, persisted), collapses to a slim icon rail. */}
         {selectedConfig && (
-          <div className="hidden lg:block">
-            <div
-              className={`fixed rounded-lg border shadow-card bg-card z-50 flex flex-col overflow-visible ${rightCollapsed ? '' : 'px-0'} ${gridInteracting ? 'pointer-events-none' : ''}`}
-              style={{
-                width: rightCollapsed ? 44 : 360,
-                height: vvh ? Math.max(240, vvh - (panelPos?.y ?? 0) - 24) : undefined,
-                left: panelPos?.x ?? undefined,
-                top: panelPos?.y ?? 72,
-              }}
-              onMouseEnter={() => {
-                if (typeof document !== 'undefined' && document.body?.dataset?.actionsMenuOpen === '1') return
-                if (dragging) return
-                if (gridInteracting) return
-                if (rightTimerRef.current) { try { clearTimeout(rightTimerRef.current) } catch {} }
-                // If tucked, expand while preserving the snapped edge
-                setRightCollapsed((prev) => {
-                  if (prev && typeof window !== 'undefined' && panelPos) {
-                    const vw = window.visualViewport?.width || window.innerWidth
-                    const margin = 12
-                    const collapsedW = 44
-                    const expandedW = 360
-                    const rightSnapX = Math.max(margin, vw - collapsedW - margin)
-                    const isRight = Math.abs(panelPos.x - rightSnapX) < 24
-                    const nextX = isRight ? Math.max(margin, vw - expandedW - margin) : margin
-                    setPanelPos({ x: nextX, y: panelPos.y })
-                  }
-                  return false
-                })
-              }}
-              onMouseLeave={() => {
-                if (typeof document !== 'undefined' && document.body?.dataset?.actionsMenuOpen === '1') return
-                if (dragging) return
-                if (gridInteracting) return
-                if (rightTimerRef.current) { try { clearTimeout(rightTimerRef.current) } catch {} }
-                if (!configPinned) rightTimerRef.current = setTimeout(() => {
-                  if (typeof window === 'undefined') { setRightCollapsed(true); return }
-                  const vw = window.visualViewport?.width || window.innerWidth
-                  const margin = 12
-                  const currW = (rightCollapsed ? 44 : 360)
-                  const collapsedW = 44
-                  const leftDist = Math.max(0, (panelPos?.x ?? margin) - margin)
-                  const rightDist = Math.max(0, (vw - ((panelPos?.x ?? 0) + currW) - margin))
-                  const snapRight = rightDist <= leftDist
-                  const nextX = snapRight ? Math.max(margin, vw - collapsedW - margin) : margin
-                  if (panelPos) setPanelPos({ x: nextX, y: panelPos.y })
-                  setRightCollapsed(true)
-                }, collapseDelayMs)
-              }}
-            >
-              {rightCollapsed && (
-                <div
-                  className="absolute left-1/2 -translate-x-1/2 text-[11px] font-medium text-foreground"
-                  style={{ top: 8, writingMode: 'vertical-rl', textOrientation: 'mixed' }}
-                >
-                  Configurator
-                </div>
-              )}
-              <div className={`flex items-center justify-between mb-0 ${rightCollapsed ? 'opacity-0 pointer-events-none' : ''} sticky top-0 bg-card z-10 pt-1 px-3 cursor-move select-none`} 
-                onPointerDown={startPanelDrag}
-              > 
-                <h2 className="text-sm font-medium">Configurator</h2>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setUseV2Panel(v => !v)}
-                    className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors duration-150 cursor-pointer font-semibold ${
-                      useV2Panel ? 'bg-[hsl(var(--primary))] text-primary-foreground border-[hsl(var(--primary))]' : 'hover:bg-muted text-muted-foreground'
-                    }`}
-                    title="Toggle V2 panel"
-                  >{useV2Panel ? 'V2 ✓' : 'V2'}</button>
-                  <button
-                    onClick={() => setConfigPinned((prev) => { const next = !prev; if (next) setRightCollapsed(false); return next })}
-                    className={`text-xs px-2 py-1 rounded-md border hover:bg-muted ${configPinned ? 'bg-[hsl(var(--secondary))]' : ''}`}
-                    title={configPinned ? 'Unpin' : 'Pin'}
-                    aria-label={configPinned ? 'Unpin configurator' : 'Pin configurator'}
-                  >
-                    {configPinned ? (
-                      <RiPushpin2Fill className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <RiPushpin2Line className="h-4 w-4" aria-hidden="true" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setSelectedId(null)}
-                    className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
-                    title="Close"
-                    aria-label="Close configurator"
-                  >
-                    <RiCloseLine className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-              <ConfigUpdateContext.Provider value={onConfigChange}>
-                <div className={`flex-1 min-h-0 overflow-y-auto overflow-x-visible overscroll-contain pt-1 pb-2 px-3 ${rightCollapsed ? 'opacity-0 pointer-events-none' : ''}`}>
-                  {useV2Panel
-                    ? <ConfiguratorPanelV2 selected={selectedConfig} allWidgets={configs} quickAddAction={quickAddWidget} />
-                    : <ConfiguratorPanel selected={selectedConfig} allWidgets={configs} quickAddAction={quickAddWidget} />}
-                </div>
-              </ConfigUpdateContext.Provider>
-              {/* Drag handle */}
-              <div
-                className="flex items-center justify-center py-1.5 mt-2 cursor-move select-none text-muted-foreground border-t bg-[hsl(var(--secondary)/0.6)]"
-                title="Drag to move"
-                onPointerDown={(e) => {
-                  if (!panelPos) return
-                  setDragging(true)
-                  const startX = e.clientX
-                  const startY = e.clientY
-                  const orig = { ...panelPos }
-                  const vw = window.visualViewport?.width || window.innerWidth
-                  const vh = window.visualViewport?.height || window.innerHeight
-                  const w = (rightCollapsed ? 44 : 360)
-                  const minX = 12, minY = 12
-                  const maxX = Math.max(minX, vw - w - 12)
-                  const maxY = Math.max(minY, (vvh || vh) - 240 - 12)
-                  const onMove = (ev: PointerEvent) => {
-                    const dx = ev.clientX - startX
-                    const dy = ev.clientY - startY
-                    const nx = Math.min(Math.max(orig.x + dx, minX), maxX)
-                    const ny = Math.min(Math.max(orig.y + dy, minY), maxY)
-                    setPanelPos({ x: nx, y: ny })
-                  }
-                  const onUp = () => {
-                    setDragging(false)
-                    window.removeEventListener('pointermove', onMove)
-                    window.removeEventListener('pointerup', onUp)
-                  }
-                  window.addEventListener('pointermove', onMove)
-                  window.addEventListener('pointerup', onUp, { once: true })
-                }}
+          <aside
+            aria-label="Configurator"
+            className={`hidden lg:flex flex-col relative border-s bg-card sticky top-14 self-start h-[calc(100vh-56px)] ${inspectorResizing ? '' : 'transition-[width] duration-[var(--dur-fast)] ease-[var(--ease-out)]'} motion-reduce:transition-none`}
+            style={{ width: inspectorCollapsed ? 48 : inspectorWidth }}
+          >
+            {inspectorCollapsed ? (
+              <button
+                type="button"
+                onClick={() => setInspectorCollapsed(false)}
+                title="Expand configurator"
+                aria-label="Expand configurator"
+                className="flex flex-col items-center gap-2 pt-3 w-full text-muted-foreground hover:text-foreground"
               >
-                <RiDragMove2Line className="h-4 w-4" aria-hidden="true" />
-              </div>
-            </div>
-          </div>
+                <RiSettings3Line className="h-5 w-5" aria-hidden="true" />
+                <span className="text-[11px] font-medium" style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>Configurator</span>
+              </button>
+            ) : (
+              <>
+                {/* Resize handle on the inner (start) edge */}
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  title="Drag to resize"
+                  className="absolute inset-y-0 start-0 w-1.5 z-20 cursor-col-resize hover:bg-[hsl(var(--primary)/0.4)]"
+                  onPointerDown={startInspectorResize}
+                />
+                <div className="flex items-center justify-between sticky top-0 bg-card z-10 pt-2 pb-1 px-3 border-b">
+                  <h2 className="text-sm font-medium">Configurator</h2>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setUseV2Panel(v => !v)}
+                      className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors duration-150 cursor-pointer font-semibold ${
+                        useV2Panel ? 'bg-[hsl(var(--primary))] text-primary-foreground border-[hsl(var(--primary))]' : 'hover:bg-muted text-muted-foreground'
+                      }`}
+                      title="Toggle V2 panel"
+                    >{useV2Panel ? 'V2 ✓' : 'V2'}</button>
+                    <button
+                      onClick={() => setInspectorCollapsed(true)}
+                      className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                      title="Collapse to rail"
+                      aria-label="Collapse configurator"
+                    >
+                      <RiArrowRightSLine className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                    <button
+                      onClick={() => setSelectedId(null)}
+                      className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                      title="Close"
+                      aria-label="Close configurator"
+                    >
+                      <RiCloseLine className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+                <ConfigUpdateContext.Provider value={onConfigChange}>
+                  <div className="flex-1 min-h-0 overflow-y-auto overflow-x-visible overscroll-contain pt-1 pb-2 px-3">
+                    {useV2Panel
+                      ? <ConfiguratorPanelV2 selected={selectedConfig} allWidgets={configs} quickAddAction={quickAddWidget} />
+                      : <ConfiguratorPanel selected={selectedConfig} allWidgets={configs} quickAddAction={quickAddWidget} />}
+                  </div>
+                </ConfigUpdateContext.Provider>
+              </>
+            )}
+          </aside>
         )}
       </main>
 
