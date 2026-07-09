@@ -5,6 +5,7 @@
   ],
   "rules": {
     "@typescript-eslint/no-explicit-any": "off",
-    "prefer-const": "warn"
+    "prefer-const": "warn",
+    "no-empty": ["warn", { "allowEmptyCatch": false }]
   }
 }

@@ -189,7 +189,7 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                       {s.email && <span className="ml-2 text-muted-foreground">{s.email}</span>}
                       <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded border">{s.permission.toUpperCase()}</span>
                     </div>
-                    <button className="px-2 py-0.5 rounded-md border hover:bg-muted" onClick={async () => { try { await Api.deleteDatasourceShare(ds.id, s.userId, user?.id); await refreshShares() } catch {} }}>Remove</button>
+                    <button className="px-2 py-0.5 rounded-md border hover:bg-muted" onClick={async () => { try { await Api.deleteDatasourceShare(ds.id, s.userId, user?.id); await refreshShares() } catch (e: any) { setShareError(e?.message || 'Failed to remove share') } }}>Remove</button>
                   </div>
                 ))}
               </div>

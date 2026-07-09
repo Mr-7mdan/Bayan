@@ -251,12 +251,12 @@ export default function ContactsPage() {
   }
 
   async function toggleActive(it: ContactOut) {
-    try { await Api.deactivateContact(it.id, !it.active); await load() } catch {}
+    try { await Api.deactivateContact(it.id, !it.active); await load() } catch { setNotice({ type: 'error', text: 'Failed to update contact' }) }
   }
 
   async function remove(it: ContactOut) {
     if (!confirm(`Delete contact ${it.name}?`)) return
-    try { await Api.deleteContact(it.id); await load() } catch {}
+    try { await Api.deleteContact(it.id); await load() } catch { setNotice({ type: 'error', text: 'Failed to delete contact' }) }
   }
 
   function exportSelected() {

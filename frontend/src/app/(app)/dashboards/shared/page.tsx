@@ -116,7 +116,17 @@ export default function CollectionsPage() {
       if (next) s.add(d.id); else s.delete(d.id)
       return s
     })
-    try { if (user?.id) { if (next) await Api.addFavorite(user.id, d.id); else await Api.removeFavorite(user.id, d.id) } } catch {}
+    try {
+      if (user?.id) { if (next) await Api.addFavorite(user.id, d.id); else await Api.removeFavorite(user.id, d.id) }
+    } catch {
+      setFavIdsSet((prev) => {
+        const s = new Set(prev)
+        if (next) s.delete(d.id); else s.add(d.id)
+        return s
+      })
+      setToast('Failed to update favorite'); window.setTimeout(() => setToast(''), 1600)
+      return
+    }
     setToast(next ? 'Favorited' : 'Removed from favorites'); window.setTimeout(() => setToast(''), 1600)
   }
 

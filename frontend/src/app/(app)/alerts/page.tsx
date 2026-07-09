@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Title, Text, Select, SelectItem } from '@tremor/react'
 import Switch from '@/components/Switch'
 import { Api, type AlertOut, type AlertCreate } from '@/lib/api'
+import { swallow } from '@/lib/log'
 import { RiPlayLine, RiDeleteBinLine, RiRefreshLine, RiSettings3Line, RiAddLine, RiEdit2Line, RiAlarmWarningLine, RiNotificationBadgeLine, RiMailLine, RiMessage2Line } from '@remixicon/react'
 import EmailConfigDialog from '@/components/alerts/EmailConfigDialog'
 import SmsConfigDialog from '@/components/alerts/SmsConfigDialog'
@@ -265,7 +266,7 @@ export default function AlertsPage() {
           if (row.finishedAt || (row.status && (row.status==='ok' || row.status==='failed'))) {
             clearInterval(runTimers.current[id]); delete runTimers.current[id]
             // Refresh alert row so lastRunAt updates in the table
-            try { const updated = await Api.getAlert(id); setItems((prev)=>prev.map((x)=>x.id===id?updated:x)) } catch {}
+            try { const updated = await Api.getAlert(id); setItems((prev)=>prev.map((x)=>x.id===id?updated:x)) } catch (e) { swallow(e, 'alerts.refreshRow') }
           }
         } catch {}
       }, 1000)

@@ -144,11 +144,12 @@ export default function ErrorReporterProvider({ children }: { children: React.Re
     }
   }, [user?.id, appVersion, env?.bugReportMode, askOpen])
 
-  class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
     constructor(props: any) {
       super(props)
-      this.state = { hasError: false }
+      this.state = { error: null }
     }
+    static getDerivedStateFromError(error: Error) { return { error } }
     componentDidCatch(error: Error, info: any) {
       const st = String(error?.stack || '')
       const loc = parseStackTop(st)
@@ -170,12 +171,14 @@ export default function ErrorReporterProvider({ children }: { children: React.Re
         occurredAt: new Date().toISOString(),
       }
       const mode = (env as any)?.bugReportMode || 'auto'
-      if (mode === 'off') { this.setState({ hasError: false }); return }
-      if (mode === 'ask') { if (!askOpen) { setAskPayload(payload); setAskOpen(true) } this.setState({ hasError: false }); return }
+      if (mode === 'off') { return }
+      if (mode === 'ask') { if (!askOpen) { setAskPayload(payload); setAskOpen(true) } return }
       void report(payload)
-      this.setState({ hasError: false })
     }
-    render() { return this.props.children as any }
+    render() {
+      if (this.state.error) throw this.state.error
+      return this.props.children as any
+    }
   }
 
   const askTitle = (() => {
