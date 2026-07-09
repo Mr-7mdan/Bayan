@@ -30,6 +30,9 @@ def get_query_executor() -> ThreadPoolExecutor:
             max_workers=QUERY_POOL_SIZE,
             thread_name_prefix="query",
         )
+        # Saturation = query_inflight / query_pool_max (wait: query_semaphore_wait_ms).
+        from .metrics import gauge_set
+        gauge_set("query_pool_max", float(QUERY_POOL_SIZE))
     return _query_executor
 
 

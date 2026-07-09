@@ -7,9 +7,10 @@ from datetime import datetime
 
 
 class HealthResponse(BaseModel):
-    status: str = "ok"
+    status: str = "ok"  # "ok" | "degraded"
     app: str
     env: str
+    checks: Optional[Dict[str, str]] = None  # name -> "ok" | "disabled" | error string
 
 
 class TestConnectionRequest(BaseModel):

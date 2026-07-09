@@ -20,6 +20,11 @@ from .routers import datasources as ds_router
 
 _scheduler: Optional[BackgroundScheduler] = None
 
+
+def scheduler_is_running() -> bool:
+    """Side-effect-free accessor for health checks (does not start/restart)."""
+    return bool(_scheduler is not None and _scheduler.running)
+
 # Dedicated bounded pool so a hung sync never wedges an APScheduler worker thread.
 # ponytail: bounded shared pool; a truly hung driver call leaks one thread until restart —
 # acceptable, capped at 4. Per-datasource pools if that ever bites.

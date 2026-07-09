@@ -53,7 +53,7 @@ import re
 import time
 from datetime import datetime, timezone
 from ..security import encrypt_text, decrypt_text
-from ..metrics import counter_inc
+from ..metrics import counter_inc, summary_observe
 import logging
 import os
 
@@ -926,6 +926,7 @@ def run_sync_now(
         db.commit()
         print(f"[ABORT] Committed sync start for state_id={st.id}", flush=True)
         # Create a run log row
+        _sync_t0 = time.perf_counter()
         run = SyncRun(id=str(uuid4()), task_id=t.id, datasource_id=ds_id, mode=t.mode)
         db.add(run)
         db.commit()
@@ -1089,14 +1090,20 @@ def run_sync_now(
                                     pass
                 except Exception:
                     pass
+            counter_inc("sync_runs_total", {"status": "success"})
         except Exception as e:
             st.error = str(e)
             run.error = st.error
+            counter_inc("sync_runs_total", {"status": "error"})
             try:
                 _log.error("task failed: %s", st.error)
             except Exception:
                 pass
         finally:
+            try:
+                summary_observe("sync_duration_ms", (time.perf_counter() - _sync_t0) * 1000.0)
+            except Exception:
+                pass
             print(f"[ABORT] Finally block: Setting in_progress=False for state_id={st.id}, cancel_requested={getattr(st, 'cancel_requested', None)}", flush=True)
             st.in_progress = False
             try:

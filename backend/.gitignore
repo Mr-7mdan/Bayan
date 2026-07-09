@@ -6,5 +6,8 @@ __pycache__/
 # Local data
 .data/
 
+# Prometheus multiprocess mmap files (prod gunicorn)
+.prom_multiproc/
+
 # OS
 .DS_Store

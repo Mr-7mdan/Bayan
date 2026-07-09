@@ -38,7 +38,7 @@ from .routers import updates as updates_router
 from .routers import issues as issues_router
 from .routers import holidays as holidays_router
 from .routers import date_presets as date_presets_router
-from .metrics import counter_inc, gauge_inc, gauge_dec, summary_observe, render_prometheus
+from .metrics import counter_inc, gauge_inc, gauge_dec, gauge_set, summary_observe, render_prometheus
 
 # --- Security: refuse to start with placeholder secret key ---
 _PLACEHOLDER_KEYS = {"BayanSecretKey", "BayanSecretKey-CHANGE-ME", "change-me", ""}
@@ -94,7 +94,9 @@ async def _metrics_mw(request: Request, call_next):
     # Track only API endpoints
     is_api = path.startswith("/api/")
     if is_api:
-        gauge_inc("app_active_requests", 1.0, {"path": path, "method": method})
+        # Label by method only: the templated route is unknown before routing,
+        # and raw path labels are a cardinality bomb / would leak inc/dec pairs.
+        gauge_inc("app_active_requests", 1.0, {"method": method})
     import time as _t
     _s = _t.perf_counter()
     try:
@@ -103,8 +105,12 @@ async def _metrics_mw(request: Request, call_next):
     finally:
         _e = int((_t.perf_counter() - _s) * 1000)
         if is_api:
-            gauge_dec("app_active_requests", 1.0, {"path": path, "method": method})
-            summary_observe("app_request_duration_ms", _e, {"path": path, "method": method})
+            gauge_dec("app_active_requests", 1.0, {"method": method})
+            # Use the templated route (e.g. /api/dashboards/{dashboard_id}) so IDs
+            # don't explode label cardinality.
+            route = request.scope.get("route")
+            tpath = getattr(route, "path", None) or path
+            summary_observe("app_request_duration_ms", _e, {"path": tpath, "method": method})
 
 @app.middleware("http")
 async def _issues_mw(request: Request, call_next):
@@ -182,7 +188,9 @@ async def _startup():
                     _time.sleep(300)  # 5 minutes
                     try:
                         ensure_scheduler_started()  # self-heals if dead
+                        gauge_set("scheduler_running", 1.0)
                     except Exception as _we:
+                        gauge_set("scheduler_running", 0.0)
                         print(f"[SCHEDULER_WATCHDOG] Error: {_we}", flush=True)
             _wd = threading.Thread(target=_scheduler_watchdog, daemon=True, name="scheduler-watchdog")
             _wd.start()
@@ -208,8 +216,47 @@ app.include_router(date_presets_router.router, prefix="/api")
 
 
 @app.get("/api/healthz", response_model=HealthResponse)
-async def healthz() -> HealthResponse:
-    return HealthResponse(status="ok", app=settings.app_name, env=settings.environment)
+async def healthz():
+    from sqlalchemy import text
+    from .scheduler import scheduler_is_running
+
+    checks: dict[str, str] = {}
+
+    # SQLite metadata DB
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
+        checks["sqlite"] = "ok"
+    except Exception as e:
+        checks["sqlite"] = str(e)[:200]
+
+    # Shared DuckDB native connection
+    try:
+        with open_duck_native(None) as cur:
+            cur.execute("SELECT 1")
+        checks["duckdb"] = "ok"
+    except Exception as e:
+        checks["duckdb"] = str(e)[:200]
+
+    # Scheduler (informational — never degrades health)
+    run_sched = str(os.getenv("RUN_SCHEDULER", "1")).strip().lower() in ("1", "true", "yes", "on")
+    if not run_sched:
+        checks["scheduler"] = "disabled"
+    else:
+        try:
+            checks["scheduler"] = "ok" if scheduler_is_running() else "not running"
+        except Exception as e:
+            checks["scheduler"] = str(e)[:200]
+
+    degraded = checks.get("sqlite") != "ok" or checks.get("duckdb") != "ok"
+    status = "degraded" if degraded else "ok"
+    resp = HealthResponse(status=status, app=settings.app_name, env=settings.environment, checks=checks)
+    if degraded:
+        return JSONResponse(status_code=503, content=resp.model_dump())
+    return resp
 
 
 @app.post("/api/test-connection", response_model=TestConnectionResponse)

@@ -32,6 +32,10 @@ export PYTHONUNBUFFERED=1
 # Set RUN_SCHEDULER=0 here and run a single separate scheduler instance if needed
 export RUN_SCHEDULER="${RUN_SCHEDULER:-0}"
 
+# Prometheus multiprocess: aggregate metrics across workers, durable across recycles.
+# Must be exported before the app imports app.metrics (prometheus_client reads it at import).
+export PROMETHEUS_MULTIPROC_DIR="${PROMETHEUS_MULTIPROC_DIR:-$SCRIPT_DIR/.prom_multiproc}"
+
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
@@ -79,6 +83,7 @@ HOT_RELOAD="${HOT_RELOAD:-0}"
 # Disable access logs to prevent log bloat (or use /dev/null)
 # Only errors/warnings will be logged
 BASE_CMD=(gunicorn app.main:app \
+  --config "$SCRIPT_DIR/gunicorn_conf.py" \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind "${HOST}:${PORT}" \
   --workers "${WORKERS}" \
