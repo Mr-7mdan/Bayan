@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -192,7 +193,7 @@ _DATA_DIR.mkdir(parents=True, exist_ok=True)
 engine_meta = create_engine(
     f"sqlite+pysqlite:///{settings.metadata_db_path}",
     future=True,
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False, "timeout": 30},
     pool_pre_ping=True,
     poolclass=NullPool,
 )
@@ -210,9 +211,23 @@ def _sqlite_pragmas(dbapi_conn, _record):  # spec 09 step 5: WAL for concurrent 
         cur.close()
 
 
-def init_db() -> None:
-    Base.metadata.create_all(bind=engine_meta)
-    # Lightweight migration: ensure token_hash exists on share_links
+BASELINE_REV = "0001_baseline"
+
+
+def _alembic_cfg():
+    from alembic.config import Config
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).parent / "alembic"))
+    return cfg
+
+
+def _legacy_backfill() -> None:
+    # ponytail: delete _legacy_backfill once all installs are stamped
+    # (check alembic_version exists everywhere), target v5.x.
+    # Pre-Alembic ad-hoc migrations, moved verbatim from the old init_db().
+    # Already idempotent; runs exactly once per install (only when the
+    # alembic_version table is absent), converging old DBs to baseline shape.
     with engine_meta.connect() as conn:
         try:
             info = conn.execute(text("PRAGMA table_info(share_links)")).fetchall()
@@ -333,6 +348,35 @@ def init_db() -> None:
             ))
         except Exception:
             pass
+
+
+def init_db() -> None:
+    """Bring the metadata DB to head via Alembic.
+
+    Fresh DB -> baseline builds the full schema. Existing pre-Alembic install
+    (tables present, no alembic_version) -> run the one-time legacy backfill,
+    stamp at baseline, then upgrade. Already-stamped DB -> upgrade is a no-op.
+    """
+    from alembic import command
+    from sqlalchemy import inspect
+    from sqlalchemy.exc import OperationalError
+
+    def _run() -> None:
+        cfg = _alembic_cfg()
+        tables = set(inspect(engine_meta).get_table_names())
+        if "alembic_version" not in tables and "users" in tables:
+            # Existing pre-Alembic install: converge to baseline, then stamp.
+            _legacy_backfill()
+            command.stamp(cfg, BASELINE_REV)
+        command.upgrade(cfg, "head")
+
+    try:
+        _run()
+    except OperationalError:
+        # Multi-worker (Gunicorn) race on a SQLite lock: the loser waits and
+        # retries once — by then the winner has already applied the work.
+        time.sleep(2)
+        _run()
 
 
 # --- Helpers ---

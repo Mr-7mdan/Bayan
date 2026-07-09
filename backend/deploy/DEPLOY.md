@@ -128,6 +128,26 @@ The app automatically trusts `X-Forwarded-*` via `ProxyHeadersMiddleware` so HTT
   - `METADATA_DB_PATH=/var/lib/reporting/meta.sqlite`
 - Ensure the directory exists and is writable by the service user.
 
+## Schema changes (Alembic migrations)
+
+The SQLite metadata DB schema is owned by Alembic (`backend/app/alembic/`).
+Migrations apply automatically on app startup (`init_db()` runs `upgrade head`);
+there is no separate deploy step. Existing pre-Alembic DBs are auto-stamped at
+the `0001_baseline` revision on first boot.
+
+To change the schema:
+
+1. Edit the models in `backend/app/models.py`.
+2. Generate a migration (run from `backend/` with the venv so `app.*` imports resolve):
+   ```bash
+   cd backend && ./venv/bin/alembic revision --autogenerate -m "describe change"
+   ```
+3. Review the generated file in `app/alembic/versions/` — for SQLite keep the
+   batch operations (`with op.batch_alter_table(...)`); `render_as_batch=True`
+   emits them because SQLite can't ALTER most columns natively.
+4. Commit the migration file. It ships in the release tarball (the whole `app/`
+   dir is packaged) and applies on the next startup.
+
 ## 8) Health checks
 
 - Use `GET /api/healthz` for LB health.

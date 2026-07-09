@@ -14,7 +14,7 @@ try:
 except Exception:  # pragma: no cover
     _duckdb = None
 
-from ..models import SessionLocal, Datasource, init_db, create_datasource, NewDatasourceInput, User, SyncTask, SyncState, SyncRun, SyncLock, DatasourceShare
+from ..models import SessionLocal, Datasource, create_datasource, NewDatasourceInput, User, SyncTask, SyncState, SyncRun, SyncLock, DatasourceShare
 from ..auth import actor_id_optional
 from ..audit import audit
 from ..authz import is_admin as _authz_is_admin, datasource_permission, Permission, require_admin
