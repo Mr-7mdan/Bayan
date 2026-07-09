@@ -1262,10 +1262,10 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   return createPortal(
     <div className="fixed inset-0 z-[1200]">
       <div className="absolute inset-0 bg-black/40" onClick={() => onCloseAction()} />
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1040px] max-w-[96vw] max-h-[90vh] overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-4">
+      <div role="dialog" aria-modal="true" aria-label={mode==='edit' ? 'Edit Alert' : 'Create Alert/Notification'} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1040px] max-w-[96vw] max-h-[90vh] overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="text-sm font-medium">{mode==='edit' ? 'Edit Alert' : 'Create Alert/Notification'}</div>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>✕</button>
+          <button aria-label="Close" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>✕</button>
         </div>
         <div className="flex gap-4 items-stretch min-h-0">
           <div className="w-44 shrink-0">

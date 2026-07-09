@@ -672,8 +672,16 @@ button.border:not([class*="rounded-"]),
   outline: none;
 }
 .btn:hover { background-color: hsl(var(--muted)); }
-.btn:focus { box-shadow: none; outline: none; }
+.btn:focus { box-shadow: none; }
+.btn:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* a11y: keyboard focus is always visible even where Tailwind outline-none/focus:ring-0 is applied.
+   Zero-specificity :where() so component styles still win on color/radius; only restores the outline. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
 
 .btn-primary { background-color: hsl(var(--primary)); border-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
 .btn-primary:hover { background-color: hsl(var(--primary)/0.9); }

@@ -131,17 +131,23 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div className={`h-screen grid ${sidebarOpen ? 'grid-cols-[272px,1fr]' : 'grid-cols-[0px,1fr]'} transition-[grid-template-columns] duration-200`}>
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only fixed top-2 left-2 z-[9999] rounded-md bg-[hsl(var(--card))] px-3 py-2 text-sm font-medium text-[hsl(var(--foreground))] shadow-card bayan-focus-ring"
+      >
+        Skip to content
+      </a>
       <Sidebar hidden={!sidebarOpen} />
       <div className="h-screen flex flex-col min-h-0 min-w-0">
         <Navbar sidebarOpen={sidebarOpen} onToggleSidebarAction={toggleSidebar} />
-        <main className={`p-0 min-h-0 min-w-0 flex-1 overflow-auto bg-[hsl(var(--background))]`}>
+        <main id="main" tabIndex={-1} className={`p-0 min-h-0 min-w-0 flex-1 overflow-auto bg-[hsl(var(--background))]`}>
           {children}
         </main>
         {/* Global dialog mount so sidebar 'Build New Dashboard' opens anywhere */}
         <CreateDashboardDialog />
         {/* Global notifications */}
         {!!notifs.length && (
-          <div className="fixed top-6 end-6 z-[200] space-y-2">
+          <div role="status" aria-live="polite" className="fixed top-6 end-6 z-[200] space-y-2">
             {notifs.map((n) => (
               <div key={n.id} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[14px] font-medium text-white shadow-card">
                 <RiCheckLine className="w-5 h-5" />

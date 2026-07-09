@@ -94,7 +94,7 @@ function Item({ it, active, nested, badge }: { it: SidebarItem; active: boolean;
     }
   }
   return it.href ? (
-    <Link href={it.href as any} onClick={onClick} className={cls} title={it.description || labelText}>{content}</Link>
+    <Link href={it.href as any} onClick={onClick} className={cls} title={it.description || labelText} aria-current={active ? 'page' : undefined}>{content}</Link>
   ) : (
     <div className={cls} onClick={onClick} title={it.description || labelText}>{content}</div>
   )
@@ -205,7 +205,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
         </Link>
       </div>
 
-      <div className="flex-1 overflow-auto px-2 py-3 space-y-1">
+      <nav aria-label="Primary" className="flex-1 overflow-auto px-2 py-3 space-y-1">
         {nodes.map((node, i) => {
           if ((node as any).type === 'item') {
             const it = node as SidebarItem
@@ -227,7 +227,7 @@ export default function Sidebar({ hidden = false }: { hidden?: boolean }) {
             </div>
           )
         })}
-      </div>
+      </nav>
 
       <div className="px-2 py-3 border-t border-[hsl(var(--border))]">
         <Popover.Root>

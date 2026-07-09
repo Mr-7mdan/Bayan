@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useState } from 'react'
 import type React from 'react'
 import type { CompositionComponent } from '@/types/widgets'
+import { useModalFocus } from '@/hooks/useModalFocus'
 
 export default function CompositionBuilderModal(props: any) {
   const { open, onClose, value, columns, onChange, choices, onQuickAdd } = props as {
@@ -44,12 +45,13 @@ export default function CompositionBuilderModal(props: any) {
   const save = () => { onChange(local); onClose() }
 
   const spanOptions = useMemo(() => Array.from({ length: columns }, (_, i) => i + 1), [columns])
+  const panelRef = useModalFocus<HTMLDivElement>(open, onClose)
 
   if (!open || typeof window === 'undefined') return null
   return createPortal(
     <div className="fixed inset-0 z-[999] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-[1000] w-full md:w-[900px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-background p-4 shadow-none">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Card Composition Builder" className="relative z-[1000] w-full md:w-[900px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-background p-4 shadow-none">
         <div className="flex items-center justify-between mb-2">
           <div className="text-sm font-medium">Card Composition Builder</div>
           <div className="flex items-center gap-2">

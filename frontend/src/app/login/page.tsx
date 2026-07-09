@@ -145,11 +145,11 @@ export default function LoginPage() {
           <form onSubmit={onSubmit} className="mt-5 space-y-3">
             <div>
               <Text className="text-sm text-gray-600 dark:text-gray-300">{t('email')}</Text>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-card" />
+              <input type="email" aria-label={t('email')} value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-card" />
             </div>
             <div>
               <Text className="text-sm text-gray-600 dark:text-gray-300">{t('password')}</Text>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-card" />
+              <input type="password" aria-label={t('password')} value={password} onChange={(e) => setPassword(e.target.value)} required className="mt-1 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-card" />
             </div>
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">

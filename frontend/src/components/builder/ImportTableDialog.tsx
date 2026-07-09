@@ -2,6 +2,7 @@
 
 import React, { useCallback, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useModalFocus } from '@/hooks/useModalFocus'
 import { Api, type DatasourceOut } from '@/lib/api'
 import { RiUpload2Line, RiFileLine, RiCloseLine, RiCheckLine, RiErrorWarningLine, RiTableLine } from '@remixicon/react'
 
@@ -135,6 +136,8 @@ export default function ImportTableDialog({ open, dsId, datasources = [], onClos
     }
   }
 
+  const panelRef = useModalFocus<HTMLDivElement>(open, handleClose)
+
   if (!open || typeof document === 'undefined') return null
 
   const canPreview = mode === 'sql' ? sql.trim().length > 0 : file !== null
@@ -142,7 +145,7 @@ export default function ImportTableDialog({ open, dsId, datasources = [], onClos
   return createPortal(
     <div className="fixed inset-0 z-[1200]">
       <div className="absolute inset-0 bg-black/50" onClick={handleClose} />
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[780px] max-w-[96vw] max-h-[90vh] flex flex-col rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] shadow-[0_8px_40px_rgba(0,0,0,0.18)]">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Import Table" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[780px] max-w-[96vw] max-h-[90vh] flex flex-col rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] shadow-[0_8px_40px_rgba(0,0,0,0.18)]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[hsl(var(--border))]">
           <div className="flex items-center gap-2.5">

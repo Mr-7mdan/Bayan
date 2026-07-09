@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useModalFocus } from '@/hooks/useModalFocus'
 import { Api, type DatasourceOut, type TablesOnlyResponse, type IntrospectResponse } from '@/lib/api'
 import CustomQueryEditor from '@/components/builder/CustomQueryEditor'
 import { Select, SelectItem } from '@tremor/react'
@@ -166,11 +167,13 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
     return String(val)
   }
 
+  const panelRef = useModalFocus<HTMLDivElement>(open, onClose)
+
   if (!open || typeof window === 'undefined') return null
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-[2px]" onClick={onClose}>
-      <div className="w-[95vw] max-w-[1400px] h-[90vh] z-[70] bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Execute SQL" className="w-[95vw] max-w-[1400px] h-[90vh] z-[70] bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-[hsl(var(--primary))]/10 rounded-lg">
@@ -185,7 +188,7 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
               </div>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-[hsl(var(--muted))] text-muted-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]">
+          <button onClick={onClose} aria-label="Close" className="p-2 rounded-xl hover:bg-[hsl(var(--muted))] text-muted-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]">
             <RiCloseLine className="h-5 w-5" />
           </button>
         </div>

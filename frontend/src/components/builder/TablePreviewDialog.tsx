@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useModalFocus } from '@/hooks/useModalFocus'
 import { Api, QueryApi } from '@/lib/api'
 
 export default function TablePreviewDialog({
@@ -94,11 +95,13 @@ export default function TablePreviewDialog({
     if (!open) setOffset(0)
   }, [open, table])
 
+  const panelRef = useModalFocus<HTMLDivElement>(open, () => onOpenChangeAction(false))
+
   if (!open || typeof window === 'undefined') return null
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40" onClick={() => onOpenChangeAction(false)}>
-      <div className="max-w-[92vw] max-h-[86vh] w-[960px] bg-card border rounded-md shadow flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={`Preview — ${table}`} className="max-w-[92vw] max-h-[86vh] w-[960px] bg-card border rounded-md shadow flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-3 py-2 border-b">
           <div className="text-sm font-medium">Preview — {table} <span className="text-xs text-muted-foreground">(limit {Math.min(limit || 1000, 1000)} offset {offset}{typeof total === 'number' ? ` of ${total}` : ''})</span></div>
           <div className="flex items-center gap-2">

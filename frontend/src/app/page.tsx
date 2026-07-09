@@ -1544,6 +1544,9 @@ export default function HomePage() {
                           )}
                           <button
                             type="button"
+                            aria-label="Widget actions"
+                            aria-haspopup="menu"
+                            aria-expanded={kebabMenuId === cfg.id}
                             className="text-xs px-1 py-0.5 rounded border hover:bg-muted"
                             title="More actions"
                             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); console.debug('[Kebab] mousedown open', cfg.id); setKebabMenuId(cfg.id); setKebabAnchorEl(e.currentTarget as HTMLElement) }}

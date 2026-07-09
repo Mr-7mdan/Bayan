@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useModalFocus } from '@/hooks/useModalFocus'
 import type { WidgetConfig } from '@/types/widgets'
 import { Api, type AlertCreate, type AlertConfig } from '@/lib/api'
 import type { ContactOut } from '@/lib/api'
@@ -251,14 +252,16 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
     } finally { setSaving(false) }
   }
 
+  const panelRef = useModalFocus<HTMLDivElement>(open, () => { if (!saving) onCloseAction() })
+
   if (!open || typeof document === 'undefined') return null
   return createPortal((
     <div className="fixed inset-0 z-[1200]">
       <div className="absolute inset-0 bg-black/40" onClick={() => !saving && onCloseAction()} />
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[880px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-card p-4">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Alerts & Notifications" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[880px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="text-sm font-medium">Alerts & Notifications</div>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction} disabled={saving}>✕</button>
+          <button aria-label="Close" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction} disabled={saving}>✕</button>
         </div>
         {error && <div className="mb-2 text-xs text-rose-600">{error}</div>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

@@ -4450,7 +4450,7 @@ export default function ChartCard({
         try { console.debug('[ChartCard] [EChartsDebug] mount-advanced-line-area-bar', { seriesCount: seriesList.length, xCount: xLabels.length }) } catch {}
       }
       return (
-        <div className="absolute inset-0">
+        <div className="absolute inset-0" role="img" aria-label={`${title || 'Chart'} — ${type} chart`}>
           <ReactECharts
             ref={echartsRef}
             key={chartInstanceKey}
@@ -5066,7 +5066,7 @@ export default function ChartCard({
         try { console.debug('[ChartCard] [EChartsDebug] mount-scatter', { seriesCount: seriesList.length }) } catch {}
       }
       return (
-        <div className="absolute inset-0" style={{ paddingBottom: dataZoom ? 48 : 0 }}>
+        <div className="absolute inset-0" role="img" aria-label={`${title || 'Chart'} — ${type} chart`} style={{ paddingBottom: dataZoom ? 48 : 0 }}>
           <ReactECharts
             ref={echartsRef}
             key={chartInstanceKey}
@@ -5896,7 +5896,7 @@ export default function ChartCard({
         }
       } catch {}
       return (
-        <div className="absolute inset-0" style={{ paddingBottom: dataZoomCombo ? 48 : 0 }}>
+        <div className="absolute inset-0" role="img" aria-label={`${title || 'Chart'} — ${type} chart`} style={{ paddingBottom: dataZoomCombo ? 48 : 0 }}>
           <ReactECharts
             ref={echartsRef}
             key={chartInstanceKey}
