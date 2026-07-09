@@ -1,5 +1,5 @@
 "use client"
-import React from 'react'
+import React, { useState } from 'react'
 
 export function SectionCard({ title, badge, children, className }: {
   title: string
@@ -51,3 +51,78 @@ export const inputCls = (extra = '') =>
 
 export const selectCls = (extra = '') =>
   `h-8 px-2 text-xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] ${extra}`
+
+// ── ColorField ────────────────────────────────────────────────────────────────
+// Token-palette swatch picker + custom hex fallback. Always emits a #rrggbb hex
+// string (theme swatches are resolved to hex at click time) so widget config
+// output stays identical to the old raw <input type="color">.
+const PALETTE_TOKENS: { label: string; varName: string }[] = [
+  { label: 'Chart 1', varName: '--chart-1' },
+  { label: 'Chart 2', varName: '--chart-2' },
+  { label: 'Chart 3', varName: '--chart-3' },
+  { label: 'Chart 4', varName: '--chart-4' },
+  { label: 'Chart 5', varName: '--chart-5' },
+  { label: 'Primary', varName: '--primary' },
+  { label: 'Muted', varName: '--muted-foreground' },
+  { label: 'Foreground', varName: '--foreground' },
+  { label: 'Border', varName: '--border' },
+  { label: 'Destructive', varName: '--destructive' },
+]
+
+function resolveTokenHex(varName: string): string {
+  if (typeof window === 'undefined') return '#000000'
+  try {
+    const el = document.createElement('span')
+    el.style.color = `hsl(var(${varName}))`
+    el.style.display = 'none'
+    document.body.appendChild(el)
+    const rgb = getComputedStyle(el).color // "rgb(r, g, b)"
+    document.body.removeChild(el)
+    const m = rgb.match(/\d+/g)
+    if (!m || m.length < 3) return '#000000'
+    const [r, g, b] = m.map(Number)
+    return '#' + [r, g, b].map(x => Math.max(0, Math.min(255, x)).toString(16).padStart(2, '0')).join('')
+  } catch { return '#000000' }
+}
+
+export function ColorField({ value, onChange, className }: {
+  value: string
+  onChange: (hex: string) => void
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const hex = value || '#000000'
+  const validHex = /^#[0-9a-fA-F]{6}$/.test(hex)
+  return (
+    <div className={`relative ${className || ''}`}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="h-8 w-full rounded-md border cursor-pointer overflow-hidden"
+        style={{ backgroundColor: hex }}
+        aria-label="Pick color" title={hex} />
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute z-50 mt-1 end-0 w-52 rounded-md border bg-card p-2 shadow-card space-y-2">
+            <div className="grid grid-cols-5 gap-1.5">
+              {PALETTE_TOKENS.map(t => (
+                <button key={t.varName} type="button" title={t.label}
+                  onClick={() => { onChange(resolveTokenHex(t.varName)); setOpen(false) }}
+                  className="h-6 rounded border cursor-pointer hover:scale-110 transition-transform"
+                  style={{ backgroundColor: `hsl(var(${t.varName}))` }} />
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 pt-1 border-t">
+              <input type="color" value={validHex ? hex : '#000000'}
+                onChange={e => onChange(e.target.value)}
+                className="h-8 w-10 shrink-0 rounded border cursor-pointer" aria-label="Custom color" />
+              <input type="text" value={value || ''}
+                onChange={e => onChange(e.target.value)}
+                placeholder="#rrggbb"
+                className="h-8 flex-1 min-w-0 px-2 text-xs rounded-md border bg-[hsl(var(--secondary))] font-mono focus:outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]" />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}

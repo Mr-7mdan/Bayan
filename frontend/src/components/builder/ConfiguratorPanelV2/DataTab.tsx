@@ -7,6 +7,7 @@ import AdvancedSqlDialog from '@/components/builder/AdvancedSqlDialog'
 import type { WidgetConfig } from '@/types/widgets'
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/Select'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { Switch } from '@/components/Switch'
 import * as SchemaCache from '@/lib/schemaCache'
 import { SectionCard, FormRow, inputCls, selectCls, ActiveBadge } from './shared'
 import { FieldDetailPanel, InlineCustomColEditor, InlineMeasureEditor } from './DataTabHelpers'
@@ -170,7 +171,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
 
           {/* Prefer local DuckDB */}
           <FormRow label="Prefer local DuckDB">
-            <Switch_
+            <Switch
               checked={!!local.options?.preferLocalDuck}
               onChangeAction={v=>patchOpt({preferLocalDuck:v||undefined})} />
           </FormRow>
@@ -419,17 +420,5 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
       )}
 
     </div>
-  )
-}
-
-// inline Switch to avoid circular import issues
-function Switch_({ checked, onChangeAction }: { checked: boolean; onChangeAction: (v: boolean) => void }) {
-  return (
-    <button
-      role="switch" aria-checked={checked}
-      onClick={()=>onChangeAction(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${checked?'bg-[hsl(var(--primary))]':'bg-[hsl(var(--input))]'}`}>
-      <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-lg ring-0 transition-transform duration-200 ${checked?'translate-x-4':'translate-x-0'}`} />
-    </button>
   )
 }

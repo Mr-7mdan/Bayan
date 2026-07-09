@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { Switch } from '@/components/Switch'
 import type { WidgetConfig, CompositionComponent } from '@/types/widgets'
-import { SectionCard, FormRow, inputCls, selectCls } from './shared'
+import { SectionCard, FormRow, inputCls, selectCls, ColorField } from './shared'
 import dynamic from 'next/dynamic'
 
 const RichTextEditor = dynamic(() => import('@/components/ui/RichTextEditor'), { ssr: false })
@@ -75,11 +75,10 @@ export function GeneralTab({ local, setLocal, updateConfig, search = '', allWidg
         </FormRow>
         {local.options?.cardFill === 'custom' && (
           <FormRow label="Custom color">
-            <input
-              type="color"
-              className="h-8 w-16 rounded-md border bg-[hsl(var(--secondary))] cursor-pointer"
+            <ColorField
+              className="w-16"
               value={local.options?.cardCustomColor || '#ffffff'}
-              onChange={(e) => patchOpt({ cardCustomColor: e.target.value })}
+              onChange={(v) => patchOpt({ cardCustomColor: v })}
             />
           </FormRow>
         )}

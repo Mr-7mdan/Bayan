@@ -656,14 +656,18 @@ export function InlineCustomColEditor({ value, onSave, onCancel }: {
   const [name, setName] = useState(value.name)
   const [formula, setFormula] = useState(value.formula)
   const [type, setType] = useState(value.type || 'number')
+  const nameErr = !name.trim() ? 'Name is required' : ''
+  const formulaErr = !formula.trim() ? 'Formula is required' : ''
   return (
     <div className="rounded-lg border bg-[hsl(var(--secondary)/0.3)] p-3 space-y-2">
       <div className="text-xs font-semibold text-muted-foreground mb-1">{value.id ? 'Edit' : 'New'} Custom Column</div>
       <FormRow label="Name" full>
         <input className={inputCls()} value={name} onChange={e=>setName(e.target.value)} placeholder="column_name" />
+        {nameErr && <div className="text-[10px] text-[hsl(var(--destructive))] mt-1">{nameErr}</div>}
       </FormRow>
       <FormRow label="Formula" full>
         <input className={inputCls('font-mono')} value={formula} onChange={e=>setFormula(e.target.value)} placeholder='CASE WHEN x > 0 THEN "Yes" ELSE "No" END' />
+        {formulaErr && <div className="text-[10px] text-[hsl(var(--destructive))] mt-1">{formulaErr}</div>}
       </FormRow>
       <FormRow label="Type">
         <select className={selectCls()} value={type} onChange={e=>setType(e.target.value)}>
@@ -672,7 +676,8 @@ export function InlineCustomColEditor({ value, onSave, onCancel }: {
       </FormRow>
       <div className="flex gap-2 justify-end pt-1">
         <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer" onClick={onCancel}>Cancel</button>
-        <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+        <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          disabled={!!(nameErr||formulaErr)}
           onClick={()=>{ if(name.trim()&&formula.trim()) onSave({id:value.id,name:name.trim(),formula:formula.trim(),type}) }}>
           Save column
         </button>
@@ -689,18 +694,23 @@ export function InlineMeasureEditor({ value, onSave, onCancel }: {
 }) {
   const [name, setName] = useState(value.name)
   const [formula, setFormula] = useState(value.formula)
+  const nameErr = !name.trim() ? 'Name is required' : ''
+  const formulaErr = !formula.trim() ? 'Formula is required' : ''
   return (
     <div className="rounded-lg border bg-[hsl(var(--secondary)/0.3)] p-3 space-y-2">
       <div className="text-xs font-semibold text-muted-foreground mb-1">{value.id ? 'Edit' : 'New'} Measure</div>
       <FormRow label="Name" full>
         <input className={inputCls()} value={name} onChange={e=>setName(e.target.value)} placeholder="Total Revenue" />
+        {nameErr && <div className="text-[10px] text-[hsl(var(--destructive))] mt-1">{nameErr}</div>}
       </FormRow>
       <FormRow label="Formula" full>
         <input className={inputCls('font-mono')} value={formula} onChange={e=>setFormula(e.target.value)} placeholder="SUM(price * quantity)" />
+        {formulaErr && <div className="text-[10px] text-[hsl(var(--destructive))] mt-1">{formulaErr}</div>}
       </FormRow>
       <div className="flex gap-2 justify-end pt-1">
         <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer" onClick={onCancel}>Cancel</button>
-        <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+        <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          disabled={!!(nameErr||formulaErr)}
           onClick={()=>{ if(name.trim()&&formula.trim()) onSave({id:value.id||crypto.randomUUID(),name:name.trim(),formula:formula.trim()}) }}>
           Save measure
         </button>

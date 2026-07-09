@@ -290,6 +290,8 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
   return (
     <div className="flex flex-col gap-0 min-h-0">
 
+      {/* ── Sticky header: search + undo + tabs ───────────────────────────── */}
+      <div className="sticky top-0 z-20 bg-card -mx-3 px-3 pt-1">
       {/* ── Search + Undo bar ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-1.5 px-0 pb-2">
         <div className="relative flex-1">
@@ -330,6 +332,7 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
             {t.count > 0 && <ActiveBadge count={t.count} />}
           </button>
         ))}
+      </div>
       </div>
 
       {/* ── Search hint ──────────────────────────────────────────────────── */}

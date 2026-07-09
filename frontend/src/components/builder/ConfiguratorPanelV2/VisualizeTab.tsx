@@ -2,8 +2,11 @@
 import { useState } from 'react'
 import type { WidgetConfig } from '@/types/widgets'
 import { Switch } from '@/components/Switch'
-import { SectionCard, FormRow, selectCls, inputCls } from './shared'
+import { Api, QueryApi } from '@/lib/api'
+import { useEnvironment } from '@/components/providers/EnvironmentProvider'
+import { SectionCard, FormRow, selectCls, inputCls, ColorField } from './shared'
 import TabsControls from '@/components/builder/TabsControls'
+import { RiAlignLeft, RiAlignCenter, RiAlignRight, RiBold, RiItalic, RiUnderline } from '@remixicon/react'
 
 // ── Chart type mini-preview ───────────────────────────────────────────────────
 function ChartPreview({ t }: { t: string }) {
@@ -70,9 +73,41 @@ export function VisualizeTab({ local, setLocal, updateConfig, allFieldNames = []
   allFieldNames?: string[]
   search?: string
 }) {
+  const { env } = useEnvironment()
   const [ttFmtCol, setTtFmtCol] = useState('')
   const [ttFmtMode, setTtFmtMode] = useState<'none'|'short'|'currency'|'percent'|'bytes'>('none')
   const [gridSubTab, setGridSubTab] = useState<'hMain'|'hSecondary'|'vMain'|'vSecondary'>('hMain')
+
+  // ── Delta resolved-period preview (ported from V1 refreshDeltaPreview) ────────
+  const [deltaResolved, setDeltaResolved] = useState<{ curStart: string; curEnd: string; prevStart: string; prevEnd: string } | null>(null)
+  const [deltaSampleNow, setDeltaSampleNow] = useState<string | null>(null)
+  const [deltaPreviewLoading, setDeltaPreviewLoading] = useState(false)
+  const [deltaPreviewError, setDeltaPreviewError] = useState<string | undefined>(undefined)
+  const refreshDeltaPreview = async () => {
+    try {
+      setDeltaPreviewLoading(true)
+      setDeltaPreviewError(undefined)
+      setDeltaResolved(null)
+      const source = local?.querySpec?.source
+      const field = (local?.options as any)?.deltaDateField as string | undefined
+      const mode = (local?.options as any)?.deltaMode as any
+      const weekStart = ((local?.options as any)?.deltaWeekStart || (env as any)?.weekStart || 'mon') as any
+      const where = (local?.querySpec?.where || {}) as Record<string, any>
+      if (!source || !field || !mode || mode === 'off') { setDeltaPreviewLoading(false); return }
+      const spec: any = { source, select: [field], where: Object.keys(where || {}).length ? where : undefined, limit: 1, offset: 0 }
+      const r = await QueryApi.querySpec({ spec, datasourceId: local?.datasourceId, limit: 1, offset: 0, includeTotal: false })
+      const cols = (r?.columns || []) as string[]
+      const idx = Math.max(0, cols.indexOf(field))
+      const v = Array.isArray(r?.rows) && r.rows[0] ? r.rows[0][idx] : undefined
+      setDeltaSampleNow(v != null ? String(v) : null)
+      const resolved = await Api.resolvePeriods({ mode, tzOffsetMinutes: (typeof window !== 'undefined') ? new Date().getTimezoneOffset() : 0, weekStart })
+      setDeltaResolved(resolved)
+    } catch (e: any) {
+      setDeltaPreviewError(String(e?.message || 'Failed to resolve period'))
+    } finally {
+      setDeltaPreviewLoading(false)
+    }
+  }
 
   const patchOpt = (p: Partial<NonNullable<WidgetConfig['options']>>) => {
     const next = { ...local, options: { ...(local.options || {}), ...p } }
@@ -186,6 +221,81 @@ export function VisualizeTab({ local, setLocal, updateConfig, allFieldNames = []
         </SectionCard>
       )}
 
+      {/* Title Format */}
+      {local.type === 'chart' && matches('title','title format','format title','heading','title color','title align','title font','title background','title margin','title outline') && (
+        <SectionCard title="Title Format">
+          {(() => { const o = (local.options || {}) as any; return (
+            <>
+              <FormRow label="Position">
+                <select className={selectCls()} value={o.chartTitlePosition || 'none'} onChange={e => patchOpt({ chartTitlePosition: e.target.value } as any)}>
+                  {(['none','above','below'] as const).map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </FormRow>
+              <FormRow label="Align">
+                <div className="flex gap-1">
+                  {([['left',RiAlignLeft],['center',RiAlignCenter],['right',RiAlignRight]] as const).map(([a, Icon]) => (
+                    <button key={a} type="button" onClick={() => patchOpt({ chartTitleAlign: a } as any)}
+                      className={`h-7 w-7 flex items-center justify-center rounded border cursor-pointer transition-colors duration-150 ${(o.chartTitleAlign || 'left') === a ? 'bg-[hsl(var(--muted))] ring-1 ring-[hsl(var(--primary))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}>
+                      <Icon className="size-4" />
+                    </button>
+                  ))}
+                </div>
+              </FormRow>
+              <FormRow label="Size (px)">
+                <input type="number" min={10} max={24} className={inputCls('w-20')} value={o.chartTitleSize ?? 13}
+                  onChange={e => patchOpt({ chartTitleSize: Math.max(10, Math.min(24, Number(e.target.value || 13))) } as any)} />
+              </FormRow>
+              <FormRow label="Style">
+                <div className="flex gap-1">
+                  {([['normal','N'],['bold',RiBold],['italic',RiItalic],['underline',RiUnderline]] as const).map(([sName, Icon]) => (
+                    <button key={sName} type="button" onClick={() => patchOpt({ chartTitleEmphasis: sName } as any)}
+                      className={`h-7 w-7 flex items-center justify-center rounded border cursor-pointer text-xs transition-colors duration-150 ${(o.chartTitleEmphasis || 'normal') === sName ? 'bg-[hsl(var(--muted))] ring-1 ring-[hsl(var(--primary))]' : 'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}>
+                      {typeof Icon === 'string' ? Icon : <Icon className="size-4" />}
+                    </button>
+                  ))}
+                </div>
+              </FormRow>
+              <FormRow label="Font color">
+                <select className={selectCls()} value={o.chartTitleColorMode || 'auto'} onChange={e => patchOpt({ chartTitleColorMode: e.target.value } as any)}>
+                  <option value="auto">Auto</option><option value="custom">Custom</option>
+                </select>
+              </FormRow>
+              {o.chartTitleColorMode === 'custom' && (
+                <FormRow label="Color"><ColorField className="w-16" value={o.chartTitleColor || '#111827'} onChange={v => patchOpt({ chartTitleColor: v } as any)} /></FormRow>
+              )}
+              <FormRow label="Background">
+                <select className={selectCls()} value={o.chartTitleBgMode || 'none'} onChange={e => patchOpt({ chartTitleBgMode: e.target.value } as any)}>
+                  <option value="none">No fill</option><option value="custom">Custom</option>
+                </select>
+              </FormRow>
+              {o.chartTitleBgMode === 'custom' && (
+                <FormRow label="Fill color"><ColorField className="w-16" value={o.chartTitleBgColor || '#ffffff'} onChange={v => patchOpt({ chartTitleBgColor: v } as any)} /></FormRow>
+              )}
+              <FormRow label="Margin">
+                <select className={selectCls()} value={o.chartTitleMargin || 'sm'} onChange={e => patchOpt({ chartTitleMargin: e.target.value } as any)}>
+                  {(['none','sm','md','lg'] as const).map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </FormRow>
+              <FormRow label="Outline">
+                <Switch checked={!!o.chartTitleOutline} onChangeAction={v => patchOpt({ chartTitleOutline: v } as any)} />
+              </FormRow>
+              <div className="border-t pt-2 space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Gaps (px)</div>
+                <div className="grid grid-cols-4 gap-2">
+                  {([['Top','chartTitleGapTop'],['Right','chartTitleGapRight'],['Bottom','chartTitleGapBottom'],['Left','chartTitleGapLeft']] as const).map(([lbl, key]) => (
+                    <div key={key}>
+                      <label className="block text-xs text-muted-foreground mb-1">{lbl}</label>
+                      <input type="number" min={0} max={48} className={inputCls()} value={o[key] ?? 0}
+                        onChange={e => patchOpt({ [key]: Math.max(0, Math.min(48, Number(e.target.value || 0))) } as any)} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )})()}
+        </SectionCard>
+      )}
+
       {/* Legend */}
       {local.type === 'chart' && !['spark','badges','tremorTable'].includes(local.chartType || '') && matches('legend','position','dot shape','max items','nested') && (
         <SectionCard title="Legend">
@@ -270,7 +380,7 @@ export function VisualizeTab({ local, setLocal, updateConfig, allFieldNames = []
             <div className="grid grid-cols-3 gap-2">
               <div><label className="block text-xs text-muted-foreground mb-1">Weight</label><select className={selectCls('w-full')} value={(local.options as any)?.xAxisFontWeight||'normal'} onChange={e=>patchOpt({xAxisFontWeight:e.target.value} as any)}>{['normal','bold'].map(w=><option key={w} value={w}>{w}</option>)}</select></div>
               <div><label className="block text-xs text-muted-foreground mb-1">Size</label><input type="number" min={8} max={18} className={inputCls()} value={(local.options as any)?.xAxisFontSize??11} onChange={e=>patchOpt({xAxisFontSize:Math.max(8,Math.min(18,Number(e.target.value||11)))} as any)} /></div>
-              <div><label className="block text-xs text-muted-foreground mb-1">Color</label><input type="color" className="w-full h-8 rounded-md border cursor-pointer" value={(local.options as any)?.xAxisFontColor||'#94a3b8'} onChange={e=>patchOpt({xAxisFontColor:e.target.value} as any)} /></div>
+              <div><label className="block text-xs text-muted-foreground mb-1">Color</label><ColorField className="w-full" value={(local.options as any)?.xAxisFontColor||'#94a3b8'} onChange={v=>patchOpt({xAxisFontColor:v} as any)} /></div>
             </div>
           </div>
           <div className="border-t pt-2 space-y-2">
@@ -278,7 +388,7 @@ export function VisualizeTab({ local, setLocal, updateConfig, allFieldNames = []
             <div className="grid grid-cols-3 gap-2">
               <div><label className="block text-xs text-muted-foreground mb-1">Weight</label><select className={selectCls('w-full')} value={(local.options as any)?.yAxisFontWeight||'normal'} onChange={e=>patchOpt({yAxisFontWeight:e.target.value} as any)}>{['normal','bold'].map(w=><option key={w} value={w}>{w}</option>)}</select></div>
               <div><label className="block text-xs text-muted-foreground mb-1">Size</label><input type="number" min={8} max={18} className={inputCls()} value={(local.options as any)?.yAxisFontSize??11} onChange={e=>patchOpt({yAxisFontSize:Math.max(8,Math.min(18,Number(e.target.value||11)))} as any)} /></div>
-              <div><label className="block text-xs text-muted-foreground mb-1">Color</label><input type="color" className="w-full h-8 rounded-md border cursor-pointer" value={(local.options as any)?.yAxisFontColor||'#94a3b8'} onChange={e=>patchOpt({yAxisFontColor:e.target.value} as any)} /></div>
+              <div><label className="block text-xs text-muted-foreground mb-1">Color</label><ColorField className="w-full" value={(local.options as any)?.yAxisFontColor||'#94a3b8'} onChange={v=>patchOpt({yAxisFontColor:v} as any)} /></div>
             </div>
           </div>
         </SectionCard>
@@ -322,7 +432,7 @@ export function VisualizeTab({ local, setLocal, updateConfig, allFieldNames = []
                       </select>
                     </FormRow>
                     <FormRow label="Width (px)"><input type="number" min={0} max={10} step={0.5} className={inputCls('w-20')} value={gl.width??1} onChange={e=>patchGrid(active.axis,active.sub,{width:Number(e.target.value||0)})} /></FormRow>
-                    <FormRow label="Color"><input type="color" className="h-8 w-16 rounded-md border cursor-pointer" value={gl.color||'#94a3b8'} onChange={e=>patchGrid(active.axis,active.sub,{color:e.target.value})} /></FormRow>
+                    <FormRow label="Color"><ColorField className="w-16" value={gl.color||'#94a3b8'} onChange={v=>patchGrid(active.axis,active.sub,{color:v})} /></FormRow>
                     <FormRow label="Opacity"><input type="number" min={0} max={1} step={0.05} className={inputCls('w-20')} value={gl.opacity??active.defOpacity} onChange={e=>patchGrid(active.axis,active.sub,{opacity:Math.max(0,Math.min(1,Number(e.target.value||0)))})} /></FormRow>
                   </>
                 )}
@@ -686,7 +796,7 @@ export function VisualizeTab({ local, setLocal, updateConfig, allFieldNames = []
       )}
 
       {/* Delta Configuration */}
-      {(local.type === 'chart' || local.type === 'kpi') && matches('delta','comparison','period','week start','date field','ui mode') && (
+      {(local.type === 'chart' || local.type === 'kpi') && matches('delta','comparison','period','week start','date field','ui mode','resolved period preview','current','previous') && (
         <SectionCard title="Delta / Comparison">
           <FormRow label="Delta mode">
             <select className={selectCls()} value={local.options?.deltaMode || 'off'}
@@ -722,6 +832,33 @@ export function VisualizeTab({ local, setLocal, updateConfig, allFieldNames = []
                   <option value="none">None</option>
                 </select>
               </FormRow>
+              {/* Resolved-period preview (ported from V1) */}
+              {local.options?.deltaDateField && (
+                <div className="mt-1 rounded-md border bg-[hsl(var(--secondary))] p-2 space-y-0.5 text-xs text-muted-foreground">
+                  <div className="font-medium text-foreground mb-0.5">Resolved Period Preview</div>
+                  <div>Mode: <span className="font-mono">{String(local.options?.deltaMode)}</span></div>
+                  <div>Date field: <span className="font-mono">{String(local.options?.deltaDateField)}</span></div>
+                  <div className="pt-0.5">
+                    {deltaPreviewLoading ? (
+                      <span>Resolving…</span>
+                    ) : deltaPreviewError ? (
+                      <span className="text-[hsl(var(--destructive))]">{deltaPreviewError}</span>
+                    ) : deltaResolved ? (
+                      <div className="space-y-0.5">
+                        <div>Current: <span className="font-mono">{deltaResolved.curStart}</span> → <span className="font-mono">{deltaResolved.curEnd}</span></div>
+                        <div>Previous: <span className="font-mono">{deltaResolved.prevStart}</span> → <span className="font-mono">{deltaResolved.prevEnd}</span></div>
+                      </div>
+                    ) : (
+                      <span>—</span>
+                    )}
+                  </div>
+                  <div>First row in <span className="font-mono">{String(local.options?.deltaDateField)}</span>: <span className="font-mono">{deltaSampleNow ?? '—'}</span></div>
+                  <div className="pt-1">
+                    <button type="button" className="text-xs px-2 py-0.5 rounded-md border bg-card hover:bg-muted transition-colors duration-150 cursor-pointer"
+                      onClick={() => void refreshDeltaPreview()}>Refresh</button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </SectionCard>
