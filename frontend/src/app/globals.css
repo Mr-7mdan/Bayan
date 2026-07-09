@@ -69,13 +69,38 @@
   --btn3: 129 60% 52%;  /* ~#21CC3A lighter */
   --btn4: 227 86% 52%;  /* ~#0636C4 lighter */
   --border-width: 1px;
+
+  /* ── Type ramp (additive; distinct from --text-1/2/3 color tokens) ── */
+  --font-2xs: 11px;
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-base: 14px;
+  --font-lg: 16px;
+  --font-xl: 20px;
+  --font-2xl: 24px;
+
+  /* ── Radius scale ── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius: var(--radius-md); /* legacy alias */
+
+  /* ── Curated elevation (light) ── */
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.05);                       /* card */
+  --shadow-2: 0 4px 12px rgb(0 0 0 / 0.10);                      /* popover/menu */
+  --shadow-3: 0 12px 32px rgb(0 0 0 / 0.18);                     /* modal */
+
+  /* ── Motion tokens ── */
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
 }
 
 /* Dark theme — avoid pure black/white, desaturate, communicate depth */
 .dark {
   /* Backgrounds from image */
   /* --background: 199.5 60% 7.1%;  /*requested custom hsl */
-  --background: 199, 98.5%, 8.1%;
+  --background: 199 98.5% 8.1%;
   --foreground: var(--text-3); /* #D3D9DC */
   --muted: 199 64% 15%;        /* #0E2F3F */
   --muted-foreground: var(--text-2); /* #9EA8AE */
@@ -109,13 +134,17 @@
   --chart-3: 40 80% 58%;
   --chart-4: 262 55% 60%;
   --chart-5: 152 48% 52%;
-  /* Prefer neutral header accents (avoid heavy color strips) */
-  --header-accent: 0 70% 40%;
+  /* Brand-consistent header accent (was red 0 70% 40%) — derived from --primary */
+  --header-accent: var(--primary);
   /* Button accents (dark mode exact colors) */
   --btn1: 13 100% 68%;   /* #FF7F5C */
   --btn2: 45 100% 68%;   /* #FFD65C */
   --btn3: 129 72% 46%;   /* #21CC3A */
   --btn4: 227 94% 40%;   /* #0636C4 */
+  /* Curated elevation (dark — needs more opacity than light) */
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.30);
+  --shadow-2: 0 4px 12px rgb(0 0 0 / 0.45);
+  --shadow-3: 0 12px 32px rgb(0 0 0 / 0.60);
 }
 
 /* Blackish dark variant */
@@ -151,7 +180,7 @@
   --chart-3: 40 80% 58%;
   --chart-4: 262 55% 60%;
   --chart-5: 152 48% 52%;
-  --header-accent: 0 70% 40%;
+  --header-accent: var(--primary);
   --btn1: 13 100% 68%;
   --btn2: 45 100% 68%;
   --btn3: 129 72% 46%;
@@ -238,17 +267,32 @@ html, body, #__next { height: 100%; }
 .nav-item-dark { @apply text-gray-400 hover:text-white transition-colors duration-150; }
 .nav-item-active-dark { @apply text-blue-400 border-b-2 border-blue-400 font-medium; }
 
-/* Hard-disable glows/shadows globally */
-.shadow, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl, .shadow-inner, .shadow-card { box-shadow: none !important; }
-[class*="shadow-"] { box-shadow: none !important; }
-.drop-shadow, [class*="drop-shadow"] { filter: none !important; box-shadow: none !important; }
-
 /* Simple entry animation for tab panel switches */
 @keyframes fadeSlideIn {
   0% { opacity: 0; transform: translateY(4px); }
   100% { opacity: 1; transform: translateY(0); }
 }
 .anim-fade-slide { animation: fadeSlideIn 180ms ease-out; }
+
+/* Toast + menu enter/exit — key off motion tokens */
+@keyframes toast-in {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-out {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(8px); }
+}
+@keyframes menu-in {
+  0% { opacity: 0; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.anim-toast-in { animation: toast-in var(--dur-base) var(--ease-out); }
+.anim-toast-out { animation: toast-out var(--dur-fast) var(--ease-out) forwards; }
+.anim-menu-in { animation: menu-in var(--dur-fast) var(--ease-out); transform-origin: top; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-toast-in, .anim-toast-out, .anim-menu-in { animation: none; }
+}
 
 /* Horizontal slide variants for tab switching */
 @keyframes slideRightIn {
@@ -327,7 +371,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .dark[data-variant="bluish"] .builder-root .bg-card {
   /* Requested: hsl(199deg 89.19% 11.01% / 61%) */
   /* background-color: hsl(199deg 89.19% 11.01% / 61%) !important; */
-  background-color: hsl(203, 73%, 13%) !important;
+  background-color: hsl(203 73% 13%) !important;
 }
 .dark[data-variant="bluish"] .builder-root .border,
 .dark[data-variant="bluish"] .builder-root .border-b,

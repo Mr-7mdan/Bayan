@@ -59,13 +59,24 @@ const config: Config = {
           5: 'hsl(var(--chart-5))',
         },
       },
+      fontSize: {
+        '2xs': ['var(--font-2xs)', { lineHeight: '1rem' }],      // 11px
+        xs: ['var(--font-xs)', { lineHeight: '1rem' }],          // 12px
+        sm: ['var(--font-sm)', { lineHeight: '1.25rem' }],       // 13px
+        base: ['var(--font-base)', { lineHeight: '1.375rem' }],  // 14px
+        lg: ['var(--font-lg)', { lineHeight: '1.5rem' }],        // 16px
+        xl: ['var(--font-xl)', { lineHeight: '1.75rem' }],       // 20px
+        '2xl': ['var(--font-2xl)', { lineHeight: '2rem' }],      // 24px
+      },
       borderRadius: {
-        lg: '12px',
-        md: '10px',
-        sm: '8px',
+        lg: 'var(--radius-lg)',
+        md: 'var(--radius-md)',
+        sm: 'var(--radius-sm)',
       },
       boxShadow: {
-        card: '0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)',
+        card: 'var(--shadow-1)',
+        popover: 'var(--shadow-2)',
+        modal: 'var(--shadow-3)',
       },
     },
   },

@@ -98,12 +98,12 @@ export default function Navbar({ sidebarOpen = true, onToggleSidebarAction }: Pr
     <header className={`${wrap} sticky top-0 z-30`}> 
       <div className="px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm">
-          {/* Sidebar toggle with hover (gray bg) and focus ring (amber) */}
+          {/* Sidebar toggle with hover (gray bg) and focus ring (brand primary) */}
           <button
             type="button"
             aria-label={sidebarOpen ? tShell('hideSidebar') : tShell('showSidebar')}
             onClick={onToggleSidebarAction}
-            className="group inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950"
+            className="group inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950"
           >
             <RiLayout4Line className="w-4 h-4" />
           </button>
