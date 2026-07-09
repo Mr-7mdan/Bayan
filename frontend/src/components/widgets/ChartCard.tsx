@@ -30,7 +30,8 @@ import { toProperCase, splitLegend, extractBaseLabel, fallbackStringsFor, parseD
 import { formatNumber, toNum, formatDatePattern } from './chart/format'
 import type { FormatMode } from './chart/format'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
-import { RiArrowUpSFill, RiArrowDownSFill, RiArrowRightSFill, RiArrowUpLine, RiArrowDownLine, RiArrowRightLine, RiCalendar2Line, RiArrowDownSLine } from '@remixicon/react'
+import { RiArrowUpSFill, RiArrowDownSFill, RiArrowRightSFill, RiArrowUpLine, RiArrowDownLine, RiArrowRightLine, RiCalendar2Line, RiArrowDownSLine, RiErrorWarningLine, RiRestartLine, RiInboxLine } from '@remixicon/react'
+import { SkeletonChart, EmptyState, Button as UiButton } from '@/components/ui'
 import {
   ResponsiveContainer,
   AreaChart as ReAreaChart,
@@ -7361,24 +7362,28 @@ export default function ChartCard({
         }
       `}</style>
       {q.isLoading ? (
-        <div className="flex flex-col items-center justify-center h-[220px]">
-          <div className="grid grid-cols-2 gap-2">
-            {[0,1,2,3].map((i)=> (
-              <span key={i} className="w-3.5 h-3.5 rounded-sm" style={{ backgroundColor: 'hsl(var(--primary))', animation: `square-bounce 1.2s ${i*0.12}s infinite ease-in-out` }} />
-            ))}
-          </div>
+        <div className="h-[220px]">
+          <SkeletonChart className="h-full border-0 bg-transparent p-0" />
           {(options as any)?.showLoadTime ? (
-            <div className="mt-2 text-[11px] text-muted-foreground">{Math.max(0, loadingSeconds)}s</div>
+            <div className="mt-2 text-2xs text-muted-foreground text-center">{Math.max(0, loadingSeconds)}s</div>
           ) : null}
         </div>
       ) : q.error ? (
-        <div className="text-sm text-red-600">Failed to load chart</div>
+        <div className="flex flex-col items-center justify-center gap-2 h-[220px] text-center px-4">
+          <RiErrorWarningLine className="h-6 w-6 text-[hsl(var(--danger))]" aria-hidden="true" />
+          <div className="text-sm text-muted-foreground">Couldn’t load this chart.</div>
+          <UiButton variant="ghost" size="sm" icon={<RiRestartLine className="h-3.5 w-3.5" aria-hidden="true" />} onClick={() => { void q.refetch() }}>
+            Retry
+          </UiButton>
+        </div>
       ) : (!isMulti && queryMode === 'spec' && !yLooksNumeric && (querySpec as any)?.select?.length >= 2) ? (
         <div className="text-sm text-muted-foreground">
           Y-axis must be numeric. Pick a numeric column for Y or apply an aggregation.
         </div>
       ) : data.length === 0 ? (
-        <div className="text-sm text-muted-foreground">No data</div>
+        <div className="h-[220px] flex items-center justify-center">
+          <EmptyState icon={<RiInboxLine className="h-5 w-5" aria-hidden="true" />} title="No data" hint="No rows match the current filters." />
+        </div>
       ) : (
         <>
           {/* Delta + Filters UI group (no header title) */}

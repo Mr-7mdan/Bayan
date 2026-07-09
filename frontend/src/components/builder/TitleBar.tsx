@@ -1,9 +1,25 @@
 "use client"
 
-import { useState, useEffect, useRef } from 'react'
-import { Button, Select, SelectItem } from '@tremor/react'
-import { RiMore2Fill, RiLayoutGrid2Line } from '@remixicon/react'
+import { useState, useEffect, useRef, type ComponentType } from 'react'
+import {
+  RiLayoutMasonryLine,
+  RiLayoutGridLine,
+  RiRefreshLine,
+  RiLockLine,
+  RiLockUnlockLine,
+  RiAddLine,
+  RiBarChartBoxLine,
+  RiTableLine,
+  RiNumbersLine,
+  RiText,
+  RiSpace,
+  RiFileTextLine,
+} from '@remixicon/react'
+import { Button, StatusPill } from '@/components/ui'
+import type { StatusPillState } from '@/components/ui'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
+
+type AddKind = 'kpi'|'chart'|'table'|'text'|'spacer'|'composition'|'report'
 
 type TitleBarProps = {
   hydrated: boolean
@@ -23,7 +39,7 @@ type TitleBarProps = {
   createdAt?: string
   gridSize?: 'sm'|'md'|'lg'|'xl'
   onGridSizeChangeAction?: (v: 'sm'|'md'|'lg'|'xl') => void
-  onAddCardAction?: (kind: 'kpi'|'chart'|'table'|'text'|'spacer'|'composition'|'report') => void
+  onAddCardAction?: (kind: AddKind) => void
   showNavigator?: boolean
   onShowNavigatorChangeAction?: (v: boolean) => void
   autoMinimizeNav?: boolean
@@ -39,7 +55,33 @@ type TitleBarProps = {
   onCanvasAutoAction?: () => void
   onCanvasFixedAction?: (w: number) => void
   onCanvasFixedCurrentAction?: () => void
+  // Autosave lifecycle (wired to page.tsx scheduleServerSave)
+  saveStatus?: StatusPillState
+  onRetrySaveAction?: () => void
 }
+
+const ADD_CARDS: Array<{ kind: AddKind; label: string; desc: string; Icon: ComponentType<any> }> = [
+  { kind: 'chart', label: 'Chart', desc: 'Line, bar, area and more', Icon: RiBarChartBoxLine },
+  { kind: 'table', label: 'Table', desc: 'Rows, columns and pivots', Icon: RiTableLine },
+  { kind: 'kpi', label: 'KPI', desc: 'A single headline metric', Icon: RiNumbersLine },
+  { kind: 'text', label: 'Text', desc: 'A note or markdown block', Icon: RiText },
+  { kind: 'spacer', label: 'Spacer', desc: 'Empty layout spacing', Icon: RiSpace },
+  { kind: 'composition', label: 'Composition', desc: 'Group widgets in one card', Icon: RiLayoutMasonryLine },
+  { kind: 'report', label: 'Report', desc: 'A composed report widget', Icon: RiFileTextLine },
+]
+
+const REFRESH_OPTS: Array<{ v: number; label: string }> = [
+  { v: 0, label: 'Off' }, { v: 60, label: 'Every 1m' }, { v: 180, label: 'Every 3m' },
+  { v: 300, label: 'Every 5m' }, { v: 900, label: 'Every 15m' }, { v: 1800, label: 'Every 30m' },
+  { v: 3600, label: 'Every 1h' }, { v: 21600, label: 'Every 6h' }, { v: 86400, label: 'Every 24h' },
+]
+
+const GRID_OPTS: Array<{ v: 'sm'|'md'|'lg'|'xl'; label: string }> = [
+  { v: 'sm', label: 'Small (24 cols)' }, { v: 'md', label: 'Medium (18 cols)' },
+  { v: 'lg', label: 'Large (12 cols)' }, { v: 'xl', label: 'XL (8 cols)' },
+]
+
+type MenuKey = 'add' | 'layout' | 'grid' | 'refresh' | null
 
 export default function TitleBar({
   hydrated,
@@ -73,8 +115,9 @@ export default function TitleBar({
   onNormalizeLayoutAction,
   onPackRowsFillAction,
   onCanvasAutoAction,
-  onCanvasFixedAction,
   onCanvasFixedCurrentAction,
+  saveStatus = 'idle',
+  onRetrySaveAction,
 }: TitleBarProps) {
   const { env } = useEnvironment()
   const trimmedToken = token?.trim() ?? ''
@@ -91,65 +134,62 @@ export default function TitleBar({
     setEditing(false)
   }
 
-  const handlePublishToggle = () => {
-    if (publicId) onUnpublishAction()
-    else onPublishAction()
-  }
+  const publicBase = () => ((env.publicDomain && env.publicDomain.trim())
+    ? env.publicDomain
+    : (typeof window !== 'undefined' ? window.location.origin : '')
+  ).replace(/\/$/, '')
 
   const handleView = () => {
     if (!publicId) return
-    const base = ((env.publicDomain && env.publicDomain.trim())
-      ? env.publicDomain
-      : (typeof window !== 'undefined' ? window.location.origin : '')
-    ).replace(/\/$/, '')
-    const url = `${base}/v/${publicId}${hasToken ? `?token=${encodeURIComponent(trimmedToken)}` : ''}`
+    const url = `${publicBase()}/v/${publicId}${hasToken ? `?token=${encodeURIComponent(trimmedToken)}` : ''}`
     window.open(url, '_blank', 'noopener,noreferrer')
   }
- 
+
+  const handleCopyLink = () => {
+    if (!publicId) return
+    try {
+      let tok = trimmedToken
+      if (isProtected && !tok && typeof window !== 'undefined') {
+        const entered = window.prompt('Enter the access token to include in the link')
+        if (entered && entered.trim()) { tok = entered.trim(); onTokenChangeAction?.(tok) }
+      }
+      const url = `${publicBase()}/v/${publicId}${(isProtected && tok) ? `?token=${encodeURIComponent(tok)}` : ''}`
+      if (navigator?.clipboard?.writeText) navigator.clipboard.writeText(url)
+    } catch {}
+  }
+
   const showViewButton = Boolean(publicId) && (!isProtected || hasToken)
 
-  // Target look: Secondary buttons with subtle border and surface for both themes
-  const secondaryBtnClass =
-    'h-10 px-4 text-sm font-medium rounded-lg border border-[hsl(var(--border))] ring-1 ring-inset ring-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]'
-  const iconBtnClass = secondaryBtnClass + ' w-10 px-0 flex items-center justify-center'
-  const [showAddPicker, setShowAddPicker] = useState(false)
-  const [actionsOpen, setActionsOpen] = useState(false)
-  const addRef = useRef<HTMLDivElement | null>(null)
-  const actionsRef = useRef<HTMLDivElement | null>(null)
+  const [openMenu, setOpenMenu] = useState<MenuKey>(null)
+  // ponytail: canvas lock has no source-of-truth prop; track locally. Resets on reload.
+  const [canvasLocked, setCanvasLocked] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
 
-  // Close pickers on outside click or Escape
+  // Close menus on outside click / Escape
   useEffect(() => {
     const onDocPointer = (e: MouseEvent) => {
-      const t = e.target as Node
-      const el = t as Element
-      // If the click lands inside an open Select/Listbox popover (often portaled), do not close the actions menu.
-      const inSelectPopover = !!(
-        el && (
-          el.closest('[role="listbox"]') ||
-          el.closest('[data-headlessui-portal]') ||
-          el.closest('[data-radix-popper-content-wrapper]') ||
-          el.closest('.tremor-Select') ||
-          el.closest('.tremor-Listbox')
-        )
-      )
-      if (showAddPicker && addRef.current && !addRef.current.contains(t) && !inSelectPopover) setShowAddPicker(false)
-      if (actionsOpen && actionsRef.current && !actionsRef.current.contains(t) && !inSelectPopover) setActionsOpen(false)
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpenMenu(null)
     }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setShowAddPicker(false); setActionsOpen(false) }
-    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(null) }
     document.addEventListener('mousedown', onDocPointer)
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onDocPointer)
       document.removeEventListener('keydown', onKey)
     }
-  }, [showAddPicker, actionsOpen])
+  }, [])
+
+  const toggle = (k: Exclude<MenuKey, null>) => setOpenMenu((v) => (v === k ? null : k))
+
+  const iconBtnClass =
+    'h-8 w-8 inline-flex items-center justify-center rounded-md border border-[hsl(var(--border))] bg-card text-foreground transition-colors hover:bg-muted'
+  const rowClass =
+    'w-full text-start text-sm px-3 py-2 rounded-md transition-colors hover:bg-muted disabled:opacity-50'
 
   return (
     <header className="sticky top-0 z-40 border-b border-[hsl(var(--border))] bg-[hsl(var(--topbar-bg))] text-[hsl(var(--topbar-fg))]">
       <div className="mx-auto w-full px-6 py-3 flex items-center gap-4 justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           {editing ? (
             <input
               type="text"
@@ -167,7 +207,7 @@ export default function TitleBar({
           ) : (
             <button
               type="button"
-              className="font-semibold truncate text-left hover:underline"
+              className="font-semibold truncate text-start hover:underline"
               title={title || 'Dashboard'}
               onClick={() => setEditing(true)}
             >
@@ -175,193 +215,167 @@ export default function TitleBar({
             </button>
           )}
           {createdAt && (
-            <span className="opacity-80 whitespace-nowrap">
-              Created on {new Date(createdAt).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })}
+            <span className="opacity-80 whitespace-nowrap text-xs">
+              Created {new Date(createdAt).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          {publicId && (
-            <div className="flex items-center gap-2">
-              {!hasToken ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={onSetTokenAction}
-                  title="Protect the link with a token"
-                >
-                  Set token
-                </Button>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={onRemoveTokenAction}
-                  title="Remove token protection"
-                >
-                  Remove token
-                </Button>
-              )}
-            </div>
-          )}
-          {/* Add Card moved into header */}
-          <div className="relative" ref={addRef}>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowAddPicker((v) => !v)}
-              className={secondaryBtnClass}
-            >
-              + Add Card
+
+        <div className="flex items-center gap-2" ref={rootRef}>
+          {/* Autosave status */}
+          <StatusPill state={saveStatus} onRetry={onRetrySaveAction} className="me-1" />
+
+          {/* Save */}
+          <Button variant="primary" size="sm" onClick={onSaveAction} disabled={!hydrated} title="Save dashboard (Ctrl/Cmd+S)">
+            Save
+          </Button>
+
+          {/* Publish / Unpublish */}
+          {!publicId ? (
+            <Button variant="secondary" size="sm" onClick={onPublishAction} disabled={!dashboardId} title="Publish a public link">
+              Publish
             </Button>
-            {showAddPicker && (
-              <div className="absolute right-0 mt-1 z-50 rounded-md border bg-card shadow-card p-2 grid grid-cols-2 gap-2 w-[260px]">
-                {(['kpi','chart','table','text','spacer','composition','report'] as const).map((t) => (
-                  <button key={t} className="text-xs px-2 py-1 rounded border hover:bg-muted" onClick={() => { onAddCardAction && onAddCardAction(t); setShowAddPicker(false) }}>{t.toUpperCase()}</button>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={onUnpublishAction} disabled={!dashboardId} title="Remove the public link">
+              Unpublish
+            </Button>
+          )}
+
+          {/* Token protection (only when published) */}
+          {publicId && (
+            !hasToken ? (
+              <Button variant="secondary" size="sm" onClick={onSetTokenAction} title="Protect the link with a token">Set token</Button>
+            ) : (
+              <Button variant="secondary" size="sm" onClick={onRemoveTokenAction} title="Remove token protection">Remove token</Button>
+            )
+          )}
+
+          {publicId && (
+            <Button variant="secondary" size="sm" onClick={handleCopyLink} title="Copy public link">Copy link</Button>
+          )}
+
+          {showViewButton && (
+            <Button variant="secondary" size="sm" onClick={handleView} title="Open published view">View</Button>
+          )}
+
+          <div className="mx-1 h-6 w-px bg-[hsl(var(--border))]" />
+
+          {/* Add Card picker */}
+          <div className="relative">
+            <Button variant="secondary" size="sm" icon={<RiAddLine className="h-4 w-4" />} onClick={() => toggle('add')}>
+              Add Card
+            </Button>
+            {openMenu === 'add' && (
+              <div className="anim-menu-in absolute end-0 mt-1 z-50 rounded-lg border border-[hsl(var(--border))] bg-card shadow-popover p-1 w-[280px]">
+                {ADD_CARDS.map(({ kind, label, desc, Icon }) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className="w-full flex items-start gap-3 px-2.5 py-2 rounded-md text-start transition-colors hover:bg-muted"
+                    onClick={() => { onAddCardAction?.(kind); setOpenMenu(null) }}
+                  >
+                    <Icon className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium">{label}</span>
+                      <span className="block text-2xs text-muted-foreground truncate">{desc}</span>
+                    </span>
+                  </button>
                 ))}
               </div>
             )}
           </div>
-          {/* Actions menu (Save / Publish / Unpublish + Grid Size) */}
-          <div className="relative" ref={actionsRef}>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setActionsOpen((v) => !v)}
-              aria-label="More actions"
-              className={iconBtnClass}
-            >
-              <RiMore2Fill className="h-4 w-4" />
-            </Button>
-            {actionsOpen && (
-              <div className="absolute right-0 mt-1 z-50 rounded-md border bg-card shadow-card p-2 w-[280px]">
-                <div className="flex flex-col gap-1">
-                  <button className="w-full text-left text-sm px-3 py-2 rounded-md transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] disabled:opacity-50" onClick={() => { onSaveAction?.(); setActionsOpen(false) }} disabled={!hydrated}>Save</button>
-                  <button className="w-full text-left text-sm px-3 py-2 rounded-md transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] disabled:opacity-50" onClick={() => { onPackRowsFillAction?.(); setActionsOpen(false) }} disabled={!hydrated}>Pack rows left + Fill</button>
-                  <button className="w-full text-left text-sm px-3 py-2 rounded-md transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] disabled:opacity-50" onClick={() => { onNormalizeLayoutAction?.(); setActionsOpen(false) }} disabled={!hydrated}>Normalize to 24 cols</button>
-                  <div className="h-px bg-[hsl(var(--border))] my-1" />
-                  <button className="w-full text-left text-sm px-3 py-2 rounded-md transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] disabled:opacity-50" onClick={() => { onCanvasFixedCurrentAction?.(); setActionsOpen(false) }} disabled={!hydrated}>Lock canvas width to current</button>
-                  <button className="w-full text-left text-sm px-3 py-2 rounded-md transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] disabled:opacity-50" onClick={() => { onCanvasAutoAction?.(); setActionsOpen(false) }} disabled={!hydrated}>Unlock canvas width (auto)</button>
-                  {!publicId && (
-                    <button className="w-full text-left text-sm px-3 py-2 rounded-md transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] disabled:opacity-50" onClick={() => { onPublishAction?.(); setActionsOpen(false) }} disabled={!dashboardId}>Publish</button>
-                  )}
-                  {!!publicId && (
-                    <>
-                      <button className="w-full text-left text-sm px-3 py-2 rounded-md transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] disabled:opacity-50" onClick={() => { onUnpublishAction?.(); setActionsOpen(false) }} disabled={!dashboardId}>Unpublish</button>
-                      <button
-                        className="w-full text-left text-sm px-3 py-2 rounded-md transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] disabled:opacity-50"
-                        onClick={() => {
-                          try {
-                            const base = ((env.publicDomain && env.publicDomain.trim())
-                              ? env.publicDomain
-                              : (typeof window !== 'undefined' ? window.location.origin : '')
-                            ).replace(/\/$/, '')
-                            let tokenToUse = trimmedToken
-                            if (isProtected && !tokenToUse) {
-                              // Ask once and persist for future copies in this browser
-                              const entered = typeof window !== 'undefined' ? window.prompt('Enter the access token to include in the link') : ''
-                              if (entered && entered.trim()) {
-                                tokenToUse = entered.trim()
-                                try {
-                                  onTokenChangeAction?.(tokenToUse)
-                                  if (dashboardId) localStorage.setItem(`dash_pub_token_${dashboardId}`, tokenToUse)
-                                } catch {}
-                              }
-                            }
-                            const url = `${base}/v/${publicId}${(isProtected && tokenToUse) ? `?token=${encodeURIComponent(tokenToUse)}` : ''}`
-                            if (navigator?.clipboard?.writeText) navigator.clipboard.writeText(url)
-                          } catch {}
-                          setActionsOpen(false)
-                        }}
-                        disabled={!dashboardId}
-                      >Copy public URL</button>
-                    </>
-                  )}
-                  <div className="h-px bg-[hsl(var(--border))] my-1" />
-                  <div className="flex items-center gap-2 px-1">
-                    <RiLayoutGrid2Line className="h-4 w-4 opacity-80" />
-                    <Select
-                      value={(gridSize || 'lg')}
-                      onValueChange={(v)=> onGridSizeChangeAction && onGridSizeChangeAction(v as any)}
-                      className="w-[180px] text-xs rounded-md"
-                    >
-                      <SelectItem value="sm">Small (24 cols)</SelectItem>
-                      <SelectItem value="md">Medium (18 cols)</SelectItem>
-                      <SelectItem value="lg">Large (12 cols)</SelectItem>
-                      <SelectItem value="xl">XL (8 cols)</SelectItem>
-                    </Select>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 px-1 text-sm py-1 rounded-md">
-                    <span>Refresh Queries every</span>
-                    <Select
-                      value={String(refreshEverySec || 0)}
-                      onValueChange={(v) => onRefreshEverySecChangeAction && onRefreshEverySecChangeAction(Number(v))}
-                      className="w-[140px] text-xs rounded-md"
-                    >
-                      <SelectItem value="0">Off</SelectItem>
-                      <SelectItem value="60">1m</SelectItem>
-                      <SelectItem value="180">3m</SelectItem>
-                      <SelectItem value="300">5m</SelectItem>
-                      <SelectItem value="900">15m</SelectItem>
-                      <SelectItem value="1800">30m</SelectItem>
-                      <SelectItem value="3600">1hr</SelectItem>
-                      <SelectItem value="21600">6hr</SelectItem>
-                      <SelectItem value="86400">24hr</SelectItem>
-                    </Select>
-                  </div>
-                  <div className="h-px bg-[hsl(var(--border))] my-2" />
-                  <label className="flex items-center justify-between gap-2 px-1 text-sm py-1 rounded-md hover:bg-secondary/60">
-                    <span>Show Data Navigator</span>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={showNavigator !== false}
-                      onChange={(e) => { onShowNavigatorChangeAction?.(e.target.checked); setActionsOpen(false) }}
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-2 px-1 text-sm py-1 rounded-md hover:bg-secondary/60">
-                    <span>Minimize sidebar on load</span>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={autoMinimizeNav !== false}
-                      onChange={(e) => { onAutoMinimizeNavChangeAction?.(e.target.checked); setActionsOpen(false) }}
-                    />
-                  </label>
-                  <div className="h-px bg-[hsl(var(--border))] my-2" />
-                  <label className="flex items-center justify-between gap-2 px-1 text-sm py-1 rounded-md hover:bg-secondary/60">
-                    <span>Show Global Filters in Public Page</span>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={publicShowFilters !== false}
-                      onChange={(e) => { onPublicShowFiltersChangeAction?.(e.target.checked); setActionsOpen(false) }}
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-2 px-1 text-sm py-1 rounded-md hover:bg-secondary/60">
-                    <span>Lock Global Filters</span>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={!!publicLockFilters}
-                      onChange={(e) => { onPublicLockFiltersChangeAction?.(e.target.checked); setActionsOpen(false) }}
-                    />
-                  </label>
-                </div>
+
+          {/* Grid density */}
+          <div className="relative">
+            <button type="button" className={iconBtnClass} onClick={() => toggle('grid')} title="Grid density" aria-label="Grid density">
+              <RiLayoutGridLine className="h-4 w-4" aria-hidden="true" />
+            </button>
+            {openMenu === 'grid' && (
+              <div className="anim-menu-in absolute end-0 mt-1 z-50 rounded-lg border border-[hsl(var(--border))] bg-card shadow-popover p-1 w-[200px]">
+                {GRID_OPTS.map(({ v, label }) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={`${rowClass} ${(gridSize || 'lg') === v ? 'bg-muted' : ''}`}
+                    onClick={() => { onGridSizeChangeAction?.(v); setOpenMenu(null) }}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
-          {showViewButton && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleView}
-              title="Open published view"
-              className={secondaryBtnClass}
-            >
-              View
-            </Button>
-          )}
+
+          {/* Auto-refresh */}
+          <div className="relative">
+            <button type="button" className={iconBtnClass} onClick={() => toggle('refresh')} title="Auto-refresh queries" aria-label="Auto-refresh queries">
+              <RiRefreshLine className="h-4 w-4" aria-hidden="true" />
+            </button>
+            {openMenu === 'refresh' && (
+              <div className="anim-menu-in absolute end-0 mt-1 z-50 rounded-lg border border-[hsl(var(--border))] bg-card shadow-popover p-1 w-[180px]">
+                {REFRESH_OPTS.map(({ v, label }) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={`${rowClass} ${Number(refreshEverySec || 0) === v ? 'bg-muted' : ''}`}
+                    onClick={() => { onRefreshEverySecChangeAction?.(v); setOpenMenu(null) }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Lock canvas width */}
+          <button
+            type="button"
+            className={iconBtnClass}
+            title={canvasLocked ? 'Unlock canvas width (auto)' : 'Lock canvas width to current'}
+            aria-label={canvasLocked ? 'Unlock canvas width' : 'Lock canvas width'}
+            aria-pressed={canvasLocked}
+            onClick={() => {
+              if (canvasLocked) { onCanvasAutoAction?.(); setCanvasLocked(false) }
+              else { onCanvasFixedCurrentAction?.(); setCanvasLocked(true) }
+            }}
+          >
+            {canvasLocked ? <RiLockLine className="h-4 w-4" aria-hidden="true" /> : <RiLockUnlockLine className="h-4 w-4" aria-hidden="true" />}
+          </button>
+
+          {/* Layout utilities + display options */}
+          <div className="relative">
+            <button type="button" className={iconBtnClass} onClick={() => toggle('layout')} title="Layout options" aria-label="Layout options">
+              <RiLayoutMasonryLine className="h-4 w-4" aria-hidden="true" />
+            </button>
+            {openMenu === 'layout' && (
+              <div className="anim-menu-in absolute end-0 mt-1 z-50 rounded-lg border border-[hsl(var(--border))] bg-card shadow-popover p-2 w-[280px]">
+                <button className={rowClass} onClick={() => { onPackRowsFillAction?.(); setOpenMenu(null) }} disabled={!hydrated}>
+                  Compact layout (fill gaps)
+                </button>
+                <button className={rowClass} onClick={() => { onNormalizeLayoutAction?.(); setOpenMenu(null) }} disabled={!hydrated}>
+                  Convert to 24-column grid
+                </button>
+                <div className="h-px bg-[hsl(var(--border))] my-2" />
+                <label className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-muted">
+                  <span>Show data navigator</span>
+                  <input type="checkbox" className="h-4 w-4" checked={showNavigator !== false} onChange={(e) => onShowNavigatorChangeAction?.(e.target.checked)} />
+                </label>
+                <label className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-muted">
+                  <span>Minimize sidebar on load</span>
+                  <input type="checkbox" className="h-4 w-4" checked={autoMinimizeNav !== false} onChange={(e) => onAutoMinimizeNavChangeAction?.(e.target.checked)} />
+                </label>
+                <div className="h-px bg-[hsl(var(--border))] my-2" />
+                <label className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-muted">
+                  <span>Show global filters on public page</span>
+                  <input type="checkbox" className="h-4 w-4" checked={publicShowFilters !== false} onChange={(e) => onPublicShowFiltersChangeAction?.(e.target.checked)} />
+                </label>
+                <label className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-muted">
+                  <span>Lock global filters</span>
+                  <input type="checkbox" className="h-4 w-4" checked={!!publicLockFilters} onChange={(e) => onPublicLockFiltersChangeAction?.(e.target.checked)} />
+                </label>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>

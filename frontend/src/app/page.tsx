@@ -9,7 +9,7 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import GridLayout from 'react-grid-layout'
 import { GRIDSIZE_COLS, colsFor, deriveLayouts, reconcileOrphans, rescaleLayout, type BreakpointKey } from '@/lib/gridBreakpoints'
-import { Modal, Button } from '@/components/ui'
+import { Modal, Button, EmptyState } from '@/components/ui'
 import KpiCard from '@/components/widgets/KpiCard'
 import ChartCard from '@/components/widgets/ChartCard'
 import HeatmapCard from '@/components/widgets/HeatmapCard'
@@ -27,9 +27,8 @@ import { ConfigUpdateContext } from '@/components/builder/ConfigUpdateContext'
 import ErrorBoundary from '@/components/dev/ErrorBoundary'
 import TitleBar from '@/components/builder/TitleBar'
 import WidgetActionsMenu from '@/components/widgets/WidgetActionsMenu'
-import { RiPushpin2Line, RiPushpin2Fill, RiSettings3Line, RiDragMove2Line } from '@remixicon/react'
+import { RiPushpin2Line, RiPushpin2Fill, RiMore2Fill, RiDragMove2Line, RiCloseLine, RiAddLine } from '@remixicon/react'
 import { createPortal } from 'react-dom'
-import WidgetKebabMenu from '@/components/widgets/WidgetKebabMenu'
 import AiAssistDialog from '@/components/ai/AiAssistDialog'
 import { JsonEditor, githubDarkTheme, githubLightTheme } from 'json-edit-react'
 import type { WidgetConfig, CompositionComponent } from '@/types/widgets'
@@ -51,9 +50,6 @@ export default function HomePage() {
   // Contextual actions menu state
   const [actionsMenuId, setActionsMenuId] = useState<string | null>(null)
   const [actionsAnchorEl, setActionsAnchorEl] = useState<HTMLElement | null>(null)
-  // Simple kebab (three-dots) menu state
-  const [kebabMenuId, setKebabMenuId] = useState<string | null>(null)
-  const [kebabAnchorEl, setKebabAnchorEl] = useState<HTMLElement | null>(null)
   const [hasPublished, setHasPublished] = useState<boolean>(false)
   const [token, setToken] = useState<string>('')
   const [isProtected, setIsProtected] = useState<boolean>(false)
@@ -670,12 +666,15 @@ export default function HomePage() {
 
   // Debounced server save triggered only by explicit user actions
   const autosaveRef = useRef<number | undefined>(undefined)
+  // Autosave lifecycle surfaced by the TitleBar StatusPill.
+  const [saveStatus, setSaveStatus] = useState<'idle'|'saving'|'saved'|'error'>('idle')
   const scheduleServerSave = (nextDef?: { layout: RGLLayout[]; widgets: Record<string, WidgetConfig> }, nextOptions?: Record<string, any>, immediate?: boolean) => {
     if (!dashboardId || !hydrated) return
     const def = nextDef ?? { layout: layoutState, widgets: configs }
     const options = nextOptions ?? dashOptions
     if (autosaveRef.current) window.clearTimeout(autosaveRef.current)
     const doSave = async () => {
+      setSaveStatus('saving')
       try {
         // Strip stale __gte/__lt for any field that already has a __date_preset saved.
         // This prevents leftover explicit date bounds from overriding the preset on future loads.
@@ -706,13 +705,34 @@ export default function HomePage() {
         const desktopLayout = merged.desktop ?? activeLayout
         await Api.saveDashboard({ id: dashboardId, name: dashboardName || 'New Dashboard', userId: user?.id || 'dev_user', definition: { ...(def as any), layout: desktopLayout, layouts: merged, widgets: sanitizedWidgets, options } })
         userEditedRef.current = false
+        setSaveStatus('saved')
       } catch {
-        // ignore autosave errors
+        // Surface autosave failures via the TitleBar StatusPill (Retry re-runs a save).
+        setSaveStatus('error')
       }
     }
     if (immediate) { void doSave(); return }
     autosaveRef.current = window.setTimeout(doSave, 600) as unknown as number
   }
+
+  // Manual save (Save button + Cmd/Ctrl+S) with status feedback.
+  const saveNow = async () => {
+    setSaveStatus('saving')
+    try { await onSave(); setSaveStatus('saved') }
+    catch { setSaveStatus('error') }
+  }
+  const saveNowRef = useRef(saveNow)
+  saveNowRef.current = saveNow
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        void saveNowRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Dialogs: View SpecQuery / SQL / JSON
   const [viewSpecId, setViewSpecId] = useState<string | null>(null)
@@ -1303,18 +1323,15 @@ export default function HomePage() {
         if (st.timeoutId) { window.clearTimeout(st.timeoutId); st.timeoutId = null }
         st.count = Math.max(0, Number(st.count || 0)) + 1
         body.dataset.actionsMenuOpen = '1'
-        console.debug('[PopoverDetector] Gate ON (popover added), count:', st.count)
       })
       removed.forEach(() => {
         const prev = Math.max(0, Number(st.count || 0))
         if (prev <= 0) return
         st.count = prev - 1
-        console.debug('[PopoverDetector] Gate dec (popover removed), count:', st.count)
         if (st.count === 0) {
           if (st.timeoutId) window.clearTimeout(st.timeoutId)
           st.timeoutId = window.setTimeout(() => {
             try { delete body.dataset.actionsMenuOpen } catch {}
-            console.debug('[PopoverDetector] Gate OFF (cooldown)')
             st.timeoutId = null
           }, 300)
         }
@@ -1337,7 +1354,9 @@ export default function HomePage() {
         isProtected={isProtected}
         token={token}
         onTokenChangeAction={setToken}
-        onSaveAction={onSave}
+        onSaveAction={saveNow}
+        onRetrySaveAction={() => { void saveNow() }}
+        saveStatus={saveStatus}
         onLoadAction={onLoad}
         onPublishAction={() => setPublishOpen(true)}
         onUnpublishAction={onUnpublish}
@@ -1458,6 +1477,16 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
+            {hydrated && layoutState.length === 0 && (
+              <div className="py-16">
+                <EmptyState
+                  icon={<RiAddLine className="h-6 w-6" aria-hidden="true" />}
+                  title="Add your first widget"
+                  hint="Charts, tables, KPIs and more. Pick a widget to start building your dashboard."
+                  primary={{ label: 'Add a widget', icon: <RiAddLine className="h-4 w-4" aria-hidden="true" />, onClick: () => addCard('chart') }}
+                />
+              </div>
+            )}
             <GridLayout
               className={editBp === 'desktop' ? 'layout' : 'layout mx-auto'}
               layout={effectiveLayout}
@@ -1520,14 +1549,6 @@ export default function HomePage() {
                           ) : null}
                         </span>
                         <span className="flex items-center gap-1 no-drag">
-                          <button
-                            type="button"
-                            className="text-xs px-1 py-0.5 rounded border hover:bg-muted"
-                            title="Widget actions"
-                            onClick={(e) => { e.stopPropagation(); setActionsMenuId(cfg.id); setActionsAnchorEl(e.currentTarget as HTMLElement) }}
-                          >
-                            <RiSettings3Line className="h-4 w-4" aria-hidden="true" />
-                          </button>
                           {cfg.type === 'composition' && (
                             <button type="button" className="text-[11px] px-2 py-0.5 rounded border hover:bg-muted"
                               title="Toggle inner edit mode"
@@ -1546,12 +1567,13 @@ export default function HomePage() {
                             type="button"
                             aria-label="Widget actions"
                             aria-haspopup="menu"
-                            aria-expanded={kebabMenuId === cfg.id}
+                            aria-expanded={actionsMenuId === cfg.id}
                             className="text-xs px-1 py-0.5 rounded border hover:bg-muted"
-                            title="More actions"
-                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); console.debug('[Kebab] mousedown open', cfg.id); setKebabMenuId(cfg.id); setKebabAnchorEl(e.currentTarget as HTMLElement) }}
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); console.debug('[Kebab] click open', cfg.id); setKebabMenuId(cfg.id); setKebabAnchorEl(e.currentTarget as HTMLElement) }}
-                          >⋮</button>
+                            title="Widget actions"
+                            onClick={(e) => { e.stopPropagation(); setActionsMenuId(cfg.id); setActionsAnchorEl(e.currentTarget as HTMLElement) }}
+                          >
+                            <RiMore2Fill className="h-4 w-4" aria-hidden="true" />
+                          </button>
                         </span>
                       </div>
                     )}
@@ -1664,6 +1686,19 @@ export default function HomePage() {
                       open={actionsMenuId === cfg.id}
                       onCloseAction={() => { setActionsMenuId(null); setActionsAnchorEl(null) }}
                       parentDashboardId={dashboardId}
+                      onAction={(action) => {
+                        const id = cfg.id
+                        if (action === 'duplicate') duplicateCard(id)
+                        else if (action === 'delete') deleteCard(id)
+                        else if (action === 'viewSpec') setViewSpecId(id)
+                        else if (action === 'viewSql') setViewSqlId(id)
+                        else if (action === 'viewJson') setViewJsonId(id)
+                        else if (action === 'aiAssist') { setAiWidgetId(id); setAiOpen(true) }
+                        else if (action === 'embed') { setEmbedWidgetId(id); setEmbedOpen(true) }
+                        else if (action === 'downloadPNG') window.dispatchEvent(new CustomEvent('widget-download-chart', { detail: { widgetId: id, format: 'png' } }))
+                        else if (action === 'downloadSVG') window.dispatchEvent(new CustomEvent('widget-download-chart', { detail: { widgetId: id, format: 'svg' } }))
+                        else if (action === 'downloadPdfPortrait' || action === 'downloadPdfLandscape') window.dispatchEvent(new CustomEvent('widget-download-pdf', { detail: { widgetId: id, landscape: action === 'downloadPdfLandscape' } }))
+                      }}
                     />
                   </div>
                 )
@@ -1761,7 +1796,7 @@ export default function HomePage() {
                     title="Close"
                     aria-label="Close configurator"
                   >
-                    ✕
+                    <RiCloseLine className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -1942,35 +1977,6 @@ export default function HomePage() {
             </div>
             </div>
       </Modal>
-      {/* Global kebab menu (outside card overlays) */}
-      <WidgetKebabMenu
-        open={!!kebabMenuId}
-        anchorEl={kebabMenuId ? kebabAnchorEl : null}
-        onCloseAction={() => { setKebabMenuId(null); setKebabAnchorEl(null) }}
-        widgetType={kebabMenuId ? configs[kebabMenuId]?.type : undefined}
-        chartType={kebabMenuId ? (configs[kebabMenuId] as any)?.chartType : undefined}
-        onAction={(action) => {
-          const id = kebabMenuId as string | null
-          if (!id) return
-          if (action === 'duplicate') duplicateCard(id)
-          else if (action === 'delete') deleteCard(id)
-          else if (action === 'viewSpec') setViewSpecId(id)
-          else if (action === 'viewSql') setViewSqlId(id)
-          else if (action === 'viewJson') setViewJsonId(id)
-          else if (action === 'aiAssist') { setAiWidgetId(id); setAiOpen(true) }
-          else if (action === 'embed') { setEmbedWidgetId(id); setEmbedOpen(true) }
-          else if (action === 'downloadPNG') {
-            window.dispatchEvent(new CustomEvent('widget-download-chart', { detail: { widgetId: id, format: 'png' } }))
-          }
-          else if (action === 'downloadSVG') {
-            window.dispatchEvent(new CustomEvent('widget-download-chart', { detail: { widgetId: id, format: 'svg' } }))
-          }
-          else if (action === 'downloadPdfPortrait' || action === 'downloadPdfLandscape') {
-            const landscape = action === 'downloadPdfLandscape'
-            window.dispatchEvent(new CustomEvent('widget-download-pdf', { detail: { widgetId: id, landscape } }))
-          }
-        }}
-      />
       {/* Viewers */}
       <ViewerDialog
         open={!!viewSpecId}
@@ -2047,7 +2053,7 @@ function ViewerDialog({ open, title, onClose, children, copyText }: { open: bool
             >Copy Raw</button>
             <div className="text-sm font-medium">{title}</div>
           </div>
-          <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onClose}>✕</button>
+          <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onClose} aria-label="Close"><RiCloseLine className="h-4 w-4" aria-hidden="true" /></button>
         </div>
         <div className="min-h-[320px] max-h-[70vh] overflow-auto">
           {children}
@@ -2112,7 +2118,7 @@ function EmbedDialog({ open, onClose, code, onCodeChange, urlPreview, width, hei
               onClick={() => { try { code && canCopy && !protectedNoToken && navigator.clipboard?.writeText(code) } catch {} }}
               disabled={!canCopy || protectedNoToken}
             >Copy</button>
-            <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onClose}>✕</button>
+            <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onClose} aria-label="Close"><RiCloseLine className="h-4 w-4" aria-hidden="true" /></button>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-7 gap-3 mb-3">

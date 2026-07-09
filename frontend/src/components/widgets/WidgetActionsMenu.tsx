@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { RiFilter3Line, RiArrowUpDownLine, RiBrushLine, RiGridLine, RiRulerLine, RiChat3Line, RiPriceTag3Line, RiArrowRightSLine, RiArrowLeftSLine, RiArrowLeftLine } from '@remixicon/react'
+import { RiFilter3Line, RiArrowUpDownLine, RiBrushLine, RiGridLine, RiRulerLine, RiChat3Line, RiPriceTag3Line, RiArrowRightSLine, RiArrowLeftSLine, RiArrowLeftLine, RiCloseLine, RiFileCopyLine, RiCodeSLine, RiBracesLine, RiFileListLine, RiSparkling2Line, RiCodeBoxLine, RiDownloadLine, RiDeleteBinLine } from '@remixicon/react'
 import { TextInput } from '@tremor/react'
 import { QueryApi, Api, type AlertOut } from '@/lib/api'
 import { Switch } from '@/components/Switch'
@@ -10,6 +10,11 @@ import type { WidgetConfig } from '@/types/widgets'
 import { Select as CSelect, SelectTrigger, SelectContent, SelectItem as CSelectItem, SelectValue } from '@/components/Select'
 import AlertDialog from '@/components/alerts/AlertDialog'
 import { RiNotification3Line } from '@remixicon/react'
+
+// Actions merged in from the old kebab menu. The dashboard page routes these.
+export type WidgetAction =
+  | 'duplicate' | 'delete' | 'viewSpec' | 'viewSql' | 'viewJson' | 'aiAssist' | 'embed'
+  | 'downloadPNG' | 'downloadSVG' | 'downloadPdfPortrait' | 'downloadPdfLandscape'
 
 export type WidgetActionsMenuProps = {
   widgetId: string
@@ -20,6 +25,8 @@ export type WidgetActionsMenuProps = {
   parentDashboardId?: string | null
   parentPublicId?: string | null
   parentToken?: string | null
+  /** Card-level actions (duplicate / view / embed / download / delete). */
+  onAction?: (action: WidgetAction) => void
 }
 
 // Text criterion -> selects subset of provided values
@@ -157,7 +164,7 @@ function useDismiss(ref: React.RefObject<HTMLElement | null>, onClose: () => voi
 }
 
 // Simple menu/submenu implementation rendered into a Portal near anchor rect, to avoid overflow clipping
-export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onCloseAction, parentDashboardId, parentPublicId, parentToken }: WidgetActionsMenuProps) {
+export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onCloseAction, parentDashboardId, parentPublicId, parentToken, onAction }: WidgetActionsMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null)
   useDismiss(ref, onCloseAction, [open])
   // Single-pane navigation path (root -> child -> grandchild)
@@ -174,17 +181,14 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
       if (st.timeoutId) { window.clearTimeout(st.timeoutId); st.timeoutId = null }
       st.count = Math.max(0, Number(st.count || 0)) + 1
       body.dataset.actionsMenuOpen = '1'
-      console.debug('[WidgetActionsMenu] Gate ON, count:', st.count, 'flag:', body.dataset.actionsMenuOpen)
     } else {
       const prev = Math.max(0, Number(st.count || 0))
       if (prev <= 0) return
       st.count = prev - 1
-      console.debug('[WidgetActionsMenu] Gate dec, count:', st.count)
       if (st.count === 0) {
         if (st.timeoutId) window.clearTimeout(st.timeoutId)
         st.timeoutId = window.setTimeout(() => {
           try { delete body.dataset.actionsMenuOpen } catch {}
-          console.debug('[WidgetActionsMenu] Gate OFF (cooldown)')
           st.timeoutId = null
         }, 300)
       }
@@ -422,19 +426,50 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
   const hasTooltip = ['chart', 'table'].includes(widgetType)
   const hasLegend = ['chart'].includes(widgetType) && !['badges', 'progress', 'tracker'].includes(chartType) // Charts with series
   const hasAlerts = true // All widgets can have alerts
+  // Chart/report download availability (merged from the old kebab menu)
+  const supportsDownload = widgetType === 'chart' && !['badges','progress','tracker','categoryBar','barList','tremorTable','spark'].includes(chartType)
+  const supportsReportDownload = widgetType === 'report'
+  // Dispatch a card-level action then close the menu.
+  const act = (a: WidgetAction) => { onAction?.(a); onCloseAction() }
 
   const makeRootPane = (): Pane => ({
     title: 'Actions',
     content: (
       <MenuList>
-        {hasFilter && <MenuItem label="Filter" icon={<RiFilter3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['filter'])} />}
-        {hasSort && <MenuItem label="Sort" icon={<RiArrowUpDownLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['sort'])} />}
-        {hasFormat && <MenuItem label="Format" icon={<RiBrushLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['format'])} />}
-        {hasGrid && <MenuItem label="Grid" icon={<RiGridLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['grid'])} />}
-        {hasAxis && <MenuItem label="Axis" icon={<RiRulerLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['axis'])} />}
-        {hasTooltip && <MenuItem label="Tooltip" icon={<RiChat3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['tooltip'])} />}
-        {hasLegend && <MenuItem label="Legend" icon={<RiPriceTag3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['legend'])} />}
-        {hasAlerts && <MenuItem label={existingAlert ? (`Edit ${existingAlert.kind === 'notification' ? 'Notification' : 'Alert'}`) : 'Set Notification/Alert'} icon={<RiNotification3Line className="h-4 w-4" aria-hidden="true" />} onClick={() => setAlertsOpen(true)} />}
+        <MenuGroup title="Configure">
+          {hasFilter && <MenuItem label="Filter" icon={<RiFilter3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['filter'])} />}
+          {hasSort && <MenuItem label="Sort" icon={<RiArrowUpDownLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['sort'])} />}
+          {hasFormat && <MenuItem label="Format" icon={<RiBrushLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['format'])} />}
+          {hasGrid && <MenuItem label="Grid" icon={<RiGridLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['grid'])} />}
+          {hasAxis && <MenuItem label="Axis" icon={<RiRulerLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['axis'])} />}
+          {hasTooltip && <MenuItem label="Tooltip" icon={<RiChat3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['tooltip'])} />}
+          {hasLegend && <MenuItem label="Legend" icon={<RiPriceTag3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['legend'])} />}
+          {hasAlerts && <MenuItem label={existingAlert ? (`Edit ${existingAlert.kind === 'notification' ? 'Notification' : 'Alert'}`) : 'Set Notification/Alert'} icon={<RiNotification3Line className="h-4 w-4" aria-hidden="true" />} onClick={() => setAlertsOpen(true)} />}
+          <MenuItem label="AI Assist" icon={<RiSparkling2Line className="h-4 w-4" aria-hidden="true" />} onClick={() => act('aiAssist')} />
+        </MenuGroup>
+        <MenuDivider />
+        <MenuItem label="Duplicate" icon={<RiFileCopyLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('duplicate')} />
+        <MenuDivider />
+        <MenuItem label="View SQL" icon={<RiCodeSLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewSql')} />
+        <MenuItem label="View Spec Query" icon={<RiBracesLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewSpec')} />
+        <MenuItem label="View JSON Config" icon={<RiFileListLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewJson')} />
+        <MenuItem label="Embed" icon={<RiCodeBoxLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('embed')} />
+        {supportsDownload && (
+          <>
+            <MenuDivider />
+            <MenuItem label="Download PNG" icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPNG')} />
+            <MenuItem label="Download SVG" icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadSVG')} />
+          </>
+        )}
+        {supportsReportDownload && (
+          <>
+            <MenuDivider />
+            <MenuItem label="Download PDF (Portrait)" icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPdfPortrait')} />
+            <MenuItem label="Download PDF (Landscape)" icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPdfLandscape')} />
+          </>
+        )}
+        <MenuDivider />
+        <MenuItem label="Delete" icon={<RiDeleteBinLine className="h-4 w-4" aria-hidden="true" />} danger onClick={() => act('delete')} />
       </MenuList>
     )
   })
@@ -985,7 +1020,7 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
                 <div className="h-7 w-7" />
               )}
               <div className="text-[13px] font-medium">{pane.title}</div>
-              <button className="h-7 w-7 flex items-center justify-center rounded hover:bg-secondary/70 border border-[hsl(var(--border))]" onClick={onCloseAction} aria-label="Close">✕</button>
+              <button className="h-7 w-7 flex items-center justify-center rounded hover:bg-secondary/70 border border-[hsl(var(--border))]" onClick={onCloseAction} aria-label="Close"><RiCloseLine className="h-4 w-4" aria-hidden="true" /></button>
             </div>
             <div className="max-h-[70vh] overflow-auto">
               {pane.content}
@@ -1037,7 +1072,11 @@ function MenuGroup({ title, children }: { title: string; children: React.ReactNo
   )
 }
 
-function MenuItem({ label, icon, hasSubmenu, active, onHover, onClick, children, side = 'right', itemRef }: {
+function MenuDivider() {
+  return <li aria-hidden className="my-1 h-px bg-[hsl(var(--border))] mx-2" />
+}
+
+function MenuItem({ label, icon, hasSubmenu, active, onHover, onClick, children, side = 'right', itemRef, danger }: {
   label: string
   icon?: React.ReactNode
   hasSubmenu?: boolean
@@ -1047,12 +1086,13 @@ function MenuItem({ label, icon, hasSubmenu, active, onHover, onClick, children,
   children?: React.ReactNode
   side?: 'left' | 'right'
   itemRef?: (el: HTMLLIElement | null) => void
+  danger?: boolean
 }) {
   return (
     <li className="relative" onMouseEnter={onHover} ref={itemRef}>
       <button
         type="button"
-        className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] ${active ? 'bg-secondary/70 ring-1 ring-inset ring-[hsl(var(--border))]' : ''}`}
+        className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] ${active ? 'bg-secondary/70 ring-1 ring-inset ring-[hsl(var(--border))]' : ''} ${danger ? 'text-[hsl(var(--danger))]' : ''}`}
         onClick={onClick}
       >
         <span className="inline-flex items-center gap-2">
