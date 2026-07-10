@@ -28,9 +28,10 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
 fi
 
 export PYTHONUNBUFFERED=1
-# IMPORTANT: with multiple Gunicorn workers, do NOT run the scheduler in each worker
-# Set RUN_SCHEDULER=0 here and run a single separate scheduler instance if needed
-export RUN_SCHEDULER="${RUN_SCHEDULER:-0}"
+# Default is a single worker (see WORKERS below), so the scheduler runs in-process.
+# If you deliberately run multiple workers, set RUN_SCHEDULER=0 here and start ONE
+# separate scheduler process, otherwise every worker would double-run jobs.
+export RUN_SCHEDULER="${RUN_SCHEDULER:-1}"
 
 # Prometheus multiprocess: aggregate metrics across workers, durable across recycles.
 # Must be exported before the app imports app.metrics (prometheus_client reads it at import).
@@ -46,12 +47,26 @@ import os
 print(os.cpu_count() or 2)
 PY
 )
-# Workers: WEB_CONCURRENCY overrides, else 2*CPU + 1
+# Workers: DEFAULT 1.
+# Bayan uses an embedded DuckDB analytical store. DuckDB holds a single
+# read-write lock on the .duckdb file — only ONE process can open it. With
+# multiple Gunicorn workers, the first worker grabs the lock and the rest fail
+# to init DuckDB ("Could not set lock ... Conflicting lock is held") and then
+# serve broken queries -> blank/erroring widgets on a fraction of requests.
+# So keep ONE worker; intra-request concurrency is handled by asyncio + the
+# heavy-query thread pool inside the worker. WEB_CONCURRENCY can override, but
+# any value > 1 will break DuckDB-backed widgets (only set it if you have moved
+# DuckDB to a single dedicated process and workers open it read-only).
 if [ -n "${WEB_CONCURRENCY:-}" ]; then
   WORKERS="${WEB_CONCURRENCY}"
 else
-  WORKERS=$(( CPU_COUNT * 2 + 1 ))
+  WORKERS=1
 fi
+if [ "${WORKERS}" -gt 1 ]; then
+  echo "[warn] WORKERS=${WORKERS} > 1: embedded DuckDB is single-process; extra workers will fail to open DuckDB and serve broken widget queries. Set WEB_CONCURRENCY=1." >&2
+fi
+# CPU_COUNT is retained for reference/tuning but no longer sizes the worker pool.
+: "${CPU_COUNT:=1}"
 
 KEEP_ALIVE="${KEEP_ALIVE:-75}"
 TIMEOUT="${TIMEOUT:-180}"
