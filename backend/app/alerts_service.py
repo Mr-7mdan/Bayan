@@ -849,17 +849,18 @@ def _render_report_table_html(tbl: dict, variables: list[dict], resolved: dict[s
 
     has_sub_row = bool(subheaders) and (not tbl.get('mergeBlankSubheaders') or any(not m for m in merge_map))
 
-    # Column widths — pixels. 0 / missing means auto-fit.
+    # Column widths — PERCENTAGES (0-100), matching how the report builder stores
+    # them ("Column Widths (%)"). 0 / missing means auto-fit. (Previously mis-read
+    # as scaled pixels, which ignored the user's set widths in the PDF.)
     col_widths = tbl.get('colWidths') or []
     wrap_text = bool(tbl.get('wrapText'))
 
-    # Build colgroup. We scale pixel widths so the PDF column sizes match the
-    # on-screen builder when the user previews and exports.
+    # Build colgroup as percent widths so PDF columns match the on-screen builder.
     colgroup = ''
     any_fixed = bool(col_widths and any(w and w > 0 for w in col_widths))
     if any_fixed:
         cols_html = ''.join(
-            f"<col style='width:{round(int(w) * scale)}px;'/>" if (w and w > 0) else '<col/>'
+            f"<col style='width:{w}%;'/>" if (w and w > 0) else '<col/>'
             for w in col_widths
         )
         colgroup = f"<colgroup>{cols_html}</colgroup>"
