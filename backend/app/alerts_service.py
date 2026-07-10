@@ -1267,20 +1267,19 @@ def _html_to_pdf(html: str, *, width: str = "210mm", height: str = "297mm", land
         return None
 
 
-def _render_report_pdf(widget_cfg: dict, db: Session, global_filters: Optional[dict] = None, *, landscape: bool = False) -> Optional[bytes]:
-    """Render a report widget as PDF bytes.
-    
-    Generates the report HTML, wraps it in a full HTML document with Inter font, and converts to PDF.
-    The target_width is chosen based on orientation to fill the printable area.
+def _render_report_full_html(widget_cfg: dict, db: Session, global_filters: Optional[dict] = None, *, landscape: bool = False) -> Optional[str]:
+    """Render the complete, standalone report HTML document (the exact markup the
+    PDF renderer converts). Shared by the PDF export and the on-screen preview so
+    the preview is pixel-identical to the downloaded PDF.
+
+    target_width fills the A4 printable area minus 10mm margins each side:
+      portrait  = 210mm - 20mm ≈ 718px @96dpi · landscape = 297mm - 20mm ≈ 1047px
     """
-    # A4 printable area minus margins (10mm each side):
-    # portrait  = 210mm - 20mm = 190mm ≈ 718px at 96dpi
-    # landscape = 297mm - 20mm = 277mm ≈ 1047px at 96dpi
     pdf_target_w = 1047 if landscape else 718
     report_html = _render_report_html(widget_cfg, db, global_filters, target_width=pdf_target_w)
     if not report_html:
         return None
-    full_html = f"""<!doctype html>
+    return f"""<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -1296,6 +1295,13 @@ def _render_report_pdf(widget_cfg: dict, db: Session, global_filters: Optional[d
   {report_html}
 </body>
 </html>"""
+
+
+def _render_report_pdf(widget_cfg: dict, db: Session, global_filters: Optional[dict] = None, *, landscape: bool = False) -> Optional[bytes]:
+    """Render a report widget as PDF bytes (same HTML as the preview → playwright)."""
+    full_html = _render_report_full_html(widget_cfg, db, global_filters, landscape=landscape)
+    if not full_html:
+        return None
     return _html_to_pdf(full_html, width="297mm" if landscape else "210mm", landscape=landscape, fit_one_page=True)
 
 

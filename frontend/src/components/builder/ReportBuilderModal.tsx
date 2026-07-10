@@ -10,7 +10,7 @@ import { ConditionalRule, ConditionalFormat, OP_OPTIONS, ICON_OPTIONS, ICON_GLYP
 import TableCellsEditorModal from './TableCellsEditorModal'
 import { useAuth } from '@/components/providers/AuthProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
-import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine, RiArrowUpLine, RiArrowDownLine, RiBarChart2Line, RiFunctions, RiCalendarLine, RiQuestionLine, RiPencilLine, RiDownloadLine } from '@remixicon/react'
+import { RiAddLine, RiDeleteBinLine, RiDragMoveLine, RiSettings3Line, RiTableLine, RiText, RiHashtag, RiCloseLine, RiArrowLeftLine, RiSave3Line, RiImageLine, RiFileCopyLine, RiAlignLeft, RiAlignCenter, RiAlignRight, RiAlignTop, RiAlignVertically, RiAlignBottom, RiDatabase2Line, RiArrowDownSLine, RiArrowUpLine, RiArrowDownLine, RiBarChart2Line, RiFunctions, RiCalendarLine, RiQuestionLine, RiPencilLine, RiDownloadLine, RiEyeLine } from '@remixicon/react'
 import DataExplorerDialogV2 from './DataExplorerDialogV2'
 import { Button, Input, StatusPill, Modal } from '@/components/ui'
 import type { StatusPillState } from '@/components/ui'
@@ -3586,6 +3586,11 @@ export default function ReportBuilderModal({
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
+  // Preview dialog: renders the same server HTML the PDF uses (fast, no playwright)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewHtml, setPreviewHtml] = useState<string>('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewLandscape, setPreviewLandscape] = useState(false)
 
   // Suspend background query recalculations while the builder is open
   useEffect(() => {
@@ -3753,20 +3758,43 @@ export default function ReportBuilderModal({
     try { localStorage.removeItem(draftKey) } catch {}
   }
 
-  // Export uses the existing server-side render path (Api.downloadReportPdf →
-  // /alerts/report-pdf/{dashboardId}/{widgetId}). It renders the *persisted*
-  // report, so Save (and publish) first if there are unsaved changes.
-  const handleExport = async () => {
-    setExportError(null)
-    let dashboardId: string | null = null
+  // Both preview and export render the *persisted* report server-side, so Save
+  // first if there are unsaved changes.
+  const resolveDashboardId = (): string | null => {
     try {
       const params = new URLSearchParams(window.location.search)
-      dashboardId = params.get('id') || localStorage.getItem('dashboardId')
-    } catch { /* noop */ }
+      return params.get('id') || localStorage.getItem('dashboardId')
+    } catch { return null }
+  }
+
+  // Preview: fetch the same HTML the PDF is built from (fast — skips playwright).
+  const openPreview = async (landscape: boolean = previewLandscape) => {
+    setExportError(null)
+    const dashboardId = resolveDashboardId()
+    if (!dashboardId) { setExportError('Save the dashboard first to enable preview.'); return }
+    setPreviewLandscape(landscape)
+    setPreviewOpen(true)
+    setPreviewLoading(true)
+    setPreviewHtml('')
+    try {
+      const html = await Api.reportPreviewHtml(dashboardId, config.id, landscape)
+      setPreviewHtml(html)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Preview failed')
+      setPreviewOpen(false)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  // Download the PDF (same render pipeline + playwright pagination).
+  const handleExport = async () => {
+    setExportError(null)
+    const dashboardId = resolveDashboardId()
     if (!dashboardId) { setExportError('Save the dashboard first to enable export.'); return }
     setExporting(true)
     try {
-      const blob = await Api.downloadReportPdf(dashboardId, config.id)
+      const blob = await Api.downloadReportPdf(dashboardId, config.id, previewLandscape)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -3833,7 +3861,7 @@ export default function ReportBuilderModal({
             >
               <RiQuestionLine className="h-4 w-4" />
             </button>
-            <Button variant="outline" size="sm" icon={<RiDownloadLine className="h-3.5 w-3.5" />} loading={exporting} onClick={handleExport}>{t('builder.exportPdf')}</Button>
+            <Button variant="outline" size="sm" icon={<RiEyeLine className="h-3.5 w-3.5" />} loading={previewLoading} onClick={() => openPreview()}>Preview</Button>
             <Button variant="primary" size="sm" icon={<RiSave3Line className="h-3.5 w-3.5" />} onClick={handleSave}>{t('builder.saveReport')}</Button>
           </div>
         </div>
@@ -4216,6 +4244,34 @@ export default function ReportBuilderModal({
       >
         <p className="text-sm text-muted-foreground">{t('builder.confirmCloseHint')}</p>
       </Modal>
+
+      {/* PDF preview — renders the same server HTML the PDF is built from */}
+      {previewOpen && (
+        <div className="fixed inset-0 z-[230] flex items-center justify-center bg-black/50 p-4" onMouseDown={() => setPreviewOpen(false)}>
+          <div className="flex flex-col w-full max-w-4xl h-[92vh] rounded-lg bg-card shadow-modal overflow-hidden anim-menu-in" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-[hsl(var(--border))] shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <RiEyeLine className="h-4 w-4 text-primary shrink-0" />
+                <span className="text-sm font-semibold truncate">{config.title || 'Report'}</span>
+                <span className="text-2xs text-muted-foreground shrink-0 hidden sm:inline">— identical to the PDF</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="inline-flex rounded-md border overflow-hidden text-2xs">
+                  <button type="button" className={`px-2 py-1 transition-colors ${!previewLandscape ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted'}`} onClick={() => { if (previewLandscape) openPreview(false) }}>Portrait</button>
+                  <button type="button" className={`px-2 py-1 transition-colors ${previewLandscape ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted'}`} onClick={() => { if (!previewLandscape) openPreview(true) }}>Landscape</button>
+                </div>
+                <Button variant="primary" size="sm" icon={<RiDownloadLine className="h-3.5 w-3.5" />} loading={exporting} onClick={handleExport}>Download PDF</Button>
+                <button type="button" onClick={() => setPreviewOpen(false)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors" aria-label={t('builder.close') || 'Close'}><RiCloseLine className="h-4 w-4" /></button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 bg-[#525659] overflow-auto flex justify-center p-4">
+              {previewLoading
+                ? <div className="flex items-center justify-center w-full text-xs text-white/70 gap-2"><span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-transparent animate-spin" /> Rendering preview…</div>
+                : <iframe title="Report preview" srcDoc={previewHtml} className="bg-white shadow-lg shrink-0" style={{ width: previewLandscape ? '1047px' : '718px', maxWidth: '100%', height: '100%', border: 'none' }} />}
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   )

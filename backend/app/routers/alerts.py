@@ -20,7 +20,7 @@ from ..authz import require_user, require_admin, require_owned, require_dashboar
 from ..security import encrypt_text, decrypt_text
 from ..alerts_service import run_rule, send_email, send_sms_hadara, evaluate_threshold, _render_kpi_html  # type: ignore
 from ..scheduler import schedule_all_alert_jobs as _sync_alert_jobs
-from ..alerts_service import _render_table_html, _apply_base_template, _apply_xpick_to_where, _render_report_html, _lookup_widget_config, _render_report_pdf  # type: ignore
+from ..alerts_service import _render_table_html, _apply_base_template, _apply_xpick_to_where, _render_report_html, _lookup_widget_config, _render_report_pdf, _render_report_full_html  # type: ignore
 from ..alerts_service import _build_kpi_svg, _build_chart_svg_placeholder, _to_svg_data_uri, _fmt_num  # type: ignore
 from ..routers.query import run_query_spec, run_pivot, period_totals  # reuse query execution
 from ..config import settings
@@ -2941,6 +2941,27 @@ def download_report_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{safe_title}.pdf"'},
     )
+
+
+@router.get("/report-html/{dashboard_id}/{widget_id}")
+def preview_report_html(
+    dashboard_id: str,
+    widget_id: str,
+    landscape: bool = False,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+) -> FastAPIResponse:
+    """Render the report widget as standalone HTML — the exact markup the PDF
+    exporter converts — for an on-screen preview. Fast: skips the playwright PDF
+    step, so the preview is identical to the download without the render wait."""
+    require_dashboard(db, user, dashboard_id, Permission.VIEW)
+    wcfg = _lookup_widget_config(db, dashboard_id=dashboard_id, widget_id=widget_id)
+    if not wcfg:
+        raise HTTPException(status_code=404, detail="Widget not found")
+    html = _render_report_full_html(wcfg, db, landscape=landscape)
+    if not html:
+        raise HTTPException(status_code=500, detail="Report render failed")
+    return FastAPIResponse(content=html, media_type="text/html")
 
 
 # --- Tests ---

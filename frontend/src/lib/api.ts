@@ -947,6 +947,15 @@ export const Api = {
     if (!res.ok) { const body = await res.text().catch(() => ''); throw new Error(`HTTP ${res.status}: ${body}`) }
     return res.blob()
   },
+  // Standalone HTML for the report — identical markup to the PDF, minus the
+  // playwright step. Powers the on-screen preview dialog (fast; download on demand).
+  reportPreviewHtml: async (dashboardId: string, widgetId: string, landscape = false): Promise<string> => {
+    const qs = landscape ? '?landscape=true' : ''
+    const url = `${getApiBase()}/alerts/report-html/${encodeURIComponent(dashboardId)}/${encodeURIComponent(widgetId)}${qs}`
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) { const body = await res.text().catch(() => ''); throw new Error(`HTTP ${res.status}: ${body}`) }
+    return res.text()
+  },
   // --- Updates ---
   updatesVersion: () => http<{ backend?: string|null; frontend?: string|null }>(`/updates/version`),
   updatesCheck: (component: 'backend'|'frontend'|'both' = 'backend') => http<{ enabled: boolean; component: string; currentVersion?: string|null; latestVersion?: string|null; updateType?: 'auto'|'manual'; requiresMigrations?: boolean; releaseNotes?: string|null; manifestUrl?: string|null }>(`/updates/check?component=${encodeURIComponent(component)}`),
