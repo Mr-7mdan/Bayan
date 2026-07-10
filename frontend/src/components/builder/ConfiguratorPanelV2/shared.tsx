@@ -1,5 +1,6 @@
 "use client"
 import React, { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 export function SectionCard({ title, badge, children, className }: {
   title: string
@@ -56,17 +57,17 @@ export const selectCls = (extra = '') =>
 // Token-palette swatch picker + custom hex fallback. Always emits a #rrggbb hex
 // string (theme swatches are resolved to hex at click time) so widget config
 // output stays identical to the old raw <input type="color">.
-const PALETTE_TOKENS: { label: string; varName: string }[] = [
-  { label: 'Chart 1', varName: '--chart-1' },
-  { label: 'Chart 2', varName: '--chart-2' },
-  { label: 'Chart 3', varName: '--chart-3' },
-  { label: 'Chart 4', varName: '--chart-4' },
-  { label: 'Chart 5', varName: '--chart-5' },
-  { label: 'Primary', varName: '--primary' },
-  { label: 'Muted', varName: '--muted-foreground' },
-  { label: 'Foreground', varName: '--foreground' },
-  { label: 'Border', varName: '--border' },
-  { label: 'Destructive', varName: '--destructive' },
+const PALETTE_TOKENS: { labelKey: string; varName: string }[] = [
+  { labelKey: 'chart1', varName: '--chart-1' },
+  { labelKey: 'chart2', varName: '--chart-2' },
+  { labelKey: 'chart3', varName: '--chart-3' },
+  { labelKey: 'chart4', varName: '--chart-4' },
+  { labelKey: 'chart5', varName: '--chart-5' },
+  { labelKey: 'primary', varName: '--primary' },
+  { labelKey: 'muted', varName: '--muted-foreground' },
+  { labelKey: 'foreground', varName: '--foreground' },
+  { labelKey: 'border', varName: '--border' },
+  { labelKey: 'destructive', varName: '--destructive' },
 ]
 
 function resolveTokenHex(varName: string): string {
@@ -90,6 +91,7 @@ export function ColorField({ value, onChange, className }: {
   onChange: (hex: string) => void
   className?: string
 }) {
+  const t = useTranslations('configurator')
   const [open, setOpen] = useState(false)
   const hex = value || '#000000'
   const validHex = /^#[0-9a-fA-F]{6}$/.test(hex)
@@ -98,23 +100,23 @@ export function ColorField({ value, onChange, className }: {
       <button type="button" onClick={() => setOpen(o => !o)}
         className="h-8 w-full rounded-md border cursor-pointer overflow-hidden"
         style={{ backgroundColor: hex }}
-        aria-label="Pick color" title={hex} />
+        aria-label={t('common.pickColor')} title={hex} />
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute z-50 mt-1 end-0 w-52 rounded-md border bg-card p-2 shadow-card space-y-2">
             <div className="grid grid-cols-5 gap-1.5">
-              {PALETTE_TOKENS.map(t => (
-                <button key={t.varName} type="button" title={t.label}
-                  onClick={() => { onChange(resolveTokenHex(t.varName)); setOpen(false) }}
+              {PALETTE_TOKENS.map(tok => (
+                <button key={tok.varName} type="button" title={t(`options.palette.${tok.labelKey}`)}
+                  onClick={() => { onChange(resolveTokenHex(tok.varName)); setOpen(false) }}
                   className="h-6 rounded border cursor-pointer hover:scale-110 transition-transform"
-                  style={{ backgroundColor: `hsl(var(${t.varName}))` }} />
+                  style={{ backgroundColor: `hsl(var(${tok.varName}))` }} />
               ))}
             </div>
             <div className="flex items-center gap-1.5 pt-1 border-t">
               <input type="color" value={validHex ? hex : '#000000'}
                 onChange={e => onChange(e.target.value)}
-                className="h-8 w-10 shrink-0 rounded border cursor-pointer" aria-label="Custom color" />
+                className="h-8 w-10 shrink-0 rounded border cursor-pointer" aria-label={t('common.customColor')} />
               <input type="text" value={value || ''}
                 onChange={e => onChange(e.target.value)}
                 placeholder="#rrggbb"

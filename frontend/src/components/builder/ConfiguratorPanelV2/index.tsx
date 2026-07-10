@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useQuery } from '@tanstack/react-query'
 import { Api, type IntrospectResponse } from '@/lib/api'
 import * as SchemaCache from '@/lib/schemaCache'
@@ -48,6 +49,7 @@ function useTabCounts(local: WidgetConfig | null) {
 export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddAction }: Props) {
   const updateConfig = useConfigUpdate()
   const { user } = useAuth()
+  const t = useTranslations('configurator')
 
   const [local, setLocal] = useState<WidgetConfig | null>(selected)
   const [activeTab, setActiveTab] = useState<Tab>('general')
@@ -272,8 +274,8 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
       <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted-foreground">
         <RiGridLine className="size-8 opacity-30" />
         <div className="text-center">
-          <div className="text-sm font-medium">No widget selected</div>
-          <div className="text-xs mt-0.5 opacity-70">Click a widget on the canvas to configure it</div>
+          <div className="text-sm font-medium">{t('empty.title')}</div>
+          <div className="text-xs mt-0.5 opacity-70">{t('empty.hint')}</div>
         </div>
       </div>
     )
@@ -282,9 +284,9 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
   const searchLower = search.toLowerCase().trim()
 
   const tabs: { key: Tab; label: string; count: number; hidden?: boolean }[] = [
-    { key: 'general',   label: 'General',   count: tabCounts.general },
-    { key: 'data',      label: 'Data',      count: tabCounts.data,     hidden: !hasDataTab },
-    { key: 'visualize', label: 'Visualize', count: tabCounts.visualize, hidden: !hasVisualTab },
+    { key: 'general',   label: t('tabs.general'),   count: tabCounts.general },
+    { key: 'data',      label: t('tabs.data'),      count: tabCounts.data,     hidden: !hasDataTab },
+    { key: 'visualize', label: t('tabs.visualize'), count: tabCounts.visualize, hidden: !hasVisualTab },
   ]
 
   return (
@@ -298,7 +300,7 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
           <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
           <input
             className="w-full h-8 pl-8 pr-2.5 text-xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--primary))] placeholder:text-muted-foreground"
-            placeholder="Search settings…"
+            placeholder={t('search.placeholder')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -309,27 +311,27 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
         </div>
         <button
           className={`h-8 w-8 flex items-center justify-center rounded-md border transition-colors duration-150 ${historyIndex > 0 ? 'hover:bg-muted cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
-          onClick={undo} disabled={historyIndex <= 0} title="Undo">
+          onClick={undo} disabled={historyIndex <= 0} title={t('common.undo')}>
           <RiArrowGoBackLine className="size-4" />
         </button>
         <button
           className={`h-8 w-8 flex items-center justify-center rounded-md border transition-colors duration-150 ${historyIndex < history.length - 1 ? 'hover:bg-muted cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
-          onClick={redo} disabled={historyIndex >= history.length - 1} title="Redo">
+          onClick={redo} disabled={historyIndex >= history.length - 1} title={t('common.redo')}>
           <RiArrowGoForwardLine className="size-4" />
         </button>
       </div>
 
       {/* ── Tab navigation ────────────────────────────────────────────────── */}
       <div className="flex items-center gap-0.5 border-b mb-3">
-        {tabs.filter(t => !t.hidden).map(t => (
-          <button key={t.key} type="button" onClick={() => setActiveTab(t.key)}
+        {tabs.filter(tab => !tab.hidden).map(tab => (
+          <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)}
             className={`relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors duration-150 cursor-pointer border-b-2 -mb-px ${
-              activeTab === t.key
+              activeTab === tab.key
                 ? 'border-[hsl(var(--primary))] text-[hsl(var(--primary))]'
                 : 'border-transparent text-muted-foreground hover:text-foreground hover:border-[hsl(var(--border))]'
             }`}>
-            {t.label}
-            {t.count > 0 && <ActiveBadge count={t.count} />}
+            {tab.label}
+            {tab.count > 0 && <ActiveBadge count={tab.count} />}
           </button>
         ))}
       </div>
@@ -339,8 +341,8 @@ export default function ConfiguratorPanelV2({ selected, allWidgets, quickAddActi
       {searchLower && (
         <div className="mb-2 px-1 text-xs text-muted-foreground flex items-center gap-1.5">
           <RiSearchLine className="size-3.5 shrink-0" />
-          Showing settings matching <span className="font-mono font-semibold text-foreground">&quot;{search}&quot;</span>
-          <span>— check all tabs</span>
+          {t('search.hintPrefix')} <span className="font-mono font-semibold text-foreground">&quot;{search}&quot;</span>
+          <span>{t('search.hintSuffix')}</span>
         </div>
       )}
 

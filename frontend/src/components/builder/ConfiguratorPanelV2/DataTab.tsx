@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useQuery } from '@tanstack/react-query'
 import { Api, type DatasourceOut, type IntrospectResponse } from '@/lib/api'
 import { PivotBuilder, type PivotAssignments } from '@/components/builder/PivotBuilder'
@@ -17,8 +18,9 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
   samplesByField: Record<string,string[]>; allFieldNames: string[]; numericFields: string[]; dateLikeFields: string[]; search?: string
 }) {
   const { user } = useAuth()
+  const t = useTranslations('configurator')
   const s = search.toLowerCase().trim()
-  const matches = (...terms: string[]) => !s || terms.some(t => t.toLowerCase().includes(s))
+  const matches = (...terms: string[]) => !s || terms.some(term => term.toLowerCase().includes(s))
 
   const [srcFilter, setSrcFilter] = useState('')
   const [selKind, setSelKind] = useState<'x'|'value'|'legend'|'filter'|null>(null)
@@ -120,7 +122,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
   }, [dsQ.data, local.datasourceId])
 
   if (['composition','report','text','spacer'].includes(local.type))
-    return <div className="text-xs text-muted-foreground p-2">No data configuration for this widget type.</div>
+    return <div className="text-xs text-muted-foreground p-2">{t('data.noDataConfig')}</div>
 
   const schemaForAdv = schemaQ.data as IntrospectResponse|undefined
 
@@ -129,10 +131,10 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
 
       {/* ── Source ──────────────────────────────────────────────────────────── */}
       {matches('source','query mode','sql','spec','datasource','routing') && (
-        <SectionCard title="Source">
+        <SectionCard title={t('sections.source')}>
           {/* Query mode toggle */}
           <div>
-            <label className="block text-xs text-muted-foreground mb-1.5">Query mode</label>
+            <label className="block text-xs text-muted-foreground mb-1.5">{t('data.queryMode')}</label>
             <div className="grid grid-cols-2 gap-2">
               {(['sql','spec'] as const).map(m=>(
                 <label key={m} className={`flex items-center justify-center p-2 rounded-md border cursor-pointer text-xs transition-colors duration-150 ${(local.queryMode||'sql')===m?'bg-[hsl(var(--muted))] ring-2 ring-[hsl(var(--primary))] font-semibold':'bg-[hsl(var(--secondary)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}>
@@ -142,14 +144,14 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
                       if(m==='spec'&&!next.querySpec) next.querySpec={source:'',select:[]}
                       setLocal(next); updateConfig(next)
                     }} />
-                  {m==='sql' ? 'SQL' : 'Spec (Ibis)'}
+                  {m==='sql' ? t('data.queryModeSql') : t('data.queryModeSpec')}
                 </label>
               ))}
             </div>
           </div>
 
           {/* Datasource picker — shows name not ID via SelectValue */}
-          <FormRow label="Datasource" full>
+          <FormRow label={t('data.datasource')} full>
             <Select value={local.datasourceId||''} onValueChangeAction={(val:string)=>{
               const next={...local,datasourceId:val||undefined} as WidgetConfig
               if(next.querySpec) next.querySpec={...next.querySpec,source:'',select:[]}
@@ -157,11 +159,11 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
             }}>
               <SelectTrigger className="h-8 text-xs rounded-md bg-[hsl(var(--secondary))] px-3 border border-[hsl(var(--border))] w-full">
                 <span className="truncate text-xs">
-                  {dsEntry ? `${dsEntry.name} (${dsEntry.type})` : '(Default: DuckDB)'}
+                  {dsEntry ? `${dsEntry.name} (${dsEntry.type})` : t('data.defaultDuckDb')}
                 </span>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">(Default: DuckDB)</SelectItem>
+                <SelectItem value="">{t('data.defaultDuckDb')}</SelectItem>
                 {((dsQ.data as DatasourceOut[]|undefined)||[]).map(ds=>(
                   <SelectItem key={ds.id} value={ds.id}>{ds.name} ({ds.type})</SelectItem>
                 ))}
@@ -170,7 +172,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
           </FormRow>
 
           {/* Prefer local DuckDB */}
-          <FormRow label="Prefer local DuckDB">
+          <FormRow label={t('data.preferLocalDuck')}>
             <Switch
               checked={!!local.options?.preferLocalDuck}
               onChangeAction={v=>patchOpt({preferLocalDuck:v||undefined})} />
@@ -179,7 +181,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
             <button
               className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors duration-150 cursor-pointer"
               onClick={()=>setAdvOpen(true)}>
-              Advanced SQL…
+              {t('data.advancedSql')}
             </button>
           </div>
         </SectionCard>
@@ -199,7 +201,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
 
       {/* ── SQL Editor ──────────────────────────────────────────────────────── */}
       {(!local.queryMode||local.queryMode==='sql') && matches('sql','query') && (
-        <SectionCard title="SQL Query">
+        <SectionCard title={t('sections.sqlQuery')}>
           <textarea
             className="w-full px-2.5 py-2 rounded-md bg-[hsl(var(--secondary))] font-mono text-xs border border-[hsl(var(--border))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--primary))] resize-y"
             rows={10} value={local.sql||''}
@@ -210,9 +212,9 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
 
       {/* ── Table / View picker ─────────────────────────────────────────────── */}
       {local.queryMode==='spec' && matches('table','view','source','refresh') && (
-        <SectionCard title="Table / View">
+        <SectionCard title={t('sections.tableView')}>
           <div className="space-y-2">
-            <input className={inputCls()} placeholder="Search tables…" value={srcFilter} onChange={e=>setSrcFilter(e.target.value)} />
+            <input className={inputCls()} placeholder={t('data.searchTables')} value={srcFilter} onChange={e=>setSrcFilter(e.target.value)} />
             <Select
               value={local.querySpec?.source||''}
               onValueChangeAction={(src:string)=>{
@@ -229,12 +231,12 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
               <SelectTrigger
                 className="h-8 w-full text-xs rounded-md bg-[hsl(var(--secondary))] px-3 border border-[hsl(var(--border))]"
                 disabled={schemaQ.isLoading && tablesFast.length===0}>
-                <SelectValue placeholder={schemaQ.isLoading&&tablesFast.length===0?'Loading…':'Select table or view…'} />
+                <SelectValue placeholder={schemaQ.isLoading&&tablesFast.length===0?t('common.loading'):t('data.selectTable')} />
               </SelectTrigger>
               <SelectContent>
                 {filteredSources.length===0 && (
                   <div className="text-xs text-muted-foreground px-3 py-2">
-                    {schemaQ.isLoading ? 'Loading tables…' : 'No tables found'}
+                    {schemaQ.isLoading ? t('data.loadingTables') : t('data.noTablesFound')}
                   </div>
                 )}
                 {filteredSources.map(it=><SelectItem key={it.value} value={it.value}>{it.label}</SelectItem>)}
@@ -250,7 +252,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
                     try{window.dispatchEvent(new CustomEvent('request-table-samples',{detail:{widgetId:local.id}} as any))}catch{}
                   }
                 }}>
-                Refresh fields
+                {t('data.refreshFields')}
               </button>
             </div>
           </div>
@@ -259,7 +261,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
 
       {/* ── Data Fields (Pivot) ─────────────────────────────────────────────── */}
       {local.queryMode==='spec' && ['chart','kpi','table'].includes(local.type) && matches('data fields','pivot','filters','x axis','values','legend') && (
-        <SectionCard title="Data Fields" badge={activeFilterCount>0?<ActiveBadge count={activeFilterCount}/>:undefined}>
+        <SectionCard title={t('sections.dataFields')} badge={activeFilterCount>0?<ActiveBadge count={activeFilterCount}/>:undefined}>
           <div className="rounded-md p-2 bg-[hsl(var(--secondary))]">
             <PivotBuilder
               fields={allFieldNames}
@@ -292,10 +294,10 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
 
       {/* ── Custom Columns ─────────────────────────────────────────────────── */}
       {local.queryMode==='spec' && matches('custom column','formula','computed') && (
-        <SectionCard title="Custom Columns">
+        <SectionCard title={t('sections.customColumns')}>
           <div className="space-y-2">
             {(local.customColumns||[]).length===0&&!editingCustom&&(
-              <div className="text-xs text-muted-foreground">No custom columns yet.</div>
+              <div className="text-xs text-muted-foreground">{t('data.noCustomColumns')}</div>
             )}
             {(local.customColumns||[]).map((col,i)=>(
               editingCustom?.id===col.id ? (
@@ -313,7 +315,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button className="text-xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors duration-150 cursor-pointer"
-                      onClick={()=>setEditingCustom({id:col.id,name:col.name,formula:col.formula,type:col.type})}>Edit</button>
+                      onClick={()=>setEditingCustom({id:col.id,name:col.name,formula:col.formula,type:col.type})}>{t('common.edit')}</button>
                     <button className="text-xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors duration-150 cursor-pointer"
                       onClick={()=>{ const next={...local,customColumns:(local.customColumns||[]).filter((_,j)=>j!==i)}; setLocal(next); updateConfig(next) }}>✕</button>
                   </div>
@@ -330,7 +332,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
             )}
             {!editingCustom&&(
               <button className="text-xs px-2.5 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] transition-colors duration-150 cursor-pointer"
-                onClick={()=>setEditingCustom({name:'',formula:''})}>+ New custom column</button>
+                onClick={()=>setEditingCustom({name:'',formula:''})}>{t('data.newCustomColumn')}</button>
             )}
           </div>
         </SectionCard>
@@ -338,10 +340,10 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
 
       {/* ── Measures ───────────────────────────────────────────────────────── */}
       {local.queryMode==='spec' && ['chart','kpi','table'].includes(local.type) && matches('measure','formula') && (
-        <SectionCard title="Measures">
+        <SectionCard title={t('sections.measures')}>
           <div className="space-y-2">
             {(local.measures||[]).length===0&&!editingMeasure&&(
-              <div className="text-xs text-muted-foreground">No measures yet.</div>
+              <div className="text-xs text-muted-foreground">{t('data.noMeasures')}</div>
             )}
             {(local.measures||[]).map((m,i)=>(
               editingMeasure?.id===m.id ? (
@@ -359,7 +361,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button className="text-xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors duration-150 cursor-pointer"
-                      onClick={()=>setEditingMeasure({id:m.id,name:m.name,formula:m.formula})}>Edit</button>
+                      onClick={()=>setEditingMeasure({id:m.id,name:m.name,formula:m.formula})}>{t('common.edit')}</button>
                     <button className="text-xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors duration-150 cursor-pointer"
                       onClick={()=>{ const next={...local,measures:(local.measures||[]).filter((_,j)=>j!==i)}; setLocal(next); updateConfig(next) }}>✕</button>
                   </div>
@@ -376,7 +378,7 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
             )}
             {!editingMeasure&&(
               <button className="text-xs px-2.5 py-1 rounded-md border bg-card hover:bg-[hsl(var(--secondary)/0.6)] transition-colors duration-150 cursor-pointer"
-                onClick={()=>setEditingMeasure({name:'',formula:''})}>+ New measure</button>
+                onClick={()=>setEditingMeasure({name:'',formula:''})}>{t('data.newMeasure')}</button>
             )}
           </div>
         </SectionCard>
@@ -384,32 +386,32 @@ export function DataTab({ local, setLocal, updateConfig, samplesByField, allFiel
 
       {/* ── Sort & Limit ────────────────────────────────────────────────────── */}
       {local.queryMode==='spec' && matches('sort','limit','top n','direction') && (
-        <SectionCard title="Sort & Limit">
-          <FormRow label="Sort by">
+        <SectionCard title={t('sections.sortLimit')}>
+          <FormRow label={t('data.sortBy')}>
             <select className={selectCls()} value={local.options?.dataDefaults?.sort?.by||''}
               onChange={e=>{
                 const dd={...(local.options?.dataDefaults||{}),sort:{...(local.options?.dataDefaults?.sort||{}),by:e.target.value as any||undefined}}
                 patchOpt({dataDefaults:dd})
               }}>
-              <option value="">Default</option>
-              <option value="x">X</option>
-              <option value="value">Value</option>
+              <option value="">{t('data.sortDefault')}</option>
+              <option value="x">{t('data.sortX')}</option>
+              <option value="value">{t('data.sortValue')}</option>
             </select>
           </FormRow>
-          <FormRow label="Direction">
+          <FormRow label={t('data.direction')}>
             <select className={selectCls()} value={local.options?.dataDefaults?.sort?.direction||'desc'}
               onChange={e=>{
                 const dd={...(local.options?.dataDefaults||{}),sort:{...(local.options?.dataDefaults?.sort||{}),direction:e.target.value as any}}
                 patchOpt({dataDefaults:dd})
               }}>
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
+              <option value="asc">{t('data.directionAsc')}</option>
+              <option value="desc">{t('data.directionDesc')}</option>
             </select>
           </FormRow>
-          <FormRow label="Top N">
+          <FormRow label={t('data.topN')}>
             <input type="number" min={1} className={inputCls('w-20')}
               value={local.options?.dataDefaults?.topN?.n ?? ''}
-              placeholder="All"
+              placeholder={t('data.topNPlaceholder')}
               onChange={e=>{
                 const v = e.target.value===''?undefined:{n:Number(e.target.value)}
                 const dd={...(local.options?.dataDefaults||{}),topN:v}

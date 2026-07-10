@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect } from 'react'
+import { useTranslations } from 'next-intl'
 import type { WidgetConfig } from '@/types/widgets'
 import type { PivotAssignments } from '@/components/builder/PivotBuilder'
 import { Switch } from '@/components/Switch'
@@ -29,52 +30,54 @@ const X_DATE_PRESET_SET = new Set(['YYYY','YYYY-MM','YYYY-MM-DD','h:mm a','dddd'
 // ── Filter rule sub-components ───────────────────────────────────────────────
 function StringRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Record<string,any>) => void }) {
   type StrOp = 'contains'|'not_contains'|'eq'|'ne'|'starts_with'|'ends_with'
+  const t = useTranslations('configurator')
   const [op, setOp] = useState<StrOp>('contains')
   const [val, setVal] = useState('')
   return (
     <div className="space-y-2">
-      <FormRow label="Operator">
+      <FormRow label={t('data.operator')}>
         <select className={selectCls()} value={op} onChange={e=>setOp(e.target.value as StrOp)}>
-          <option value="contains">contains</option>
-          <option value="not_contains">not contains</option>
-          <option value="eq">equals</option>
-          <option value="ne">not equals</option>
-          <option value="starts_with">starts with</option>
-          <option value="ends_with">ends with</option>
+          <option value="contains">{t('options.strOp.contains')}</option>
+          <option value="not_contains">{t('options.strOp.not_contains')}</option>
+          <option value="eq">{t('options.strOp.eq')}</option>
+          <option value="ne">{t('options.strOp.ne')}</option>
+          <option value="starts_with">{t('options.strOp.starts_with')}</option>
+          <option value="ends_with">{t('options.strOp.ends_with')}</option>
         </select>
       </FormRow>
-      <FormRow label="Value" full>
-        <input className={inputCls()} value={val} onChange={e=>setVal(e.target.value)} placeholder="value…" />
+      <FormRow label={t('data.value')} full>
+        <input className={inputCls()} value={val} onChange={e=>setVal(e.target.value)} placeholder={t('data.valuePlaceholder')} />
       </FormRow>
       <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
-        onClick={()=>{ if(val.trim()) onPatch({[`${field}__${op}`]:val.trim()}) }}>Apply rule</button>
+        onClick={()=>{ if(val.trim()) onPatch({[`${field}__${op}`]:val.trim()}) }}>{t('common.applyRule')}</button>
     </div>
   )
 }
 
 function NumberFilterDetails({ field, onPatch }: { field: string; onPatch: (p: Record<string,any>) => void }) {
   type NumberOp = 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'between'
+  const t = useTranslations('configurator')
   const [op, setOp] = useState<NumberOp>('gte')
   const [val, setVal] = useState('')
   const [val2, setVal2] = useState('')
   return (
     <div className="space-y-2">
-      <FormRow label="Operator">
+      <FormRow label={t('data.operator')}>
         <select className={selectCls()} value={op} onChange={e=>setOp(e.target.value as NumberOp)}>
-          <option value="eq">= equals</option>
-          <option value="ne">≠ not equals</option>
-          <option value="gt">&gt; greater than</option>
-          <option value="gte">≥ at least</option>
-          <option value="lt">&lt; less than</option>
-          <option value="lte">≤ at most</option>
-          <option value="between">between</option>
+          <option value="eq">{t('options.numOp.eq')}</option>
+          <option value="ne">{t('options.numOp.ne')}</option>
+          <option value="gt">{t('options.numOp.gt')}</option>
+          <option value="gte">{t('options.numOp.gte')}</option>
+          <option value="lt">{t('options.numOp.lt')}</option>
+          <option value="lte">{t('options.numOp.lte')}</option>
+          <option value="between">{t('options.numOp.between')}</option>
         </select>
       </FormRow>
-      <FormRow label={op==='between'?'From':'Value'}>
+      <FormRow label={op==='between'?t('data.from'):t('data.value')}>
         <input type="number" className={inputCls()} value={val} onChange={e=>setVal(e.target.value)} placeholder="0" />
       </FormRow>
       {op==='between' && (
-        <FormRow label="To">
+        <FormRow label={t('data.to')}>
           <input type="number" className={inputCls()} value={val2} onChange={e=>setVal2(e.target.value)} placeholder="0" />
         </FormRow>
       )}
@@ -83,7 +86,7 @@ function NumberFilterDetails({ field, onPatch }: { field: string; onPatch: (p: R
           if(!val) return
           if(op==='between') onPatch({[`${field}__gte`]:Number(val),[`${field}__lte`]:Number(val2||val)})
           else onPatch({[`${field}__${op}`]:Number(val)})
-        }}>Apply rule</button>
+        }}>{t('common.applyRule')}</button>
     </div>
   )
 }
@@ -91,6 +94,7 @@ function NumberFilterDetails({ field, onPatch }: { field: string; onPatch: (p: R
 function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Record<string,any>) => void }) {
   type DateMode = 'preset'|'custom'
   type CustomOp = 'after'|'before'|'between'
+  const t = useTranslations('configurator')
   const [mode, setMode] = useState<DateMode>('preset')
   const [config, setConfig] = useState<PresetConfig>({ ...DEFAULT_PRESET, period: 'month' })
   const [selectedQuickPick, setSelectedQuickPick] = useState<string | null>(null)
@@ -115,7 +119,7 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
       <div className="flex gap-1 rounded-md border p-0.5 bg-muted/30 w-fit">
         {(['preset','custom'] as DateMode[]).map(m=>(
           <button key={m} onClick={()=>setMode(m)}
-            className={`text-xs px-2.5 py-0.5 rounded cursor-pointer capitalize ${mode===m?'bg-background shadow-sm font-medium':''}`}>{m}</button>
+            className={`text-xs px-2.5 py-0.5 rounded cursor-pointer capitalize ${mode===m?'bg-background shadow-sm font-medium':''}`}>{t(`options.toggle.${m}`)}</button>
         ))}
       </div>
       {mode==='preset' ? (
@@ -126,7 +130,7 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
             const qp = QUICK_PICKS.find(q => q.label === label)
             if (qp) setConfig({ ...qp.config })
           }}>
-            {!selectedQuickPick && <option value="">— Select a preset —</option>}
+            {!selectedQuickPick && <option value="">{t('data.selectPreset')}</option>}
             {Object.entries(groups).map(([group, picks]) => (
               <optgroup key={group} label={group}>
                 {picks.map(qp => <option key={qp.label} value={qp.label}>{qp.label}</option>)}
@@ -136,25 +140,25 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
           {/* Composable dimension controls */}
           <div className="grid grid-cols-2 gap-1.5">
             <div>
-              <span className="text-[10px] text-muted-foreground">Period</span>
+              <span className="text-[10px] text-muted-foreground">{t('data.period')}</span>
               <select className={selectCls('w-full')} value={config.period} onChange={e => setConfig(c => ({ ...c, period: e.target.value as any }))}>
                 {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <span className="text-[10px] text-muted-foreground">Offset</span>
+              <span className="text-[10px] text-muted-foreground">{t('data.offset')}</span>
               <select className={selectCls('w-full')} value={config.offset} onChange={e => setConfig(c => ({ ...c, offset: e.target.value as any }))}>
                 {OFFSET_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <span className="text-[10px] text-muted-foreground">As Of</span>
+              <span className="text-[10px] text-muted-foreground">{t('data.asOf')}</span>
               <select className={selectCls('w-full')} value={config.as_of} onChange={e => setConfig(c => ({ ...c, as_of: e.target.value as any }))}>
                 {AS_OF_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <span className="text-[10px] text-muted-foreground">Range Mode</span>
+              <span className="text-[10px] text-muted-foreground">{t('data.rangeMode')}</span>
               <select className={selectCls('w-full')} value={config.range_mode} onChange={e => setConfig(c => ({ ...c, range_mode: e.target.value as any }))}>
                 {RANGE_MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -163,31 +167,31 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
           <div className="flex items-center gap-3">
             <label className="inline-flex items-center gap-1 text-[10px]">
               <input type="checkbox" checked={config.include_weekends} onChange={e => setConfig(c => ({ ...c, include_weekends: e.target.checked }))} />
-              <span className="text-muted-foreground">Include Weekends</span>
+              <span className="text-muted-foreground">{t('data.includeWeekends')}</span>
             </label>
             <label className="inline-flex items-center gap-1 text-[10px]">
               <input type="checkbox" checked={config.apply_holidays} onChange={e => setConfig(c => ({ ...c, apply_holidays: e.target.checked }))} />
-              <span className="text-muted-foreground">Apply Holidays</span>
+              <span className="text-muted-foreground">{t('data.applyHolidays')}</span>
             </label>
           </div>
-          {preview.label && <p className="text-[10px] text-muted-foreground">{preview.loading ? 'Resolving…' : preview.label}</p>}
+          {preview.label && <p className="text-[10px] text-muted-foreground">{preview.loading ? t('data.resolving') : preview.label}</p>}
           <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
-            onClick={()=>onPatch({[`${field}__date_preset`]:config,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>Apply</button>
+            onClick={()=>onPatch({[`${field}__date_preset`]:config,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>{t('common.apply')}</button>
         </div>
       ) : (
         <div className="space-y-2">
-          <FormRow label="Condition">
+          <FormRow label={t('data.condition')}>
             <select className={selectCls()} value={customOp} onChange={e=>setCustomOp(e.target.value as CustomOp)}>
-              <option value="after">after</option>
-              <option value="before">before</option>
-              <option value="between">between</option>
+              <option value="after">{t('options.dateOp.after')}</option>
+              <option value="before">{t('options.dateOp.before')}</option>
+              <option value="between">{t('options.dateOp.between')}</option>
             </select>
           </FormRow>
-          <FormRow label={customOp==='between'?'From':'Date'}>
+          <FormRow label={customOp==='between'?t('data.from'):t('data.date')}>
             <input type="date" className={inputCls()} value={d1} onChange={e=>setD1(e.target.value)} />
           </FormRow>
           {customOp==='between' && (
-            <FormRow label="To">
+            <FormRow label={t('data.to')}>
               <input type="date" className={inputCls()} value={d2} onChange={e=>setD2(e.target.value)} />
             </FormRow>
           )}
@@ -197,7 +201,7 @@ function DateRuleDetails({ field, onPatch }: { field: string; onPatch: (p: Recor
               if(customOp==='after') onPatch({[`${field}__gte`]:d1,[`${field}__date_preset`]:undefined})
               else if(customOp==='before') onPatch({[`${field}__lt`]:d1,[`${field}__date_preset`]:undefined})
               else onPatch({[`${field}__gte`]:d1,[`${field}__lt`]:d2||d1,[`${field}__date_preset`]:undefined})
-            }}>Apply</button>
+            }}>{t('common.apply')}</button>
         </div>
       )}
     </div>
@@ -211,6 +215,7 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
   pivot: PivotAssignments; applyPivot: (p: PivotAssignments) => void
   samplesByField: Record<string,string[]>; numericFields: string[]; dateLikeFields: string[]
 }) {
+  const t = useTranslations('configurator')
   const [filterTab, setFilterTab] = useState<'manual'|'rule'>('manual')
   const [ruleType, setRuleType] = useState<'auto'|'string'|'number'|'date'>('auto')
   // Local samples state — populated from prop OR from live event
@@ -294,75 +299,75 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
           const needsDateField = isPeriodicAgg || isMaAgg || isLastAgg
           return (
             <>
-              <FormRow label="Aggregation">
+              <FormRow label={t('data.aggregation')}>
                 <select className={selectCls()} value={curAgg} onChange={e => {
                   const agg = e.target.value
                   const autoDate = xField || undefined
                   patchValue({ agg, avgDateField: (ve as any)?.avgDateField || autoDate })
                 }}>
-                  <optgroup label="Standard">
-                    {(['none','sum','count','distinct','avg','min','max'] as const).map(a => <option key={a} value={a}>{a}</option>)}
+                  <optgroup label={t('data.aggStandard')}>
+                    {(['none','sum','count','distinct','avg','min','max'] as const).map(a => <option key={a} value={a}>{t(`options.agg.${a}`)}</option>)}
                   </optgroup>
                   {xIsDate && (<>
-                    <optgroup label="Period Average">
-                      <option value="avg_daily">Avg / Day</option>
-                      <option value="avg_wday">Avg / WDay (working days)</option>
-                      <option value="avg_weekly">Avg / Week</option>
-                      <option value="avg_monthly">Avg / Month</option>
+                    <optgroup label={t('data.aggPeriodAverage')}>
+                      <option value="avg_daily">{t('data.avgDaily')}</option>
+                      <option value="avg_wday">{t('data.avgWday')}</option>
+                      <option value="avg_weekly">{t('data.avgWeekly')}</option>
+                      <option value="avg_monthly">{t('data.avgMonthly')}</option>
                     </optgroup>
-                    <optgroup label="Last Period">
-                      <option value="last_daily_sum">Last Daily Sum</option>
+                    <optgroup label={t('data.aggLastPeriod')}>
+                      <option value="last_daily_sum">{t('data.lastDailySum')}</option>
                     </optgroup>
-                    <optgroup label="Moving Average">
-                      <option value="ma7">MA-7 (7-day)</option>
-                      <option value="ma14">MA-14 (14-day)</option>
-                      <option value="ma30">MA-30 (30-day)</option>
-                      <option value="ma60">MA-60 (60-day)</option>
+                    <optgroup label={t('data.aggMovingAverage')}>
+                      <option value="ma7">{t('data.ma7')}</option>
+                      <option value="ma14">{t('data.ma14')}</option>
+                      <option value="ma30">{t('data.ma30')}</option>
+                      <option value="ma60">{t('data.ma60')}</option>
                     </optgroup>
                   </>)}
                 </select>
               </FormRow>
               {needsDateField && (
-                <FormRow label="Date column">
+                <FormRow label={t('data.dateColumn')}>
                   <select className={selectCls()} value={(ve as any)?.avgDateField || xField || ''} onChange={e => patchValue({ avgDateField: e.target.value || undefined })}>
-                    <option value="">— select —</option>
+                    <option value="">{t('data.select')}</option>
                     {dateLikeFields.map(f => <option key={f} value={f}>{f}</option>)}
                   </select>
                 </FormRow>
               )}
               {isPeriodicAgg && (
-                <FormRow label="Numerator">
+                <FormRow label={t('data.numerator')}>
                   <select className={selectCls()} value={(ve as any)?.avgNumerator || 'sum'} onChange={e => patchValue({ avgNumerator: e.target.value })}>
-                    <option value="sum">sum</option>
-                    <option value="count">count</option>
-                    <option value="distinct">distinct</option>
+                    <option value="sum">{t('options.agg.sum')}</option>
+                    <option value="count">{t('options.agg.count')}</option>
+                    <option value="distinct">{t('options.agg.distinct')}</option>
                   </select>
                 </FormRow>
               )}
               {curAgg === 'avg_wday' && (
-                <FormRow label="Exclude holidays">
+                <FormRow label={t('data.excludeHolidays')}>
                   <input type="checkbox" className="accent-[hsl(var(--primary))]" checked={!!(ve as any)?.applyHolidays} onChange={e => patchValue({ applyHolidays: e.target.checked })} />
                 </FormRow>
               )}
             </>
           )
         })()}
-        <FormRow label="Format">
+        <FormRow label={t('data.format')}>
           <select className={selectCls()} value={ve?.format||'none'} onChange={e=>patchValue({format:e.target.value})}>
-            {FORMAT_OPTIONS.map(f=><option key={f} value={f}>{f}</option>)}
+            {FORMAT_OPTIONS.map(f=><option key={f} value={f}>{t(`options.formats.${f}`)}</option>)}
           </select>
         </FormRow>
-        <FormRow label="Label" full>
+        <FormRow label={t('data.label')} full>
           <input className={inputCls()} placeholder={field} value={ve?.label||''} onChange={e=>patchValue({label:e.target.value||undefined})} />
         </FormRow>
-        <FormRow label="Prefix">
+        <FormRow label={t('data.prefix')}>
           <input className={inputCls('w-24')} value={(ve as any)?.prefix||''} onChange={e=>patchValue({prefix:e.target.value||undefined})} />
         </FormRow>
-        <FormRow label="Suffix">
+        <FormRow label={t('data.suffix')}>
           <input className={inputCls('w-24')} value={(ve as any)?.suffix||''} onChange={e=>patchValue({suffix:e.target.value||undefined})} />
         </FormRow>
         {isChart && (
-          <FormRow label="Color">
+          <FormRow label={t('data.color')}>
             <select className={selectCls()} value={currentColor}
               onChange={e=>{ const k=e.target.value as AvailableChartColorsKeys; patchValue({colorToken:colorKeyToToken(k)}) }}>
               {chartColors.slice(0,5).map(c=><option key={c} value={c}>{c}</option>)}
@@ -370,62 +375,62 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
           </FormRow>
         )}
         {hasSecondaryAxis && (
-          <FormRow label="Secondary axis">
+          <FormRow label={t('data.secondaryAxis')}>
             <Switch checked={!!ve?.secondaryAxis} onChangeAction={v=>patchValue({secondaryAxis:v})} />
           </FormRow>
         )}
-        <FormRow label="Sort by">
+        <FormRow label={t('data.sortBy')}>
           <select className={selectCls()} value={(ve as any)?.sort?.by||''}
             onChange={e=>{ const by=e.target.value; patchValue({sort:by?{by,direction:(ve as any)?.sort?.direction||'desc'}:undefined}) }}>
-            <option value="">None</option>
-            <option value="x">X label</option>
-            <option value="value">Value</option>
+            <option value="">{t('data.sortNone')}</option>
+            <option value="x">{t('data.sortXLabel')}</option>
+            <option value="value">{t('data.sortValue')}</option>
           </select>
         </FormRow>
         {(ve as any)?.sort?.by && (
-          <FormRow label="Direction">
+          <FormRow label={t('data.direction')}>
             <select className={selectCls()} value={(ve as any)?.sort?.direction||'desc'}
               onChange={e=>patchValue({sort:{...((ve as any)?.sort||{by:'value'}),direction:e.target.value}})}>
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
+              <option value="desc">{t('data.directionDesc')}</option>
+              <option value="asc">{t('data.directionAsc')}</option>
             </select>
           </FormRow>
         )}
         {advancedMode && (
           <>
-            <FormRow label="Stack group">
-              <input className={inputCls('w-24')} placeholder="e.g. A" value={ve?.stackId||''}
+            <FormRow label={t('data.stackGroup')}>
+              <input className={inputCls('w-24')} placeholder={t('data.stackGroupPlaceholder')} value={ve?.stackId||''}
                 onChange={e=>patchValue({stackId:e.target.value||undefined})} />
             </FormRow>
-            <FormRow label="Fill style">
+            <FormRow label={t('data.fillStyle')}>
               <select className={selectCls()} value={ve?.style||'solid'} onChange={e=>patchValue({style:e.target.value})}>
-                <option value="solid">Solid</option>
-                <option value="gradient">Gradient</option>
+                <option value="solid">{t('options.fillStyle.solid')}</option>
+                <option value="gradient">{t('options.fillStyle.gradient')}</option>
               </select>
             </FormRow>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Conditional rules</span>
+                <span className="text-xs text-muted-foreground">{t('data.conditionalRules')}</span>
                 <button className="text-[10px] px-2 py-0.5 rounded border hover:bg-muted cursor-pointer"
-                  onClick={()=>patchValue({conditionalRules:[...condRules,{when:'>',value:0,color:'rose'}]})}>+ Add</button>
+                  onClick={()=>patchValue({conditionalRules:[...condRules,{when:'>',value:0,color:'rose'}]})}>{t('common.add')}</button>
               </div>
-              {condRules.length===0 && <div className="text-xs text-muted-foreground">No rules yet.</div>}
+              {condRules.length===0 && <div className="text-xs text-muted-foreground">{t('data.noRules')}</div>}
               <div className="space-y-1 max-h-48 overflow-auto">
                 {condRules.map((r,idx)=>(
                   <div key={idx} className="grid grid-cols-[80px,1fr,90px,auto] items-center gap-1">
                     <select className={selectCls()} value={r.when}
                       onChange={e=>patchValue({conditionalRules:condRules.map((rr,i)=>i===idx?{...rr,when:e.target.value}:rr)})}>
-                      {['>','>=','<','<=','equals','between'].map(w=><option key={w} value={w}>{w}</option>)}
+                      {['>','>=','<','<=','equals','between'].map(w=><option key={w} value={w}>{w==='equals'?t('options.strOp.eq'):w==='between'?t('options.dateOp.between'):w}</option>)}
                     </select>
                     {r.when==='between'
-                      ? <input className={inputCls('font-mono')} placeholder="min,max" value={Array.isArray(r.value)?`${r.value[0]},${r.value[1]}`:''}
+                      ? <input className={inputCls('font-mono')} placeholder={t('data.minMaxPlaceholder')} value={Array.isArray(r.value)?`${r.value[0]},${r.value[1]}`:''}
                           onChange={e=>{ const pts=e.target.value.split(',').map(v=>Number(v.trim())); patchValue({conditionalRules:condRules.map((rr,i)=>i===idx?{...rr,value:[Number(pts[0]||0),Number(pts[1]||0)]}:rr)}) }} />
                       : <input type="number" className={inputCls()} value={Array.isArray(r.value)?0:Number(r.value)}
                           onChange={e=>patchValue({conditionalRules:condRules.map((rr,i)=>i===idx?{...rr,value:Number(e.target.value)}:rr)})} />
                     }
                     <select className={selectCls()} value={r.color||'rose'}
                       onChange={e=>patchValue({conditionalRules:condRules.map((rr,i)=>i===idx?{...rr,color:e.target.value}:rr)})}>
-                      {['blue','emerald','violet','amber','gray','rose','indigo','cyan','pink','lime','fuchsia'].map(c=><option key={c} value={c}>{c}</option>)}
+                      {['blue','emerald','violet','amber','gray','rose','indigo','cyan','pink','lime','fuchsia'].map(c=><option key={c} value={c}>{t(`options.colors.${c}`)}</option>)}
                     </select>
                     <button className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-muted cursor-pointer"
                       onClick={()=>patchValue({conditionalRules:condRules.filter((_,i)=>i!==idx)})}>✕</button>
@@ -445,25 +450,25 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
     const xDatePreset = !xDateFmtRaw ? 'none' : X_DATE_PRESET_SET.has(xDateFmtRaw) ? xDateFmtRaw : 'custom'
     return (
       <div className="space-y-2">
-        <FormRow label="Group by">
+        <FormRow label={t('data.groupBy')}>
           <select className={selectCls()} value={local.xAxis?.groupBy||'none'}
             onChange={e=>{
               const groupBy = e.target.value as any
               const next = { ...local, xAxis:{...(local.xAxis||{}),groupBy}, querySpec:{...(local.querySpec||{source:'',select:[]}),groupBy} }
               setLocal(next); updateConfig(next)
             }}>
-            {['none','hour','day','week','month','quarter','year'].map(g=><option key={g} value={g}>{g}</option>)}
+            {['none','hour','day','week','month','quarter','year'].map(g=><option key={g} value={g}>{t(`options.groupBy.${g}`)}</option>)}
           </select>
         </FormRow>
-        <FormRow label="Label case">
+        <FormRow label={t('data.labelCase')}>
           <select className={selectCls()} value={(local.options as any)?.xLabelCase||'proper'}
             onChange={e=>patchOpt({xLabelCase:e.target.value as any})}>
-            <option value="proper">Proper</option>
-            <option value="uppercase">Uppercase</option>
-            <option value="lowercase">Lowercase</option>
+            <option value="proper">{t('options.case.proper')}</option>
+            <option value="uppercase">{t('options.case.uppercase')}</option>
+            <option value="lowercase">{t('options.case.lowercase')}</option>
           </select>
         </FormRow>
-        <FormRow label="Date format" full>
+        <FormRow label={t('data.dateFormat')} full>
           <select className={selectCls('w-full')} value={xDatePreset}
             onChange={e=>{
               const v = e.target.value
@@ -471,23 +476,23 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
               else if (v==='custom') patchOpt({xDateFormat:'DD-MMM-YYYY'} as any)
               else patchOpt({xDateFormat:v} as any)
             }}>
-            {X_DATE_PRESETS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
+            {X_DATE_PRESETS.map(p=><option key={p.value} value={p.value}>{t(`options.xDateFormat.${p.value}`)}</option>)}
           </select>
           {xDatePreset==='custom' && (
-            <input className={`${inputCls()} mt-1 font-mono`} placeholder="e.g. DD-MMM-YYYY, MMM-YYYY"
+            <input className={`${inputCls()} mt-1 font-mono`} placeholder={t('data.dateFormatCustomPlaceholder')}
               value={String(xDateFmtRaw||'')}
               onChange={e=>patchOpt({xDateFormat:e.target.value||undefined} as any)} />
           )}
         </FormRow>
-        <FormRow label="Week starts on">
+        <FormRow label={t('data.weekStartsOn')}>
           <select className={selectCls()} value={(local.options as any)?.xWeekStart||'mon'}
             onChange={e=>patchOpt({xWeekStart:e.target.value as any})}>
-            <option value="mon">Monday</option>
-            <option value="sun">Sunday</option>
+            <option value="mon">{t('data.monday')}</option>
+            <option value="sun">{t('data.sunday')}</option>
           </select>
         </FormRow>
-        <FormRow label="Max ticks">
-          <input type="number" min={2} className={inputCls('w-20')} placeholder="Auto"
+        <FormRow label={t('data.maxTicks')}>
+          <input type="number" min={2} className={inputCls('w-20')} placeholder={t('data.auto')}
             value={typeof (local.options as any)?.xTickCount==='number'?(local.options as any).xTickCount:''}
             onChange={e=>patchOpt({xTickCount:e.target.value===''?undefined:Math.max(2,Number(e.target.value))})} />
         </FormRow>
@@ -499,25 +504,25 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
   if (kind === 'legend') {
     if (local.type === 'kpi') return (
       <div className="space-y-2">
-        <FormRow label="Category label case">
+        <FormRow label={t('data.categoryLabelCase')}>
           <select className={selectCls()} value={(local.options as any)?.kpi?.labelCase||'proper'}
             onChange={e=>patchOpt({kpi:{...((local.options as any)?.kpi||{}),labelCase:e.target.value}} as any)}>
-            <option value="proper">Proper</option>
-            <option value="capitalize">Capitalize</option>
-            <option value="uppercase">Uppercase</option>
-            <option value="lowercase">Lowercase</option>
+            <option value="proper">{t('options.case.proper')}</option>
+            <option value="capitalize">{t('options.case.capitalize')}</option>
+            <option value="uppercase">{t('options.case.uppercase')}</option>
+            <option value="lowercase">{t('options.case.lowercase')}</option>
           </select>
         </FormRow>
       </div>
     )
     return (
       <div className="space-y-2">
-        <FormRow label="Label case">
+        <FormRow label={t('data.labelCase')}>
           <select className={selectCls()} value={(local.options as any)?.legendLabelCase||'proper'}
             onChange={e=>patchOpt({legendLabelCase:e.target.value as any})}>
-            <option value="proper">Proper</option>
-            <option value="uppercase">Uppercase</option>
-            <option value="lowercase">Lowercase</option>
+            <option value="proper">{t('options.case.proper')}</option>
+            <option value="uppercase">{t('options.case.uppercase')}</option>
+            <option value="lowercase">{t('options.case.lowercase')}</option>
           </select>
         </FormRow>
       </div>
@@ -532,9 +537,9 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
     return (
       <div className="space-y-2">
         <div className="flex gap-1 rounded-md border p-0.5 bg-muted/30 w-fit">
-          {(['manual','rule'] as const).map(t=>(
-            <button key={t} onClick={()=>setFilterTab(t)}
-              className={`text-xs px-2.5 py-0.5 rounded cursor-pointer capitalize ${filterTab===t?'bg-background shadow-sm font-medium':''}`}>{t}</button>
+          {(['manual','rule'] as const).map(ft=>(
+            <button key={ft} onClick={()=>setFilterTab(ft)}
+              className={`text-xs px-2.5 py-0.5 rounded cursor-pointer capitalize ${filterTab===ft?'bg-background shadow-sm font-medium':''}`}>{t(`options.toggle.${ft}`)}</button>
           ))}
         </div>
         {filterTab==='rule'
@@ -544,12 +549,12 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
               return (
                 <>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground shrink-0">Type:</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{t('data.typeLabel')}</span>
                     <div className="flex gap-1">
-                      {(['auto','string','number','date'] as const).map(t=>(
-                        <button key={t} type="button" onClick={()=>setRuleType(t)}
-                          className={`text-[10px] px-2 py-0.5 rounded border cursor-pointer capitalize ${ruleType===t?'bg-[hsl(var(--primary))] text-primary-foreground':'hover:bg-muted'}`}>
-                          {t==='auto'?`auto (${effectiveIsNum?'num':effectiveIsDate?'date':'str'})`:t}
+                      {(['auto','string','number','date'] as const).map(ty=>(
+                        <button key={ty} type="button" onClick={()=>setRuleType(ty)}
+                          className={`text-[10px] px-2 py-0.5 rounded border cursor-pointer capitalize ${ruleType===ty?'bg-[hsl(var(--primary))] text-primary-foreground':'hover:bg-muted'}`}>
+                          {ty==='auto'?t('data.autoType',{type:effectiveIsNum?t('data.typeNum'):effectiveIsDate?t('data.typeDate'):t('data.typeStr')}):t(`options.toggle.${ty}`)}
                         </button>
                       ))}
                     </div>
@@ -564,51 +569,51 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
             <>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Min (≥)</label>
+                  <label className="text-xs text-muted-foreground">{t('data.min')}</label>
                   <input type="number" className={inputCls()} value={String(where[`${field}__gte`]??'')} placeholder="—"
                     onChange={e=>patchWhere({[`${field}__gte`]:e.target.value!==''?Number(e.target.value):undefined})} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Max (≤)</label>
+                  <label className="text-xs text-muted-foreground">{t('data.max')}</label>
                   <input type="number" className={inputCls()} value={String(where[`${field}__lte`]??'')} placeholder="—"
                     onChange={e=>patchWhere({[`${field}__lte`]:e.target.value!==''?Number(e.target.value):undefined})} />
                 </div>
               </div>
               <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer"
-                onClick={()=>patchWhere({[`${field}__gte`]:undefined,[`${field}__lte`]:undefined})}>Clear</button>
+                onClick={()=>patchWhere({[`${field}__gte`]:undefined,[`${field}__lte`]:undefined})}>{t('common.clear')}</button>
             </>
           ) : isDate ? (
             <>
-              <FormRow label="Preset" full>
+              <FormRow label={t('data.preset')} full>
                 <select className={selectCls('w-full')} value={where[`${field}__date_preset`]||''}
                   onChange={e=>patchWhere({[`${field}__date_preset`]:e.target.value||undefined,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>
-                  <option value="">— None —</option>
-                  {DATE_PRESETS.map(p=><option key={p} value={p}>{p.replace(/_/g,' ')}</option>)}
+                  <option value="">{t('data.none')}</option>
+                  {DATE_PRESETS.map(p=><option key={p} value={p}>{t(`options.legacyDatePresets.${p}`)}</option>)}
                 </select>
               </FormRow>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">From</label>
+                  <label className="text-xs text-muted-foreground">{t('data.from')}</label>
                   <input type="date" className={inputCls()} value={String(where[`${field}__gte`]||'')}
                     onChange={e=>patchWhere({[`${field}__gte`]:e.target.value||undefined,[`${field}__date_preset`]:undefined})} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">To</label>
+                  <label className="text-xs text-muted-foreground">{t('data.to')}</label>
                   <input type="date" className={inputCls()} value={String(where[`${field}__lt`]||'')}
                     onChange={e=>patchWhere({[`${field}__lt`]:e.target.value||undefined,[`${field}__date_preset`]:undefined})} />
                 </div>
               </div>
               <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer"
-                onClick={()=>patchWhere({[`${field}__date_preset`]:undefined,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>Clear</button>
+                onClick={()=>patchWhere({[`${field}__date_preset`]:undefined,[`${field}__gte`]:undefined,[`${field}__lt`]:undefined})}>{t('common.clear')}</button>
             </>
           ) : (
             <>
               {samples.length===0 && (
                 <div className="flex items-center justify-between text-xs text-muted-foreground rounded-md border p-2 bg-[hsl(var(--secondary)/0.4)]">
-                  <span>No samples loaded yet</span>
+                  <span>{t('data.noSamples')}</span>
                   <button type="button" className="text-xs px-2 py-0.5 rounded border hover:bg-muted cursor-pointer"
                     onClick={()=>{ if(local.id&&typeof window!=='undefined') try{window.dispatchEvent(new CustomEvent('request-table-samples',{detail:{widgetId:local.id}}))}catch{} }}>
-                    Refresh
+                    {t('common.refresh')}
                   </button>
                 </div>
               )}
@@ -623,13 +628,13 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
               </div>
               {sel.length>0 && (
                 <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer"
-                  onClick={()=>patchSel([])}>Clear ({sel.length})</button>
+                  onClick={()=>patchSel([])}>{t('common.clearCount',{count:sel.length})}</button>
               )}
             </>
           )
         }
         <div className="flex items-center justify-between pt-2 border-t mt-1">
-          <span className="text-xs text-muted-foreground">Expose in chart filterbar</span>
+          <span className="text-xs text-muted-foreground">{t('data.exposeFilterbar')}</span>
           <Switch checked={!!filtersExpose[field]}
             onChangeAction={v=>{
               const next={...local,options:{...(local.options||{}),filtersExpose:{...filtersExpose,[field]:v}}} as WidgetConfig
@@ -642,7 +647,7 @@ export function FieldDetails({ kind, field, local, setLocal, updateConfig, pivot
 
   return (
     <div className="text-xs text-muted-foreground">
-      <span className="font-mono text-foreground">{field}</span> → <span className="capitalize">{kind}</span>
+      <span className="font-mono text-foreground">{field}</span> → <span className="capitalize">{t(`options.kind.${kind as 'x'|'value'|'legend'|'filter'}`)}</span>
     </div>
   )
 }
@@ -653,33 +658,34 @@ export function InlineCustomColEditor({ value, onSave, onCancel }: {
   onSave: (v: { id?: string; name: string; formula: string; type?: string }) => void
   onCancel: () => void
 }) {
+  const t = useTranslations('configurator')
   const [name, setName] = useState(value.name)
   const [formula, setFormula] = useState(value.formula)
   const [type, setType] = useState(value.type || 'number')
-  const nameErr = !name.trim() ? 'Name is required' : ''
-  const formulaErr = !formula.trim() ? 'Formula is required' : ''
+  const nameErr = !name.trim() ? t('data.nameRequired') : ''
+  const formulaErr = !formula.trim() ? t('data.formulaRequired') : ''
   return (
     <div className="rounded-lg border bg-[hsl(var(--secondary)/0.3)] p-3 space-y-2">
-      <div className="text-xs font-semibold text-muted-foreground mb-1">{value.id ? 'Edit' : 'New'} Custom Column</div>
-      <FormRow label="Name" full>
-        <input className={inputCls()} value={name} onChange={e=>setName(e.target.value)} placeholder="column_name" />
+      <div className="text-xs font-semibold text-muted-foreground mb-1">{value.id ? t('data.editCustomColumn') : t('data.newCustomColumnTitle')}</div>
+      <FormRow label={t('data.name')} full>
+        <input className={inputCls()} value={name} onChange={e=>setName(e.target.value)} placeholder={t('data.nameColumnPlaceholder')} />
         {nameErr && <div className="text-[10px] text-[hsl(var(--destructive))] mt-1">{nameErr}</div>}
       </FormRow>
-      <FormRow label="Formula" full>
+      <FormRow label={t('data.formula')} full>
         <input className={inputCls('font-mono')} value={formula} onChange={e=>setFormula(e.target.value)} placeholder='CASE WHEN x > 0 THEN "Yes" ELSE "No" END' />
         {formulaErr && <div className="text-[10px] text-[hsl(var(--destructive))] mt-1">{formulaErr}</div>}
       </FormRow>
-      <FormRow label="Type">
+      <FormRow label={t('data.type')}>
         <select className={selectCls()} value={type} onChange={e=>setType(e.target.value)}>
-          {['number','string','date','boolean'].map(t=><option key={t} value={t}>{t}</option>)}
+          {['number','string','date','boolean'].map(ct=><option key={ct} value={ct}>{t(`options.colType.${ct}`)}</option>)}
         </select>
       </FormRow>
       <div className="flex gap-2 justify-end pt-1">
-        <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer" onClick={onCancel}>Cancel</button>
+        <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer" onClick={onCancel}>{t('common.cancel')}</button>
         <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           disabled={!!(nameErr||formulaErr)}
           onClick={()=>{ if(name.trim()&&formula.trim()) onSave({id:value.id,name:name.trim(),formula:formula.trim(),type}) }}>
-          Save column
+          {t('data.saveColumn')}
         </button>
       </div>
     </div>
@@ -692,27 +698,28 @@ export function InlineMeasureEditor({ value, onSave, onCancel }: {
   onSave: (v: { id: string; name: string; formula: string }) => void
   onCancel: () => void
 }) {
+  const t = useTranslations('configurator')
   const [name, setName] = useState(value.name)
   const [formula, setFormula] = useState(value.formula)
-  const nameErr = !name.trim() ? 'Name is required' : ''
-  const formulaErr = !formula.trim() ? 'Formula is required' : ''
+  const nameErr = !name.trim() ? t('data.nameRequired') : ''
+  const formulaErr = !formula.trim() ? t('data.formulaRequired') : ''
   return (
     <div className="rounded-lg border bg-[hsl(var(--secondary)/0.3)] p-3 space-y-2">
-      <div className="text-xs font-semibold text-muted-foreground mb-1">{value.id ? 'Edit' : 'New'} Measure</div>
-      <FormRow label="Name" full>
-        <input className={inputCls()} value={name} onChange={e=>setName(e.target.value)} placeholder="Total Revenue" />
+      <div className="text-xs font-semibold text-muted-foreground mb-1">{value.id ? t('data.editMeasure') : t('data.newMeasureTitle')}</div>
+      <FormRow label={t('data.name')} full>
+        <input className={inputCls()} value={name} onChange={e=>setName(e.target.value)} placeholder={t('data.nameMeasurePlaceholder')} />
         {nameErr && <div className="text-[10px] text-[hsl(var(--destructive))] mt-1">{nameErr}</div>}
       </FormRow>
-      <FormRow label="Formula" full>
+      <FormRow label={t('data.formula')} full>
         <input className={inputCls('font-mono')} value={formula} onChange={e=>setFormula(e.target.value)} placeholder="SUM(price * quantity)" />
         {formulaErr && <div className="text-[10px] text-[hsl(var(--destructive))] mt-1">{formulaErr}</div>}
       </FormRow>
       <div className="flex gap-2 justify-end pt-1">
-        <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer" onClick={onCancel}>Cancel</button>
+        <button className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted cursor-pointer" onClick={onCancel}>{t('common.cancel')}</button>
         <button className="text-xs px-2.5 py-1 rounded-md border bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           disabled={!!(nameErr||formulaErr)}
           onClick={()=>{ if(name.trim()&&formula.trim()) onSave({id:value.id||crypto.randomUUID(),name:name.trim(),formula:formula.trim()}) }}>
-          Save measure
+          {t('data.saveMeasure')}
         </button>
       </div>
     </div>
@@ -727,11 +734,12 @@ export function FieldDetailPanel({ selKind, selField, local, setLocal, updateCon
   samplesByField: Record<string,string[]>; numericFields: string[]; dateLikeFields: string[]
   onClose: () => void
 }) {
+  const t = useTranslations('configurator')
   return (
     <div className="rounded-lg border bg-[hsl(var(--secondary)/0.3)] p-3 space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-xs font-semibold">
-          <span className="px-1.5 py-0.5 rounded border bg-card capitalize text-muted-foreground">{selKind}</span>
+          <span className="px-1.5 py-0.5 rounded border bg-card capitalize text-muted-foreground">{t(`options.kind.${selKind}`)}</span>
           <span>{selField}</span>
         </div>
         <button className="text-xs px-2 py-0.5 rounded border hover:bg-muted cursor-pointer" onClick={onClose}>✕</button>
