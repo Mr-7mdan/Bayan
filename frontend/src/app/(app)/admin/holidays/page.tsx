@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl'
 import { Card, Title, Text, Select, SelectItem } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { Button } from '@/components/ui'
 import { Api, type HolidayRuleCreate, type HolidayRuleOut } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
@@ -200,14 +201,16 @@ export default function AdminHolidaysPage() {
               <td className="px-3 py-2">{r.recurrence_expr || '\u2014'}</td>
               <td className="px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <button
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => openEdit(r)}
-                  >{t('admin.holidays.edit')}</button>
-                  <button
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+                  >{t('admin.holidays.edit')}</Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
                     onClick={() => { setDeleteTarget(r); setDeleteOpen(true) }}
-                  >{t('admin.holidays.delete')}</button>
+                  >{t('admin.holidays.delete')}</Button>
                 </div>
               </td>
             </tr>
@@ -230,15 +233,17 @@ export default function AdminHolidaysPage() {
           </div>
           <div className="flex items-center gap-2">
             <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={onUpload} />
-            <button
-              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+            <Button
+              size="sm"
+              variant="outline"
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
-            >{uploading ? t('admin.holidays.uploading') : t('admin.holidays.uploadCsv')}</button>
-            <button
-              className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium"
+            >{uploading ? t('admin.holidays.uploading') : t('admin.holidays.uploadCsv')}</Button>
+            <Button
+              size="sm"
+              variant="primary"
               onClick={() => { resetCreateForm(); setCreateOpen(true) }}
-            >{t('admin.holidays.addHoliday')}</button>
+            >{t('admin.holidays.addHoliday')}</Button>
           </div>
         </div>
         <div className="p-3 space-y-3">
@@ -272,9 +277,9 @@ export default function AdminHolidaysPage() {
               <div className="mt-1 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                 <span>{t('admin.holidays.showing', { from: filteredRows.length === 0 ? 0 : page * pageSize + 1, to: Math.min((page + 1) * pageSize, filteredRows.length), total: filteredRows.length })}</span>
                 <div className="flex items-center gap-2">
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('admin.holidays.prev')}</button>
+                  <Button size="sm" variant="outline" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('admin.holidays.prev')}</Button>
                   <span>{t('admin.holidays.pageIndicator', { page: page + 1, total: totalPages })}</span>
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('admin.holidays.next')}</button>
+                  <Button size="sm" variant="outline" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('admin.holidays.next')}</Button>
                 </div>
               </div>
             </>
@@ -311,9 +316,9 @@ export default function AdminHolidaysPage() {
               {crError && <div className="text-sm text-red-600">{crError}</div>}
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.holidays.cancel')}</button>
+                  <Button type="button" size="sm" variant="outline">{t('admin.holidays.cancel')}</Button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={crBusy || !crName} onClick={onCreate}>{crBusy ? t('admin.holidays.creating') : t('admin.holidays.create')}</button>
+                <Button type="button" size="sm" variant="primary" disabled={crBusy || !crName} onClick={onCreate}>{crBusy ? t('admin.holidays.creating') : t('admin.holidays.create')}</Button>
               </div>
             </div>
           </Dialog.Content>
@@ -349,9 +354,9 @@ export default function AdminHolidaysPage() {
               {edError && <div className="text-sm text-red-600">{edError}</div>}
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.holidays.cancel')}</button>
+                  <Button type="button" size="sm" variant="outline">{t('admin.holidays.cancel')}</Button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={edBusy || !edName} onClick={onEdit}>{edBusy ? t('admin.holidays.saving') : t('admin.holidays.save')}</button>
+                <Button type="button" size="sm" variant="primary" disabled={edBusy || !edName} onClick={onEdit}>{edBusy ? t('admin.holidays.saving') : t('admin.holidays.save')}</Button>
               </div>
             </div>
           </Dialog.Content>
@@ -368,9 +373,9 @@ export default function AdminHolidaysPage() {
               <Text>{t.rich('admin.holidays.deleteConfirm', { name: deleteTarget?.name || '', strong: (chunks) => <strong>{chunks}</strong> })}</Text>
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.holidays.cancel')}</button>
+                  <Button type="button" size="sm" variant="outline">{t('admin.holidays.cancel')}</Button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border text-red-600 hover:bg-red-50 dark:hover:bg-red-950" disabled={delBusy} onClick={onDelete}>{delBusy ? t('admin.holidays.deleting') : t('admin.holidays.delete')}</button>
+                <Button type="button" size="sm" variant="danger" disabled={delBusy} onClick={onDelete}>{delBusy ? t('admin.holidays.deleting') : t('admin.holidays.delete')}</Button>
               </div>
             </div>
           </Dialog.Content>

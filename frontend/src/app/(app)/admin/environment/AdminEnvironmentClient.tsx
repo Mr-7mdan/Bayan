@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Card, Title, Text } from '@tremor/react'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { Button } from '@/components/ui'
 import { Api } from '@/lib/api'
 import { useEnvironment, BAYAN_DEFAULTS } from '@/components/providers/EnvironmentProvider'
 
@@ -348,9 +349,9 @@ export default function AdminEnvironmentPage() {
               </div>
             </div>
             <div className="mt-3 flex items-center gap-2">
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={onSave}>{t('admin.environment.save')}</button>
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={testing} onClick={onTest}>{testing ? t('admin.environment.testing') : t('admin.environment.testApi')}</button>
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={() => { setApiOverride(''); onSave() }}>{t('admin.environment.resetToDefault')}</button>
+              <Button size="sm" variant="primary" type="button" onClick={onSave}>{t('admin.environment.save')}</Button>
+              <Button size="sm" variant="outline" type="button" disabled={testing} onClick={onTest}>{testing ? t('admin.environment.testing') : t('admin.environment.testApi')}</Button>
+              <Button size="sm" variant="outline" type="button" onClick={() => { setApiOverride(''); onSave() }}>{t('admin.environment.resetToDefault')}</Button>
             </div>
           </section>
 
@@ -359,7 +360,7 @@ export default function AdminEnvironmentPage() {
             <h3 className="text-sm font-semibold mb-2">{t('admin.environment.updates')}</h3>
             <p className="text-xs text-muted-foreground mb-3">{t('admin.environment.updatesDesc')}</p>
             <div className="flex items-center gap-2 mb-3">
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={checkingUpd} onClick={checkUpdates}>{checkingUpd ? t('admin.environment.checking') : t('admin.environment.checkUpdates')}</button>
+              <Button size="sm" variant="outline" type="button" disabled={checkingUpd} onClick={checkUpdates}>{checkingUpd ? t('admin.environment.checking') : t('admin.environment.checkUpdates')}</Button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border p-2">
@@ -373,16 +374,19 @@ export default function AdminEnvironmentPage() {
                   </details>
                 )}
                 <div className="mt-2">
-                  <button
-                    className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                  <Button
+                    size="sm"
+                    variant="primary"
                     disabled={!updB?.enabled || updB?.updateType !== 'auto' || updB?.requiresMigrations || applyBusy === 'backend'}
                     onClick={() => applyUpdate('backend')}
-                  >{applyBusy === 'backend' ? t('admin.environment.applying') : t('admin.environment.applyAutoUpdate')}</button>
-                  <button
-                    className="ml-2 text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                  >{applyBusy === 'backend' ? t('admin.environment.applying') : t('admin.environment.applyAutoUpdate')}</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-2"
                     disabled={promoteBusy === 'backend'}
                     onClick={() => promoteUpdate('backend')}
-                  >{promoteBusy === 'backend' ? t('admin.environment.promoting') : t('admin.environment.promoteRestart')}</button>
+                  >{promoteBusy === 'backend' ? t('admin.environment.promoting') : t('admin.environment.promoteRestart')}</Button>
                 </div>
               </div>
               <div className="rounded-md border p-2">
@@ -396,16 +400,19 @@ export default function AdminEnvironmentPage() {
                   </details>
                 )}
                 <div className="mt-2">
-                  <button
-                    className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                  <Button
+                    size="sm"
+                    variant="primary"
                     disabled={!updF?.enabled || updF?.updateType !== 'auto' || updF?.requiresMigrations || applyBusy === 'frontend'}
                     onClick={() => applyUpdate('frontend')}
-                  >{applyBusy === 'frontend' ? t('admin.environment.applying') : t('admin.environment.applyAutoUpdate')}</button>
-                  <button
-                    className="ml-2 text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                  >{applyBusy === 'frontend' ? t('admin.environment.applying') : t('admin.environment.applyAutoUpdate')}</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-2"
                     disabled={promoteBusy === 'frontend'}
                     onClick={() => promoteUpdate('frontend')}
-                  >{promoteBusy === 'frontend' ? t('admin.environment.promoting') : t('admin.environment.promoteRestart')}</button>
+                  >{promoteBusy === 'frontend' ? t('admin.environment.promoting') : t('admin.environment.promoteRestart')}</Button>
                 </div>
               </div>
             </div>
@@ -473,9 +480,9 @@ export default function AdminEnvironmentPage() {
               </div>
               <div className="mt-2 text-[11px] text-muted-foreground">{t('admin.environment.serverKey', { status: serverHasKey ? t('admin.environment.set') : t('admin.environment.notSet') })}</div>
               <div className="mt-3 flex items-center gap-2">
-                <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={testingAI} onClick={onTestAI}>{testingAI ? t('admin.environment.testing') : t('admin.environment.testEndpoint')}</button>
-                <button className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" type="button" disabled={savingAI} onClick={() => saveAiToServer(false)}>{savingAI ? t('admin.environment.saving') : t('admin.environment.saveToServer')}</button>
-                <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingAI} onClick={() => saveAiToServer(true)}>{t('admin.environment.clearServerKey')}</button>
+                <Button size="sm" variant="outline" type="button" disabled={testingAI} onClick={onTestAI}>{testingAI ? t('admin.environment.testing') : t('admin.environment.testEndpoint')}</Button>
+                <Button size="sm" variant="primary" type="button" disabled={savingAI} onClick={() => saveAiToServer(false)}>{savingAI ? t('admin.environment.saving') : t('admin.environment.saveToServer')}</Button>
+                <Button size="sm" variant="outline" type="button" disabled={savingAI} onClick={() => saveAiToServer(true)}>{t('admin.environment.clearServerKey')}</Button>
                 {aiMsg && <span className="text-xs text-emerald-600">{aiMsg}</span>}
                 {aiErr && <span className="text-xs text-rose-600">{aiErr}</span>}
                 {aiSaveMsg && <span className="text-xs text-emerald-600">{aiSaveMsg}</span>}
@@ -493,15 +500,17 @@ export default function AdminEnvironmentPage() {
                   <span className="font-medium text-foreground">{t('admin.environment.bayanDefault')}</span>.
                 </p>
               </div>
-              <button
+              <Button
                 type="button"
-                className="shrink-0 text-xs px-2.5 py-1.5 rounded-md border border-[hsl(var(--border))] hover:bg-muted disabled:opacity-50 cursor-pointer transition-colors"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
                 disabled={savingBranding}
                 onClick={restoreBayanDefaults}
                 title={t('admin.environment.restoreDefaultsTitle')}
               >
                 {t('admin.environment.restoreDefaults')}
-              </button>
+              </Button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <BrandingField
@@ -564,8 +573,8 @@ export default function AdminEnvironmentPage() {
               </div>
             </div>
             <div className="mt-3 flex items-center gap-2 flex-wrap">
-              <button className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" type="button" disabled={savingBranding} onClick={saveBrandingToServer}>{savingBranding ? t('admin.environment.saving') : t('admin.environment.saveToServer')}</button>
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={savingBranding} onClick={reloadBrandingFromServer}>{t('admin.environment.reloadFromServer')}</button>
+              <Button size="sm" variant="primary" type="button" disabled={savingBranding} onClick={saveBrandingToServer}>{savingBranding ? t('admin.environment.saving') : t('admin.environment.saveToServer')}</Button>
+              <Button size="sm" variant="outline" type="button" disabled={savingBranding} onClick={reloadBrandingFromServer}>{t('admin.environment.reloadFromServer')}</Button>
               {brandingMsg && <span className="text-xs text-emerald-600">{brandingMsg}</span>}
               {brandingErr && <span className="text-xs text-rose-600">{brandingErr}</span>}
             </div>
@@ -603,8 +612,8 @@ export default function AdminEnvironmentPage() {
               </label>
             </div>
             <div className="mt-3 flex items-center gap-2">
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={()=> { setLocalPublicDomain(defaultPublicDomain); setEnv({ publicDomain: defaultPublicDomain }) }}>{t('admin.environment.useDefault')}</button>
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={()=> { setLocalPublicDomain(''); setEnv({ publicDomain: '' }) }}>{t('admin.environment.clearOverride')}</button>
+              <Button size="sm" variant="outline" type="button" onClick={()=> { setLocalPublicDomain(defaultPublicDomain); setEnv({ publicDomain: defaultPublicDomain }) }}>{t('admin.environment.useDefault')}</Button>
+              <Button size="sm" variant="outline" type="button" onClick={()=> { setLocalPublicDomain(''); setEnv({ publicDomain: '' }) }}>{t('admin.environment.clearOverride')}</Button>
             </div>
             <p className="text-xs text-muted-foreground mt-2">{t('admin.environment.publicLinksDesc')}</p>
           </section>
@@ -626,7 +635,7 @@ export default function AdminEnvironmentPage() {
               </label>
             </div>
             <div className="mt-3 flex items-center gap-2">
-              <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={issuesBusy} onClick={onTestIssues}>{issuesBusy ? t('admin.environment.testing') : t('admin.environment.testGithubToken')}</button>
+              <Button size="sm" variant="outline" type="button" disabled={issuesBusy} onClick={onTestIssues}>{issuesBusy ? t('admin.environment.testing') : t('admin.environment.testGithubToken')}</Button>
               {issuesMsg && <span className="text-xs text-emerald-600">{issuesMsg}</span>}
               {issuesErr && <span className="text-xs text-rose-600">{issuesErr}</span>}
             </div>

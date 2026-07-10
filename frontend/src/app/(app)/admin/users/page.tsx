@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Card, Title, Text, Select, SelectItem } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { Button } from '@/components/ui'
 import { Api, type UserOut, type UserRowOut } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
@@ -141,14 +142,16 @@ export default function AdminUsersPage() {
               <td className="px-3 py-2">{r.active ? t('admin.users.yes') : t('admin.users.no')}</td>
               <td className="px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <button
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => onSetActive(r, !r.active)}
-                  >{r.active ? t('admin.users.deactivate') : t('admin.users.activate')}</button>
-                  <button
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+                  >{r.active ? t('admin.users.deactivate') : t('admin.users.activate')}</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => { setPwdTarget(r); setPwdOpen(true) }}
-                  >{t('admin.users.changePassword')}</button>
+                  >{t('admin.users.changePassword')}</Button>
                 </div>
               </td>
             </tr>
@@ -169,7 +172,7 @@ export default function AdminUsersPage() {
             <Title className="text-gray-500 dark:text-white">{t('admin.users.title')}</Title>
             <Text className="mt-0 text-gray-500 dark:text-white">{t('admin.users.subtitle')}</Text>
           </div>
-          <button className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium" onClick={() => setCreateOpen(true)}>{t('admin.users.createUser')}</button>
+          <Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}>{t('admin.users.createUser')}</Button>
         </div>
         <div className="p-3 space-y-3">
           <div className="flex items-center py-2 gap-2">
@@ -202,9 +205,9 @@ export default function AdminUsersPage() {
               <div className="mt-1 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                 <span>{t('admin.users.showing', { from: page * pageSize + 1, to: Math.min((page + 1) * pageSize, filteredRows.length), total: filteredRows.length })}</span>
                 <div className="flex items-center gap-2">
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('admin.users.prev')}</button>
+                  <Button size="sm" variant="outline" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('admin.users.prev')}</Button>
                   <span>{t('admin.users.pageOf', { page: page + 1, total: totalPages })}</span>
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('admin.users.next')}</button>
+                  <Button size="sm" variant="outline" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('admin.users.next')}</Button>
                 </div>
               </div>
             </>
@@ -237,9 +240,9 @@ export default function AdminUsersPage() {
               {cuError && <div className="text-sm text-red-600">{cuError}</div>}
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.users.cancel')}</button>
+                  <Button type="button" size="sm" variant="outline">{t('admin.users.cancel')}</Button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={cuBusy || !cuEmail || !cuPassword} onClick={onCreate}>{cuBusy ? t('admin.users.creating') : t('admin.users.create')}</button>
+                <Button type="button" size="sm" variant="primary" disabled={cuBusy || !cuEmail || !cuPassword} onClick={onCreate}>{cuBusy ? t('admin.users.creating') : t('admin.users.create')}</Button>
               </div>
             </div>
           </Dialog.Content>
@@ -259,9 +262,9 @@ export default function AdminUsersPage() {
               {pwdError && <div className="text-sm text-red-600">{pwdError}</div>}
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.users.cancel')}</button>
+                  <Button type="button" size="sm" variant="outline">{t('admin.users.cancel')}</Button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" disabled={pwdBusy || !pwdNew} onClick={onSetPassword}>{pwdBusy ? t('admin.users.saving') : t('admin.users.save')}</button>
+                <Button type="button" size="sm" variant="primary" disabled={pwdBusy || !pwdNew} onClick={onSetPassword}>{pwdBusy ? t('admin.users.saving') : t('admin.users.save')}</Button>
               </div>
             </div>
           </Dialog.Content>

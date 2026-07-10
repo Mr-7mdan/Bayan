@@ -8,6 +8,7 @@ import { Card, Title, Text, TextInput, Badge, TabGroup, TabList, Tab, TabPanels,
 import * as Popover from '@radix-ui/react-popover'
 import { RiFocus2Line, RiArrowDownSLine, RiClipboardLine } from '@remixicon/react'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { Button } from '@/components/ui'
 import { Api, parseUtcDate, type DatasourceOut, type DatasourceDetailOut, type SyncTaskOut, type SyncTaskCreate, type SyncRunOut, type IntrospectResponse, type TablesOnlyResponse } from '@/lib/api'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
@@ -381,19 +382,21 @@ function AdminSchedulesInner() {
                 ))}
               </Select>
             </div>
-            <button
-              className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+            <Button
+              size="sm"
+              variant="outline"
               disabled={!selectedId || runAll.isPending}
               onClick={() => runAll.mutate()}
             >
               {t('admin.schedules.runAllNow')}
-            </button>
-            <button
-              className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               onClick={() => refreshSchedules.mutate()}
             >
               {t('admin.schedules.refreshSchedules')}
-            </button>
+            </Button>
           </div>
         </div>
         <div className="p-4 space-y-4">
@@ -699,8 +702,9 @@ function AdminSchedulesInner() {
                       <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> {t('admin.schedules.enabled')}</label>
                     </div>
                     <div className="md:col-start-6 flex items-end md:justify-start gap-2">
-                      <button
-                        className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed h-9"
+                      <Button
+                        size="sm"
+                        variant="primary"
                         disabled={!selectedId || (!!editingTaskId ? saveTask.isPending : createTask.isPending) || (!form.sourceTable && !form.customQuery) || !form.destTableName}
                         onClick={() => {
                           if (!selectedId || (!form.sourceTable && !form.customQuery) || !form.destTableName) return
@@ -709,13 +713,14 @@ function AdminSchedulesInner() {
                         }}
                       >
                         {editingTaskId ? t('admin.schedules.save') : t('admin.schedules.create')}
-                      </button>
+                      </Button>
                       {editingTaskId && (
-                        <button
-                          className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed h-9"
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={cancelEdit}
                           disabled={saveTask.isPending}
-                        >{t('admin.schedules.cancel')}</button>
+                        >{t('admin.schedules.cancel')}</Button>
                       )}
                     </div>
                   </div>
@@ -802,29 +807,33 @@ function AdminSchedulesInner() {
                             </td>
                             <td className="px-2 py-1">
                               <div className="flex items-center gap-2">
-                                <button
-                                  className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+                                <Button
+                                  size="sm"
+                                  variant="outline"
                                   title={tt('admin.schedules.edit')}
                                   onClick={() => beginEdit(t)}
-                                >{tt('admin.schedules.edit')}</button>
+                                >{tt('admin.schedules.edit')}</Button>
                                 {t.inProgress ? (
-                                  <button
-                                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  <Button
+                                    size="sm"
+                                    variant="danger"
                                     title={tt('admin.schedules.abort')}
                                     onClick={() => abortOne.mutate(t.id)}
-                                  >{tt('admin.schedules.abort')}</button>
+                                  >{tt('admin.schedules.abort')}</Button>
                                 ) : (
-                                  <button
-                                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
                                     title={tt('admin.schedules.runNow')}
                                     onClick={() => runOne.mutate(t.id)}
-                                  >{tt('admin.schedules.run')}</button>
+                                  >{tt('admin.schedules.run')}</Button>
                                 )}
-                                <button
-                                  className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed text-red-600"
+                                <Button
+                                  size="sm"
+                                  variant="danger"
                                   title={tt('admin.schedules.delete')}
                                   onClick={() => deleteTask.mutate(t.id)}
-                                >{tt('admin.schedules.delete')}</button>
+                                >{tt('admin.schedules.delete')}</Button>
                               </div>
                             </td>
                           </tr>
@@ -839,8 +848,8 @@ function AdminSchedulesInner() {
                   <div className="flex items-center justify-between px-3 py-2 border-t text-xs">
                     <div>{t('admin.schedules.pageOf', { page: taskPage, total: totalTaskPages })}</div>
                     <div className="flex items-center gap-2">
-                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={taskPage<=1} onClick={() => setTaskPage((p) => Math.max(1, p-1))}>{t('admin.schedules.prev')}</button>
-                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={taskPage>=totalTaskPages} onClick={() => setTaskPage((p) => Math.min(totalTaskPages, p+1))}>{t('admin.schedules.next')}</button>
+                      <Button size="sm" variant="outline" disabled={taskPage<=1} onClick={() => setTaskPage((p) => Math.max(1, p-1))}>{t('admin.schedules.prev')}</Button>
+                      <Button size="sm" variant="outline" disabled={taskPage>=totalTaskPages} onClick={() => setTaskPage((p) => Math.min(totalTaskPages, p+1))}>{t('admin.schedules.next')}</Button>
                     </div>
                   </div>
                 </div>
@@ -850,8 +859,9 @@ function AdminSchedulesInner() {
                   <div className="px-3 py-2 border-b text-sm font-medium flex items-center justify-between">
                     <span>{t('admin.schedules.logs')}</span>
                     <div className="flex items-center gap-2 text-xs">
-                      <button
-                        className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+                      <Button
+                        size="sm"
+                        variant="outline"
                         disabled={!selectedId || (logsData.length === 0) || clearLogs.isPending}
                         onClick={() => {
                           if (!selectedId) return
@@ -859,7 +869,7 @@ function AdminSchedulesInner() {
                           if (!ok) return
                           clearLogs.mutate()
                         }}
-                      >{t('admin.schedules.clearLogs')}</button>
+                      >{t('admin.schedules.clearLogs')}</Button>
                       <span className="min-w-[140px] whitespace-nowrap">{t('admin.schedules.rowsPerPage')}</span>
                       <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                         [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
@@ -921,8 +931,8 @@ function AdminSchedulesInner() {
                   <div className="flex items-center justify-between px-3 py-2 border-t text-xs">
                     <div>{t('admin.schedules.pageOf', { page: logPage, total: totalLogPages })}</div>
                     <div className="flex items-center gap-2">
-                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={logPage<=1} onClick={() => setLogPage((p) => Math.max(1, p-1))}>{t('admin.schedules.prev')}</button>
-                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={logPage>=totalLogPages} onClick={() => setLogPage((p) => Math.min(totalLogPages, p+1))}>{t('admin.schedules.next')}</button>
+                      <Button size="sm" variant="outline" disabled={logPage<=1} onClick={() => setLogPage((p) => Math.max(1, p-1))}>{t('admin.schedules.prev')}</Button>
+                      <Button size="sm" variant="outline" disabled={logPage>=totalLogPages} onClick={() => setLogPage((p) => Math.min(totalLogPages, p+1))}>{t('admin.schedules.next')}</Button>
                     </div>
                   </div>
                 </div>
@@ -953,10 +963,11 @@ function AdminSchedulesInner() {
                                 <td className="px-2 py-1">{t.mode}</td>
                                 <td className="px-2 py-1">{typeof t.progressTotal === 'number' ? `${t.progressCurrent || 0}/${t.progressTotal}` : (t.progressCurrent || 0)}</td>
                                 <td className="px-2 py-1">
-                                  <button
-                                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  <Button
+                                    size="sm"
+                                    variant="danger"
                                     onClick={() => abortOne.mutate(t.id)}
-                                  >{tt('admin.schedules.abort')}</button>
+                                  >{tt('admin.schedules.abort')}</Button>
                                 </td>
                               </tr>
                             ))}
@@ -976,13 +987,14 @@ function AdminSchedulesInner() {
                 <div className="rounded-md border overflow-hidden bg-[hsl(var(--card))]">
                   <div className="px-3 py-2 border-b text-sm font-medium flex items-center justify-between">
                     <span>{t('admin.schedules.scheduledTasksTitle')}</span>
-                    <button
-                      className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => refreshSchedules.mutate()}
                       disabled={refreshSchedules.isPending}
                     >
                       {t('admin.schedules.refreshSchedules')}
-                    </button>
+                    </Button>
                   </div>
                   <div className="overflow-auto">
                     <table className="w-full text-sm">
