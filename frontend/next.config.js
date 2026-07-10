@@ -10,10 +10,11 @@ const nextConfig = {
   typedRoutes: true,
   // Silence workspace root inference warning (point to monorepo root if applicable)
   outputFileTracingRoot: __dirname,
-  // Tree-shake barrel imports from icon/UI kits so unused icons/components stay out of chunks
-  experimental: {
-    optimizePackageImports: ['@tremor/react', '@remixicon/react', 'lucide-react'],
-  },
+  // NOTE: experimental.optimizePackageImports was removed — it added per-route
+  // dev-compile overhead (slower page-to-page navigation in `next dev`) and
+  // intermittently broke `next build` ("Cannot read properties of undefined
+  // (reading 'call')"). Marginal bundle benefit after dead deps were dropped;
+  // Next 15 already optimizes common barrels by default.
   typescript: {
     // Dangerously allow production builds to successfully complete even if
     // your project has type errors.
