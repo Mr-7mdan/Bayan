@@ -12,14 +12,19 @@ export function middleware(req: NextRequest) {
     url.pathname = '/home'
     return NextResponse.redirect(url)
   }
-  if (PUBLIC.some((r) => r.test(pathname))) return NextResponse.next()
+  // Expose the pathname to the i18n request config (which otherwise can't see it)
+  // so public dashboard views can force the default language.
+  const headers = new Headers(req.headers)
+  headers.set('x-pathname', pathname)
+  const pass = () => NextResponse.next({ request: { headers } })
+  if (PUBLIC.some((r) => r.test(pathname))) return pass()
   if (!req.cookies.get('bayan_session')) {
     const url = req.nextUrl.clone()
     url.pathname = '/login'
     url.searchParams.set('next', pathname)
     return NextResponse.redirect(url)
   }
-  return NextResponse.next()
+  return pass()
 }
 
 export const config = {
