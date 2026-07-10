@@ -320,6 +320,53 @@ def list_ds(userId: str | None = Query(default=None), actorId: str | None = Depe
     return [DatasourceOut.model_validate(r) for r in all_rows]
 
 
+# IMPORTANT: /export MUST be registered before /{ds_id}. Starlette matches routes
+# in definition order, so if /export comes after /{ds_id}, "export" is captured as
+# a datasource id and returns 404 ("Datasource not found"). Helpers it calls
+# (_to_export_item) resolve at call time, so their later definition is fine.
+@router.get("/export", response_model=list[DatasourceExportItem])
+def export_datasources(request: Request, ids: list[str] | None = Query(default=None), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
+    # Permissions: admin can export any; non-admin can only export own datasources
+    if _actor_is_admin(db, actorId):
+        q = db.query(Datasource)
+    else:
+        actor = (actorId or "").strip()
+        if not actor:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        q = db.query(Datasource).filter(Datasource.user_id == actor)
+    if ids:
+        q = q.filter(Datasource.id.in_(ids))
+    rows = q.order_by(Datasource.created_at.desc()).all()
+    out: list[DatasourceExportItem] = []
+    for r in rows:
+        item = _to_export_item(r)
+        if includeSyncTasks:
+            tasks = db.query(SyncTask).filter(SyncTask.datasource_id == r.id).order_by(SyncTask.created_at.asc()).all()
+            st_items: list[dict] = []
+            for t in tasks:
+                st_items.append({
+                    "id": t.id,
+                    "datasourceId": t.datasource_id,
+                    "sourceSchema": t.source_schema,
+                    "sourceTable": t.source_table,
+                    "destTableName": t.dest_table_name,
+                    "mode": t.mode,
+                    "pkColumns": t.pk_columns,
+                    "selectColumns": t.select_columns,
+                    "sequenceColumn": t.sequence_column,
+                    "batchSize": t.batch_size,
+                    "scheduleCron": t.schedule_cron,
+                    "enabled": t.enabled,
+                    "groupKey": t.group_key,
+                    "createdAt": t.created_at,
+                })
+            item.syncTasks = st_items  # type: ignore[attr-defined]
+        out.append(item)
+    audit("datasource.export", actor_id=actorId, target_type="datasource", request=request,
+          details={"ids": [r.id for r in rows], "includesCredentials": True})
+    return out
+
+
 @router.get("/{ds_id}", response_model=DatasourceDetailOut)
 def get_ds(ds_id: str, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
     ds: Datasource | None = db.get(Datasource, ds_id)
@@ -2681,47 +2728,8 @@ def _to_export_item(ds: Datasource) -> DatasourceExportItem:
     )
 
 
-@router.get("/export", response_model=list[DatasourceExportItem])
-def export_datasources(request: Request, ids: list[str] | None = Query(default=None), includeSyncTasks: bool = Query(default=True), actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
-    # Permissions: admin can export any; non-admin can only export own datasources
-    if _actor_is_admin(db, actorId):
-        q = db.query(Datasource)
-    else:
-        actor = (actorId or "").strip()
-        if not actor:
-            raise HTTPException(status_code=403, detail="Forbidden")
-        q = db.query(Datasource).filter(Datasource.user_id == actor)
-    if ids:
-        q = q.filter(Datasource.id.in_(ids))
-    rows = q.order_by(Datasource.created_at.desc()).all()
-    out: list[DatasourceExportItem] = []
-    for r in rows:
-        item = _to_export_item(r)
-        if includeSyncTasks:
-            tasks = db.query(SyncTask).filter(SyncTask.datasource_id == r.id).order_by(SyncTask.created_at.asc()).all()
-            st_items: list[dict] = []
-            for t in tasks:
-                st_items.append({
-                    "id": t.id,
-                    "datasourceId": t.datasource_id,
-                    "sourceSchema": t.source_schema,
-                    "sourceTable": t.source_table,
-                    "destTableName": t.dest_table_name,
-                    "mode": t.mode,
-                    "pkColumns": t.pk_columns,
-                    "selectColumns": t.select_columns,
-                    "sequenceColumn": t.sequence_column,
-                    "batchSize": t.batch_size,
-                    "scheduleCron": t.schedule_cron,
-                    "enabled": t.enabled,
-                    "groupKey": t.group_key,
-                    "createdAt": t.created_at,
-                })
-            item.syncTasks = st_items  # type: ignore[attr-defined]
-        out.append(item)
-    audit("datasource.export", actor_id=actorId, target_type="datasource", request=request,
-          details={"ids": [r.id for r in rows], "includesCredentials": True})
-    return out
+# NOTE: the GET /export (export-all) route is registered ABOVE the /{ds_id} route
+# (near get_ds) so it isn't shadowed by the path param. Do not re-add it here.
 
 
 @router.get("/{ds_id}/export", response_model=DatasourceExportItem)
