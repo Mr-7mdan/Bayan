@@ -30,3 +30,7 @@ logs/
 
 # spec-01 junk dir (kept on disk, never released)
 garbage/
+
+# session/tooling artifacts (keep on disk, never track)
+.data/
+.shared/ui-ux-pro-max/
