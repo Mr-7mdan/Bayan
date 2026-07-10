@@ -20,6 +20,7 @@ import {
 import { Button, StatusPill } from '@/components/ui'
 import type { StatusPillState } from '@/components/ui'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
+import { useTranslations } from 'next-intl'
 
 type AddKind = 'kpi'|'chart'|'table'|'text'|'spacer'|'composition'|'report'
 
@@ -67,25 +68,27 @@ type TitleBarProps = {
   onRedoAction?: () => void
 }
 
-const ADD_CARDS: Array<{ kind: AddKind; label: string; desc: string; Icon: ComponentType<any> }> = [
-  { kind: 'chart', label: 'Chart', desc: 'Line, bar, area and more', Icon: RiBarChartBoxLine },
-  { kind: 'table', label: 'Table', desc: 'Rows, columns and pivots', Icon: RiTableLine },
-  { kind: 'kpi', label: 'KPI', desc: 'A single headline metric', Icon: RiNumbersLine },
-  { kind: 'text', label: 'Text', desc: 'A note or markdown block', Icon: RiText },
-  { kind: 'spacer', label: 'Spacer', desc: 'Empty layout spacing', Icon: RiSpace },
-  { kind: 'composition', label: 'Composition', desc: 'Group widgets in one card', Icon: RiLayoutMasonryLine },
-  { kind: 'report', label: 'Report', desc: 'A composed report widget', Icon: RiFileTextLine },
+// Labels are resolved from the `builder.addCard.*` messages at render time using `kind`.
+const ADD_CARDS: Array<{ kind: AddKind; Icon: ComponentType<any> }> = [
+  { kind: 'chart', Icon: RiBarChartBoxLine },
+  { kind: 'table', Icon: RiTableLine },
+  { kind: 'kpi', Icon: RiNumbersLine },
+  { kind: 'text', Icon: RiText },
+  { kind: 'spacer', Icon: RiSpace },
+  { kind: 'composition', Icon: RiLayoutMasonryLine },
+  { kind: 'report', Icon: RiFileTextLine },
 ]
 
-const REFRESH_OPTS: Array<{ v: number; label: string }> = [
-  { v: 0, label: 'Off' }, { v: 60, label: 'Every 1m' }, { v: 180, label: 'Every 3m' },
-  { v: 300, label: 'Every 5m' }, { v: 900, label: 'Every 15m' }, { v: 1800, label: 'Every 30m' },
-  { v: 3600, label: 'Every 1h' }, { v: 21600, label: 'Every 6h' }, { v: 86400, label: 'Every 24h' },
+// `key` maps to `builder.refreshOpts.*` messages.
+const REFRESH_OPTS: Array<{ v: number; key: string }> = [
+  { v: 0, key: 'off' }, { v: 60, key: '1m' }, { v: 180, key: '3m' },
+  { v: 300, key: '5m' }, { v: 900, key: '15m' }, { v: 1800, key: '30m' },
+  { v: 3600, key: '1h' }, { v: 21600, key: '6h' }, { v: 86400, key: '24h' },
 ]
 
-const GRID_OPTS: Array<{ v: 'sm'|'md'|'lg'|'xl'; label: string }> = [
-  { v: 'sm', label: 'Small (24 cols)' }, { v: 'md', label: 'Medium (18 cols)' },
-  { v: 'lg', label: 'Large (12 cols)' }, { v: 'xl', label: 'XL (8 cols)' },
+// `v` maps directly to `builder.gridOpts.*` messages.
+const GRID_OPTS: Array<{ v: 'sm'|'md'|'lg'|'xl' }> = [
+  { v: 'sm' }, { v: 'md' }, { v: 'lg' }, { v: 'xl' },
 ]
 
 type MenuKey = 'add' | 'layout' | 'grid' | 'refresh' | null
@@ -131,16 +134,17 @@ export default function TitleBar({
   onRedoAction,
 }: TitleBarProps) {
   const { env } = useEnvironment()
+  const t = useTranslations('builder')
   const trimmedToken = token?.trim() ?? ''
   const hasToken = trimmedToken.length > 0
 
   // Inline title editing state
   const [editing, setEditing] = useState(false)
-  const [localTitle, setLocalTitle] = useState<string>(title || 'Dashboard')
-  useEffect(() => { setLocalTitle(title || 'Dashboard') }, [title])
+  const [localTitle, setLocalTitle] = useState<string>(title || t('toolbar.defaultTitle'))
+  useEffect(() => { setLocalTitle(title || t('toolbar.defaultTitle')) }, [title, t])
 
   const commitTitle = () => {
-    const next = (localTitle || '').trim() || 'Untitled Dashboard'
+    const next = (localTitle || '').trim() || t('toolbar.untitled')
     if (onTitleChangeAction) onTitleChangeAction(next)
     setEditing(false)
   }
@@ -161,7 +165,7 @@ export default function TitleBar({
     try {
       let tok = trimmedToken
       if (isProtected && !tok && typeof window !== 'undefined') {
-        const entered = window.prompt('Enter the access token to include in the link')
+        const entered = window.prompt(t('toolbar.copyLinkPrompt'))
         if (entered && entered.trim()) { tok = entered.trim(); onTokenChangeAction?.(tok) }
       }
       const url = `${publicBase()}/v/${publicId}${(isProtected && tok) ? `?token=${encodeURIComponent(tok)}` : ''}`
@@ -211,23 +215,23 @@ export default function TitleBar({
               onBlur={commitTitle}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') commitTitle()
-                if (e.key === 'Escape') { setLocalTitle(title || 'Dashboard'); setEditing(false) }
+                if (e.key === 'Escape') { setLocalTitle(title || t('toolbar.defaultTitle')); setEditing(false) }
               }}
-              aria-label="Edit dashboard title"
+              aria-label={t('toolbar.editTitleAria')}
             />
           ) : (
             <button
               type="button"
               className="font-semibold truncate text-start hover:underline"
-              title={title || 'Dashboard'}
+              title={title || t('toolbar.defaultTitle')}
               onClick={() => setEditing(true)}
             >
-              {title || 'Dashboard'}
+              {title || t('toolbar.defaultTitle')}
             </button>
           )}
           {createdAt && (
             <span className="opacity-80 whitespace-nowrap text-xs">
-              Created {new Date(createdAt).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })}
+              {t('toolbar.created', { date: new Date(createdAt).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' }) })}
             </span>
           )}
         </div>
@@ -239,8 +243,8 @@ export default function TitleBar({
             className={`${iconBtnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
             onClick={onUndoAction}
             disabled={!canUndo}
-            title="Undo (Ctrl/Cmd+Z)"
-            aria-label="Undo"
+            title={t('toolbar.undoTooltip')}
+            aria-label={t('toolbar.undo')}
           >
             <RiArrowGoBackLine className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -249,8 +253,8 @@ export default function TitleBar({
             className={`${iconBtnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
             onClick={onRedoAction}
             disabled={!canRedo}
-            title="Redo (Ctrl/Cmd+Shift+Z)"
-            aria-label="Redo"
+            title={t('toolbar.redoTooltip')}
+            aria-label={t('toolbar.redo')}
           >
             <RiArrowGoForwardLine className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -261,36 +265,36 @@ export default function TitleBar({
           <StatusPill state={saveStatus} onRetry={onRetrySaveAction} className="me-1" />
 
           {/* Save */}
-          <Button variant="primary" size="sm" onClick={onSaveAction} disabled={!hydrated} title="Save dashboard (Ctrl/Cmd+S)">
-            Save
+          <Button variant="primary" size="sm" onClick={onSaveAction} disabled={!hydrated} title={t('toolbar.saveTooltip')}>
+            {t('toolbar.save')}
           </Button>
 
           {/* Publish / Unpublish */}
           {!publicId ? (
-            <Button variant="secondary" size="sm" onClick={onPublishAction} disabled={!dashboardId} title="Publish a public link">
-              Publish
+            <Button variant="secondary" size="sm" onClick={onPublishAction} disabled={!dashboardId} title={t('toolbar.publishTooltip')}>
+              {t('toolbar.publish')}
             </Button>
           ) : (
-            <Button variant="secondary" size="sm" onClick={onUnpublishAction} disabled={!dashboardId} title="Remove the public link">
-              Unpublish
+            <Button variant="secondary" size="sm" onClick={onUnpublishAction} disabled={!dashboardId} title={t('toolbar.unpublishTooltip')}>
+              {t('toolbar.unpublish')}
             </Button>
           )}
 
           {/* Token protection (only when published) */}
           {publicId && (
             !hasToken ? (
-              <Button variant="secondary" size="sm" onClick={onSetTokenAction} title="Protect the link with a token">Set token</Button>
+              <Button variant="secondary" size="sm" onClick={onSetTokenAction} title={t('toolbar.setTokenTooltip')}>{t('toolbar.setToken')}</Button>
             ) : (
-              <Button variant="secondary" size="sm" onClick={onRemoveTokenAction} title="Remove token protection">Remove token</Button>
+              <Button variant="secondary" size="sm" onClick={onRemoveTokenAction} title={t('toolbar.removeTokenTooltip')}>{t('toolbar.removeToken')}</Button>
             )
           )}
 
           {publicId && (
-            <Button variant="secondary" size="sm" onClick={handleCopyLink} title="Copy public link">Copy link</Button>
+            <Button variant="secondary" size="sm" onClick={handleCopyLink} title={t('toolbar.copyLinkTooltip')}>{t('toolbar.copyLink')}</Button>
           )}
 
           {showViewButton && (
-            <Button variant="secondary" size="sm" onClick={handleView} title="Open published view">View</Button>
+            <Button variant="secondary" size="sm" onClick={handleView} title={t('toolbar.viewTooltip')}>{t('toolbar.view')}</Button>
           )}
 
           <div className="mx-1 h-6 w-px bg-[hsl(var(--border))]" />
@@ -298,11 +302,11 @@ export default function TitleBar({
           {/* Add Card picker */}
           <div className="relative">
             <Button variant="secondary" size="sm" icon={<RiAddLine className="h-4 w-4" />} onClick={() => toggle('add')}>
-              Add Card
+              {t('toolbar.addCard')}
             </Button>
             {openMenu === 'add' && (
               <div className="anim-menu-in absolute end-0 mt-1 z-50 rounded-lg border border-[hsl(var(--border))] bg-card shadow-popover p-1 w-[280px]">
-                {ADD_CARDS.map(({ kind, label, desc, Icon }) => (
+                {ADD_CARDS.map(({ kind, Icon }) => (
                   <button
                     key={kind}
                     type="button"
@@ -311,8 +315,8 @@ export default function TitleBar({
                   >
                     <Icon className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <span className="min-w-0">
-                      <span className="block text-sm font-medium">{label}</span>
-                      <span className="block text-2xs text-muted-foreground truncate">{desc}</span>
+                      <span className="block text-sm font-medium">{t(`addCard.${kind}`)}</span>
+                      <span className="block text-2xs text-muted-foreground truncate">{t(`addCard.${kind}Desc`)}</span>
                     </span>
                   </button>
                 ))}
@@ -322,19 +326,19 @@ export default function TitleBar({
 
           {/* Grid density */}
           <div className="relative">
-            <button type="button" className={iconBtnClass} onClick={() => toggle('grid')} title="Grid density" aria-label="Grid density">
+            <button type="button" className={iconBtnClass} onClick={() => toggle('grid')} title={t('toolbar.gridDensity')} aria-label={t('toolbar.gridDensity')}>
               <RiLayoutGridLine className="h-4 w-4" aria-hidden="true" />
             </button>
             {openMenu === 'grid' && (
               <div className="anim-menu-in absolute end-0 mt-1 z-50 rounded-lg border border-[hsl(var(--border))] bg-card shadow-popover p-1 w-[200px]">
-                {GRID_OPTS.map(({ v, label }) => (
+                {GRID_OPTS.map(({ v }) => (
                   <button
                     key={v}
                     type="button"
                     className={`${rowClass} ${(gridSize || 'lg') === v ? 'bg-muted' : ''}`}
                     onClick={() => { onGridSizeChangeAction?.(v); setOpenMenu(null) }}
                   >
-                    {label}
+                    {t(`gridOpts.${v}`)}
                   </button>
                 ))}
               </div>
@@ -343,19 +347,19 @@ export default function TitleBar({
 
           {/* Auto-refresh */}
           <div className="relative">
-            <button type="button" className={iconBtnClass} onClick={() => toggle('refresh')} title="Auto-refresh queries" aria-label="Auto-refresh queries">
+            <button type="button" className={iconBtnClass} onClick={() => toggle('refresh')} title={t('toolbar.autoRefresh')} aria-label={t('toolbar.autoRefresh')}>
               <RiRefreshLine className="h-4 w-4" aria-hidden="true" />
             </button>
             {openMenu === 'refresh' && (
               <div className="anim-menu-in absolute end-0 mt-1 z-50 rounded-lg border border-[hsl(var(--border))] bg-card shadow-popover p-1 w-[180px]">
-                {REFRESH_OPTS.map(({ v, label }) => (
+                {REFRESH_OPTS.map(({ v, key }) => (
                   <button
                     key={v}
                     type="button"
                     className={`${rowClass} ${Number(refreshEverySec || 0) === v ? 'bg-muted' : ''}`}
                     onClick={() => { onRefreshEverySecChangeAction?.(v); setOpenMenu(null) }}
                   >
-                    {label}
+                    {t(`refreshOpts.${key}`)}
                   </button>
                 ))}
               </div>
@@ -366,8 +370,8 @@ export default function TitleBar({
           <button
             type="button"
             className={iconBtnClass}
-            title={canvasLocked ? 'Unlock canvas width (auto)' : 'Lock canvas width to current'}
-            aria-label={canvasLocked ? 'Unlock canvas width' : 'Lock canvas width'}
+            title={canvasLocked ? t('toolbar.unlockCanvas') : t('toolbar.lockCanvasToCurrent')}
+            aria-label={canvasLocked ? t('toolbar.unlockCanvasAria') : t('toolbar.lockCanvasAria')}
             aria-pressed={canvasLocked}
             onClick={() => {
               if (canvasLocked) { onCanvasAutoAction?.(); setCanvasLocked(false) }
@@ -379,33 +383,33 @@ export default function TitleBar({
 
           {/* Layout utilities + display options */}
           <div className="relative">
-            <button type="button" className={iconBtnClass} onClick={() => toggle('layout')} title="Layout options" aria-label="Layout options">
+            <button type="button" className={iconBtnClass} onClick={() => toggle('layout')} title={t('toolbar.layoutOptions')} aria-label={t('toolbar.layoutOptions')}>
               <RiLayoutMasonryLine className="h-4 w-4" aria-hidden="true" />
             </button>
             {openMenu === 'layout' && (
               <div className="anim-menu-in absolute end-0 mt-1 z-50 rounded-lg border border-[hsl(var(--border))] bg-card shadow-popover p-2 w-[280px]">
                 <button className={rowClass} onClick={() => { onPackRowsFillAction?.(); setOpenMenu(null) }} disabled={!hydrated}>
-                  Compact layout (fill gaps)
+                  {t('layoutMenu.compact')}
                 </button>
                 <button className={rowClass} onClick={() => { onNormalizeLayoutAction?.(); setOpenMenu(null) }} disabled={!hydrated}>
-                  Convert to 24-column grid
+                  {t('layoutMenu.convert24')}
                 </button>
                 <div className="h-px bg-[hsl(var(--border))] my-2" />
                 <label className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-muted">
-                  <span>Show data navigator</span>
+                  <span>{t('layoutMenu.showNavigator')}</span>
                   <input type="checkbox" className="h-4 w-4" checked={showNavigator !== false} onChange={(e) => onShowNavigatorChangeAction?.(e.target.checked)} />
                 </label>
                 <label className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-muted">
-                  <span>Minimize sidebar on load</span>
+                  <span>{t('layoutMenu.minimizeSidebar')}</span>
                   <input type="checkbox" className="h-4 w-4" checked={autoMinimizeNav !== false} onChange={(e) => onAutoMinimizeNavChangeAction?.(e.target.checked)} />
                 </label>
                 <div className="h-px bg-[hsl(var(--border))] my-2" />
                 <label className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-muted">
-                  <span>Show global filters on public page</span>
+                  <span>{t('layoutMenu.showPublicFilters')}</span>
                   <input type="checkbox" className="h-4 w-4" checked={publicShowFilters !== false} onChange={(e) => onPublicShowFiltersChangeAction?.(e.target.checked)} />
                 </label>
                 <label className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-muted">
-                  <span>Lock global filters</span>
+                  <span>{t('layoutMenu.lockFilters')}</span>
                   <input type="checkbox" className="h-4 w-4" checked={!!publicLockFilters} onChange={(e) => onPublicLockFiltersChangeAction?.(e.target.checked)} />
                 </label>
               </div>

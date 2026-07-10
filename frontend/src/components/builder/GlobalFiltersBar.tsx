@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useFilters } from '@/components/providers/FiltersProvider'
 import FilterbarControl from '@/components/shared/FilterbarControl'
 import DateFieldMappingDialog from '@/components/builder/DateFieldMappingDialog'
@@ -10,27 +11,28 @@ import { RiLink, RiLinkUnlink } from '@remixicon/react'
 
 export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabled }: { widgets?: Record<string, WidgetConfig>; onApplyMappingAction?: (map: Record<string, string | undefined>) => void; disabled?: boolean }) {
   const { filters, setFilters, reset } = useFilters()
+  const t = useTranslations('builder')
   const [showMapping, setShowMapping] = useState(false)
   const [showBreakPanel, setShowBreakPanel] = useState(false)
-  
+
   // Use filterPreset from filters context (defaults to 'all' if not set)
   const selectedPreset = filters.filterPreset || 'all'
 
   const presetLabels: Record<string, string> = {
-    all: 'All time',
-    today: 'Today',
-    '7d': 'Last 7 days',
-    '30d': 'Last 30 days',
-    'this-week': 'This week',
-    'last-week': 'Last week',
-    'this-month': 'This month',
-    'prev-month': 'Previous month',
-    mtd: 'Month to date',
-    'this-quarter': 'This quarter',
-    'last-quarter': 'Last quarter',
-    'this-year': 'This year',
-    'last-year': 'Last year',
-    ytd: 'Year to date',
+    all: t('filters.presets.all'),
+    today: t('filters.presets.today'),
+    '7d': t('filters.presets.7d'),
+    '30d': t('filters.presets.30d'),
+    'this-week': t('filters.presets.this-week'),
+    'last-week': t('filters.presets.last-week'),
+    'this-month': t('filters.presets.this-month'),
+    'prev-month': t('filters.presets.prev-month'),
+    mtd: t('filters.presets.mtd'),
+    'this-quarter': t('filters.presets.this-quarter'),
+    'last-quarter': t('filters.presets.last-quarter'),
+    'this-year': t('filters.presets.this-year'),
+    'last-year': t('filters.presets.last-year'),
+    ytd: t('filters.presets.ytd'),
   }
   const presetOptions = [
     'all','today','7d','30d',
@@ -162,23 +164,23 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
         disabled={!!disabled}
       />
       <div className="flex items-center gap-2">
-        <label className="text-[11px] text-[hsl(var(--muted-foreground))]">Start</label>
+        <label className="text-[11px] text-[hsl(var(--muted-foreground))]">{t('filters.start')}</label>
         <DatePickerField
           value={filters.startDate}
           onChangeAction={(v) => {
             setFilters({ ...filters, startDate: v, filterPreset: undefined })
           }}
           disabled={!!disabled}
-          ariaLabel="Start date"
+          ariaLabel={t('filters.startDateAria')}
         />
-        <label className="text-[11px] text-[hsl(var(--muted-foreground))]">End</label>
+        <label className="text-[11px] text-[hsl(var(--muted-foreground))]">{t('filters.end')}</label>
         <DatePickerField
           value={filters.endDate}
           onChangeAction={(v) => {
             setFilters({ ...filters, endDate: v, filterPreset: undefined })
           }}
           disabled={!!disabled}
-          ariaLabel="End date"
+          ariaLabel={t('filters.endDateAria')}
         />
         <button
           type="button"
@@ -187,9 +189,9 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
             reset()
           }}
           disabled={!!disabled}
-          title="Clear filters"
+          title={t('filters.clearTooltip')}
         >
-          Clear
+          {t('filters.clear')}
         </button>
         {widgets && onApplyMappingAction && (
           <>
@@ -197,22 +199,22 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
             type="button"
             className="text-[12px] h-8 px-2 rounded-md border bg-[hsl(var(--card))] text-[hsl(var(--foreground))] border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"
             onClick={() => setShowMapping(true)}
-            title="Map date fields for widgets"
+            title={t('filters.mapDateFieldsTooltip')}
           >
-            <span className="inline-flex items-center gap-1"><RiLink className="w-4 h-4" /> Map Date Fields</span>
+            <span className="inline-flex items-center gap-1"><RiLink className="w-4 h-4" /> {t('filters.mapDateFields')}</span>
           </button>
           <div className="relative">
             <button
               type="button"
               className="text-[12px] h-8 px-2 rounded-md border bg-[hsl(var(--card))] text-[hsl(var(--foreground))] border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"
               onClick={() => setShowBreakPanel(v => !v)}
-              title="Break global filter link for selected widgets"
+              title={t('filters.breakFilterLinkTooltip')}
             >
-              <span className="inline-flex items-center gap-1"><RiLinkUnlink className="w-4 h-4" /> Break Filter Link</span>
+              <span className="inline-flex items-center gap-1"><RiLinkUnlink className="w-4 h-4" /> {t('filters.breakFilterLink')}</span>
             </button>
             {showBreakPanel && (
               <div className="absolute right-0 z-20 mt-1 w-[280px] max-h-[260px] overflow-auto rounded-md border bg-card p-2 shadow">
-                <div className="text-[11px] text-muted-foreground mb-1">Disable global date filters for widgets</div>
+                <div className="text-[11px] text-muted-foreground mb-1">{t('filters.breakPanelHint')}</div>
                 <ul className="space-y-1 text-[12px]">
                     {Object.values(widgets || {}).map((w) => {
                       const id = String(w.id)
@@ -236,14 +238,14 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
                               }}
                               disabled={!!disabled}
                             />
-                            <span className="text-[11px]">Break</span>
+                            <span className="text-[11px]">{t('filters.break')}</span>
                           </label>
                         </li>
                       )
                     })}
                   </ul>
                   <div className="flex items-center justify-end mt-2">
-                    <button type="button" className="text-[12px] h-7 px-2 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--muted))]" onClick={() => setShowBreakPanel(false)}>Close</button>
+                    <button type="button" className="text-[12px] h-7 px-2 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--muted))]" onClick={() => setShowBreakPanel(false)}>{t('filters.close')}</button>
                   </div>
                 </div>
               )}

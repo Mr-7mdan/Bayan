@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 import { RiFilter3Line, RiArrowUpDownLine, RiBrushLine, RiGridLine, RiRulerLine, RiChat3Line, RiPriceTag3Line, RiArrowRightSLine, RiArrowLeftSLine, RiArrowLeftLine, RiCloseLine, RiFileCopyLine, RiCodeSLine, RiBracesLine, RiFileListLine, RiSparkling2Line, RiCodeBoxLine, RiDownloadLine, RiDeleteBinLine } from '@remixicon/react'
 import { TextInput } from '@tremor/react'
@@ -31,6 +32,7 @@ export type WidgetActionsMenuProps = {
 
 // Text criterion -> selects subset of provided values
 function TextCriterionInput({ criterion, values, onApply }: { criterion: string; values: string[]; onApply: (vals: string[]) => void }) {
+  const t = useTranslations('builder')
   const [q, setQ] = React.useState<string>('')
   const apply = () => {
     const base = (values || []).map(String)
@@ -49,9 +51,9 @@ function TextCriterionInput({ criterion, values, onApply }: { criterion: string;
   }
   return (
     <div className="space-y-2">
-      <input type="text" className="w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-transparent" placeholder="Enter text" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input type="text" className="w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-transparent" placeholder={t('widgetMenu.enterText')} value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="flex items-center gap-2">
-        <button type="button" className="h-8 px-2 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={apply}>Apply</button>
+        <button type="button" className="h-8 px-2 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={apply}>{t('widgetMenu.apply')}</button>
       </div>
     </div>
   )
@@ -59,6 +61,7 @@ function TextCriterionInput({ criterion, values, onApply }: { criterion: string;
 
 // Number criterion -> selects subset of provided values
 function NumberCriterionInput({ criterion, values, onApply }: { criterion: string; values: string[]; onApply: (vals: string[]) => void }) {
+  const t = useTranslations('builder')
   const [a, setA] = React.useState<string>('')
   const [b, setB] = React.useState<string>('')
   const apply = () => {
@@ -82,14 +85,14 @@ function NumberCriterionInput({ criterion, values, onApply }: { criterion: strin
     <div className="space-y-2">
       {(/between/i.test(criterion)) ? (
         <div className="grid grid-cols-2 gap-2">
-          <input type="number" className="h-8 px-2 rounded-md border bg-transparent" placeholder="Min" value={a} onChange={(e) => setA(e.target.value)} />
-          <input type="number" className="h-8 px-2 rounded-md border bg-transparent" placeholder="Max" value={b} onChange={(e) => setB(e.target.value)} />
+          <input type="number" className="h-8 px-2 rounded-md border bg-transparent" placeholder={t('widgetMenu.min')} value={a} onChange={(e) => setA(e.target.value)} />
+          <input type="number" className="h-8 px-2 rounded-md border bg-transparent" placeholder={t('widgetMenu.max')} value={b} onChange={(e) => setB(e.target.value)} />
         </div>
       ) : (
-        <input type="number" className="w-full h-8 px-2 rounded-md border bg-transparent" placeholder="Enter number" value={a} onChange={(e) => setA(e.target.value)} />
+        <input type="number" className="w-full h-8 px-2 rounded-md border bg-transparent" placeholder={t('widgetMenu.enterNumber')} value={a} onChange={(e) => setA(e.target.value)} />
       )}
       <div className="flex items-center gap-2">
-        <button type="button" className="h-8 px-2 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={apply}>Apply</button>
+        <button type="button" className="h-8 px-2 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={apply}>{t('widgetMenu.apply')}</button>
       </div>
     </div>
   )
@@ -97,6 +100,7 @@ function NumberCriterionInput({ criterion, values, onApply }: { criterion: strin
 
 // Date criterion -> selects subset of provided values
 function DateCriterionInput({ criterion, values, onApply }: { criterion: string; values: string[]; onApply: (vals: string[]) => void }) {
+  const t = useTranslations('builder')
   const [a, setA] = React.useState<string>('')
   const [b, setB] = React.useState<string>('')
   const toYMD = (s: string): string => {
@@ -135,7 +139,7 @@ function DateCriterionInput({ criterion, values, onApply }: { criterion: string;
         <input type="date" className="w-full h-8 px-2 rounded-md border bg-transparent" value={a} onChange={(e) => setA(e.target.value)} />
       )}
       <div className="flex items-center gap-2">
-        <button type="button" className="h-8 px-2 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={apply}>Apply</button>
+        <button type="button" className="h-8 px-2 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={apply}>{t('widgetMenu.apply')}</button>
       </div>
     </div>
   )
@@ -165,6 +169,7 @@ function useDismiss(ref: React.RefObject<HTMLElement | null>, onClose: () => voi
 
 // Simple menu/submenu implementation rendered into a Portal near anchor rect, to avoid overflow clipping
 export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onCloseAction, parentDashboardId, parentPublicId, parentToken, onAction }: WidgetActionsMenuProps) {
+  const t = useTranslations('builder')
   const ref = useRef<HTMLDivElement | null>(null)
   useDismiss(ref, onCloseAction, [open])
   // Single-pane navigation path (root -> child -> grandchild)
@@ -433,43 +438,43 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
   const act = (a: WidgetAction) => { onAction?.(a); onCloseAction() }
 
   const makeRootPane = (): Pane => ({
-    title: 'Actions',
+    title: t('widgetMenu.actions'),
     content: (
       <MenuList>
-        <MenuGroup title="Configure">
-          {hasFilter && <MenuItem label="Filter" icon={<RiFilter3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['filter'])} />}
-          {hasSort && <MenuItem label="Sort" icon={<RiArrowUpDownLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['sort'])} />}
-          {hasFormat && <MenuItem label="Format" icon={<RiBrushLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['format'])} />}
-          {hasGrid && <MenuItem label="Grid" icon={<RiGridLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['grid'])} />}
-          {hasAxis && <MenuItem label="Axis" icon={<RiRulerLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['axis'])} />}
-          {hasTooltip && <MenuItem label="Tooltip" icon={<RiChat3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['tooltip'])} />}
-          {hasLegend && <MenuItem label="Legend" icon={<RiPriceTag3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['legend'])} />}
-          {hasAlerts && <MenuItem label={existingAlert ? (`Edit ${existingAlert.kind === 'notification' ? 'Notification' : 'Alert'}`) : 'Set Notification/Alert'} icon={<RiNotification3Line className="h-4 w-4" aria-hidden="true" />} onClick={() => setAlertsOpen(true)} />}
-          <MenuItem label="AI Assist" icon={<RiSparkling2Line className="h-4 w-4" aria-hidden="true" />} onClick={() => act('aiAssist')} />
+        <MenuGroup title={t('widgetMenu.configure')}>
+          {hasFilter && <MenuItem label={t('widgetMenu.filter')} icon={<RiFilter3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['filter'])} />}
+          {hasSort && <MenuItem label={t('widgetMenu.sort')} icon={<RiArrowUpDownLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['sort'])} />}
+          {hasFormat && <MenuItem label={t('widgetMenu.format')} icon={<RiBrushLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['format'])} />}
+          {hasGrid && <MenuItem label={t('widgetMenu.grid')} icon={<RiGridLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['grid'])} />}
+          {hasAxis && <MenuItem label={t('widgetMenu.axis')} icon={<RiRulerLine className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['axis'])} />}
+          {hasTooltip && <MenuItem label={t('widgetMenu.tooltip')} icon={<RiChat3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['tooltip'])} />}
+          {hasLegend && <MenuItem label={t('widgetMenu.legend')} icon={<RiPriceTag3Line className="h-4 w-4" aria-hidden="true" />} hasSubmenu onClick={() => setNav(['legend'])} />}
+          {hasAlerts && <MenuItem label={existingAlert ? (existingAlert.kind === 'notification' ? t('widgetMenu.editNotification') : t('widgetMenu.editAlert')) : t('widgetMenu.setAlert')} icon={<RiNotification3Line className="h-4 w-4" aria-hidden="true" />} onClick={() => setAlertsOpen(true)} />}
+          <MenuItem label={t('widgetMenu.aiAssist')} icon={<RiSparkling2Line className="h-4 w-4" aria-hidden="true" />} onClick={() => act('aiAssist')} />
         </MenuGroup>
         <MenuDivider />
-        <MenuItem label="Duplicate" icon={<RiFileCopyLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('duplicate')} />
+        <MenuItem label={t('widgetMenu.duplicate')} icon={<RiFileCopyLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('duplicate')} />
         <MenuDivider />
-        <MenuItem label="View SQL" icon={<RiCodeSLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewSql')} />
-        <MenuItem label="View Spec Query" icon={<RiBracesLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewSpec')} />
-        <MenuItem label="View JSON Config" icon={<RiFileListLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewJson')} />
-        <MenuItem label="Embed" icon={<RiCodeBoxLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('embed')} />
+        <MenuItem label={t('widgetMenu.viewSql')} icon={<RiCodeSLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewSql')} />
+        <MenuItem label={t('widgetMenu.viewSpec')} icon={<RiBracesLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewSpec')} />
+        <MenuItem label={t('widgetMenu.viewJson')} icon={<RiFileListLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('viewJson')} />
+        <MenuItem label={t('widgetMenu.embed')} icon={<RiCodeBoxLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('embed')} />
         {supportsDownload && (
           <>
             <MenuDivider />
-            <MenuItem label="Download PNG" icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPNG')} />
-            <MenuItem label="Download SVG" icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadSVG')} />
+            <MenuItem label={t('widgetMenu.downloadPng')} icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPNG')} />
+            <MenuItem label={t('widgetMenu.downloadSvg')} icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadSVG')} />
           </>
         )}
         {supportsReportDownload && (
           <>
             <MenuDivider />
-            <MenuItem label="Download PDF (Portrait)" icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPdfPortrait')} />
-            <MenuItem label="Download PDF (Landscape)" icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPdfLandscape')} />
+            <MenuItem label={t('widgetMenu.downloadPdfPortrait')} icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPdfPortrait')} />
+            <MenuItem label={t('widgetMenu.downloadPdfLandscape')} icon={<RiDownloadLine className="h-4 w-4" aria-hidden="true" />} onClick={() => act('downloadPdfLandscape')} />
           </>
         )}
         <MenuDivider />
-        <MenuItem label="Delete" icon={<RiDeleteBinLine className="h-4 w-4" aria-hidden="true" />} danger onClick={() => act('delete')} />
+        <MenuItem label={t('widgetMenu.delete')} icon={<RiDeleteBinLine className="h-4 w-4" aria-hidden="true" />} danger onClick={() => act('delete')} />
       </MenuList>
     )
   })
@@ -477,7 +482,7 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
   const makeFilterPane = (p: string[]): Pane => {
     if (p.length === 1) {
       return {
-        title: 'Filter',
+        title: t('widgetMenu.filter'),
         content: (
           <MenuList>
             {filterableFields.map((f) => (
@@ -552,7 +557,7 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
               <input
                 type="text"
                 className="w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-transparent text-[12px]"
-                placeholder="Search values"
+                placeholder={t('widgetMenu.searchValues')}
                 value={distinctSearch[field] || ''}
                 onChange={(e) => {
                   const q = e.target.value
@@ -574,22 +579,22 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
                 const nextWhere: Record<string, any> = { ...prevWhere }
                 if (all.length === 0) delete nextWhere[field]; else nextWhere[field] = all
                 emitPatch({ querySpec: ({ ...((cfg as any)?.querySpec || {}), where: nextWhere } as any) })
-              }}>Select all</button>
+              }}>{t('widgetMenu.selectAll')}</button>
               <button type="button" className="text-[11px] px-2 py-0.5 rounded border" onClick={() => {
                 const prevWhere = (((cfg as any)?.querySpec?.where) || {}) as Record<string, any>
                 const nextWhere: Record<string, any> = { ...prevWhere }; delete nextWhere[field]
                 emitPatch({ querySpec: ({ ...((cfg as any)?.querySpec || {}), where: nextWhere } as any) })
-              }}>Clear</button>
+              }}>{t('widgetMenu.clear')}</button>
             </div>
             <div className="max-h-48 overflow-auto px-2 pb-2 space-y-1">
               {(() => {
                 const currentRaw = (((cfg as any)?.querySpec?.where || {}) as any)[field]
                 const current: string[] = Array.isArray(currentRaw) ? currentRaw.map(String) : (currentRaw != null ? [String(currentRaw)] : [])
                 const all = distinctCache[field]
-                if (!all) { return <div className="text-xs text-muted-foreground px-1">Loading values…</div> }
+                if (!all) { return <div className="text-xs text-muted-foreground px-1">{t('widgetMenu.loadingValues')}</div> }
                 const q = (distinctSearch[field] || '').trim().toLowerCase()
                 const vals = q ? all.filter((v) => v.toLowerCase().includes(q)) : all
-                if (vals.length === 0) { return <div className="text-xs text-muted-foreground px-1">No values.</div> }
+                if (vals.length === 0) { return <div className="text-xs text-muted-foreground px-1">{t('widgetMenu.noValues')}</div> }
                 const toggle = (v: string) => {
                   const exists = current.includes(v)
                   const next = exists ? current.filter((x) => x !== v) : [...current, v]
@@ -1012,7 +1017,7 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
                   type="button"
                   className="h-7 w-7 flex items-center justify-center rounded hover:bg-secondary/70 border border-[hsl(var(--border))]"
                   onClick={() => { if (nav.length === 0) onCloseAction(); else setNav((prev) => prev.slice(0, -1)) }}
-                  aria-label="Back"
+                  aria-label={t('widgetMenu.back')}
                 >
                   <RiArrowLeftLine className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -1020,7 +1025,7 @@ export default function WidgetActionsMenu({ widgetId, cfg, anchorEl, open, onClo
                 <div className="h-7 w-7" />
               )}
               <div className="text-[13px] font-medium">{pane.title}</div>
-              <button className="h-7 w-7 flex items-center justify-center rounded hover:bg-secondary/70 border border-[hsl(var(--border))]" onClick={onCloseAction} aria-label="Close"><RiCloseLine className="h-4 w-4" aria-hidden="true" /></button>
+              <button className="h-7 w-7 flex items-center justify-center rounded hover:bg-secondary/70 border border-[hsl(var(--border))]" onClick={onCloseAction} aria-label={t('widgetMenu.close')}><RiCloseLine className="h-4 w-4" aria-hidden="true" /></button>
             </div>
             <div className="max-h-[70vh] overflow-auto">
               {pane.content}

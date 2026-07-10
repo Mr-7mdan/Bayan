@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import { Api, type EmbedTokenRowOut, type ShareEntryOut } from '@/lib/api'
@@ -44,6 +45,7 @@ function layoutsEqual(a: RGLLayout[], b: RGLLayout[]): boolean {
 }
 
 export default function HomePage() {
+  const t = useTranslations('builder')
   const { user } = useAuth()
   const { env } = useEnvironment()
   const searchParams = useSearchParams()
@@ -225,7 +227,7 @@ export default function HomePage() {
   }, [embedOpen, embedWidgetId, embedWidth, embedHeight, embedTheme, embedBg, embedExpiry, publicId, token, embedEt, env.publicDomain])
 
   async function generateEmbedEt() {
-    if (!publicId) { setToast('Publish to generate token'); window.setTimeout(()=>setToast(''), 1200); return }
+    if (!publicId) { setToast(t('toast.publishToGenerateToken')); window.setTimeout(()=>setToast(''), 1200); return }
     try {
       const res = await Api.createEmbedToken(publicId, embedExpiry, user?.id)
       setEmbedEt(res.token)
@@ -238,7 +240,7 @@ export default function HomePage() {
       // Refresh persisted tokens list
       if (dashboardId) { try { await refreshTokensAndShares() } catch {} }
     } catch (e: any) {
-      setToast(e?.message || 'Failed to create token')
+      setToast(e?.message || t('toast.failedCreateToken'))
       window.setTimeout(()=>setToast(''), 1500)
     }
   }
@@ -420,7 +422,7 @@ export default function HomePage() {
     try { localStorage.setItem('dashboardDraft', JSON.stringify(payload.definition)) } catch {}
     // Clear publish state until we refetch status
     setPublicId(null)
-    setToast(`Saved. id: ${res.id}`)
+    setToast(t('toast.savedWithId', { id: res.id }))
     window.setTimeout(() => setToast(''), 1000)
   }
 
@@ -1393,7 +1395,7 @@ export default function HomePage() {
                 definition: { layout: layoutState, widgets: configs, options: dashOptions },
               })
               setDashboardId(res.id)
-              setToast('Saved')
+              setToast(t('toast.saved'))
               window.setTimeout(() => setToast(''), 1000)
             } catch {}
           })()
@@ -1435,8 +1437,8 @@ export default function HomePage() {
         {showNavigator && (
           <aside
             className={`hidden md:block overflow-hidden rounded-lg border shadow-card bg-card ${leftCollapsed ? 'cursor-pointer' : 'p-3'}`}
-            title={leftCollapsed ? 'Click to expand' : undefined}
-            aria-label="Data Navigator"
+            title={leftCollapsed ? t('navigator.expand') : undefined}
+            aria-label={t('navigator.aria')}
             aria-expanded={!leftCollapsed}
             onClick={() => { if (leftTimerRef.current) { try { clearTimeout(leftTimerRef.current) } catch {} } if (leftCollapsed) setLeftCollapsed(false) }}
             onMouseLeave={() => { if (leftTimerRef.current) { try { clearTimeout(leftTimerRef.current) } catch {} } leftTimerRef.current = setTimeout(() => setLeftCollapsed(true), 200) }}
@@ -1485,7 +1487,7 @@ export default function HomePage() {
                 />
                 </div>
                 {/* Breakpoint switcher: pick which layout (Desktop/Tablet/Phone) to edit */}
-                <div className="inline-flex rounded-md border overflow-hidden text-xs flex-none" role="group" aria-label="Edit layout for breakpoint">
+                <div className="inline-flex rounded-md border overflow-hidden text-xs flex-none" role="group" aria-label={t('breakpoints.aria')}>
                   {(['desktop', 'tablet', 'phone'] as BreakpointKey[]).map((bp) => (
                     <button
                       key={bp}
@@ -1494,7 +1496,7 @@ export default function HomePage() {
                       className={`px-2 py-1 capitalize ${editBp === bp ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                       onClick={() => handleEditBpChange(bp)}
                     >
-                      {bp}
+                      {t(`breakpoints.${bp}`)}
                     </button>
                   ))}
                 </div>
@@ -1504,9 +1506,9 @@ export default function HomePage() {
               <div className="py-16">
                 <EmptyState
                   icon={<RiAddLine className="h-6 w-6" aria-hidden="true" />}
-                  title="Add your first widget"
-                  hint="Charts, tables, KPIs and more. Pick a widget to start building your dashboard."
-                  primary={{ label: 'Add a widget', icon: <RiAddLine className="h-4 w-4" aria-hidden="true" />, onClick: () => addCard('chart') }}
+                  title={t('emptyState.title')}
+                  hint={t('emptyState.hint')}
+                  primary={{ label: t('emptyState.cta'), icon: <RiAddLine className="h-4 w-4" aria-hidden="true" />, onClick: () => addCard('chart') }}
                 />
               </div>
             )}
@@ -1570,8 +1572,8 @@ export default function HomePage() {
                     {!showHeader && (
                       <div
                         className="widget-drag-handle absolute top-1 start-1 z-10 rounded border bg-card/90 p-0.5 text-muted-foreground cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--dur-fast)] ease-[var(--ease-out)] motion-reduce:transition-none"
-                        title="Drag to move"
-                        aria-label="Drag to move widget"
+                        title={t('widget.dragTooltip')}
+                        aria-label={t('widget.dragAria')}
                       >
                         <RiDragMove2Line className="h-4 w-4" aria-hidden="true" />
                       </div>
@@ -1585,7 +1587,7 @@ export default function HomePage() {
                               const key = String(cfg.id).split('::tab:')[0]
                               const secs = (loadTimes as any)[key]
                               return (secs != null) ? (
-                                <span className="ml-2 text-[11px] text-muted-foreground whitespace-nowrap">Loaded in {secs}s</span>
+                                <span className="ml-2 text-[11px] text-muted-foreground whitespace-nowrap">{t('widget.loadedIn', { secs })}</span>
                               ) : null
                             })()
                           ) : null}
@@ -1593,7 +1595,7 @@ export default function HomePage() {
                         <span className="flex items-center gap-1 no-drag">
                           {cfg.type === 'composition' && (
                             <button type="button" className="text-[11px] px-2 py-0.5 rounded border hover:bg-muted"
-                              title="Toggle inner edit mode"
+                              title={t('widget.toggleInnerEdit')}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 const curr = (cfg.options?.composition as any)?.innerInteractive === true
@@ -1602,12 +1604,12 @@ export default function HomePage() {
                                 setConfigs((prev) => ({ ...prev, [cfg.id]: nextCfg }))
                                 scheduleServerSave({ layout: layoutState, widgets: { ...configs, [cfg.id]: nextCfg } })
                               }}>
-                              {((cfg.options?.composition as any)?.innerInteractive ? 'Disable Inner Edit' : 'Enable Inner Edit')}
+                              {((cfg.options?.composition as any)?.innerInteractive ? t('widget.disableInnerEdit') : t('widget.enableInnerEdit'))}
                             </button>
                           )}
                           <button
                             type="button"
-                            aria-label="Widget actions"
+                            aria-label={t('widget.actionsAria')}
                             aria-haspopup="menu"
                             aria-expanded={actionsMenuId === cfg.id}
                             className="text-xs px-1 py-0.5 rounded border hover:bg-muted"
@@ -1688,7 +1690,7 @@ export default function HomePage() {
             no overlap. Resizable (320–480px, persisted), collapses to a slim icon rail. */}
         {selectedConfig && (
           <aside
-            aria-label="Configurator"
+            aria-label={t('inspector.aria')}
             className={`hidden lg:flex flex-col relative border-s bg-card sticky top-14 self-start h-[calc(100vh-56px)] ${inspectorResizing ? '' : 'transition-[width] duration-[var(--dur-fast)] ease-[var(--ease-out)]'} motion-reduce:transition-none`}
             style={{ width: inspectorCollapsed ? 48 : inspectorWidth }}
           >
@@ -1696,12 +1698,12 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => setInspectorCollapsed(false)}
-                title="Expand configurator"
-                aria-label="Expand configurator"
+                title={t('inspector.expand')}
+                aria-label={t('inspector.expand')}
                 className="flex flex-col items-center gap-2 pt-3 w-full text-muted-foreground hover:text-foreground"
               >
                 <RiSettings3Line className="h-5 w-5" aria-hidden="true" />
-                <span className="text-[11px] font-medium" style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>Configurator</span>
+                <span className="text-[11px] font-medium" style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>{t('inspector.title')}</span>
               </button>
             ) : (
               <>
@@ -1709,12 +1711,12 @@ export default function HomePage() {
                 <div
                   role="separator"
                   aria-orientation="vertical"
-                  title="Drag to resize"
+                  title={t('inspector.resizeTooltip')}
                   className="absolute inset-y-0 start-0 w-1.5 z-20 cursor-col-resize hover:bg-[hsl(var(--primary)/0.4)]"
                   onPointerDown={startInspectorResize}
                 />
                 <div className="flex items-center justify-between sticky top-0 bg-card z-10 pt-2 pb-1 px-3 border-b">
-                  <h2 className="text-sm font-medium">Configurator</h2>
+                  <h2 className="text-sm font-medium">{t('inspector.title')}</h2>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setUseV2Panel(v => !v)}
@@ -1726,16 +1728,16 @@ export default function HomePage() {
                     <button
                       onClick={() => setInspectorCollapsed(true)}
                       className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
-                      title="Collapse to rail"
-                      aria-label="Collapse configurator"
+                      title={t('inspector.collapseTooltip')}
+                      aria-label={t('inspector.collapse')}
                     >
                       <RiArrowRightSLine className="h-4 w-4" aria-hidden="true" />
                     </button>
                     <button
                       onClick={() => setSelectedId(null)}
                       className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
-                      title="Close"
-                      aria-label="Close configurator"
+                      title={t('inspector.closeTooltip')}
+                      aria-label={t('inspector.close')}
                     >
                       <RiCloseLine className="h-4 w-4" aria-hidden="true" />
                     </button>
