@@ -3,7 +3,7 @@ import { headers } from 'next/headers'
 import type { ReactNode } from 'react'
 import { Suspense } from 'react'
 import './globals.css'
-import { Inter, IBM_Plex_Sans_Arabic } from 'next/font/google'
+import { Inter, Tajawal } from 'next/font/google'
 import { getLocale, getMessages } from 'next-intl/server'
 import { NextIntlClientProvider } from 'next-intl'
 import QueryProvider from '@/components/providers/QueryProvider'
@@ -16,7 +16,9 @@ import EnvironmentProvider from '@/components/providers/EnvironmentProvider'
 import ErrorReporterProvider from '@/components/providers/ErrorReporterProvider'
 
 const inter = Inter({ subsets: ['latin'] })
-const plexArabic = IBM_Plex_Sans_Arabic({ subsets: ['arabic', 'latin'], weight: ['400', '500', '600', '700'] })
+// Tajawal: modern geometric Arabic sans (free stand-in for STC Forward / Helvetica
+// Neue Arabic used by macuco.com/ar). Self-hosted by next/font — no runtime request.
+const tajawal = Tajawal({ subsets: ['arabic', 'latin'], weight: ['400', '500', '700'] })
 
 const defaultMetadata: Metadata = {
   title: { default: 'Bayan', template: '%s · Bayan' },
@@ -65,7 +67,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const locale = await getLocale()
   const messages = await getMessages()
   const dir = locale === 'ar' ? 'rtl' : 'ltr'
-  const fontClass = locale === 'ar' ? plexArabic.className : inter.className
+  const fontClass = locale === 'ar' ? tajawal.className : inter.className
   return (
     <html lang={locale} dir={dir} className="h-full">
       <body className={`${fontClass} h-full bg-background text-foreground`}>
