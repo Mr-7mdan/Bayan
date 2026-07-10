@@ -463,12 +463,12 @@ function PivotMatrixView({ rows, columns: _cols, widgetId, tableOptions, pivot }
   // Cell alignment (defaults): horizontal left, vertical top
   const cellHAlign = (tableOptions as any)?.pivotStyle?.cellHAlign || 'left'
   const cellVAlign = (tableOptions as any)?.pivotStyle?.cellVAlign || 'top'
-  const cellTextAlignClass = cellHAlign === 'center' ? 'text-center' : (cellHAlign === 'right' ? 'text-right' : 'text-left')
+  const cellTextAlignClass = cellHAlign === 'center' ? 'text-center' : (cellHAlign === 'right' ? 'text-end' : 'text-start')
   const cellValignClass = (cellVAlign === 'middle' || cellVAlign === 'center') ? 'align-middle' : (cellVAlign === 'bottom' ? 'align-bottom' : 'align-top')
   // Header alignment (defaults): horizontal left, vertical top
   const headerHAlign = (tableOptions as any)?.pivotStyle?.headerHAlign || 'left'
   const headerVAlign = (tableOptions as any)?.pivotStyle?.headerVAlign || 'top'
-  const headerTextAlignClass = headerHAlign === 'center' ? 'text-center' : (headerHAlign === 'right' ? 'text-right' : 'text-left')
+  const headerTextAlignClass = headerHAlign === 'center' ? 'text-center' : (headerHAlign === 'right' ? 'text-end' : 'text-start')
   const headerValignClass = (headerVAlign === 'middle' || headerVAlign === 'center') ? 'align-middle' : (headerVAlign === 'bottom' ? 'align-bottom' : 'align-top')
   const headerVFlexClass = headerVAlign === 'middle' || headerVAlign === 'center' ? 'items-center' : (headerVAlign === 'bottom' ? 'items-end' : 'items-start')
   const headerHJustifyClass = headerHAlign === 'center' ? 'justify-center' : (headerHAlign === 'right' ? 'justify-end' : 'justify-start')
@@ -655,7 +655,7 @@ function PivotMatrixView({ rows, columns: _cols, widgetId, tableOptions, pivot }
               }
               // Alignment based on utility classes
               const cls = td.className || ''
-              const horiz = cls.includes('text-right') ? 'right' : (cls.includes('text-center') ? 'center' : 'left')
+              const horiz = cls.includes('text-end') ? 'right' : (cls.includes('text-center') ? 'center' : 'left')
               const vert = cls.includes('align-middle') ? 'middle' : (cls.includes('align-bottom') ? 'bottom' : 'top')
               anchor.alignment = { horizontal: horiz as any, vertical: vert as any, wrapText: true }
               // Alternating row background
@@ -1338,7 +1338,7 @@ function PivotMatrixView({ rows, columns: _cols, widgetId, tableOptions, pivot }
             <tr className="bg-gradient-to-r from-[hsl(var(--muted)/0.85)] to-[hsl(var(--muted)/0.6)]">
               {/* Row header total label */}
               {rowDims.length > 0 ? (
-                <th colSpan={rowDims.length} className="text-left border px-2 font-semibold">Total</th>
+                <th colSpan={rowDims.length} className="text-start border px-2 font-semibold">Total</th>
               ) : null}
               {colDims.length === 0 ? (
                 <>

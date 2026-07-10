@@ -147,7 +147,7 @@ export default function DataNavigator() {
           <li key={ds.id}>
             <div className="relative">
               <button
-                className={`w-full text-left px-2 py-2 rounded-md hover:bg-muted border-l-2 transition-colors pr-8 ${
+                className={`w-full text-start px-2 py-2 rounded-md hover:bg-muted border-l-2 transition-colors pr-8 ${
                   selectedId === ds.id ? 'bg-secondary/60 border-l-[hsl(var(--header-accent))]' : 'border-l-transparent'
                 }`}
                 onClick={() => setSelectedId(ds.id)}
@@ -238,10 +238,10 @@ export default function DataNavigator() {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-[hsl(var(--muted))] text-[hsl(var(--foreground))]">
-                        <th className="text-left font-medium px-2 py-1">Table</th>
-                        <th className="text-left font-medium px-2 py-1">Rows</th>
-                        <th className="text-left font-medium px-2 py-1">Last Sync</th>
-                        <th className="text-left font-medium px-2 py-1">Actions</th>
+                        <th className="text-start font-medium px-2 py-1">Table</th>
+                        <th className="text-start font-medium px-2 py-1">Rows</th>
+                        <th className="text-start font-medium px-2 py-1">Last Sync</th>
+                        <th className="text-start font-medium px-2 py-1">Actions</th>
                       </tr>
                     </thead>
                     <tbody>

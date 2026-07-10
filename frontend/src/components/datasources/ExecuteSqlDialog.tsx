@@ -326,7 +326,7 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
               {!loading && !error && rows.length > 0 && (
                 <div className="border border-[hsl(var(--border))] rounded-xl bg-[hsl(var(--background))] overflow-hidden absolute inset-4 shadow-sm flex flex-col">
                   <div className="flex-1 overflow-auto">
-                    <table className="min-w-full text-[13px] text-left border-collapse">
+                    <table className="min-w-full text-[13px] text-start border-collapse">
                       <thead className="bg-[hsl(var(--muted))]/80 sticky top-0 z-10 backdrop-blur-md">
                         <tr>
                           {columns.map((c, i) => (

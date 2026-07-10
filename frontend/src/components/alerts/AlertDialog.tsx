@@ -1278,7 +1278,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                 <button
                   key={s}
                   type="button"
-                  className={`${tabBase} ${uiSection===s ? tabActive : ''} w-full text-left`}
+                  className={`${tabBase} ${uiSection===s ? tabActive : ''} w-full text-start`}
                   onClick={()=> setUiSection(s)}
                 >
                   {t('alertDialog.sections.'+s)}
@@ -1407,7 +1407,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                         const key = (s.type==='contact') ? `c:${(s.id||'').toLowerCase()}` : `t:${(s.tag||'').toLowerCase()}`
                         const checked = recipSel.has(recipKey(s))
                         return (
-                          <button key={key || String(idx)} className="w-full text-left text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleRecipSel(s)}>
+                          <button key={key || String(idx)} className="w-full text-start text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleRecipSel(s)}>
                             <input type="checkbox" readOnly checked={checked} className="h-3 w-3" />
                             <span>{s.label}</span>
                           </button>
@@ -2185,10 +2185,10 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                   <table className="min-w-full text-sm">
                     <thead className="bg-[hsl(var(--muted))]">
                       <tr>
-                        <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.started')}</th>
-                        <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.finished')}</th>
-                        <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.status')}</th>
-                        <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.message')}</th>
+                        <th className="text-start px-2 py-1 font-medium">{t('alertDialog.runs.started')}</th>
+                        <th className="text-start px-2 py-1 font-medium">{t('alertDialog.runs.finished')}</th>
+                        <th className="text-start px-2 py-1 font-medium">{t('alertDialog.runs.status')}</th>
+                        <th className="text-start px-2 py-1 font-medium">{t('alertDialog.runs.message')}</th>
                       </tr>
                     </thead>
                     <tbody>

@@ -389,12 +389,12 @@ export default function AlertsPage() {
             <table className="min-w-full text-sm">
               <thead className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
                 <tr>
-                  <th className="text-left px-3 py-2 font-medium">{t('alerts.table.name')}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t('alerts.table.type')}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t('alerts.table.lastRun')}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t('alerts.table.nextRun')}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t('alerts.table.status')}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t('alerts.table.actions')}</th>
+                  <th className="text-start px-3 py-2 font-medium">{t('alerts.table.name')}</th>
+                  <th className="text-start px-3 py-2 font-medium">{t('alerts.table.type')}</th>
+                  <th className="text-start px-3 py-2 font-medium">{t('alerts.table.lastRun')}</th>
+                  <th className="text-start px-3 py-2 font-medium">{t('alerts.table.nextRun')}</th>
+                  <th className="text-start px-3 py-2 font-medium">{t('alerts.table.status')}</th>
+                  <th className="text-start px-3 py-2 font-medium">{t('alerts.table.actions')}</th>
                 </tr>
               </thead>
               <tbody className="bg-[hsl(var(--background))]">

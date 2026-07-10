@@ -1158,7 +1158,7 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
                       {(() => {
                         const cols = pvCols.filter(c => c !== '*')
                         return (
-                          <tr>{cols.map((c) => (<th key={c} className="text-left px-2 py-1 border-b bg-[hsl(var(--secondary)/0.6)] sticky top-0 whitespace-pre">{c}</th>))}</tr>
+                          <tr>{cols.map((c) => (<th key={c} className="text-start px-2 py-1 border-b bg-[hsl(var(--secondary)/0.6)] sticky top-0 whitespace-pre">{c}</th>))}</tr>
                         )
                       })()}
                     </thead>
@@ -1496,10 +1496,10 @@ export default function AdvancedSqlDialog({ open, onCloseAction, datasourceId, d
               <table className="min-w-full text-[11px]">
                 <thead className="bg-[hsl(var(--secondary)/0.6)]">
                   <tr>
-                    <th className="text-left px-2 py-1 border-b">Type</th>
-                    <th className="text-left px-2 py-1 border-b w-[45%] max-w-[420px]">Summary</th>
-                    <th className="text-left px-2 py-1 border-b w-[26%] max-w-[260px]">Scope</th>
-                    <th className="text-left px-2 py-1 border-b">Actions</th>
+                    <th className="text-start px-2 py-1 border-b">Type</th>
+                    <th className="text-start px-2 py-1 border-b w-[45%] max-w-[420px]">Summary</th>
+                    <th className="text-start px-2 py-1 border-b w-[26%] max-w-[260px]">Scope</th>
+                    <th className="text-start px-2 py-1 border-b">Actions</th>
                   </tr>
                 </thead>
                 <tbody>

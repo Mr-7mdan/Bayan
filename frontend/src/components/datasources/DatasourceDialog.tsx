@@ -937,7 +937,7 @@ export default function DatasourceDialog({
               </div>
               <nav className="space-y-1">
                 {CONNECTORS.map((c) => (
-                  <button key={c.id} className={`w-full text-left sidebar-item-light dark:sidebar-item-dark ${type===c.id ? 'sidebar-item-active-light dark:sidebar-item-active-dark' : ''}`} onClick={() => { setType(c.id as any); setBuilderDirty(false) }}>
+                  <button key={c.id} className={`w-full text-start sidebar-item-light dark:sidebar-item-dark ${type===c.id ? 'sidebar-item-active-light dark:sidebar-item-active-dark' : ''}`} onClick={() => { setType(c.id as any); setBuilderDirty(false) }}>
                     <span className="inline-flex items-center gap-2">
                       <c.icon className="w-4 h-4" />
                       {c.label}

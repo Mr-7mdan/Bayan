@@ -167,7 +167,7 @@ function ExpressionBuilder({ expression, allVarNames, onChange }: {
           <div className="max-h-48 overflow-y-auto">
             {allVarNames.filter(n => n.toLowerCase().includes(varSearch.toLowerCase())).map(name => (
               <button key={name} onClick={() => { applyToken({ kind: 'var', name }); setVarSearch('') }}
-                className="w-full text-left px-2 py-1 rounded hover:bg-primary/10 hover:text-primary transition-colors truncate">
+                className="w-full text-start px-2 py-1 rounded hover:bg-primary/10 hover:text-primary transition-colors truncate">
                 {name}
               </button>
             ))}
@@ -1751,7 +1751,7 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
       <div className="max-h-52 overflow-y-auto">
         {filteredPick.map(c => (
           <button key={c} onClick={() => pickField(c)}
-            className="w-full text-left px-2 py-1 rounded hover:bg-primary/10 hover:text-primary transition-colors truncate">
+            className="w-full text-start px-2 py-1 rounded hover:bg-primary/10 hover:text-primary transition-colors truncate">
             {c}
           </button>
         ))}
@@ -2514,7 +2514,7 @@ function CellVarSelect({ value, variables, onChange }: {
     <div ref={containerRef} className="relative flex-1 min-w-0">
       <button
         type="button"
-        className="w-full flex items-center gap-0.5 bg-transparent text-2xs font-mono text-left min-w-0 outline-none"
+        className="w-full flex items-center gap-0.5 bg-transparent text-2xs font-mono text-start min-w-0 outline-none"
         onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}
         onMouseDown={(e) => e.stopPropagation()}
         title={selected?.name || 'Select variable…'}
@@ -2541,7 +2541,7 @@ function CellVarSelect({ value, variables, onChange }: {
           <div className="max-h-52 overflow-y-auto py-0.5">
             <button
               type="button"
-              className="w-full text-left text-2xs font-mono px-2 py-1 hover:bg-muted text-muted-foreground"
+              className="w-full text-start text-2xs font-mono px-2 py-1 hover:bg-muted text-muted-foreground"
               onClick={() => { onChange(''); setOpen(false) }}
             >
               (none)
@@ -2552,7 +2552,7 @@ function CellVarSelect({ value, variables, onChange }: {
               <button
                 key={v.id}
                 type="button"
-                className={`w-full text-left text-2xs font-mono px-2 py-1 hover:bg-muted truncate block ${v.id === value ? 'text-primary font-semibold bg-primary/5' : ''}`}
+                className={`w-full text-start text-2xs font-mono px-2 py-1 hover:bg-muted truncate block ${v.id === value ? 'text-primary font-semibold bg-primary/5' : ''}`}
                 onClick={() => { onChange(v.id); setOpen(false) }}
               >
                 {v.name}
@@ -3116,18 +3116,18 @@ function InlineTableEditor({
                       {/* Row actions */}
                       <div className="border-t pt-2 mt-1 space-y-1">
                         <button
-                          className={`w-full text-2xs text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri === 0 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
+                          className={`w-full text-2xs text-start px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri === 0 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
                           disabled={ri === 0}
                           onClick={() => { moveRowUp(ri); setDeleteConfirmRow(null) }}>
                           <RiArrowUpLine className="h-3 w-3 shrink-0" />Move row up
                         </button>
                         <button
-                          className={`w-full text-2xs text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri >= table.rows - 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
+                          className={`w-full text-2xs text-start px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${ri >= table.rows - 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'}`}
                           disabled={ri >= table.rows - 1}
                           onClick={() => { moveRowDown(ri); setDeleteConfirmRow(null) }}>
                           <RiArrowDownLine className="h-3 w-3 shrink-0" />Move row down
                         </button>
-                        <button className="w-full text-2xs text-left px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1.5"
+                        <button className="w-full text-2xs text-start px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1.5"
                           onClick={() => { insertRowAbove(ri); setDeleteConfirmRow(null) }}>
                           <RiAddLine className="h-3 w-3 shrink-0" />Insert row above
                         </button>
@@ -3141,7 +3141,7 @@ function InlineTableEditor({
                           </div>
                         ) : (
                           <button
-                            className={`w-full text-2xs text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                            className={`w-full text-2xs text-start px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
                               table.rows <= 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-destructive/10 text-destructive'
                             }`}
                             disabled={table.rows <= 1}
@@ -3172,7 +3172,7 @@ function InlineTableEditor({
                             </div>
                           ) : (
                             <button
-                              className={`w-full text-2xs text-left px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                              className={`w-full text-2xs text-start px-2 py-1 rounded transition-colors flex items-center gap-1.5 ${
                                 table.cols <= 1 ? 'opacity-40 cursor-not-allowed text-muted-foreground' : 'hover:bg-destructive/10 text-destructive'
                               }`}
                               disabled={table.cols <= 1}

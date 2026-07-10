@@ -459,7 +459,7 @@ export default function AddDatasourceDialog({
                       detectResult.error ? (
                         <span className="text-red-700">Detect: {detectResult.error}</span>
                       ) : (
-                        <div className="text-right">
+                        <div className="text-end">
                           <div className="text-muted-foreground">
                             Detected: <b>{detectResult.detected || (detectResult.candidates?.join('/') || 'unknown')}</b>{' '}
                             {detectResult.method ? `(${detectResult.method})` : ''}

@@ -1627,7 +1627,7 @@ function KpiCard({
                       const isLast = i === (percents.length - 1)
                       return (
                         <div key={name} className="px-1 min-w-0" style={{ width: isLast ? `calc(${percents[i]}% + 24px)` : `${percents[i]}%` }}>
-                          <button type="button" onClick={(e) => { e.stopPropagation(); toggleLegend(name) }} className="w-full text-left">
+                          <button type="button" onClick={(e) => { e.stopPropagation(); toggleLegend(name) }} className="w-full text-start">
                             <div className={`flex items-start ${isLast ? 'flex-row-reverse justify-end' : 'justify-start'} gap-1`} title={`${name}: ${formatNumber(v.current)} (${Math.round(percents[i])}%)`}>
                               <span className="inline-block w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: tremorNameToHex(segColors[i]) }} />
                               <div className="min-w-0">
@@ -1686,7 +1686,7 @@ function KpiCard({
                     return (
                       <div key={name} className="space-y-0.5">
                         <div className="flex items-center justify-between text-[12px] text-muted-foreground">
-                          <button type="button" className={`truncate max-w-[160px] text-left ${currentLegendSel.includes(String(name)) ? 'text-foreground' : ''}`} title={name} onClick={(e) => { e.stopPropagation(); toggleLegend(name) }}>
+                          <button type="button" className={`truncate max-w-[160px] text-start ${currentLegendSel.includes(String(name)) ? 'text-foreground' : ''}`} title={name} onClick={(e) => { e.stopPropagation(); toggleLegend(name) }}>
                             {displayKpiLabel(name)}
                           </button>
                           <span className="whitespace-nowrap">{right}</span>

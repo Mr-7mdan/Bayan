@@ -423,7 +423,7 @@ export default function ContactsPage() {
             <div className="mt-2 max-h-40 overflow-auto text-xs">
               <table className="w-full">
                 <thead>
-                  <tr><th className="text-left pr-2">{t('contacts.notice.recipient')}</th><th className="text-left">{t('contacts.notice.error')}</th></tr>
+                  <tr><th className="text-start pr-2">{t('contacts.notice.recipient')}</th><th className="text-start">{t('contacts.notice.error')}</th></tr>
                 </thead>
                 <tbody>
                   {notice.details.map((d, i) => (
@@ -440,13 +440,13 @@ export default function ContactsPage() {
         <table className="w-full text-sm">
           <thead className="bg-[hsl(var(--muted))]">
             <tr>
-              <th className="px-2 py-2 w-8 text-left"><input type="checkbox" checked={items.length>0 && items.every(it=>selectedIds[it.id])} onChange={(e)=> setSelectedIds(items.reduce((acc, it)=> (acc[it.id]=e.target.checked, acc), {} as Record<string, boolean>))} /></th>
-              <th className="px-2 py-2 text-left">{t('contacts.table.name')}</th>
-              <th className="px-2 py-2 text-left">{t('contacts.table.email')}</th>
-              <th className="px-2 py-2 text-left">{t('contacts.table.phone')}</th>
-              <th className="px-2 py-2 text-left">{t('contacts.table.tags')}</th>
-              <th className="px-2 py-2 text-left">{t('contacts.table.active')}</th>
-              <th className="px-2 py-2 text-left">{t('contacts.table.actions')}</th>
+              <th className="px-2 py-2 w-8 text-start"><input type="checkbox" checked={items.length>0 && items.every(it=>selectedIds[it.id])} onChange={(e)=> setSelectedIds(items.reduce((acc, it)=> (acc[it.id]=e.target.checked, acc), {} as Record<string, boolean>))} /></th>
+              <th className="px-2 py-2 text-start">{t('contacts.table.name')}</th>
+              <th className="px-2 py-2 text-start">{t('contacts.table.email')}</th>
+              <th className="px-2 py-2 text-start">{t('contacts.table.phone')}</th>
+              <th className="px-2 py-2 text-start">{t('contacts.table.tags')}</th>
+              <th className="px-2 py-2 text-start">{t('contacts.table.active')}</th>
+              <th className="px-2 py-2 text-start">{t('contacts.table.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -602,7 +602,7 @@ export default function ContactsPage() {
                         </div>
                       </div>
                       {emailSuggestions.map((s, idx) => (
-                        <button key={idx} className="w-full text-left text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleEmailSel(s)}>
+                        <button key={idx} className="w-full text-start text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleEmailSel(s)}>
                           <input type="checkbox" readOnly checked={emailSel.has(emailKey(s))} className="h-3 w-3" />
                           <span>{s.label}</span>
                         </button>
@@ -696,7 +696,7 @@ export default function ContactsPage() {
                         </div>
                       </div>
                       {smsSuggestions.map((s, idx) => (
-                        <button key={idx} className="w-full text-left text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleSmsSel(s)}>
+                        <button key={idx} className="w-full text-start text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleSmsSel(s)}>
                           <input type="checkbox" readOnly checked={smsSel.has(smsKey(s))} className="h-3 w-3" />
                           <span>{s.label}</span>
                         </button>

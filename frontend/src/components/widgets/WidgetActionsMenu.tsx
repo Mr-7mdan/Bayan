@@ -1097,7 +1097,7 @@ function MenuItem({ label, icon, hasSubmenu, active, onHover, onClick, children,
     <li className="relative" onMouseEnter={onHover} ref={itemRef}>
       <button
         type="button"
-        className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] ${active ? 'bg-secondary/70 ring-1 ring-inset ring-[hsl(var(--border))]' : ''} ${danger ? 'text-[hsl(var(--danger))]' : ''}`}
+        className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-start transition-colors hover:bg-secondary/60 hover:ring-1 hover:ring-inset hover:ring-[hsl(var(--border))] ${active ? 'bg-secondary/70 ring-1 ring-inset ring-[hsl(var(--border))]' : ''} ${danger ? 'text-[hsl(var(--danger))]' : ''}`}
         onClick={onClick}
       >
         <span className="inline-flex items-center gap-2">
@@ -1139,7 +1139,7 @@ function FieldSelect({ className, children, value, onValueChangeAction, onValueC
   const valueProp = (value === '' || value === null || value === undefined) ? undefined : value
   return (
     <CSelect value={valueProp} onValueChangeAction={cb}>
-      <SelectTrigger className={`w-full rounded-lg border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-left ${className || ''}`}>
+      <SelectTrigger className={`w-full rounded-lg border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-start ${className || ''}`}>
         <SelectValue placeholder="Select..." />
       </SelectTrigger>
       <SelectContent>

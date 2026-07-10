@@ -923,7 +923,7 @@ export default function FilterbarControl(props: any) {
           {options.map((opt) => (
             <button
               key={opt}
-              className={`w-full text-left px-3 py-1.5 rounded-md mx-0.5 my-0.5 text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))] ${active===opt?'font-medium':''}`}
+              className={`w-full text-start px-3 py-1.5 rounded-md mx-0.5 my-0.5 text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))] ${active===opt?'font-medium':''}`}
               role="menuitem"
               onClick={() => { if (disabled) return; onChange(opt); setOpen(false) }}
             >

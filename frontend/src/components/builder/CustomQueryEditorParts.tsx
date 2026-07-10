@@ -210,7 +210,7 @@ export function ColumnSelector({ meta, selected, onToggle, onAll, onNone }: {
           const kind = inferKind(col.type)
           return (
             <button key={col.name} type="button" onClick={() => onToggle(col.name)}
-              className={['w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-[hsl(var(--muted))]/50 transition-colors', chk ? 'bg-[hsl(var(--primary))]/5' : ''].join(' ')}>
+              className={['w-full flex items-center gap-2 px-2.5 py-1.5 text-start text-xs hover:bg-[hsl(var(--muted))]/50 transition-colors', chk ? 'bg-[hsl(var(--primary))]/5' : ''].join(' ')}>
               {chk
                 ? <RiCheckboxLine className="h-3.5 w-3.5 text-[hsl(var(--primary))] flex-shrink-0" />
                 : <RiCheckboxBlankLine className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
@@ -269,7 +269,7 @@ function SearchableColSelect({ meta, km, value, onChange }: {
       <button
         type="button"
         onClick={() => { setOpen((v) => !v); setTimeout(() => inputRef.current?.focus(), 30) }}
-        className="w-full flex items-center gap-1.5 h-6 px-1.5 text-xs rounded border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 hover:bg-[hsl(var(--muted))]/70 outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]/40 transition-colors text-left">
+        className="w-full flex items-center gap-1.5 h-6 px-1.5 text-xs rounded border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 hover:bg-[hsl(var(--muted))]/70 outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]/40 transition-colors text-start">
         {current ? (
           <>
             <span className={['text-[9px] px-1 rounded font-mono flex-shrink-0', KIND_CLS[kind]].join(' ')}>{KIND_LABEL[kind]}</span>
@@ -312,7 +312,7 @@ function SearchableColSelect({ meta, km, value, onChange }: {
                   key={col.name}
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); select(col.name) }}
-                  className={['w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors hover:bg-[hsl(var(--muted))]/60',
+                  className={['w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-start transition-colors hover:bg-[hsl(var(--muted))]/60',
                     active ? 'bg-[hsl(var(--primary))]/8 font-medium text-[hsl(var(--primary))]' : 'text-foreground',
                   ].join(' ')}>
                   <span className={['text-[9px] px-1 rounded font-mono flex-shrink-0', KIND_CLS[k]].join(' ')}>{KIND_LABEL[k]}</span>

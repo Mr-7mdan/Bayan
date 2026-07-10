@@ -285,7 +285,7 @@ export default function ImportTableDialog({ open, dsId, datasources = [], onClos
                   <thead className="sticky top-0 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] z-10">
                     <tr>
                       {preview.columns.map((col) => (
-                        <th key={col} className="px-3 py-2 text-left font-medium whitespace-nowrap min-w-[110px]">
+                        <th key={col} className="px-3 py-2 text-start font-medium whitespace-nowrap min-w-[110px]">
                           <div className="flex flex-col gap-1">
                             <span className="text-[hsl(var(--muted-foreground))] truncate max-w-[160px]" title={col}>{col}</span>
                             <select

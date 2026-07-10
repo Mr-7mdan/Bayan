@@ -534,7 +534,7 @@ export default function AiAssistDialog({
                 ) : (
                   <>
                     {!descOpen && (
-                      <span className="truncate overflow-hidden text-left max-w-[60vw]">{description ? description : '—'}</span>
+                      <span className="truncate overflow-hidden text-start max-w-[60vw]">{description ? description : '—'}</span>
                     )}
                     <span className="ml-2 text-[10px] shrink-0">Click to edit</span>
                   </>

@@ -642,7 +642,7 @@ export default function TableCellsEditorModal({
                       >
                         <div className="h-9 px-1 flex items-center gap-0.5">
                           <RiDraggable className="h-3 w-3 text-muted-foreground/60 shrink-0" />
-                          <span className="text-2xs tabular-nums font-mono text-muted-foreground w-4 text-right">{ri + 1}</span>
+                          <span className="text-2xs tabular-nums font-mono text-muted-foreground w-4 text-end">{ri + 1}</span>
                           {rowHasFmt && (
                             <span className="ml-0.5 inline-block w-1 h-1 rounded-full bg-[hsl(var(--primary))]" title={t('tableCells.rowHasFormatting')} aria-label={t('tableCells.rowFormatted')} />
                           )}

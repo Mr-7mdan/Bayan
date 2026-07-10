@@ -48,9 +48,9 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
             </Popover.Trigger>
             <Popover.Portal>
             <Popover.Content side="bottom" align="end" className="z-50 w-48 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--popover))] shadow-none p-1">
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExplore(ds) }}>Data Explorer</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>Edit</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); try {
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExplore(ds) }}>Data Explorer</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>Edit</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); try {
                 const data = await Api.exportDatasource(ds.id, true, user?.id)
                 const exportPayload = { items: [data] }
                 const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' })
@@ -65,7 +65,7 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                 a.remove()
               } catch {} }}>Export (.json)</button>
               <button
-                className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]"
+                className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]"
                 onClick={async (e) => {
                   e.stopPropagation();
                   setMenuOpen(false)
@@ -81,8 +81,8 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                   }
                 }}
               >Dispose Engine Pool</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onToggleActive(ds, !meta.active) }}>{meta.active ? 'Deactivate' : 'Activate'}</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmOpen(true) }}>Delete</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onToggleActive(ds, !meta.active) }}>{meta.active ? 'Deactivate' : 'Activate'}</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmOpen(true) }}>Delete</button>
             </Popover.Content>
             </Popover.Portal>
           </Popover.Root>

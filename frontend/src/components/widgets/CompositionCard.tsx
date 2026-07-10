@@ -111,7 +111,7 @@ export default function CompositionCard({ title, options, widgets, interactive =
                   <div
                     key={c.id || idx}
                     ref={(el) => { itemRefs.current[idx] = el }}
-                    className={`${wrapClass} ${c.align === 'center' ? 'text-center' : c.align === 'right' ? 'text-right' : 'text-left'} text-xl font-semibold`}
+                    className={`${wrapClass} ${c.align === 'center' ? 'text-center' : c.align === 'right' ? 'text-end' : 'text-start'} text-xl font-semibold`}
                     onDoubleClick={() => interactive && onEditComponent(idx)}
                     {...(interactiveAttrs as any)}
                   >
@@ -155,7 +155,7 @@ export default function CompositionCard({ title, options, widgets, interactive =
                   <div
                     key={c.id || idx}
                     ref={(el) => { itemRefs.current[idx] = el }}
-                    className={`${wrapClass} ${c.align === 'center' ? 'text-center' : c.align === 'right' ? 'text-right' : 'text-left'} text-sm text-muted-foreground`}
+                    className={`${wrapClass} ${c.align === 'center' ? 'text-center' : c.align === 'right' ? 'text-end' : 'text-start'} text-sm text-muted-foreground`}
                     onDoubleClick={() => interactive && onEditComponent(idx)}
                     {...(interactiveAttrs as any)}
                   >

@@ -185,11 +185,11 @@ export default function AdminHolidaysPage() {
       <table className="min-w-full text-sm">
         <thead className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
           <tr>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colName')}</th>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colType')}</th>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colSpecificDate')}</th>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colRecurrence')}</th>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colActions')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.holidays.colName')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.holidays.colType')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.holidays.colSpecificDate')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.holidays.colRecurrence')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.holidays.colActions')}</th>
           </tr>
         </thead>
         <tbody className="bg-[hsl(var(--background))]">

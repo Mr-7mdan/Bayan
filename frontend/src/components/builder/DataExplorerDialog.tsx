@@ -91,7 +91,7 @@ function SchemaTree({ schema, loading, sel, onSelect, onRefresh, refreshing, sin
             <div key={sch.name}>
               {multi && (
                 <button type="button" onClick={() => togSchema(sch.name)}
-                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs hover:bg-[hsl(var(--muted))]/40 transition-colors text-left">
+                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs hover:bg-[hsl(var(--muted))]/40 transition-colors text-start">
                   {schOpen ? <RiArrowDownSLine className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                             : <RiArrowRightSLine className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
                   <RiDatabase2Line className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
@@ -115,7 +115,7 @@ function SchemaTree({ schema, loading, sel, onSelect, onRefresh, refreshing, sin
                         {tOpen ? <RiArrowDownSLine className="h-3 w-3 text-muted-foreground" /> : <RiArrowRightSLine className="h-3 w-3 text-muted-foreground" />}
                       </button>
                       <button type="button" onClick={() => { onSelect({ schema: sch.name, table: t.name, column: null }); if (!tOpen) togTable(tk) }}
-                        className="flex items-center gap-1.5 flex-1 min-w-0 text-xs text-left">
+                        className="flex items-center gap-1.5 flex-1 min-w-0 text-xs text-start">
                         <RiTableLine className="h-3.5 w-3.5 text-[hsl(var(--primary))]/70 flex-shrink-0" />
                         <span className={['font-medium truncate', isSelTbl && !sel?.column ? 'text-[hsl(var(--primary))]' : 'text-foreground'].join(' ')}>{t.name}</span>
                         <span className="ml-auto text-[10px] text-muted-foreground flex-shrink-0 pl-1">{t.columns?.length ?? 0}</span>
@@ -128,7 +128,7 @@ function SchemaTree({ schema, loading, sel, onSelect, onRefresh, refreshing, sin
                       return (
                         <button key={c.name} type="button"
                           onClick={() => onSelect({ schema: sch.name, table: t.name, column: c.name })}
-                          className={['w-full flex items-center gap-2 py-1 text-xs text-left transition-colors border-l-2',
+                          className={['w-full flex items-center gap-2 py-1 text-xs text-start transition-colors border-l-2',
                             multi ? 'pl-9 pr-3' : 'pl-6 pr-3',
                             isSelCol ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/8 text-[hsl(var(--primary))]' : 'border-transparent hover:bg-[hsl(var(--muted))]/30 text-muted-foreground',
                           ].join(' ')}>
@@ -248,7 +248,7 @@ function PreviewPanel({ dsId, sel }: { dsId: string; sel: Sel | null }) {
                   const hl = c === sel.column
                   return (
                     <th key={c + ci} ref={el => { colRefs.current[c] = el }}
-                      className={['text-left font-semibold px-3 py-2 whitespace-nowrap select-none bg-[hsl(var(--muted))]',
+                      className={['text-start font-semibold px-3 py-2 whitespace-nowrap select-none bg-[hsl(var(--muted))]',
                         hl ? 'text-[hsl(var(--primary))] border-b-2 border-b-[hsl(var(--primary))]' : 'text-foreground border-b border-[hsl(var(--border))]',
                       ].join(' ')}>
                       {hl && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[hsl(var(--primary))] mr-1.5 align-middle" />}

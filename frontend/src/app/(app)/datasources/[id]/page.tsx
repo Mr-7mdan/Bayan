@@ -388,10 +388,10 @@ export default function DatasourceDetailPage() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                      <th className="text-left font-medium px-2 py-1">{t('datasources.detail.colTable')}</th>
-                      <th className="text-left font-medium px-2 py-1">{t('datasources.detail.colRowCount')}</th>
-                      <th className="text-left font-medium px-2 py-1">{t('datasources.detail.colLastSync')}</th>
-                      <th className="text-left font-medium px-2 py-1">{t('datasources.detail.colActions')}</th>
+                      <th className="text-start font-medium px-2 py-1">{t('datasources.detail.colTable')}</th>
+                      <th className="text-start font-medium px-2 py-1">{t('datasources.detail.colRowCount')}</th>
+                      <th className="text-start font-medium px-2 py-1">{t('datasources.detail.colLastSync')}</th>
+                      <th className="text-start font-medium px-2 py-1">{t('datasources.detail.colActions')}</th>
                     </tr>
                   </thead>
                   <tbody>

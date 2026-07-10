@@ -294,7 +294,7 @@ export default function DataModelPage() {
         <div className="mt-2 overflow-x-auto">
           <table className="min-w-full text-xs">
             <thead>
-              <tr className="text-left border-b border-[hsl(var(--border))]">
+              <tr className="text-start border-b border-[hsl(var(--border))]">
                 <th className="px-2 py-1">{t('dataModel.localDucks.colName')}</th>
                 <th className="px-2 py-1">{t('dataModel.localDucks.colType')}</th>
                 <th className="px-2 py-1">{t('dataModel.localDucks.colDefault')}</th>
@@ -433,12 +433,12 @@ export default function DataModelPage() {
         <table className="min-w-full text-sm table-fixed">
           <thead className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
             <tr>
-              <th className="text-left px-3 py-2 font-medium w-[35%]">{t('dataModel.grid.hTable')}</th>
-              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hRecords')}</th>
-              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hLastSynced')}</th>
-              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hSourceDatasource')}</th>
-              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hNextSync')}</th>
-              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hActions')}</th>
+              <th className="text-start px-3 py-2 font-medium w-[35%]">{t('dataModel.grid.hTable')}</th>
+              <th className="text-start px-3 py-2 font-medium">{t('dataModel.grid.hRecords')}</th>
+              <th className="text-start px-3 py-2 font-medium">{t('dataModel.grid.hLastSynced')}</th>
+              <th className="text-start px-3 py-2 font-medium">{t('dataModel.grid.hSourceDatasource')}</th>
+              <th className="text-start px-3 py-2 font-medium">{t('dataModel.grid.hNextSync')}</th>
+              <th className="text-start px-3 py-2 font-medium">{t('dataModel.grid.hActions')}</th>
             </tr>
           </thead>
           <tbody className="bg-[hsl(var(--background))]">

@@ -144,34 +144,34 @@ export default function DashboardCard({
                 <Popover.Portal>
                 <Popover.Content side="bottom" align="end" className="z-50 w-48 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--popover))] shadow-none p-1">
                   {/* Common primary open */}
-                  <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); handlePrimaryOpen(true) }}>{openLabel}</button>
+                  <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); handlePrimaryOpen(true) }}>{openLabel}</button>
                   {/* Extra read-only option only when in dashboard context and published */}
                   {context === 'dashboard' && !!onOpenPublicAction && d.published && (
-                    <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onOpenPublicAction(d) }}>{t('openReadOnly')}</button>
+                    <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onOpenPublicAction(d) }}>{t('openReadOnly')}</button>
                   )}
                   {/* Dashboards context */}
                   {context === 'dashboard' && (
                     <>
                       {!!onEditAction && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEditAction(d) }}>{t('edit')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEditAction(d) }}>{t('edit')}</button>
                       )}
                       {!!onDuplicateAction && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onDuplicateAction(d) }}>{t('duplicate')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onDuplicateAction(d) }}>{t('duplicate')}</button>
                       )}
                       {!!onPublishOpenAction && !d.published && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onPublishOpenAction(d) }}>{t('publish')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onPublishOpenAction(d) }}>{t('publish')}</button>
                       )}
                       {!!onUnpublishAction && d.published && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onUnpublishAction(d) }}>{t('unpublish')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onUnpublishAction(d) }}>{t('unpublish')}</button>
                       )}
                       {!!onCopyLinkAction && d.published && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onCopyLinkAction(d) }}>{t('copyLink')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onCopyLinkAction(d) }}>{t('copyLink')}</button>
                       )}
                       {!!onExportAction && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onExportAction(d) }}>{t('exportJson')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onExportAction(d) }}>{t('exportJson')}</button>
                       )}
                       {!!onDeleteAction && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onDeleteAction(d) }}>{t('delete')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onDeleteAction(d) }}>{t('delete')}</button>
                       )}
                     </>
                   )}
@@ -179,10 +179,10 @@ export default function DashboardCard({
                   {context === 'collection' && (
                     <>
                       {permission === 'rw' && !!onEditAction && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEditAction(d) }}>{t('edit')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEditAction(d) }}>{t('edit')}</button>
                       )}
                       {!!onRemoveFromCollectionAction && (
-                        <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onRemoveFromCollectionAction(d) }}>{t('removeFromCollection')}</button>
+                        <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onRemoveFromCollectionAction(d) }}>{t('removeFromCollection')}</button>
                       )}
                     </>
                   )}

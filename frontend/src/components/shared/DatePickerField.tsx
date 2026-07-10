@@ -43,7 +43,7 @@ export default function DatePickerField({
           aria-label={ariaLabel || "Pick a date"}
           className={`date-trigger inline-flex items-center gap-2 px-2 h-8 rounded-md border text-[12px] bg-[hsl(var(--card))] border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-tremor-brand-muted ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${className}`}
         >
-          <span className="min-w-[92px] text-left tabular-nums">{label}</span>
+          <span className="min-w-[92px] text-start tabular-nums">{label}</span>
           <CalendarIcon className="w-4 h-4 text-[hsl(var(--foreground))]" />
         </button>
       </Popover.Trigger>

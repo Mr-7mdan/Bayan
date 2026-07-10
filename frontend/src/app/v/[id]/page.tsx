@@ -412,7 +412,7 @@ export default function ViewDashboard() {
           <div className="flex items-center gap-3">
             <img src={(env.orgLogoLight || '/logo.svg') as any} alt={(env.orgName || 'Bayan')} className="h-7 w-auto block dark:hidden" />
             <img src={(env.orgLogoDark || '/logo-dark.svg') as any} alt={(env.orgName || 'Bayan')} className="h-7 w-auto hidden dark:block" />
-            <span className="font-semibold truncate text-left" title={dashboardName || 'Dashboard'}>
+            <span className="font-semibold truncate text-start" title={dashboardName || 'Dashboard'}>
               {dashboardName || 'Dashboard'}
             </span>
             {collectionState.message && (

@@ -130,7 +130,7 @@ export default function TablePreviewDialog({
                   <thead className="sticky top-0 bg-[hsl(var(--muted))]">
                     <tr>
                       {columns.map((c) => (
-                        <th key={c} className="text-left font-medium px-2 py-1 whitespace-nowrap">{c}</th>
+                        <th key={c} className="text-start font-medium px-2 py-1 whitespace-nowrap">{c}</th>
                       ))}
                     </tr>
                   </thead>

@@ -77,13 +77,13 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
             </Popover.Trigger>
             <Popover.Portal>
             <Popover.Content side="bottom" align="end" className="z-50 w-56 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--popover))] shadow-none p-1">
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExplore(ds) }}>{t('datasources.list.dataExplorer')}</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExecuteSql(ds) }}>{t('datasources.list.executeSql')}</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>{t('datasources.list.edit')}</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExplore(ds) }}>{t('datasources.list.dataExplorer')}</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExecuteSql(ds) }}>{t('datasources.list.executeSql')}</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>{t('datasources.list.edit')}</button>
               {(user?.role === 'admin') && (
-                <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); openShare() }}>{t('datasources.list.shareWith')}</button>
+                <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); openShare() }}>{t('datasources.list.shareWith')}</button>
               )}
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); try {
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); try {
                 const data = await Api.exportDatasource(ds.id, true, user?.id)
                 const exportPayload = { items: [data] }
                 const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' })
@@ -98,7 +98,7 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                 a.remove()
               } catch {} }}>{t('datasources.list.exportJson')}</button>
               <button
-                className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]"
+                className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]"
                 onClick={async (e) => {
                   e.stopPropagation();
                   setMenuOpen(false)
@@ -114,8 +114,8 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                   }
                 }}
               >{t('datasources.list.disposeEnginePool')}</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onToggleActive(ds, !meta.active) }}>{meta.active ? t('datasources.list.deactivate') : t('datasources.list.activate')}</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmOpen(true) }}>{t('datasources.list.delete')}</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onToggleActive(ds, !meta.active) }}>{meta.active ? t('datasources.list.deactivate') : t('datasources.list.activate')}</button>
+              <button className="w-full text-start text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmOpen(true) }}>{t('datasources.list.delete')}</button>
             </Popover.Content>
             </Popover.Portal>
           </Popover.Root>

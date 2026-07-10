@@ -126,11 +126,11 @@ export default function AdminUsersPage() {
       <table className="min-w-full text-sm">
         <thead className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
           <tr>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colName')}</th>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colEmail')}</th>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colRole')}</th>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colActive')}</th>
-            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colActions')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.users.colName')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.users.colEmail')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.users.colRole')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.users.colActive')}</th>
+            <th className="text-start px-3 py-2 font-medium">{t('admin.users.colActions')}</th>
           </tr>
         </thead>
         <tbody className="bg-[hsl(var(--background))]">

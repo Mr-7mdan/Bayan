@@ -383,7 +383,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
                     </div>
                   </div>
                   {emailSuggestions.map((s, idx) => (
-                    <button key={idx} className="w-full text-left text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleEmailSel(s)}>
+                    <button key={idx} className="w-full text-start text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleEmailSel(s)}>
                       <input type="checkbox" readOnly checked={emailSel.has(emailKey(s))} className="h-3 w-3" />
                       <span>{s.label}</span>
                     </button>
@@ -422,7 +422,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
                     </div>
                   </div>
                   {smsSuggestions.map((s, idx) => (
-                    <button key={idx} className="w-full text-left text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleSmsSel(s)}>
+                    <button key={idx} className="w-full text-start text-xs px-2 py-1 hover:bg-[hsl(var(--muted))] inline-flex items-center gap-2" onMouseDown={(e)=> e.preventDefault()} onClick={()=> toggleSmsSel(s)}>
                       <input type="checkbox" readOnly checked={smsSel.has(smsKey(s))} className="h-3 w-3" />
                       <span>{s.label}</span>
                     </button>
@@ -557,10 +557,10 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
             <table className="min-w-full text-sm">
               <thead className="bg-[hsl(var(--muted))]">
                 <tr>
-                  <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.started')}</th>
-                  <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.finished')}</th>
-                  <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.status')}</th>
-                  <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.message')}</th>
+                  <th className="text-start px-2 py-1 font-medium">{t('alertDialog.runs.started')}</th>
+                  <th className="text-start px-2 py-1 font-medium">{t('alertDialog.runs.finished')}</th>
+                  <th className="text-start px-2 py-1 font-medium">{t('alertDialog.runs.status')}</th>
+                  <th className="text-start px-2 py-1 font-medium">{t('alertDialog.runs.message')}</th>
                 </tr>
               </thead>
               <tbody>

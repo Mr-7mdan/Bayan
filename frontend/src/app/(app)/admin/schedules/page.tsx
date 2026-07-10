@@ -526,7 +526,7 @@ function AdminSchedulesInner() {
                                 <div className="max-h-56 overflow-auto text-xs">
                                   {form.sequenceColumn && (
                                     <button
-                                      className="w-full text-left px-2 py-1 rounded text-muted-foreground hover:bg-[hsl(var(--muted))] italic"
+                                      className="w-full text-start px-2 py-1 rounded text-muted-foreground hover:bg-[hsl(var(--muted))] italic"
                                       onClick={() => { setForm((f) => ({ ...f, sequenceColumn: undefined })); setSeqOpen(false); setSeqSearch('') }}
                                     >{t('admin.schedules.clearSelection')}</button>
                                   )}
@@ -535,7 +535,7 @@ function AdminSchedulesInner() {
                                     .map((c) => (
                                       <button
                                         key={c}
-                                        className={`w-full text-left px-2 py-1 rounded font-mono hover:bg-[hsl(var(--muted))] ${form.sequenceColumn === c ? 'bg-[hsl(var(--primary))]/10 font-semibold' : ''}`}
+                                        className={`w-full text-start px-2 py-1 rounded font-mono hover:bg-[hsl(var(--muted))] ${form.sequenceColumn === c ? 'bg-[hsl(var(--primary))]/10 font-semibold' : ''}`}
                                         onClick={() => { setForm((f) => ({ ...f, sequenceColumn: c })); setSeqOpen(false); setSeqSearch('') }}
                                       >{c}</button>
                                     ))}
@@ -757,20 +757,20 @@ function AdminSchedulesInner() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colSource')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colDest')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colPks')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colSeq')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colBatch')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colCron')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colQuery')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colEnabled')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colLastRun')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colRows')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colDuration')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colStatus')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colActions')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colSource')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colDest')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colPks')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colSeq')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colBatch')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colCron')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colQuery')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colEnabled')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colLastRun')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colRows')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colDuration')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colStatus')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colActions')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -884,14 +884,14 @@ function AdminSchedulesInner() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logStarted')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logTask')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logSourceTable')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logDestTable')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colRows')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logFinished')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.error')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.logStarted')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.logTask')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.logSourceTable')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.logDestTable')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colRows')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.logFinished')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.error')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -946,10 +946,10 @@ function AdminSchedulesInner() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colTask')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colProgress')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colActions')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colTask')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colProgress')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colActions')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1000,9 +1000,9 @@ function AdminSchedulesInner() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colTask')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colCron')}</th>
-                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colNextRun')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colTask')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colCron')}</th>
+                          <th className="text-start font-medium px-2 py-1">{t('admin.schedules.colNextRun')}</th>
                         </tr>
                       </thead>
                       <tbody>

@@ -146,5 +146,37 @@
     "minAgo": "{count}min ago",
     "hoursAgo": "{count}h ago",
     "daysAgo": "{count}d ago"
+  },
+  "about": {
+    "title": "About Bayan",
+    "subtitle": "Dashboard & Analytics",
+    "descriptionHeading": "Description",
+    "descriptionBody": "Bayan is your management companion to keep you up-to-date on your organization's progress, performance, and KPIs. Build, share, and embed modular dashboards with secure public views, per-user collections, and flexible themes.",
+    "features": [
+      "Build dashboards with stunning visuals, charts, tables, and KPIs.",
+      "Share dashboards with your team, or publish them to the web securely.",
+      "Collaborate with your team to build the dashboard you need.",
+      "Get alerted when thresholds are hit.",
+      "Receive periodic, pre-configured notifications with charts, data tables, pivot tables, and KPIs.",
+      "Send bulk SMS and emails using your contacts datasets.",
+      "Create charts, KPIs, and tables and embed them in your website.",
+      "Deltas mode for easy comps and analysis.",
+      "AI Powered Assist mode to help you build dashboards."
+    ],
+    "contactHeading": "Contact",
+    "email": "Email",
+    "phone": "Phone",
+    "website": "Website"
+  },
+  "changePassword": {
+    "title": "Change Password",
+    "subtitle": "Update your account password",
+    "current": "Current password",
+    "new": "New password",
+    "confirm": "Confirm new password",
+    "mismatch": "New passwords do not match",
+    "success": "Password updated successfully.",
+    "failure": "Failed to change password",
+    "submit": "Update password"
   }
 }

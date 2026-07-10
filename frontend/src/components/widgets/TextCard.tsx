@@ -102,7 +102,7 @@ export default function TextCard({
                 const align = lbl.align || 'left'
                 const classFor = (lbl.style || 'p')
                 const cls = [
-                  align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left',
+                  align === 'right' ? 'text-end' : align === 'center' ? 'text-center' : 'text-start',
                   lbl.color ? '' : 'text-foreground',
                   classFor === 'h1' ? 'text-2xl font-semibold' :
                   classFor === 'h2' ? 'text-xl font-semibold' :
