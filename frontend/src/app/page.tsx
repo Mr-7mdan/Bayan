@@ -1801,6 +1801,10 @@ export default function HomePage() {
                       <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" type="button" onClick={async () => { await copyToClipboard(pubLink) }}>Copy</button>
                     </div>
                   )}
+                  <label className="flex items-center justify-between gap-2 text-sm border-t pt-3">
+                    <span>Hide global filters on the public view</span>
+                    <input type="checkbox" className="h-4 w-4" checked={(dashOptions.publicShowFilters ?? true) === false} onChange={(e) => { const next = { ...(dashOptions || {}), publicShowFilters: !e.target.checked }; setDashOptions(next); userEditedRef.current = true; scheduleServerSave(undefined, next) }} />
+                  </label>
                 </div>
               )}
               {pubMode==='user' && (

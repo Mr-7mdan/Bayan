@@ -271,8 +271,8 @@ export default function EmbedWidget() {
             )}
           </div>
           <div className="mt-2 flex items-center justify-center gap-2 text-[10px] text-[hsl(var(--foreground))] opacity-80">
-            <img src="/logo.png" alt="Bayan" className="h-3 w-auto inline dark:hidden" />
-            <img src="/logo-dark.png" alt="Bayan" className="h-3 w-auto hidden dark:inline" />
+            <img src="/bayan-logo.svg" alt="Bayan" className="h-3 w-auto inline dark:hidden" />
+            <img src="/bayan-logo-dark.svg" alt="Bayan" className="h-3 w-auto hidden dark:inline" />
             <span>Powered by Bayan © {new Date().getFullYear()}</span>
           </div>
         </div>
