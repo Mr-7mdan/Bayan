@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Select, SelectItem } from '@tremor/react'
 import { Api, type CollectionItemOut, type FavoriteOut, type DashboardListItem } from '@/lib/api'
@@ -13,13 +14,14 @@ import { EmptyState } from '@/components/ui'
 // Using shared DashboardCard
 
 export default function CollectionsPage() {
+  const t = useTranslations('pages')
   const { user } = useAuth()
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [items, setItems] = useState<CollectionItemOut[]>([])
   const { notify } = useProgressToast()
-  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|isn't published/i.test(m) ? 'error' : 'success') }
+  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|isn't published|فشل|تعذّر|خطأ|غير منشورة|صالحة/i.test(m) ? 'error' : 'success') }
   const [tabIndex, setTabIndex] = useState(0)
   const prevTabIndex = useRef(0)
   const [slideDir, setSlideDir] = useState<'left' | 'right'>('right')
@@ -41,7 +43,7 @@ export default function CollectionsPage() {
         const res = await Api.listCollectionItems(user.id)
         if (!cancelled) setItems(res || [])
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load collections')
+        if (!cancelled) setError(e?.message || t('dashboardsShared.toasts.loadFailed'))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -102,7 +104,7 @@ export default function CollectionsPage() {
     } catch {
       if (it.publicId) router.push(`/v/${it.publicId}` as `/v/${string}`)
       else {
-        setToast("This dashboard isn't published")
+        setToast(t('common.toasts.notPublished'))
         window.setTimeout(() => setToast(''), 1600)
       }
     }
@@ -126,10 +128,10 @@ export default function CollectionsPage() {
         if (next) s.delete(d.id); else s.add(d.id)
         return s
       })
-      setToast('Failed to update favorite'); window.setTimeout(() => setToast(''), 1600)
+      setToast(t('dashboardsShared.toasts.favoriteUpdateFailed')); window.setTimeout(() => setToast(''), 1600)
       return
     }
-    setToast(next ? 'Favorited' : 'Removed from favorites'); window.setTimeout(() => setToast(''), 1600)
+    setToast(next ? t('common.toasts.favorited') : t('common.toasts.removedFromFavorites')); window.setTimeout(() => setToast(''), 1600)
   }
 
   return (
@@ -137,19 +139,19 @@ export default function CollectionsPage() {
       <Card className="p-0 bg-[hsl(var(--background))]">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--background))] border-b border-[hsl(var(--border))]">
           <div>
-            <Title className="text-foreground">My Collections</Title>
-            <Text className="mt-0 text-muted-foreground">View items in your collection</Text>
+            <Title className="text-foreground">{t('dashboardsShared.title')}</Title>
+            <Text className="mt-0 text-muted-foreground">{t('dashboardsShared.subtitle')}</Text>
           </div>
         </div>
         {error && <div className="px-4 py-2 text-sm text-red-600">{error}</div>}
         <TabGroup index={tabIndex} onIndexChange={(i) => { setSlideDir(i > prevTabIndex.current ? 'left' : 'right'); prevTabIndex.current = i; setTabIndex(i); }}>
           <TabList className="px-3 py-1.5 border-b border-[hsl(var(--border))]">
             <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
-              <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">My Collections</span>
+              <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">{t('dashboardsShared.tabMine')}</span>
               <span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring ui-selected:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring ui-selected:dark:text-dark-tremor-content-emphasis sm:inline-flex">{filteredMine.length}</span>
             </Tab>
             <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
-              <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Collaborations</span>
+              <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">{t('dashboardsShared.tabCollab')}</span>
               <span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring ui-selected:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring ui-selected:dark:text-dark-tremor-content-emphasis sm:inline-flex">{filteredCollab.length}</span>
             </Tab>
           </TabList>
@@ -157,16 +159,16 @@ export default function CollectionsPage() {
             <TabPanel className="px-3 pb-3 pt-0">
               <div className="flex items-center py-2 gap-3">
                 <div className="flex items-center gap-2">
-                  <label htmlFor="searchCollectionsMine" className="text-sm text-gray-600 dark:text-gray-300">Search</label>
+                  <label htmlFor="searchCollectionsMine" className="text-sm text-gray-600 dark:text-gray-300">{t('common.search')}</label>
                   <input id="searchCollectionsMine"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search collections..."
+                    placeholder={t('dashboardsShared.searchMinePlaceholder')}
                     className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]"
                   />
                 </div>
                 <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-                  <span className="whitespace-nowrap min-w-[84px]">Per page</span>
+                  <span className="whitespace-nowrap min-w-[84px]">{t('common.perPage')}</span>
                   <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                     [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
                     [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -184,11 +186,11 @@ export default function CollectionsPage() {
                 </div>
               </div>
               <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}`}>
-                {loading && <Text>Loading…</Text>}
+                {loading && <Text>{t('common.loading')}</Text>}
                 {!loading && filteredMine.length === 0 && (
                   query.trim()
-                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title="No matches" hint="No collections match your search." />
-                    : <EmptyState icon={<RiFolderSharedLine className="h-7 w-7" />} title="No collections yet" hint="Dashboards you save to collections will appear here." />
+                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title={t('common.noMatches')} hint={t('dashboardsShared.noMatchesMineHint')} />
+                    : <EmptyState icon={<RiFolderSharedLine className="h-7 w-7" />} title={t('dashboardsShared.noCollectionsTitle')} hint={t('dashboardsShared.noCollectionsHint')} />
                 )}
                 {!loading && visibleMine.map((it) => {
                   const d: DashboardListItem = {
@@ -211,13 +213,12 @@ export default function CollectionsPage() {
               {!loading && filteredMine.length > 0 && (
                 <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                   <span>
-                    Showing {pageMine * pageSize + 1}
-                    –{Math.min((pageMine + 1) * pageSize, filteredMine.length)} of {filteredMine.length}
+                    {t('common.showing', { from: pageMine * pageSize + 1, to: Math.min((pageMine + 1) * pageSize, filteredMine.length), total: filteredMine.length })}
                   </span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageMine <= 0} onClick={() => setPageMine((p) => Math.max(0, p - 1))}>Prev</button>
-                    <span>Page {pageMine + 1} / {totalPagesMine}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageMine >= totalPagesMine - 1} onClick={() => setPageMine((p) => Math.min(totalPagesMine - 1, p + 1))}>Next</button>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageMine <= 0} onClick={() => setPageMine((p) => Math.max(0, p - 1))}>{t('common.prev')}</button>
+                    <span>{t('common.pageOf', { current: pageMine + 1, total: totalPagesMine })}</span>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageMine >= totalPagesMine - 1} onClick={() => setPageMine((p) => Math.min(totalPagesMine - 1, p + 1))}>{t('common.next')}</button>
                   </div>
                 </div>
               )}
@@ -225,16 +226,16 @@ export default function CollectionsPage() {
             <TabPanel className="px-3 pb-3 pt-0">
               <div className="flex items-center py-2 gap-3">
                 <div className="flex items-center gap-2">
-                  <label htmlFor="searchCollectionsCollab" className="text-sm text-gray-600 dark:text-gray-300">Search</label>
+                  <label htmlFor="searchCollectionsCollab" className="text-sm text-gray-600 dark:text-gray-300">{t('common.search')}</label>
                   <input id="searchCollectionsCollab"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search collaborations..."
+                    placeholder={t('dashboardsShared.searchCollabPlaceholder')}
                     className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]"
                   />
                 </div>
                 <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-                  <span className="whitespace-nowrap min-w-[84px]">Per page</span>
+                  <span className="whitespace-nowrap min-w-[84px]">{t('common.perPage')}</span>
                   <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                     [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
                     [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -252,11 +253,11 @@ export default function CollectionsPage() {
                 </div>
               </div>
               <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}`}>
-                {loading && <Text>Loading…</Text>}
+                {loading && <Text>{t('common.loading')}</Text>}
                 {!loading && filteredCollab.length === 0 && (
                   query.trim()
-                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title="No matches" hint="No collaborations match your search." />
-                    : <EmptyState icon={<RiFolderSharedLine className="h-7 w-7" />} title="No collaborations yet" hint="Dashboards shared with edit access will appear here." />
+                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title={t('common.noMatches')} hint={t('dashboardsShared.noMatchesCollabHint')} />
+                    : <EmptyState icon={<RiFolderSharedLine className="h-7 w-7" />} title={t('dashboardsShared.noCollabTitle')} hint={t('dashboardsShared.noCollabHint')} />
                 )}
                 {!loading && visibleCollab.map((it) => {
                   const d: DashboardListItem = {
@@ -279,13 +280,12 @@ export default function CollectionsPage() {
               {!loading && filteredCollab.length > 0 && (
                 <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                   <span>
-                    Showing {pageCollab * pageSize + 1}
-                    –{Math.min((pageCollab + 1) * pageSize, filteredCollab.length)} of {filteredCollab.length}
+                    {t('common.showing', { from: pageCollab * pageSize + 1, to: Math.min((pageCollab + 1) * pageSize, filteredCollab.length), total: filteredCollab.length })}
                   </span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageCollab <= 0} onClick={() => setPageCollab((p) => Math.max(0, p - 1))}>Prev</button>
-                    <span>Page {pageCollab + 1} / {totalPagesCollab}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageCollab >= totalPagesCollab - 1} onClick={() => setPageCollab((p) => Math.min(totalPagesCollab - 1, p + 1))}>Next</button>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageCollab <= 0} onClick={() => setPageCollab((p) => Math.max(0, p - 1))}>{t('common.prev')}</button>
+                    <span>{t('common.pageOf', { current: pageCollab + 1, total: totalPagesCollab })}</span>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageCollab >= totalPagesCollab - 1} onClick={() => setPageCollab((p) => Math.min(totalPagesCollab - 1, p + 1))}>{t('common.next')}</button>
                   </div>
                 </div>
               )}

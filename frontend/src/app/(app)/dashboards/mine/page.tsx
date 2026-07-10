@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text, Select, SelectItem } from '@tremor/react'
 import * as Tabs from '@radix-ui/react-tabs'
@@ -55,6 +56,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 // Using shared DashboardCard
 
 export default function MyDashboardsPage() {
+  const t = useTranslations('pages')
   const { user } = useAuth()
   const { env } = useEnvironment()
   const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
@@ -63,7 +65,7 @@ export default function MyDashboardsPage() {
   const [error, setError] = useState<string | null>(null)
   const [items, setItems] = useState<DashboardListItem[]>([])
   const { notify } = useProgressToast()
-  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|no valid|isn't published/i.test(m) ? 'error' : 'success') }
+  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|no valid|isn't published|فشل|تعذّر|خطأ|غير منشورة|صالحة/i.test(m) ? 'error' : 'success') }
   // Favorites (as ids set for quick lookup)
   const [favIdsSet, setFavIdsSet] = useState<Set<string>>(new Set())
   const [confirmDeleteFor, setConfirmDeleteFor] = useState<DashboardListItem | null>(null)
@@ -98,7 +100,7 @@ export default function MyDashboardsPage() {
         const res = await Api.listDashboards(user?.id || 'dev_user')
         if (!cancelled) setItems(res || [])
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load dashboards')
+        if (!cancelled) setError(e?.message || t('dashboardsMine.toasts.loadFailed'))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -156,14 +158,14 @@ export default function MyDashboardsPage() {
   const onUnpublish = async (d: DashboardListItem) => {
     await Api.unpublishDashboard(d.id, user?.id)
     setItems((prev) => prev.map((x) => x.id === d.id ? { ...x, published: false, publicId: null } : x))
-    setToast('Unpublished')
+    setToast(t('common.toasts.unpublished'))
     window.setTimeout(() => setToast(''), 1600)
   }
   const onDelete = async (d: DashboardListItem) => {
     await Api.deleteDashboard(d.id, user?.id)
     setItems((prev) => prev.filter((x) => x.id !== d.id))
     try { window.dispatchEvent(new CustomEvent('sidebar-counts-refresh')) } catch {}
-    setToast('Deleted')
+    setToast(t('common.toasts.deleted'))
     window.setTimeout(() => setToast(''), 1600)
   }
   const onCopyLink = async (d: DashboardListItem) => {
@@ -171,7 +173,7 @@ export default function MyDashboardsPage() {
       // Prefer server status to know if link is protected and get the current publicId
       const status = await Api.getPublishStatus(d.id)
       const baseId = status?.publicId || d.publicId
-      if (!baseId) { setToast("This dashboard isn't published"); window.setTimeout(() => setToast(''), 1600); return }
+      if (!baseId) { setToast(t('common.toasts.notPublished')); window.setTimeout(() => setToast(''), 1600); return }
       const base = ((env.publicDomain && env.publicDomain.trim()) ? env.publicDomain : (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')
       let url = `${base}/v/${baseId}`
       if (status?.protected) {
@@ -181,14 +183,14 @@ export default function MyDashboardsPage() {
         } catch {}
       }
       const ok = await copyToClipboard(url)
-      setToast(ok ? 'Link copied' : 'Copy failed. Please copy manually.')
+      setToast(ok ? t('common.toasts.linkCopied') : t('common.toasts.copyFailed'))
     } catch {
       const baseId = d.publicId
-      if (!baseId) { setToast("This dashboard isn't published"); window.setTimeout(() => setToast(''), 1600); return }
+      if (!baseId) { setToast(t('common.toasts.notPublished')); window.setTimeout(() => setToast(''), 1600); return }
       const base = ((env.publicDomain && env.publicDomain.trim()) ? env.publicDomain : (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')
       const url = `${base}/v/${baseId}`
       const ok = await copyToClipboard(url)
-      setToast(ok ? 'Link copied' : 'Copy failed. Please copy manually.')
+      setToast(ok ? t('common.toasts.linkCopied') : t('common.toasts.copyFailed'))
     }
     window.setTimeout(() => setToast(''), 1600)
   }
@@ -200,10 +202,10 @@ export default function MyDashboardsPage() {
       const next = await Api.listDashboards(user?.id || 'dev_user')
       setItems(next || [])
       try { window.dispatchEvent(new CustomEvent('sidebar-counts-refresh')) } catch {}
-      setToast('Duplicated')
+      setToast(t('common.toasts.duplicated'))
       window.setTimeout(() => setToast(''), 1600)
     } catch (e: any) {
-      setToast(e?.message || 'Failed to duplicate')
+      setToast(e?.message || t('dashboardsMine.toasts.duplicateFailed'))
       window.setTimeout(() => setToast(''), 2000)
     }
   }
@@ -231,10 +233,10 @@ export default function MyDashboardsPage() {
       document.body.appendChild(a)
       a.click()
       a.remove()
-      setToast('Exported')
+      setToast(t('common.toasts.exported'))
       window.setTimeout(() => setToast(''), 1600)
     } catch (e: any) {
-      setToast(e?.message || 'Export failed')
+      setToast(e?.message || t('dashboardsMine.toasts.exportFailed'))
       window.setTimeout(() => setToast(''), 2000)
     }
   }
@@ -252,7 +254,7 @@ export default function MyDashboardsPage() {
         if (next) await Api.addFavorite(user.id, d.id)
         else await Api.removeFavorite(user.id, d.id)
       }
-      setToast(next ? 'Favorited' : 'Removed from favorites')
+      setToast(next ? t('common.toasts.favorited') : t('common.toasts.removedFromFavorites'))
       window.setTimeout(() => setToast(''), 1600)
     } catch {
       // best-effort; UI already updated
@@ -423,10 +425,10 @@ export default function MyDashboardsPage() {
       setItems(next || [])
       try { window.dispatchEvent(new CustomEvent('sidebar-counts-refresh')) } catch {}
       
-      setToast(`Imported ${dashboards.length} dashboard${dashboards.length > 1 ? 's' : ''}`)
+      setToast(t('dashboardsMine.toasts.imported', { count: dashboards.length }))
       window.setTimeout(() => setToast(''), 1600)
     } catch (e: any) {
-      setToast(e?.message || 'Import failed')
+      setToast(e?.message || t('dashboardsMine.toasts.importFailed'))
       window.setTimeout(() => setToast(''), 2000)
     } finally {
       setBusyImport(false)
@@ -439,8 +441,8 @@ export default function MyDashboardsPage() {
       <Card className="p-0 bg-[hsl(var(--background))]">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--background))] border-b border-[hsl(var(--border))]">
           <div>
-            <Title className="text-foreground">My Dashboards</Title>
-            <Text className="mt-0 text-muted-foreground">View/Create/Edit/Publish/Unpublish your dashboards from here</Text>
+            <Title className="text-foreground">{t('dashboardsMine.title')}</Title>
+            <Text className="mt-0 text-muted-foreground">{t('dashboardsMine.subtitle')}</Text>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -448,7 +450,7 @@ export default function MyDashboardsPage() {
               className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium"
               onClick={() => { try { window.dispatchEvent(new CustomEvent('open-create-dashboard')) } catch {} }}
             >
-              Build New Dashboard
+              {t('dashboardsMine.buildNew')}
             </button>
             {isAdmin && (
               <>
@@ -468,11 +470,11 @@ export default function MyDashboardsPage() {
                       a.click()
                       a.remove()
                     } catch (e: any) {
-                      setToast(e?.message || 'Export failed'); window.setTimeout(() => setToast(''), 2000)
+                      setToast(e?.message || t('dashboardsMine.toasts.exportFailed')); window.setTimeout(() => setToast(''), 2000)
                     }
                   }}
                 >
-                  Export All (.json)
+                  {t('dashboardsMine.exportAll')}
                 </button>
                 <button
                   type="button"
@@ -480,7 +482,7 @@ export default function MyDashboardsPage() {
                   disabled={busyImport}
                   onClick={() => fileRef.current?.click()}
                 >
-                  {busyImport ? 'Importing…' : 'Import JSON'}
+                  {busyImport ? t('dashboardsMine.importing') : t('dashboardsMine.importJson')}
                 </button>
                 <input ref={fileRef} type="file" accept="application/json" hidden onChange={async (e) => {
                   const file = e.target.files?.[0]
@@ -518,10 +520,10 @@ export default function MyDashboardsPage() {
                       setPendingImportData({ dashboards, datasources })
                       setShowMappingDialog(true)
                     } else {
-                      setToast('No valid dashboards found in file'); window.setTimeout(() => setToast(''), 2000)
+                      setToast(t('dashboardsMine.toasts.noValid')); window.setTimeout(() => setToast(''), 2000)
                     }
                   } catch (e: any) {
-                    setToast(e?.message || 'Import failed'); window.setTimeout(() => setToast(''), 2000)
+                    setToast(e?.message || t('dashboardsMine.toasts.importFailed')); window.setTimeout(() => setToast(''), 2000)
                   } finally {
                     setBusyImport(false)
                     try { if (fileRef.current) fileRef.current.value = '' } catch {}
@@ -543,27 +545,27 @@ export default function MyDashboardsPage() {
         >
           <Tabs.List className="px-3 py-1.5 border-b border-[hsl(var(--border))]">
             <Tabs.Trigger value="all" className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] data-[state=active]:border-[hsl(var(--primary))]">
-              <span className="text-gray-500 dark:text-gray-400 data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:dark:text-[hsl(var(--primary))]">All Dashboards</span>
+              <span className="text-gray-500 dark:text-gray-400 data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:dark:text-[hsl(var(--primary))]">{t('dashboardsMine.tabAll')}</span>
               <span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring data-[state=active]:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring data-[state=active]:dark:text-dark-tremor-content-emphasis sm:inline-flex">{filteredAll.length}</span>
             </Tabs.Trigger>
             <Tabs.Trigger value="published" className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] data-[state=active]:border-[hsl(var(--primary))]">
-              <span className="text-gray-500 dark:text-gray-400 data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:dark:text-[hsl(var(--primary))]">Published</span>
+              <span className="text-gray-500 dark:text-gray-400 data-[state=active]:text-[hsl(var(--primary-deep))] data-[state=active]:dark:text-[hsl(var(--primary))]">{t('dashboardsMine.tabPublished')}</span>
               <span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring data-[state=active]:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring data-[state=active]:dark:text-dark-tremor-content-emphasis sm:inline-flex">{filteredPublished.length}</span>
             </Tabs.Trigger>
           </Tabs.List>
           <Tabs.Content value="all" className="px-3 pb-3 pt-0">
             <div className="flex items-center py-2 gap-3">
               <div className="flex items-center gap-2">
-                <label htmlFor="searchDashAll" className="text-sm text-gray-600 dark:text-gray-300">Search</label>
+                <label htmlFor="searchDashAll" className="text-sm text-gray-600 dark:text-gray-300">{t('common.search')}</label>
                 <input id="searchDashAll"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search dashboards..."
+                  placeholder={t('dashboardsMine.searchPlaceholder')}
                   className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]"
                 />
               </div>
               <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-                <span className="whitespace-nowrap min-w-[84px]">Per page</span>
+                <span className="whitespace-nowrap min-w-[84px]">{t('common.perPage')}</span>
                 <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                   [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
                   [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -581,11 +583,11 @@ export default function MyDashboardsPage() {
               </div>
             </div>
             <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}` }>
-              {loading && <Text>Loading…</Text>}
+              {loading && <Text>{t('common.loading')}</Text>}
               {!loading && filteredAll.length === 0 && (
                 query.trim()
-                  ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title="No matches" hint="No dashboards match your search." />
-                  : <EmptyState icon={<RiDashboardLine className="h-7 w-7" />} title="No dashboards yet" hint="Create your first dashboard to start visualizing your data." primary={{ label: 'New dashboard', icon: <RiAddLine className="h-4 w-4" />, onClick: () => router.push('/builder' as any) }} />
+                  ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title={t('common.noMatches')} hint={t('dashboardsMine.noMatchesHint')} />
+                  : <EmptyState icon={<RiDashboardLine className="h-7 w-7" />} title={t('dashboardsMine.noDashboardsTitle')} hint={t('dashboardsMine.noDashboardsHint')} primary={{ label: t('dashboardsMine.newDashboard'), icon: <RiAddLine className="h-4 w-4" />, onClick: () => router.push('/builder' as any) }} />
               )}
               {!loading && visibleAll.map((d) => (
                 <DashboardCard key={d.id} d={d} widthClass="w-full" showMenu context="dashboard"
@@ -599,13 +601,12 @@ export default function MyDashboardsPage() {
             {!loading && filteredAll.length > 0 && (
               <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                 <span>
-                  Showing {pageAll * pageSize + 1}
-                  –{Math.min((pageAll + 1) * pageSize, filteredAll.length)} of {filteredAll.length}
+                  {t('common.showing', { from: pageAll * pageSize + 1, to: Math.min((pageAll + 1) * pageSize, filteredAll.length), total: filteredAll.length })}
                 </span>
                 <div className="flex items-center gap-2">
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageAll <= 0} onClick={() => setPageAll((p) => Math.max(0, p - 1))}>Prev</button>
-                  <span>Page {pageAll + 1} / {totalPagesAll}</span>
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageAll >= totalPagesAll - 1} onClick={() => setPageAll((p) => Math.min(totalPagesAll - 1, p + 1))}>Next</button>
+                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageAll <= 0} onClick={() => setPageAll((p) => Math.max(0, p - 1))}>{t('common.prev')}</button>
+                  <span>{t('common.pageOf', { current: pageAll + 1, total: totalPagesAll })}</span>
+                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageAll >= totalPagesAll - 1} onClick={() => setPageAll((p) => Math.min(totalPagesAll - 1, p + 1))}>{t('common.next')}</button>
                 </div>
               </div>
             )}
@@ -613,16 +614,16 @@ export default function MyDashboardsPage() {
           <Tabs.Content value="published" className="px-3 pb-3 pt-0">
               <div className="flex items-center py-2 gap-3">
                 <div className="flex items-center gap-2">
-                  <label htmlFor="searchDashPub" className="text-sm text-gray-600 dark:text-gray-300">Search</label>
+                  <label htmlFor="searchDashPub" className="text-sm text-gray-600 dark:text-gray-300">{t('common.search')}</label>
                   <input id="searchDashPub"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search dashboards..."
+                    placeholder={t('dashboardsMine.searchPlaceholder')}
                     className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]"
                   />
                 </div>
                 <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-                  <span>Per page</span>
+                  <span>{t('common.perPage')}</span>
                   <Select value={String(pageSize)} onValueChange={(v) => setPageSize(parseInt(v || '8') || 8)} className="rounded-md min-w-[76px]">
                     <SelectItem value="6">6</SelectItem>
                     <SelectItem value="8">8</SelectItem>
@@ -632,11 +633,11 @@ export default function MyDashboardsPage() {
                 </div>
               </div>
               <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}` }>
-                {loading && <Text>Loading…</Text>}
+                {loading && <Text>{t('common.loading')}</Text>}
                 {!loading && filteredPublished.length === 0 && (
                   query.trim()
-                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title="No matches" hint="No published dashboards match your search." />
-                    : <EmptyState icon={<RiDashboardLine className="h-7 w-7" />} title="No published dashboards" hint="Publish a dashboard to share it with a public link." />
+                    ? <EmptyState icon={<RiSearchLine className="h-7 w-7" />} title={t('common.noMatches')} hint={t('dashboardsMine.noPublishedMatchesHint')} />
+                    : <EmptyState icon={<RiDashboardLine className="h-7 w-7" />} title={t('dashboardsMine.noPublishedTitle')} hint={t('dashboardsMine.noPublishedHint')} />
                 )}
                 {!loading && visiblePublished.map((d) => (
                   <DashboardCard key={d.id} d={d} widthClass="w-full" showMenu context="dashboard"
@@ -650,13 +651,12 @@ export default function MyDashboardsPage() {
               {!loading && filteredPublished.length > 0 && (
                 <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                   <span>
-                    Showing {pagePub * pageSize + 1}
-                    –{Math.min((pagePub + 1) * pageSize, filteredPublished.length)} of {filteredPublished.length}
+                    {t('common.showing', { from: pagePub * pageSize + 1, to: Math.min((pagePub + 1) * pageSize, filteredPublished.length), total: filteredPublished.length })}
                   </span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pagePub <= 0} onClick={() => setPagePub((p) => Math.max(0, p - 1))}>Prev</button>
-                    <span>Page {pagePub + 1} / {totalPagesPub}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pagePub >= totalPagesPub - 1} onClick={() => setPagePub((p) => Math.min(totalPagesPub - 1, p + 1))}>Next</button>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pagePub <= 0} onClick={() => setPagePub((p) => Math.max(0, p - 1))}>{t('common.prev')}</button>
+                    <span>{t('common.pageOf', { current: pagePub + 1, total: totalPagesPub })}</span>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pagePub >= totalPagesPub - 1} onClick={() => setPagePub((p) => Math.min(totalPagesPub - 1, p + 1))}>{t('common.next')}</button>
                   </div>
                 </div>
               )}
@@ -671,14 +671,13 @@ export default function MyDashboardsPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/20" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Delete dashboard?</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold">{t('common.deleteDialog.title')}</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground mt-1">
-              This action cannot be undone. This will permanently delete
-              {` "${confirmDeleteFor?.name || ''}"`}.
+              {t('common.deleteDialog.desc', { name: confirmDeleteFor?.name || '' })}
             </Dialog.Description>
             <div className="mt-4 flex items-center justify-end gap-2">
               <Dialog.Close asChild>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('common.cancel')}</button>
               </Dialog.Close>
               <button
                 type="button"
@@ -689,7 +688,7 @@ export default function MyDashboardsPage() {
                   setDelBusy(true)
                   try { await onDelete(confirmDeleteFor) } finally { setDelBusy(false); setConfirmDeleteFor(null) }
                 }}
-              >{delBusy ? 'Deleting…' : 'Delete'}</button>
+              >{delBusy ? t('common.deleting') : t('common.delete')}</button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -700,20 +699,20 @@ export default function MyDashboardsPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/20" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Publish or Share</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold">{t('common.publishDialog.title')}</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground mt-1">
-              Choose whether to publish a public read‑only link, or share with a specific user.
+              {t('common.publishDialog.desc')}
             </Dialog.Description>
             <div className="mt-4 space-y-4">
               {/* Mode selector */}
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm">
                   <input type="radio" name="pubmode" checked={pubMode==='public'} onChange={() => setPubMode('public')} />
-                  <span>Public version: read‑only</span>
+                  <span>{t('common.publishDialog.publicReadOnly')}</span>
                 </label>
                 <label className="flex items-center gap-2 text-sm">
                   <input type="radio" name="pubmode" checked={pubMode==='user'} onChange={() => setPubMode('user')} />
-                  <span>Share with a user</span>
+                  <span>{t('common.publishDialog.shareWithUser')}</span>
                 </label>
               </div>
 
@@ -721,10 +720,10 @@ export default function MyDashboardsPage() {
               {pubMode === 'public' && (
                 <div className="space-y-3">
                   <label className="text-sm block">
-                    Token (optional)
+                    {t('common.publishDialog.tokenOptional')}
                     <input
                       className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                      placeholder="Leave empty for public access"
+                      placeholder={t('common.publishDialog.tokenPlaceholder')}
                       value={pubToken}
                       onChange={(e) => setPubToken(e.target.value)}
                     />
@@ -735,7 +734,7 @@ export default function MyDashboardsPage() {
                       type="button"
                       onClick={() => setPubToken(genUDID())}
                     >
-                      Generate secure token
+                      {t('common.publishDialog.generateToken')}
                     </button>
                     <button
                       className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted"
@@ -756,17 +755,17 @@ export default function MyDashboardsPage() {
                           const base = ((env.publicDomain && env.publicDomain.trim()) ? env.publicDomain : (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')
                           const url = `${base}/v/${res.publicId}${pubToken ? `?token=${encodeURIComponent(pubToken)}` : ''}`
                           setPubLink(url)
-                          setToast('Published')
+                          setToast(t('common.toasts.published'))
                           window.setTimeout(() => setToast(''), 1600)
                         } catch (e: any) {
-                          setToast(e?.message || 'Failed to publish')
+                          setToast(e?.message || t('dashboardsMine.toasts.publishFailed'))
                           window.setTimeout(() => setToast(''), 2000)
                         } finally {
                           setPubBusy(false)
                         }
                       }}
                     >
-                      Save & generate link
+                      {t('common.publishDialog.saveGenerateLink')}
                     </button>
                   </div>
                   {!!pubLink && (
@@ -777,10 +776,10 @@ export default function MyDashboardsPage() {
                         type="button"
                         onClick={async () => {
                           const ok = await copyToClipboard(pubLink)
-                          setToast(ok ? 'Link copied' : 'Copy failed. Please copy manually.')
+                          setToast(ok ? t('common.toasts.linkCopied') : t('common.toasts.copyFailed'))
                           window.setTimeout(() => setToast(''), 1600)
                         }}
-                      >Copy</button>
+                      >{t('common.copy')}</button>
                     </div>
                   )}
                 </div>
@@ -791,7 +790,7 @@ export default function MyDashboardsPage() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <label className="text-sm block">
-                      Share with user (email or id)
+                      {t('common.publishDialog.shareWithUserLabel')}
                       <input
                         className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
                         placeholder="user@example.com"
@@ -800,14 +799,14 @@ export default function MyDashboardsPage() {
                       />
                     </label>
                     <div>
-                      <div className="text-sm mb-1">Permission</div>
+                      <div className="text-sm mb-1">{t('common.publishDialog.permission')}</div>
                       <label className="flex items-center gap-2 text-sm">
                         <input type="radio" name="perm" checked={sharePerm==='ro'} onChange={() => setSharePerm('ro')} />
-                        <span>Read‑only</span>
+                        <span>{t('common.publishDialog.readOnly')}</span>
                       </label>
                       <label className="flex items-center gap-2 text-sm mt-1">
                         <input type="radio" name="perm" checked={sharePerm==='rw'} onChange={() => setSharePerm('rw')} />
-                        <span>Read‑write</span>
+                        <span>{t('common.publishDialog.readWrite')}</span>
                       </label>
                     </div>
                   </div>
@@ -828,18 +827,18 @@ export default function MyDashboardsPage() {
                             dashboardName: publishFor.name,
                             permission: sharePerm,
                           })
-                          setToast('Shared with user')
+                          setToast(t('common.toasts.sharedWithUser'))
                           window.setTimeout(() => setToast(''), 1600)
                           setPublishFor(null)
                         } catch (e: any) {
-                          setToast(e?.message || 'Failed to share')
+                          setToast(e?.message || t('dashboardsMine.toasts.shareFailed'))
                           window.setTimeout(() => setToast(''), 2000)
                         } finally {
                           setPubBusy(false)
                         }
                       }}
                     >
-                      Share dashboard
+                      {t('common.publishDialog.shareDashboard')}
                     </button>
                   </div>
                 </div>
@@ -847,7 +846,7 @@ export default function MyDashboardsPage() {
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
               <Dialog.Close asChild>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Close</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('common.close')}</button>
               </Dialog.Close>
             </div>
           </Dialog.Content>

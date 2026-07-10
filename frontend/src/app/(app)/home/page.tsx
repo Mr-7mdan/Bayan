@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Card, Title, Text } from '@tremor/react'
@@ -16,6 +17,7 @@ import DashboardCard from '@/components/dashboards/DashboardCard'
 // Removed local DashCard in favor of shared DashboardCard
 
 export default function HomeWorkspacePage() {
+  const t = useTranslations('pages')
   const { user } = useAuth()
   const router = useRouter()
   const { env } = useEnvironment()
@@ -28,7 +30,7 @@ export default function HomeWorkspacePage() {
   const [collab, setCollab] = useState<CollectionItemOut[]>([])
   const { notify } = useProgressToast()
   // Route the existing setToast(msg) call sites through the unified toast; '' clears are no-ops (auto-dismiss).
-  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|isn't published/i.test(m) ? 'error' : 'success') }
+  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|isn't published|فشل|تعذّر|خطأ|غير منشورة|صالحة/i.test(m) ? 'error' : 'success') }
 
   const lastKey = useMemo(() => `lastDashId:${user?.id || 'dev_user'}`, [user?.id])
 
@@ -101,7 +103,7 @@ export default function HomeWorkspacePage() {
         if (!cancelled) {
           const mapped = (favRes || []).map((f) => ({
             id: f.dashboardId,
-            name: f.name || 'Favorite',
+            name: f.name || t('home.favoriteFallback'),
             userId: f.userId,
             createdAt: f.updatedAt || new Date().toISOString(),
             updatedAt: f.updatedAt || undefined,
@@ -172,7 +174,7 @@ export default function HomeWorkspacePage() {
         if (next) await Api.addFavorite(user.id, d.id)
         else await Api.removeFavorite(user.id, d.id)
       }
-      setToast(next ? 'Favorited' : 'Removed from favorites')
+      setToast(next ? t('common.toasts.favorited') : t('common.toasts.removedFromFavorites'))
       window.setTimeout(() => setToast(''), 1600)
     } catch { /* ignore, best-effort */ }
   }
@@ -204,7 +206,7 @@ export default function HomeWorkspacePage() {
       const res = await Api.saveDashboard({ name: `${d.name} (copy)`, userId: user?.id || 'dev_user', definition: src.definition })
       // Prepend to recents
       setRecent((prev) => [{ ...res, published: false, publicId: undefined, datasourceCount: d.datasourceCount, tablesCount: d.tablesCount, widgetsCount: d.widgetsCount }, ...prev])
-      setToast('Duplicated'); window.setTimeout(() => setToast(''), 1600)
+      setToast(t('common.toasts.duplicated')); window.setTimeout(() => setToast(''), 1600)
     } catch {}
   }
   // Publish / Share dialog state
@@ -223,7 +225,7 @@ export default function HomeWorkspacePage() {
       await Api.unpublishDashboard(d.id, user?.id)
       setRecent((prev) => prev.map((x) => x.id === d.id ? { ...x, published: false, publicId: null } : x))
       setFavs((prev) => prev.map((x) => x.id === d.id ? { ...x, published: false, publicId: null } : x))
-      setToast('Unpublished'); window.setTimeout(() => setToast(''), 1600)
+      setToast(t('common.toasts.unpublished')); window.setTimeout(() => setToast(''), 1600)
     } catch {}
   }
   // Delete confirmation
@@ -236,7 +238,7 @@ export default function HomeWorkspacePage() {
       await Api.deleteDashboard(confirmDeleteFor.id, user?.id)
       setRecent((prev) => prev.filter((x) => x.id !== confirmDeleteFor.id))
       setFavs((prev) => prev.filter((x) => x.id !== confirmDeleteFor.id))
-      setToast('Deleted'); window.setTimeout(() => setToast(''), 1600)
+      setToast(t('common.toasts.deleted')); window.setTimeout(() => setToast(''), 1600)
       setConfirmDeleteFor(null)
     } finally { setDelBusy(false) }
   }
@@ -249,26 +251,26 @@ export default function HomeWorkspacePage() {
       const base = ((env.publicDomain && env.publicDomain.trim()) ? env.publicDomain : (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')
       let url = `${base}/v/${baseId}`
       if (status?.protected) {
-        let t: string | null = null
-        try { t = localStorage.getItem(`dash_pub_token_${d.id}`) } catch {}
-        if (!t && typeof window !== 'undefined') {
-          const entered = window.prompt('Enter the access token to include in the link')
+        let tok: string | null = null
+        try { tok = localStorage.getItem(`dash_pub_token_${d.id}`) } catch {}
+        if (!tok && typeof window !== 'undefined') {
+          const entered = window.prompt(t('home.enterToken'))
           if (entered && entered.trim()) {
-            t = entered.trim()
-            try { localStorage.setItem(`dash_pub_token_${d.id}`, t) } catch {}
+            tok = entered.trim()
+            try { localStorage.setItem(`dash_pub_token_${d.id}`, tok) } catch {}
           }
         }
-        if (t) url += `?token=${encodeURIComponent(t)}`
+        if (tok) url += `?token=${encodeURIComponent(tok)}`
       }
       const ok = await copyToClipboard(url)
-      setToast(ok ? 'Link copied' : 'Copy failed. Please copy manually.')
+      setToast(ok ? t('common.toasts.linkCopied') : t('common.toasts.copyFailed'))
     } catch {
       const baseId = d.publicId
-      if (!baseId) { setToast("This dashboard isn't published"); window.setTimeout(() => setToast(''), 1600); return }
+      if (!baseId) { setToast(t('common.toasts.notPublished')); window.setTimeout(() => setToast(''), 1600); return }
       const base = ((env.publicDomain && env.publicDomain.trim()) ? env.publicDomain : (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')
       const url = `${base}/v/${baseId}`
       const ok = await copyToClipboard(url)
-      setToast(ok ? 'Link copied' : 'Copy failed. Please copy manually.')
+      setToast(ok ? t('common.toasts.linkCopied') : t('common.toasts.copyFailed'))
       window.setTimeout(() => setToast(''), 1600)
     }
   }
@@ -278,8 +280,8 @@ export default function HomeWorkspacePage() {
       <Card className="p-0 bg-[hsl(var(--background))] min-w-0 w-full overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] min-w-0">
           <div>
-            <Title className="text-foreground">Welcome back, {user?.name || 'there'}</Title>
-            <Text className="mt-0 text-muted-foreground">Pick up where you left off or explore your recent work</Text>
+            <Title className="text-foreground">{t('home.welcome', { name: user?.name || t('home.fallbackName') })}</Title>
+            <Text className="mt-0 text-muted-foreground">{t('home.subtitle')}</Text>
           </div>
         </div>
 
@@ -289,9 +291,9 @@ export default function HomeWorkspacePage() {
             <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
               <EmptyState
                 icon={<RiRocketLine className="h-8 w-8" />}
-                title="Create your first dashboard"
-                hint="Build interactive dashboards from your data sources. Start with a blank canvas and add widgets."
-                primary={{ label: 'New dashboard', icon: <RiAddLine className="h-4 w-4" />, onClick: () => router.push('/builder' as any) }}
+                title={t('home.emptyFirstTitle')}
+                hint={t('home.emptyFirstHint')}
+                primary={{ label: t('home.newDashboard'), icon: <RiAddLine className="h-4 w-4" />, onClick: () => router.push('/builder' as any) }}
               />
             </div>
           </div>
@@ -301,7 +303,7 @@ export default function HomeWorkspacePage() {
         {last && user?.id && last.userId === user.id && (
           <div className="px-3 py-3 min-w-0 max-w-full">
             <div className="mb-2 text-[15px] font-medium text-gray-700 dark:text-gray-200 flex items-center justify-between min-w-0 max-w-full">
-              <span>Continue working on</span>
+              <span>{t('home.continueWorking')}</span>
             </div>
             <div className="overflow-x-auto no-scrollbar w-full">
               <div className="flex gap-3">{/* single card but keep style consistent */}
@@ -314,14 +316,14 @@ export default function HomeWorkspacePage() {
         {/* Favourites */}
         <div className="px-3 py-3 min-w-0 max-w-full">
           <div className="mb-2 text-[15px] font-medium text-gray-700 dark:text-gray-200 flex flex-wrap items-center justify-between gap-2 min-w-0 max-w-full">
-            <span>Favourites</span>
-            <Link href="/dashboards/mine" className="shrink-0 text-xs px-2 py-1 rounded-md border hover:bg-muted">See all</Link>
+            <span>{t('home.favourites')}</span>
+            <Link href="/dashboards/mine" className="shrink-0 text-xs px-2 py-1 rounded-md border hover:bg-muted">{t('home.seeAll')}</Link>
           </div>
           {favs.length === 0 ? (
             <EmptyState
               icon={<RiStarLine className="h-7 w-7" />}
-              title="No favourites yet"
-              hint="Star dashboards to pin them here for quick access."
+              title={t('home.noFavouritesTitle')}
+              hint={t('home.noFavouritesHint')}
             />
           ) : (
           <div className="overflow-x-auto no-scrollbar w-full">
@@ -339,8 +341,8 @@ export default function HomeWorkspacePage() {
         {recent.length > 0 && (
         <div className="px-3 py-3 min-w-0 max-w-full">
           <div className="mb-2 text-[15px] font-medium text-gray-700 dark:text-gray-200 flex flex-wrap items-center justify-between gap-2 min-w-0 max-w-full">
-            <span>Recent Dashboards</span>
-            <Link href="/dashboards/mine" className="shrink-0 text-xs px-2 py-1 rounded-md border hover:bg-muted">See all</Link>
+            <span>{t('home.recentDashboards')}</span>
+            <Link href="/dashboards/mine" className="shrink-0 text-xs px-2 py-1 rounded-md border hover:bg-muted">{t('home.seeAll')}</Link>
           </div>
           <div className="overflow-x-auto no-scrollbar w-full">
             <div className="flex gap-3">
@@ -356,14 +358,14 @@ export default function HomeWorkspacePage() {
         {/* Recent Collections */}
         <div className="px-3 py-3 min-w-0 max-w-full">
           <div className="mb-2 text-[15px] font-medium text-gray-700 dark:text-gray-200 flex flex-wrap items-center justify-between gap-2 min-w-0 max-w-full">
-            <span>Recent Collections</span>
-            <Link href="/dashboards/shared" className="shrink-0 text-xs px-2 py-1 rounded-md border hover:bg-muted">See all</Link>
+            <span>{t('home.recentCollections')}</span>
+            <Link href="/dashboards/shared" className="shrink-0 text-xs px-2 py-1 rounded-md border hover:bg-muted">{t('home.seeAll')}</Link>
           </div>
           {collab.length === 0 ? (
             <EmptyState
               icon={<RiFolderSharedLine className="h-7 w-7" />}
-              title="No shared collections"
-              hint="Dashboards shared with you will appear here."
+              title={t('home.noCollectionsTitle')}
+              hint={t('home.noCollectionsHint')}
             />
           ) : (
           <div className="overflow-x-auto no-scrollbar w-full">
@@ -397,11 +399,11 @@ export default function HomeWorkspacePage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/20" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Delete dashboard?</Dialog.Title>
-            <Dialog.Description className="text-sm text-muted-foreground mt-1">This action cannot be undone. This will permanently delete "{confirmDeleteFor?.name}".</Dialog.Description>
+            <Dialog.Title className="text-lg font-semibold">{t('common.deleteDialog.title')}</Dialog.Title>
+            <Dialog.Description className="text-sm text-muted-foreground mt-1">{t('common.deleteDialog.desc', { name: confirmDeleteFor?.name || '' })}</Dialog.Description>
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button></Dialog.Close>
-              <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-red-50 text-red-600" disabled={delBusy} onClick={confirmDelete}>{delBusy ? 'Deleting…' : 'Delete'}</button>
+              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('common.cancel')}</button></Dialog.Close>
+              <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-red-50 text-red-600" disabled={delBusy} onClick={confirmDelete}>{delBusy ? t('common.deleting') : t('common.delete')}</button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -412,20 +414,20 @@ export default function HomeWorkspacePage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/20" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Publish or Share</Dialog.Title>
-            <Dialog.Description className="text-sm text-muted-foreground mt-1">Choose whether to publish a public read‑only link, or share with a specific user.</Dialog.Description>
+            <Dialog.Title className="text-lg font-semibold">{t('common.publishDialog.title')}</Dialog.Title>
+            <Dialog.Description className="text-sm text-muted-foreground mt-1">{t('common.publishDialog.desc')}</Dialog.Description>
             <div className="mt-4 space-y-4">
               <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm"><input type="radio" name="pubmode" checked={pubMode==='public'} onChange={() => setPubMode('public')} /><span>Public version: read‑only</span></label>
-                <label className="flex items-center gap-2 text-sm"><input type="radio" name="pubmode" checked={pubMode==='user'} onChange={() => setPubMode('user')} /><span>Share with a user</span></label>
+                <label className="flex items-center gap-2 text-sm"><input type="radio" name="pubmode" checked={pubMode==='public'} onChange={() => setPubMode('public')} /><span>{t('common.publishDialog.publicReadOnly')}</span></label>
+                <label className="flex items-center gap-2 text-sm"><input type="radio" name="pubmode" checked={pubMode==='user'} onChange={() => setPubMode('user')} /><span>{t('common.publishDialog.shareWithUser')}</span></label>
               </div>
               {pubMode==='public' && (
                 <div className="space-y-3">
-                  <label className="text-sm block">Token (optional)
-                    <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" placeholder="Leave empty for public access" value={pubToken} onChange={(e) => setPubToken(e.target.value)} />
+                  <label className="text-sm block">{t('common.publishDialog.tokenOptional')}
+                    <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" placeholder={t('common.publishDialog.tokenPlaceholder')} value={pubToken} onChange={(e) => setPubToken(e.target.value)} />
                   </label>
                   <div className="flex gap-2">
-                    <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={() => setPubToken(crypto.randomUUID())}>Generate secure token</button>
+                    <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={() => setPubToken(crypto.randomUUID())}>{t('common.publishDialog.generateToken')}</button>
                     <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={pubBusy} onClick={async () => {
                       if (!publishFor) return; setPubBusy(true); try {
                         const res = await Api.setPublishToken(publishFor.id, pubToken || undefined, user?.id)
@@ -439,14 +441,14 @@ export default function HomeWorkspacePage() {
                         } catch {}
                         const base = ((env.publicDomain && env.publicDomain.trim()) ? env.publicDomain : (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')
                         const url = `${base}/v/${res.publicId}${pubToken ? `?token=${encodeURIComponent(pubToken)}` : ''}`
-                        setPubLink(url); setToast('Published'); window.setTimeout(() => setToast(''), 1600)
+                        setPubLink(url); setToast(t('common.toasts.published')); window.setTimeout(() => setToast(''), 1600)
                       } finally { setPubBusy(false) }
-                    }}>Save & generate link</button>
+                    }}>{t('common.publishDialog.saveGenerateLink')}</button>
                   </div>
                   {!!pubLink && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground break-all">
                       <span className="font-mono flex-1">{pubLink}</span>
-                      <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" type="button" onClick={async () => { await copyToClipboard(pubLink); setToast('Link copied'); window.setTimeout(() => setToast(''), 1600) }}>Copy</button>
+                      <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" type="button" onClick={async () => { await copyToClipboard(pubLink); setToast(t('common.toasts.linkCopied')); window.setTimeout(() => setToast(''), 1600) }}>{t('common.copy')}</button>
                     </div>
                   )}
                 </div>
@@ -454,13 +456,13 @@ export default function HomeWorkspacePage() {
               {pubMode==='user' && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <label className="text-sm block">Share with user (email or id)
+                    <label className="text-sm block">{t('common.publishDialog.shareWithUserLabel')}
                       <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" placeholder="user@example.com" value={shareUser} onChange={(e) => setShareUser(e.target.value)} />
                     </label>
                     <div>
-                      <div className="text-sm mb-1">Permission</div>
-                      <label className="flex items-center gap-2 text-sm"><input type="radio" name="perm" checked={sharePerm==='ro'} onChange={() => setSharePerm('ro')} /><span>Read‑only</span></label>
-                      <label className="flex items-center gap-2 text-sm mt-1"><input type="radio" name="perm" checked={sharePerm==='rw'} onChange={() => setSharePerm('rw')} /><span>Read‑write</span></label>
+                      <div className="text-sm mb-1">{t('common.publishDialog.permission')}</div>
+                      <label className="flex items-center gap-2 text-sm"><input type="radio" name="perm" checked={sharePerm==='ro'} onChange={() => setSharePerm('ro')} /><span>{t('common.publishDialog.readOnly')}</span></label>
+                      <label className="flex items-center gap-2 text-sm mt-1"><input type="radio" name="perm" checked={sharePerm==='rw'} onChange={() => setSharePerm('rw')} /><span>{t('common.publishDialog.readWrite')}</span></label>
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -469,15 +471,15 @@ export default function HomeWorkspacePage() {
                         // Reuse collection API to add to user collection
                         const me = user?.name || user?.id || 'Someone'
                         await Api.addToCollection(shareUser.trim(), { userId: shareUser.trim(), dashboardId: publishFor.id, sharedBy: me, dashboardName: publishFor.name, permission: sharePerm })
-                        setToast('Shared with user'); window.setTimeout(() => setToast(''), 1600); setPublishFor(null)
+                        setToast(t('common.toasts.sharedWithUser')); window.setTimeout(() => setToast(''), 1600); setPublishFor(null)
                       } finally { setPubBusy(false) }
-                    }}>Share dashboard</button>
+                    }}>{t('common.publishDialog.shareDashboard')}</button>
                   </div>
                 </div>
               )}
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Close</button></Dialog.Close>
+              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('common.close')}</button></Dialog.Close>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
