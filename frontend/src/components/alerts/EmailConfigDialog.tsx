@@ -1,13 +1,15 @@
 "use client"
 
 import React, { useEffect, useState, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import { Api, type EmailConfigPayload, type TestEmailPayload } from '@/lib/api'
 
 export default function EmailConfigDialog({ open, onCloseAction }: { open: boolean; onCloseAction: () => void }) {
+  const t = useTranslations('comms')
   const [form, setForm] = useState<EmailConfigPayload>({ host: '', port: 587, username: '', password: '', fromName: '', fromEmail: '', useTls: true, baseTemplateHtml: '', logoUrl: '' })
   const [testTo, setTestTo] = useState('')
-  const [previewSubject, setPreviewSubject] = useState('Sample Notification')
-  const [previewContent, setPreviewContent] = useState('<div class="card"><div class="subject">Weekly Report</div><p>Hello, this is a sample content block for preview purposes.</p></div>')
+  const [previewSubject, setPreviewSubject] = useState(t('alertDialog.email.previewSubject'))
+  const [previewContent, setPreviewContent] = useState(t.raw('alertDialog.email.previewContent') as string)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState('')
@@ -43,9 +45,9 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
     try {
       setBusy(true); setError(null)
       await Api.putEmailConfig({ ...form, fromEmail: form.username })
-      setToast('Saved'); window.setTimeout(() => setToast(''), 1600)
+      setToast(t('alertDialog.toasts.saved')); window.setTimeout(() => setToast(''), 1600)
       onCloseAction()
-    } catch (e: any) { setError(e?.message || 'Failed to save') } finally { setBusy(false) }
+    } catch (e: any) { setError(e?.message || t('alertDialog.toasts.failedSave')) } finally { setBusy(false) }
   }
 
   const defaultTemplate = (withLogo = true) => {
@@ -211,10 +213,10 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
       .replace(/\{\{year\}\}/g, String(new Date().getFullYear()))
     // sample replacements for preview-only placeholders
     const previewRepl: Record<string,string> = {
-      dashboardName: 'Sample Dashboard',
-      alertName: subject || 'Sample Notification',
+      dashboardName: t('alertDialog.samples.dashboard'),
+      alertName: subject || t('alertDialog.email.previewSubject'),
       runAt: new Date().toLocaleString(),
-      range: 'current period',
+      range: t('alertDialog.samples.currentPeriod'),
     }
     out = Object.entries(previewRepl).reduce((acc, [k, v]) => acc.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v), out)
     
@@ -225,12 +227,12 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
     try {
       setBusy(true); setError(null)
       const to = testTo.split(',').map((s)=>s.trim()).filter(Boolean)
-      if (!to.length) { setError('Enter 1+ recipients'); setBusy(false); return }
+      if (!to.length) { setError(t('alertDialog.toasts.enterRecipients')); setBusy(false); return }
       const html = applyBaseTemplate(previewSubject, previewContent)
-      const payload: TestEmailPayload = { to, subject: previewSubject || 'Test Email', html }
+      const payload: TestEmailPayload = { to, subject: previewSubject || t('alertDialog.email.testEmailSubject'), html }
       await Api.testEmail(payload)
-      setToast('Test sent'); window.setTimeout(() => setToast(''), 1600)
-    } catch (e: any) { setError(e?.message || 'Failed to send test') } finally { setBusy(false) }
+      setToast(t('alertDialog.toasts.testSent')); window.setTimeout(() => setToast(''), 1600)
+    } catch (e: any) { setError(e?.message || t('alertDialog.toasts.failedSendTest')) } finally { setBusy(false) }
   }
 
   if (!open) return null
@@ -239,34 +241,34 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
       <div className="absolute inset-0 bg-black/40" onClick={() => !busy && onCloseAction()} />
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[980px] max-w-[98vw] max-h-[95vh] overflow-auto rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-2">
-          <div className="text-sm font-medium">Email (Office 365) Configuration</div>
+          <div className="text-sm font-medium">{t('alertDialog.email.title')}</div>
           <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={onCloseAction} disabled={busy}>✕</button>
         </div>
         {error && <div className="mb-2 text-xs text-rose-600">{error}</div>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="text-sm">SMTP Host<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={form.host || ''} onChange={(e)=>setForm((f)=>({ ...f, host: e.target.value }))} /></label>
-          <label className="text-sm">Port<input type="number" className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={Number(form.port || 587)} onChange={(e)=>setForm((f)=>({ ...f, port: Number(e.target.value||587) }))} /></label>
-          <label className="text-sm">Username<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={form.username || ''} onChange={(e)=>setForm((f)=>({ ...f, username: e.target.value }))} /></label>
-          <label className="text-sm">Password<input type="password" className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={(form as any).password || ''} onChange={(e)=>setForm((f)=>({ ...f, password: e.target.value } as any))} /></label>
-          <label className="text-sm">From Name<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={form.fromName || ''} onChange={(e)=>setForm((f)=>({ ...f, fromName: e.target.value }))} /></label>
-          <label className="text-sm inline-flex items-center gap-2 mt-1"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={!!form.useTls} onChange={(e)=>setForm((f)=>({ ...f, useTls: e.target.checked }))} /><span>Use TLS</span></label>
+          <label className="text-sm">{t('alertDialog.email.smtpHost')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={form.host || ''} onChange={(e)=>setForm((f)=>({ ...f, host: e.target.value }))} /></label>
+          <label className="text-sm">{t('alertDialog.email.port')}<input type="number" className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={Number(form.port || 587)} onChange={(e)=>setForm((f)=>({ ...f, port: Number(e.target.value||587) }))} /></label>
+          <label className="text-sm">{t('alertDialog.email.username')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={form.username || ''} onChange={(e)=>setForm((f)=>({ ...f, username: e.target.value }))} /></label>
+          <label className="text-sm">{t('alertDialog.email.password')}<input type="password" className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={(form as any).password || ''} onChange={(e)=>setForm((f)=>({ ...f, password: e.target.value } as any))} /></label>
+          <label className="text-sm">{t('alertDialog.email.fromName')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={form.fromName || ''} onChange={(e)=>setForm((f)=>({ ...f, fromName: e.target.value }))} /></label>
+          <label className="text-sm inline-flex items-center gap-2 mt-1"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={!!form.useTls} onChange={(e)=>setForm((f)=>({ ...f, useTls: e.target.checked }))} /><span>{t('alertDialog.email.useTls')}</span></label>
         </div>
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-2 min-w-0">
-            <div className="text-sm font-medium">Branding & Base Template</div>
-            <label className="text-sm">Logo URL
-              <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="https://.../logo.png or data:image/..." value={form.logoUrl || ''} onChange={(e)=>setForm((f)=>({ ...f, logoUrl: e.target.value }))} />
+            <div className="text-sm font-medium">{t('alertDialog.email.branding')}</div>
+            <label className="text-sm">{t('alertDialog.email.logoUrl')}
+              <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.email.logoUrlPlaceholder')} value={form.logoUrl || ''} onChange={(e)=>setForm((f)=>({ ...f, logoUrl: e.target.value }))} />
             </label>
             <div className="flex items-center gap-2 text-xs">
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onLogoFileChange} />
-              <button type="button" className="px-2 py-1 rounded-md border hover:bg-muted" onClick={onPickLogo} disabled={busy}>Upload & embed</button>
-              {String(form.logoUrl || '').startsWith('data:') && (<span className="px-2 py-1 rounded-md border bg-[hsl(var(--muted))]">Embedded</span>)}
-              {!!form.logoUrl && (<button type="button" className="px-2 py-1 rounded-md border hover:bg-muted" onClick={()=>setForm((f)=>({ ...f, logoUrl: '' }))} disabled={busy}>Clear</button>)}
+              <button type="button" className="px-2 py-1 rounded-md border hover:bg-muted" onClick={onPickLogo} disabled={busy}>{t('alertDialog.email.uploadEmbed')}</button>
+              {String(form.logoUrl || '').startsWith('data:') && (<span className="px-2 py-1 rounded-md border bg-[hsl(var(--muted))]">{t('alertDialog.email.embedded')}</span>)}
+              {!!form.logoUrl && (<button type="button" className="px-2 py-1 rounded-md border hover:bg-muted" onClick={()=>setForm((f)=>({ ...f, logoUrl: '' }))} disabled={busy}>{t('alertDialog.common.clear')}</button>)}
             </div>
-            <label className="text-sm">Base HTML template
+            <label className="text-sm">{t('alertDialog.email.baseTemplate')}
               <textarea
                 className="mt-1 w-full h-48 px-2 py-2 rounded-md border bg-background font-mono text-[12px]"
-                placeholder="Paste your HTML template here (use {{subject}}, {{content}}, {{logoUrl}}, {{year}})"
+                placeholder={t.raw('alertDialog.email.baseTemplatePlaceholder') as string}
                 value={form.baseTemplateHtml || ''}
                 onChange={(e)=>setForm((f)=>({ ...f, baseTemplateHtml: e.target.value }))}
                 onDragOver={(e)=>{ e.preventDefault() }}
@@ -289,7 +291,7 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
                 <span
                   key={ph}
                   className="px-2 py-1 rounded-md border cursor-move select-none bg-[hsl(var(--muted))] whitespace-nowrap"
-                  title="Drag into the template"
+                  title={t('alertDialog.email.dragHint')}
                   draggable
                   onDragStart={(e)=>{ e.dataTransfer.setData('text/plain', ph) }}
                   onClick={()=> setForm((f)=>({ ...f, baseTemplateHtml: (f.baseTemplateHtml||'') + (f.baseTemplateHtml?.endsWith(' ')?'':' ') + ph }))}
@@ -297,21 +299,21 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
               ))}
             </div>
             <div className="w-full flex flex-wrap items-center gap-2 text-xs mt-2">
-              <span>Presets:</span>
-              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: defaultTemplate(presetIncludeLogo) }))}>Default</button>
-              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: compactTemplate(presetIncludeLogo) }))}>Compact</button>
-              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: kpiHeroTemplate(presetIncludeLogo) }))}>KPI Hero</button>
-              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: tableFocusedTemplate(presetIncludeLogo) }))}>Table Focused</button>
+              <span>{t('alertDialog.email.presets')}</span>
+              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: defaultTemplate(presetIncludeLogo) }))}>{t('alertDialog.email.presetDefault')}</button>
+              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: compactTemplate(presetIncludeLogo) }))}>{t('alertDialog.email.presetCompact')}</button>
+              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: kpiHeroTemplate(presetIncludeLogo) }))}>{t('alertDialog.email.presetKpiHero')}</button>
+              <button className="px-2 py-1 rounded-md border hover:bg-muted" onClick={() => setForm((f)=>({ ...f, baseTemplateHtml: tableFocusedTemplate(presetIncludeLogo) }))}>{t('alertDialog.email.presetTableFocused')}</button>
               <label className="inline-flex items-center gap-1 ml-2 cursor-pointer select-none">
                 <input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" checked={presetIncludeLogo} onChange={(e) => setPresetIncludeLogo(e.target.checked)} />
-                <span>Include logo</span>
+                <span>{t('alertDialog.email.includeLogo')}</span>
               </label>
             </div>
           </div>
           <div className="space-y-2">
-            <div className="text-sm font-medium">Live Preview</div>
-            <label className="text-sm">Subject<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={previewSubject} onChange={(e)=>setPreviewSubject(e.target.value)} /></label>
-            <label className="text-sm">Body Content (inserts into {'{{content}}'})
+            <div className="text-sm font-medium">{t('alertDialog.email.livePreview')}</div>
+            <label className="text-sm">{t('alertDialog.email.subject')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={previewSubject} onChange={(e)=>setPreviewSubject(e.target.value)} /></label>
+            <label className="text-sm">{t.raw('alertDialog.email.bodyContent') as string}
               <textarea className="mt-1 w-full h-32 px-2 py-2 rounded-md border bg-background" value={previewContent} onChange={(e)=>setPreviewContent(e.target.value)} />
             </label>
             <div className="rounded-md border bg-white overflow-auto" style={{ minHeight: 160 }}>
@@ -320,13 +322,13 @@ export default function EmailConfigDialog({ open, onCloseAction }: { open: boole
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <label className="text-sm">Test to (comma-separated)<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="user@org.com,another@org.com" value={testTo} onChange={(e)=>setTestTo(e.target.value)} /></label>
+          <label className="text-sm">{t('alertDialog.email.testTo')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="user@org.com,another@org.com" value={testTo} onChange={(e)=>setTestTo(e.target.value)} /></label>
           <div className="flex items-end gap-2">
             <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted inline-flex items-center gap-2" disabled={busy} onClick={onTest}>
               {busy && (<span className="inline-block h-3 w-3 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>)}
-              {busy ? 'Sending…' : 'Send test'}
+              {busy ? t('alertDialog.email.sending') : t('alertDialog.email.sendTest')}
             </button>
-            <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted" disabled={busy} onClick={onSave}>Save</button>
+            <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted" disabled={busy} onClick={onSave}>{t('alertDialog.common.save')}</button>
           </div>
         </div>
         {!!toast && <div className="mt-3 text-xs text-emerald-700">{toast}</div>}

@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 import { useModalFocus } from '@/hooks/useModalFocus'
 import type { WidgetConfig } from '@/types/widgets'
@@ -8,6 +9,7 @@ import { Api, type AlertCreate, type AlertConfig } from '@/lib/api'
 import type { ContactOut } from '@/lib/api'
 
 export default function AlertsDialog({ open, onCloseAction, widget }: { open: boolean; onCloseAction: () => void; widget: WidgetConfig }) {
+  const t = useTranslations('comms')
   const [name, setName] = useState<string>('')
   const [kind, setKind] = useState<'alert'|'notification'>('alert')
   const [emailTo, setEmailTo] = useState<string>('')
@@ -49,7 +51,7 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
 
   useEffect(() => {
     if (!open) return
-    setName((widget as any)?.title || 'New Alert')
+    setName((widget as any)?.title || t('alertDialog.samples.newAlert'))
     setKind('alert')
     setEmailTo('')
     setSmsTo('')
@@ -59,8 +61,8 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
     setTemplate('')
     setRenderMode('kpi')
     // Prefill template with KPI placeholder
-    setTemplate('Current KPI value: {{kpi}}')
-    setPreviewSubject((widget as any)?.title || 'Notification')
+    setTemplate(t.raw('alertDialog.list.defaultTemplate') as string)
+    setPreviewSubject((widget as any)?.title || t('alertDialog.samples.notification'))
     // Initialize threshold defaults from widget spec
     try {
       const s: any = spec || {}
@@ -106,7 +108,7 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
       const res = await Api.evaluateAlert({ name: payload.name, dashboardId: (widget as any)?.dashboardId, config: payload.config })
       setTestHtml(res?.html || '')
     } catch (e: any) {
-      setError(e?.message || 'Failed to evaluate')
+      setError(e?.message || t('alertDialog.toasts.failedEvaluate'))
     }
   }
 
@@ -165,10 +167,10 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
   }
 
   const previewReplacements = (): Record<string, string> => ({
-    dashboardName: 'Sample Dashboard',
-    alertName: name || 'Notification',
+    dashboardName: t('alertDialog.samples.dashboard'),
+    alertName: name || t('alertDialog.samples.notification'),
     runAt: new Date().toLocaleString(),
-    range: 'current period',
+    range: t('alertDialog.samples.currentPeriod'),
     kpi: '1234',
   })
 
@@ -181,11 +183,11 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
 
   const buildPreviewHtml = () => {
     const parts: string[] = []
-    parts.push(`<div style='font-family:Inter,Arial,sans-serif;font-size:13px'>Rule: ${name}</div>`)
+    parts.push(`<div style='font-family:Inter,Arial,sans-serif;font-size:13px'>${t('alertDialog.list.ruleLabel', { name })}</div>`)
     if (kind === 'notification') {
-      if (renderMode === 'kpi') parts.push(renderKpiBlock((widget as any)?.title || 'KPI', 1234))
-      else if (renderMode === 'table') parts.push('<div class="card">Table preview will render when sent.</div>')
-      else parts.push('<div class="card">Chart link will be included.</div>')
+      if (renderMode === 'kpi') parts.push(renderKpiBlock((widget as any)?.title || t('alertDialog.render.kpi'), 1234))
+      else if (renderMode === 'table') parts.push(`<div class="card">${t('alertDialog.list.tablePreviewMsg')}</div>`)
+      else parts.push(`<div class="card">${t('alertDialog.list.chartLinkMsg')}</div>`)
     }
     const per = String(template || '')
     if (per.trim()) parts.push(`<div>${per}</div>`)
@@ -235,7 +237,7 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
     const phones = Array.from(phonesSet)
     if (emails.length) actions.push({ type: 'email', to: emails, subject: (previewSubject || name) })
     if (kind !== 'notification' && phones.length) actions.push({ type: 'sms', to: phones, message: template || name })
-    const render: any = (kind === 'notification') ? (renderMode === 'table' ? { mode: 'table', querySpec: spec } : (renderMode === 'chart' ? { mode: 'chart', url: '' } : { mode: 'kpi', label: (widget as any)?.title || 'KPI' })) : { mode: 'kpi', label: (widget as any)?.title || 'KPI' }
+    const render: any = (kind === 'notification') ? (renderMode === 'table' ? { mode: 'table', querySpec: spec } : (renderMode === 'chart' ? { mode: 'chart', url: '' } : { mode: 'kpi', label: (widget as any)?.title || t('alertDialog.render.kpi') })) : { mode: 'kpi', label: (widget as any)?.title || t('alertDialog.render.kpi') }
     const cfg: AlertConfig = { datasourceId, triggers, actions, render, template }
     const payload: AlertCreate = { name, kind, widgetId: (widget as any)?.id, dashboardId: (widget as any)?.dashboardId, enabled: true, config: cfg }
     return payload
@@ -248,7 +250,7 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
       await Api.createAlert(payload)
       onCloseAction()
     } catch (e: any) {
-      setError(e?.message || 'Failed to save')
+      setError(e?.message || t('alertDialog.toasts.failedSave'))
     } finally { setSaving(false) }
   }
 
@@ -258,46 +260,46 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
   return createPortal((
     <div className="fixed inset-0 z-[1200]">
       <div className="absolute inset-0 bg-black/40" onClick={() => !saving && onCloseAction()} />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Alerts & Notifications" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[880px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-card p-4">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t('alertDialog.list.title')} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[880px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-sm font-medium">Alerts & Notifications</div>
-          <button aria-label="Close" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction} disabled={saving}>✕</button>
+          <div className="text-sm font-medium">{t('alertDialog.list.title')}</div>
+          <button aria-label={t('alertDialog.common.close')} className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction} disabled={saving}>✕</button>
         </div>
         {error && <div className="mb-2 text-xs text-rose-600">{error}</div>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="text-sm">Name
+          <label className="text-sm">{t('alertDialog.header.name')}
             <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={name} onChange={(e)=>setName(e.target.value)} />
           </label>
-          <label className="text-sm">Type
+          <label className="text-sm">{t('alertDialog.header.type')}
             <select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={kind} onChange={(e)=>setKind(e.target.value as any)}>
-              <option value="alert">Alert</option>
-              <option value="notification">Notification</option>
+              <option value="alert">{t('alertDialog.header.alert')}</option>
+              <option value="notification">{t('alertDialog.header.notification')}</option>
             </select>
           </label>
           <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-3">
-            <label className="text-sm">Email to (comma-separated)
+            <label className="text-sm">{t('alertDialog.list.emailToLabel')}
               <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="user@org.com,another@org.com" value={emailTo} onChange={(e)=>setEmailTo(e.target.value)} />
             </label>
             {kind !== 'notification' && (
-              <label className="text-sm">SMS to (comma-separated)
+              <label className="text-sm">{t('alertDialog.list.smsToLabel')}
                 <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="059xxxxxxx,056xxxxxxx" value={smsTo} onChange={(e)=>setSmsTo(e.target.value)} />
               </label>
             )}
-            <label className="text-sm">Template (supports {'{{kpi}}'})
-              <textarea className="mt-1 w-full h-24 px-2 py-2 rounded-md border bg-background" placeholder="Current KPI value: {{kpi}}" value={template} onChange={(e)=>setTemplate(e.target.value)} />
+            <label className="text-sm">{t.raw('alertDialog.list.templateLabel') as string}
+              <textarea className="mt-1 w-full h-24 px-2 py-2 rounded-md border bg-background" placeholder={t.raw('alertDialog.list.templatePlaceholder') as string} value={template} onChange={(e)=>setTemplate(e.target.value)} />
             </label>
           </div>
         </div>
 
         {/* Contacts & Datasource selectors */}
         <div className="mt-4">
-          <div className="text-sm font-medium mb-2">Recipients</div>
+          <div className="text-sm font-medium mb-2">{t('alertDialog.recipients.title')}</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-2">
-              <div className="text-xs font-medium">Contacts</div>
+              <div className="text-xs font-medium">{t('alertDialog.list.contacts')}</div>
               <div className="flex items-center gap-2">
-                <input className="w-full h-8 px-2 rounded-md border bg-background" placeholder="Search contacts by name/email/phone" value={contactsSearch} onChange={(e)=>setContactsSearch(e.target.value)} />
-                <a href="/contacts" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]">Contacts Manager</a>
+                <input className="w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.list.contactsSearchPlaceholder')} value={contactsSearch} onChange={(e)=>setContactsSearch(e.target.value)} />
+                <a href="/contacts" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]">{t('alertDialog.list.contactsManager')}</a>
               </div>
               {contactsResults.length > 0 && (
                 <div className="rounded-md border bg-background p-2 max-h-36 overflow-auto text-xs">
@@ -306,7 +308,7 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
                     return (
                       <div key={c.id} className="flex items-center justify-between py-1">
                         <div className="truncate"><span className="font-medium">{c.name}</span> <span className="opacity-70">{c.email || ''} {c.phone ? `| ${c.phone}`: ''}</span></div>
-                        <button className="text-[11px] px-2 py-0.5 rounded-md border hover:bg-muted" onClick={()=> setSelectedContacts((prev)=> sel ? prev.filter(x=>x.id!==c.id) : [...prev, c])}>{sel ? 'Remove' : 'Add'}</button>
+                        <button className="text-[11px] px-2 py-0.5 rounded-md border hover:bg-muted" onClick={()=> setSelectedContacts((prev)=> sel ? prev.filter(x=>x.id!==c.id) : [...prev, c])}>{sel ? t('alertDialog.common.remove') : t('alertDialog.common.add')}</button>
                       </div>
                     )
                   })}
@@ -324,20 +326,20 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
               )}
             </div>
             <div className="space-y-3">
-              <div className="text-xs font-medium">Load recipients from datasource</div>
+              <div className="text-xs font-medium">{t('alertDialog.list.loadFromDatasource')}</div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                <label>Source
-                  <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="schema.table or table" value={emailSource} onChange={(e)=>setEmailSource(e.target.value)} />
+                <label>{t('alertDialog.list.source')}
+                  <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.list.sourcePlaceholder')} value={emailSource} onChange={(e)=>setEmailSource(e.target.value)} />
                 </label>
-                <label>Email field
+                <label>{t('alertDialog.list.emailField')}
                   <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="email_column" value={emailField} onChange={(e)=>setEmailField(e.target.value)} />
                 </label>
                 <div className="col-span-2 flex items-center gap-2">
                   <button className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted disabled:opacity-60" disabled={emailLoading || !emailSource || !emailField} onClick={async()=>{
                     if (!datasourceId) return;
                     try { setEmailLoading(true); const res = await Api.distinct({ source: emailSource, field: emailField, datasourceId }); setEmailCandidates(Array.isArray(res.values)? res.values.map(v=>String(v)).filter(Boolean) : []) } finally { setEmailLoading(false) }
-                  }}>{emailLoading ? 'Loading…' : 'Load emails'}</button>
-                  <button className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted" onClick={()=>{ const picked = Object.entries(emailSelected).filter(([k,v])=>v).map(([k])=>k); const merged = new Set<string>(emailTo.split(',').map(s=>s.trim()).filter(Boolean)); picked.forEach((e)=>merged.add(e)); setEmailTo(Array.from(merged).join(', ')) }}>Add to Email</button>
+                  }}>{emailLoading ? t('alertDialog.common.loading') : t('alertDialog.list.loadEmails')}</button>
+                  <button className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted" onClick={()=>{ const picked = Object.entries(emailSelected).filter(([k,v])=>v).map(([k])=>k); const merged = new Set<string>(emailTo.split(',').map(s=>s.trim()).filter(Boolean)); picked.forEach((e)=>merged.add(e)); setEmailTo(Array.from(merged).join(', ')) }}>{t('alertDialog.list.addToEmail')}</button>
                 </div>
                 {emailCandidates.length>0 && (
                   <div className="col-span-2 rounded-md border bg-background p-2 max-h-32 overflow-auto">
@@ -352,18 +354,18 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
               </div>
               {kind !== 'notification' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                  <label>Source
-                    <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="schema.table or table" value={phoneSource} onChange={(e)=>setPhoneSource(e.target.value)} />
+                  <label>{t('alertDialog.list.source')}
+                    <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.list.sourcePlaceholder')} value={phoneSource} onChange={(e)=>setPhoneSource(e.target.value)} />
                   </label>
-                  <label>Phone field
+                  <label>{t('alertDialog.list.phoneField')}
                     <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="phone_column" value={phoneField} onChange={(e)=>setPhoneField(e.target.value)} />
                   </label>
                   <div className="col-span-2 flex items-center gap-2">
                     <button className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted disabled:opacity-60" disabled={phoneLoading || !phoneSource || !phoneField} onClick={async()=>{
                       if (!datasourceId) return;
                       try { setPhoneLoading(true); const res = await Api.distinct({ source: phoneSource, field: phoneField, datasourceId }); setPhoneCandidates(Array.isArray(res.values)? res.values.map(v=>String(v)).filter(Boolean) : []) } finally { setPhoneLoading(false) }
-                    }}>{phoneLoading ? 'Loading…' : 'Load numbers'}</button>
-                    <button className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted" onClick={()=>{ const picked = Object.entries(phoneSelected).filter(([k,v])=>v).map(([k])=>k); const merged = new Set<string>(smsTo.split(',').map(s=>s.trim()).filter(Boolean)); picked.forEach((p)=>merged.add(p)); setSmsTo(Array.from(merged).join(', ')) }}>Add to SMS</button>
+                    }}>{phoneLoading ? t('alertDialog.common.loading') : t('alertDialog.list.loadNumbers')}</button>
+                    <button className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted" onClick={()=>{ const picked = Object.entries(phoneSelected).filter(([k,v])=>v).map(([k])=>k); const merged = new Set<string>(smsTo.split(',').map(s=>s.trim()).filter(Boolean)); picked.forEach((p)=>merged.add(p)); setSmsTo(Array.from(merged).join(', ')) }}>{t('alertDialog.list.addToSms')}</button>
                   </div>
                   {phoneCandidates.length>0 && (
                     <div className="col-span-2 rounded-md border bg-background p-2 max-h-32 overflow-auto">
@@ -382,23 +384,23 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
         </div>
 
         <div className="mt-4">
-          <div className="text-sm font-medium mb-2">Trigger</div>
+          <div className="text-sm font-medium mb-2">{t('alertDialog.trigger.title')}</div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <label className="text-sm">Type
+            <label className="text-sm">{t('alertDialog.trigger.type')}
               <select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={triggerType} onChange={(e)=>setTriggerType(e.target.value as any)}>
-                <option value="threshold">Threshold</option>
-                <option value="time">Time of day</option>
+                <option value="threshold">{t('alertDialog.trigger.threshold')}</option>
+                <option value="time">{t('alertDialog.trigger.timeOfDay')}</option>
               </select>
             </label>
             {triggerType === 'threshold' ? (
               <>
                 {/* Aggregator & Measure selections to support multiple value chips */}
-                <label className="text-sm">Aggregator
+                <label className="text-sm">{t('alertDialog.trigger.aggregator')}
                   <select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={aggSel} onChange={(e)=>setAggSel(e.target.value)}>
-                    {['count','sum','avg','min','max','distinct'].map((a)=> (<option key={a} value={a}>{a}</option>))}
+                    {['count','sum','avg','min','max','distinct'].map((a)=> (<option key={a} value={a}>{t('alertDialog.trigger.aggOptions.'+a)}</option>))}
                   </select>
                 </label>
-                <label className="text-sm">Measure / Value
+                <label className="text-sm">{t('alertDialog.trigger.measureValue')}
                   <select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={measureSel} onChange={(e)=>setMeasureSel(e.target.value)} disabled={aggSel==='count'}>
                     {/* Build options from widget spec */}
                     {(() => {
@@ -423,31 +425,31 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
                     })()}
                   </select>
                 </label>
-                <label className="text-sm">Operator
+                <label className="text-sm">{t('alertDialog.trigger.operator')}
                   <select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={operator} onChange={(e)=>setOperator(e.target.value)}>
                     <option value=">">&gt;</option>
                     <option value=">=">&gt;=</option>
                     <option value="<">&lt;</option>
                     <option value="<=">&lt;=</option>
                     <option value="==">==</option>
-                    <option value="between">between (enter A,B)</option>
+                    <option value="between">{t('alertDialog.trigger.betweenHint')}</option>
                   </select>
                 </label>
-                <label className="text-sm">Value
-                  <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={operator==='between'? 'A,B' : 'number'} value={value} onChange={(e)=>setValue(e.target.value)} />
+                <label className="text-sm">{t('alertDialog.trigger.value')}
+                  <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={operator==='between'? 'A,B' : t('alertDialog.trigger.numberPlaceholder')} value={value} onChange={(e)=>setValue(e.target.value)} />
                 </label>
                 {spec?.x && (
-                  <label className="text-sm">X value to compare
-                    <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={`Enter ${String(spec?.x)} value (optional)`} value={xValueSel} onChange={(e)=>setXValueSel(e.target.value)} />
+                  <label className="text-sm">{t('alertDialog.list.xValueCompare')}
+                    <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.trigger.categoryFilterPlaceholder', { field: String(spec?.x) })} value={xValueSel} onChange={(e)=>setXValueSel(e.target.value)} />
                   </label>
                 )}
               </>
             ) : (
               <>
-                <label className="text-sm">Time (HH:mm)
+                <label className="text-sm">{t('alertDialog.schedule.time')}
                   <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="09:00" value={timeOfDay} onChange={(e)=>setTimeOfDay(e.target.value)} />
                 </label>
-                <label className="text-sm">Week days (0=Sun..6=Sat)
+                <label className="text-sm">{t('alertDialog.list.weekDays')}
                   <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="1,2,3,4,5" value={daysOfWeek.join(',')} onChange={(e)=>{
                     const arr = e.target.value.split(',').map((s)=>parseInt(s,10)).filter((n)=>!isNaN(n) && n>=0 && n<=6)
                     setDaysOfWeek(arr)
@@ -459,13 +461,13 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
         </div>
 
         <div className="mt-4">
-          <div className="text-sm font-medium mb-2">Render (for Notifications)</div>
+          <div className="text-sm font-medium mb-2">{t('alertDialog.list.renderNotifications')}</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <label className="text-sm">Mode
+            <label className="text-sm">{t('alertDialog.render.mode')}
               <select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={renderMode} onChange={(e)=>setRenderMode(e.target.value as any)}>
-                <option value="kpi">KPI</option>
-                <option value="table">Table</option>
-                <option value="chart">Chart (link)</option>
+                <option value="kpi">{t('alertDialog.render.kpi')}</option>
+                <option value="table">{t('alertDialog.render.table')}</option>
+                <option value="chart">{t('alertDialog.render.chartLink')}</option>
               </select>
             </label>
           </div>
@@ -474,14 +476,14 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
         {kind === 'notification' && (
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-2">
-              <div className="text-sm font-medium">Template Placeholders</div>
+              <div className="text-sm font-medium">{t('alertDialog.list.templatePlaceholders')}</div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="px-2 py-1 rounded-md border cursor-pointer" onClick={() => setTemplate((t)=>t + (t.endsWith(' ')?'':' ') + '{{kpi}}')}>{'{{kpi}}'}</span>
               </div>
             </div>
             <div className="space-y-2">
-              <div className="text-sm font-medium">Live Email Preview</div>
-              <label className="text-sm">Subject
+              <div className="text-sm font-medium">{t('alertDialog.list.liveEmailPreview')}</div>
+              <label className="text-sm">{t('alertDialog.email.subject')}
                 <input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={previewSubject} onChange={(e)=>setPreviewSubject(e.target.value)} />
               </label>
               <div className="rounded-md border bg-white overflow-auto" style={{ minHeight: 160 }}>
@@ -492,8 +494,8 @@ export default function AlertsDialog({ open, onCloseAction, widget }: { open: bo
         )}
 
         <div className="mt-4 flex items-center gap-2">
-          <button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" disabled={saving} onClick={onSave}>{saving ? 'Saving…' : 'Save'}</button>
-          <button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" disabled={saving} onClick={onCloseAction}>Cancel</button>
+          <button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" disabled={saving} onClick={onSave}>{saving ? t('alertDialog.common.saving') : t('alertDialog.common.save')}</button>
+          <button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" disabled={saving} onClick={onCloseAction}>{t('alertDialog.common.cancel')}</button>
         </div>
       </div>
     </div>

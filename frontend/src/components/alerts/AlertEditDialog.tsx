@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Api, parseUtcDate, type AlertOut, type AlertCreate, type AlertConfig, type AlertRunOut } from '@/lib/api'
 
 function parseCron(cron?: string) {
@@ -35,6 +36,7 @@ function buildCron(time: string, opts: { mode: 'weekly'|'monthly'; dows: number[
 }
 
 export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAction }: { open: boolean; alert: AlertOut | null; onCloseAction: () => void; onSavedAction: (a: AlertOut) => void }) {
+  const t = useTranslations('comms')
   const [name, setName] = useState('')
   const [kind, setKind] = useState<'alert'|'notification'>('alert')
   const [enabled, setEnabled] = useState(true)
@@ -296,7 +298,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
       _savedRef.current = res
       onSavedAction(res)
       onCloseAction()
-    } catch (e: any) { setError(e?.message || 'Failed to save') } finally { setSaving(false) }
+    } catch (e: any) { setError(e?.message || t('alertDialog.toasts.failedSave')) } finally { setSaving(false) }
   }
 
   const onTestEvaluate = async () => {
@@ -307,7 +309,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
       const res = await Api.evaluateAlert({ name, dashboardId: (alert as any)?.dashboardId, config: cfg })
       setPreviewHtml(res?.html || '')
     } catch (e: any) {
-      setError(e?.message || 'Failed to evaluate')
+      setError(e?.message || t('alertDialog.toasts.failedEvaluate'))
     }
   }
 
@@ -332,8 +334,8 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
     // Validate
     const invalidEmail = [...emailSet].find(e => !isValidEmail(e))
     const invalidPhone = [...phoneSet].find(p => !isValidPhone(p))
-    if (invalidEmail) throw new Error(`Invalid email: ${invalidEmail}`)
-    if (invalidPhone) throw new Error(`Invalid phone: ${invalidPhone}`)
+    if (invalidEmail) throw new Error(t('alertDialog.validation.invalidEmail', { value: invalidEmail }))
+    if (invalidPhone) throw new Error(t('alertDialog.validation.invalidPhone', { value: invalidPhone }))
     return { emails: [...emailSet], phones: [...phoneSet] }
   }
 
@@ -343,16 +345,16 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
       <div className="absolute inset-0 bg-black/40" onClick={() => !saving && onCloseAction()} />
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[880px] max-w-[95vw] max-h-[90vh] overflow-auto rounded-lg border bg-background p-4">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-sm font-medium">Edit Alert</div>
+          <div className="text-sm font-medium">{t('alertDialog.header.editTitle')}</div>
           <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction} disabled={saving}>✕</button>
         </div>
         {error && <div className="mb-2 text-xs text-rose-600">{error}</div>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <label className="text-sm">Name<input className="mt-1 w-full h-8 px-2 rounded-md border bg-card" value={name} onChange={(e)=>setName(e.target.value)} /></label>
-          <label className="text-sm">Type<select className="mt-1 w-full h-8 px-2 rounded-md border bg-card" value={kind} onChange={(e)=>setKind(e.target.value as any)}><option value="alert">Alert</option><option value="notification">Notification</option></select></label>
-          <label className="text-sm inline-flex items-center gap-2 mt-6"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={enabled} onChange={(e)=>setEnabled(e.target.checked)} /><span>Enabled</span></label>
+          <label className="text-sm">{t('alertDialog.header.name')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-card" value={name} onChange={(e)=>setName(e.target.value)} /></label>
+          <label className="text-sm">{t('alertDialog.header.type')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-card" value={kind} onChange={(e)=>setKind(e.target.value as any)}><option value="alert">{t('alertDialog.header.alert')}</option><option value="notification">{t('alertDialog.header.notification')}</option></select></label>
+          <label className="text-sm inline-flex items-center gap-2 mt-6"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={enabled} onChange={(e)=>setEnabled(e.target.checked)} /><span>{t('alertDialog.header.enabled')}</span></label>
           <div className="text-sm col-span-1 md:col-span-2">
-            <div>Email recipients</div>
+            <div>{t('alertDialog.edit.emailRecipients')}</div>
             <div className="mt-1 relative">
               <div className="min-h-9 rounded-md border bg-card p-1 flex flex-wrap gap-1 items-center">
                 {emailToTokens.map((t, i) => (
@@ -363,7 +365,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
                 ))}
                 <input
                   className="flex-1 min-w-[160px] h-7 bg-transparent outline-none text-xs px-2"
-                  placeholder="Type name, email, or #tag; press Enter"
+                  placeholder={t('alertDialog.edit.emailInputPlaceholder')}
                   value={emailToInput}
                   onChange={(e)=> setEmailToInput(e.target.value)}
                   onFocus={()=> setEmailSugOpen(true)}
@@ -374,10 +376,10 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
               {emailSugOpen && emailSuggestions.length>0 && (
                 <div className="absolute z-[1001] mt-1 w-full max-h-56 overflow-auto rounded-md shadow suggest-menu">
                   <div className="sticky top-0 z-10 flex items-center justify-between px-2 py-1 border-b bg-[hsl(var(--card))] text-[11px]">
-                    <div>{Array.from(emailSel).length} selected</div>
+                    <div>{t('alertDialog.common.selectedCount', { n: Array.from(emailSel).length })}</div>
                     <div className="flex items-center gap-2">
-                      <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={addSelectedEmails}>Add selected</button>
-                      <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={()=> setEmailSel(new Set())}>Clear</button>
+                      <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={addSelectedEmails}>{t('alertDialog.common.addSelected')}</button>
+                      <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={()=> setEmailSel(new Set())}>{t('alertDialog.common.clear')}</button>
                     </div>
                   </div>
                   {emailSuggestions.map((s, idx) => (
@@ -391,7 +393,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
             </div>
           </div>
           <div className="text-sm">
-            <div>SMS recipients</div>
+            <div>{t('alertDialog.edit.smsRecipients')}</div>
             <div className="mt-1 relative">
               <div className="min-h-9 rounded-md border bg-card p-1 flex flex-wrap gap-1 items-center">
                 {smsToTokens.map((t, i) => (
@@ -402,7 +404,7 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
                 ))}
                 <input
                   className="flex-1 min-w-[160px] h-7 bg-transparent outline-none text-xs px-2"
-                  placeholder="Type name, number, or #tag; press Enter"
+                  placeholder={t('alertDialog.edit.smsInputPlaceholder')}
                   value={smsToInput}
                   onChange={(e)=> setSmsToInput(e.target.value)}
                   onFocus={()=> setSmsSugOpen(true)}
@@ -413,10 +415,10 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
               {smsSugOpen && smsSuggestions.length>0 && (
                 <div className="absolute z-[1001] mt-1 w-full max-h-56 overflow-auto rounded-md shadow suggest-menu">
                   <div className="sticky top-0 z-10 flex items-center justify-between px-2 py-1 border-b bg-[hsl(var(--card))] text-[11px]">
-                    <div>{Array.from(smsSel).length} selected</div>
+                    <div>{t('alertDialog.common.selectedCount', { n: Array.from(smsSel).length })}</div>
                     <div className="flex items-center gap-2">
-                      <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={addSelectedSms}>Add selected</button>
-                      <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={()=> setSmsSel(new Set())}>Clear</button>
+                      <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={addSelectedSms}>{t('alertDialog.common.addSelected')}</button>
+                      <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={()=> setSmsSel(new Set())}>{t('alertDialog.common.clear')}</button>
                     </div>
                   </div>
                   {smsSuggestions.map((s, idx) => (
@@ -429,39 +431,39 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
               )}
             </div>
           </div>
-          <label className="text-sm md:col-span-3">Template<textarea className="mt-1 w-full h-20 px-2 py-1 rounded-md border bg-card resize-y" placeholder="Current KPI value: {{kpi}}" value={template} onChange={(e)=>setTemplate(e.target.value)} /></label>
+          <label className="text-sm md:col-span-3">{t('alertDialog.edit.template')}<textarea className="mt-1 w-full h-20 px-2 py-1 rounded-md border bg-card resize-y" placeholder={t.raw('alertDialog.edit.templatePlaceholder') as string} value={template} onChange={(e)=>setTemplate(e.target.value)} /></label>
         </div>
         <div className="mt-4">
-          <div className="text-sm font-medium mb-2">Trigger</div>
+          <div className="text-sm font-medium mb-2">{t('alertDialog.trigger.title')}</div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <label className="text-sm">Type<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={triggerType} onChange={(e)=>setTriggerType(e.target.value as any)}><option value="threshold">Threshold</option><option value="time">Time of day</option></select></label>
+            <label className="text-sm">{t('alertDialog.trigger.type')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={triggerType} onChange={(e)=>setTriggerType(e.target.value as any)}><option value="threshold">{t('alertDialog.trigger.threshold')}</option><option value="time">{t('alertDialog.trigger.timeOfDay')}</option></select></label>
             {triggerType === 'threshold' ? (
               <>
-                <label className="text-sm">Operator<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={operator} onChange={(e)=>setOperator(e.target.value)}><option value=">">&gt;</option><option value=">=">&gt;=</option><option value="<">&lt;</option><option value="<=">&lt;=</option><option value="==">==</option><option value="between">between (enter A,B)</option></select></label>
-                <label className="text-sm">Value<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={operator==='between'? 'A,B' : 'number'} value={value} onChange={(e)=>setValue(e.target.value)} /></label>
+                <label className="text-sm">{t('alertDialog.trigger.operator')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={operator} onChange={(e)=>setOperator(e.target.value)}><option value=">">&gt;</option><option value=">=">&gt;=</option><option value="<">&lt;</option><option value="<=">&lt;=</option><option value="==">==</option><option value="between">{t('alertDialog.trigger.betweenHint')}</option></select></label>
+                <label className="text-sm">{t('alertDialog.trigger.value')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={operator==='between'? 'A,B' : t('alertDialog.trigger.numberPlaceholder')} value={value} onChange={(e)=>setValue(e.target.value)} /></label>
               </>
             ) : (
               <>
-                <label className="text-sm">Time (HH:mm)<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="09:00" value={timeOfDay} onChange={(e)=>setTimeOfDay(e.target.value)} /></label>
+                <label className="text-sm">{t('alertDialog.schedule.time')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="09:00" value={timeOfDay} onChange={(e)=>setTimeOfDay(e.target.value)} /></label>
                 <div className="text-sm">
-                  <div className="mb-1">Schedule</div>
+                  <div className="mb-1">{t('alertDialog.schedule.title')}</div>
                   <div className="inline-flex rounded-md border overflow-hidden">
-                    <button type="button" className={`px-2 py-1 text-xs ${scheduleKind==='weekly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('weekly')}>Weekly</button>
-                    <button type="button" className={`px-2 py-1 text-xs border-l ${scheduleKind==='monthly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('monthly')}>Monthly</button>
+                    <button type="button" className={`px-2 py-1 text-xs ${scheduleKind==='weekly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('weekly')}>{t('alertDialog.schedule.weekly')}</button>
+                    <button type="button" className={`px-2 py-1 text-xs border-l ${scheduleKind==='monthly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('monthly')}>{t('alertDialog.schedule.monthly')}</button>
                   </div>
                 </div>
                 {scheduleKind === 'weekly' ? (
                   <div className="md:col-span-2">
-                    <div className="text-sm">Days of week</div>
+                    <div className="text-sm">{t('alertDialog.schedule.daysOfWeek')}</div>
                     <div className="mt-1 flex flex-wrap gap-1 text-xs">
-                      {[{v:0,l:'Sun'},{v:1,l:'Mon'},{v:2,l:'Tue'},{v:3,l:'Wed'},{v:4,l:'Thu'},{v:5,l:'Fri'},{v:6,l:'Sat'}].map(d => (
+                      {[{v:0,l:t('alertDialog.schedule.weekdays.sun')},{v:1,l:t('alertDialog.schedule.weekdays.mon')},{v:2,l:t('alertDialog.schedule.weekdays.tue')},{v:3,l:t('alertDialog.schedule.weekdays.wed')},{v:4,l:t('alertDialog.schedule.weekdays.thu')},{v:5,l:t('alertDialog.schedule.weekdays.fri')},{v:6,l:t('alertDialog.schedule.weekdays.sat')}].map(d => (
                         <button key={d.v} type="button" className={`px-2 py-1 rounded-md border ${daysOfWeek.includes(d.v)?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setDaysOfWeek((prev)=> prev.includes(d.v) ? prev.filter(x=>x!==d.v) : [...prev, d.v].sort((a,b)=>a-b))}>{d.l}</button>
                       ))}
                     </div>
                   </div>
                 ) : (
                   <div className="md:col-span-2">
-                    <div className="text-sm">Days of month</div>
+                    <div className="text-sm">{t('alertDialog.schedule.daysOfMonth')}</div>
                     <div className="mt-1 grid grid-cols-7 gap-1 text-xs">
                       {Array.from({ length: 31 }).map((_,i)=> i+1).map((d)=> (
                         <button key={d} type="button" className={`px-2 py-1 rounded-md border ${daysOfMonth.includes(d)?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setDaysOfMonth((prev)=> prev.includes(d) ? prev.filter(x=>x!==d) : [...prev, d].sort((a,b)=>a-b))}>{d}</button>
@@ -474,14 +476,14 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
           </div>
         </div>
         <div className="mt-4">
-          <div className="text-sm font-medium mb-2">Render</div>
+          <div className="text-sm font-medium mb-2">{t('alertDialog.render.render')}</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <label className="text-sm">Mode<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={renderMode} onChange={(e)=>setRenderMode(e.target.value as any)}><option value="kpi">KPI</option><option value="table">Table</option><option value="chart">Chart (link)</option><option value="report">Report</option></select></label>
+            <label className="text-sm">{t('alertDialog.render.mode')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={renderMode} onChange={(e)=>setRenderMode(e.target.value as any)}><option value="kpi">{t('alertDialog.render.kpi')}</option><option value="table">{t('alertDialog.render.table')}</option><option value="chart">{t('alertDialog.render.chartLink')}</option><option value="report">{t('alertDialog.render.report')}</option></select></label>
             {renderMode === 'report' && (
               <div className="inline-flex items-center gap-2 mt-5">
-                <label className="text-sm inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> Attach PDF</label>
+                <label className="text-sm inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> {t('alertDialog.header.attachPdf')}</label>
                 {attachPdf && (
-                  <label className="text-sm inline-flex items-center gap-2 ml-2 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={pdfLandscape} onChange={(e)=> setPdfLandscape(e.target.checked)} /> Landscape</label>
+                  <label className="text-sm inline-flex items-center gap-2 ml-2 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={pdfLandscape} onChange={(e)=> setPdfLandscape(e.target.checked)} /> {t('alertDialog.header.landscape')}</label>
                 )}
               </div>
             )}
@@ -491,8 +493,8 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
         {/* Inline test evaluate */}
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-medium">Inline Test</div>
-            <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onTestEvaluate}>Test evaluate</button>
+            <div className="text-sm font-medium">{t('alertDialog.preview.inlineTest')}</div>
+            <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onTestEvaluate}>{t('alertDialog.preview.testEvaluate')}</button>
           </div>
           {!!previewHtml && (
             <div className="rounded-md border bg-white overflow-auto" style={{ minHeight: 120 }}>
@@ -503,22 +505,22 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
 
         {/* Carried KPI summary (from current config) */}
         <div className="mt-4">
-          <div className="text-sm font-medium mb-2">Current KPI (from config)</div>
+          <div className="text-sm font-medium mb-2">{t('alertDialog.edit.currentKpiConfig')}</div>
           <div className="text-xs rounded-md border p-2 bg-[hsl(var(--card))]">
             {(() => {
               try {
                 const cfg: any = (alert?.config || {}) as any
                 const t0 = Array.isArray(cfg.triggers) ? (cfg.triggers.find((t: any) => String(t?.type) === 'threshold') || null) : null
-                if (!t0) return <div>No threshold defined.</div>
+                if (!t0) return <div>{t('alertDialog.edit.noThreshold')}</div>
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <div>Datasource: <span className="font-mono">{String(cfg.datasourceId || '—')}</span></div>
-                    <div>Source: <span className="font-mono">{String(t0.source || '—')}</span></div>
-                    <div>Aggregator: <span className="font-mono">{String(t0.aggregator || '—')}</span></div>
-                    <div>Measure: <span className="font-mono">{String(t0.measure || '—')}</span></div>
-                    <div>X Field: <span className="font-mono">{String(t0.xField || '—')}</span></div>
-                    <div>X Value: <span className="font-mono">{String(t0.xValue ?? '—')}</span></div>
-                    <div className="md:col-span-3">Where: <span className="font-mono break-all">{t0.where ? JSON.stringify(t0.where) : '—'}</span></div>
+                    <div>{t('alertDialog.preview.fieldDatasource')} <span className="font-mono">{String(cfg.datasourceId || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldSource')} <span className="font-mono">{String(t0.source || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldAggregator')} <span className="font-mono">{String(t0.aggregator || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldMeasure')} <span className="font-mono">{String(t0.measure || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldXField')} <span className="font-mono">{String(t0.xField || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldXValue')} <span className="font-mono">{String(t0.xValue ?? '—')}</span></div>
+                    <div className="md:col-span-3">{t('alertDialog.preview.fieldWhere')} <span className="font-mono break-all">{t0.where ? JSON.stringify(t0.where) : '—'}</span></div>
                   </div>
                 )
               } catch { return <div>—</div> }
@@ -529,36 +531,36 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
         {/* Advanced KPI editor */}
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-medium">Advanced (define/override KPI)</div>
-            <label className="text-xs inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={advOpen} onChange={(e)=>setAdvOpen(e.target.checked)} /> Enable</label>
+            <div className="text-sm font-medium">{t('alertDialog.advanced.title')}</div>
+            <label className="text-xs inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={advOpen} onChange={(e)=>setAdvOpen(e.target.checked)} /> {t('alertDialog.advanced.enable')}</label>
           </div>
           {advOpen && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-              <label>Datasource ID<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="datasource id" value={advDatasourceId} onChange={(e)=>setAdvDatasourceId(e.target.value)} /></label>
-              <label>Table / Source<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="schema.table or table" value={advSource} onChange={(e)=>setAdvSource(e.target.value)} /></label>
-              <label>Aggregator<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={advAgg} onChange={(e)=>setAdvAgg(e.target.value as any)}><option value="count">count</option><option value="sum">sum</option><option value="avg">avg</option><option value="min">min</option><option value="max">max</option><option value="distinct">distinct</option></select></label>
-              <label className="md:col-span-2">Measure<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="column (omit for count)" value={advMeasure} onChange={(e)=>setAdvMeasure(e.target.value)} disabled={advAgg==='count'} /></label>
-              <label>X Field<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="optional, category/date field" value={advXField} onChange={(e)=>setAdvXField(e.target.value)} /></label>
-              <label>X Value<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder="value to target (optional)" value={advXValue} onChange={(e)=>setAdvXValue(e.target.value)} /></label>
-              <label className="md:col-span-3">Filters JSON (where)
+              <label>{t('alertDialog.edit.datasourceId')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.edit.datasourceIdPlaceholder')} value={advDatasourceId} onChange={(e)=>setAdvDatasourceId(e.target.value)} /></label>
+              <label>{t('alertDialog.advanced.tableSource')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.edit.tableSourcePlaceholder')} value={advSource} onChange={(e)=>setAdvSource(e.target.value)} /></label>
+              <label>{t('alertDialog.trigger.aggregator')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={advAgg} onChange={(e)=>setAdvAgg(e.target.value as any)}><option value="count">{t('alertDialog.trigger.aggOptions.count')}</option><option value="sum">{t('alertDialog.trigger.aggOptions.sum')}</option><option value="avg">{t('alertDialog.trigger.aggOptions.avg')}</option><option value="min">{t('alertDialog.trigger.aggOptions.min')}</option><option value="max">{t('alertDialog.trigger.aggOptions.max')}</option><option value="distinct">{t('alertDialog.trigger.aggOptions.distinct')}</option></select></label>
+              <label className="md:col-span-2">{t('alertDialog.edit.measure')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.edit.measurePlaceholder')} value={advMeasure} onChange={(e)=>setAdvMeasure(e.target.value)} disabled={advAgg==='count'} /></label>
+              <label>{t('alertDialog.edit.xField')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.edit.xFieldPlaceholder')} value={advXField} onChange={(e)=>setAdvXField(e.target.value)} /></label>
+              <label>{t('alertDialog.advanced.xValue')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" placeholder={t('alertDialog.advanced.xValuePlaceholder')} value={advXValue} onChange={(e)=>setAdvXValue(e.target.value)} /></label>
+              <label className="md:col-span-3">{t('alertDialog.advanced.filtersJson')}
                 <textarea className="mt-1 w-full h-20 px-2 py-2 rounded-md border bg-background font-mono text-[12px]" placeholder='{"status":"paid"}' value={advWhere} onChange={(e)=>setAdvWhere(e.target.value)} />
               </label>
-              <div className="md:col-span-3 text-xs text-muted-foreground">Advanced overrides will be used for evaluation, save, and sending.</div>
+              <div className="md:col-span-3 text-xs text-muted-foreground">{t('alertDialog.advanced.overridesHint')}</div>
             </div>
           )}
         </div>
 
         {/* Runs history */}
         <div className="mt-4">
-          <div className="text-sm font-medium mb-2">Runs</div>
+          <div className="text-sm font-medium mb-2">{t('alertDialog.runs.title')}</div>
           <div className="overflow-auto rounded-md border bg-[hsl(var(--card))]">
             <table className="min-w-full text-sm">
               <thead className="bg-[hsl(var(--muted))]">
                 <tr>
-                  <th className="text-left px-2 py-1 font-medium">Started</th>
-                  <th className="text-left px-2 py-1 font-medium">Finished</th>
-                  <th className="text-left px-2 py-1 font-medium">Status</th>
-                  <th className="text-left px-2 py-1 font-medium">Message</th>
+                  <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.started')}</th>
+                  <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.finished')}</th>
+                  <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.status')}</th>
+                  <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.message')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -570,13 +572,13 @@ export default function AlertEditDialog({ open, alert, onCloseAction, onSavedAct
                     <td className="px-2 py-1 truncate max-w-[420px]" title={r.message || ''}>{r.message || '—'}</td>
                   </tr>
                 )) : (
-                  <tr><td className="px-2 py-2" colSpan={4}>No runs yet.</td></tr>
+                  <tr><td className="px-2 py-2" colSpan={4}>{t('alertDialog.runs.none')}</td></tr>
                 )}
               </tbody>
             </table>
           </div>
         </div>
-        <div className="mt-4 flex items-center gap-2"><button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" disabled={saving} onClick={onSave}>{saving ? 'Saving…' : 'Save'}</button><button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" disabled={saving} onClick={onCloseAction}>Cancel</button></div>
+        <div className="mt-4 flex items-center gap-2"><button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" disabled={saving} onClick={onSave}>{saving ? t('alertDialog.common.saving') : t('alertDialog.common.save')}</button><button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" disabled={saving} onClick={onCloseAction}>{t('alertDialog.common.cancel')}</button></div>
       </div>
     </div>
   )

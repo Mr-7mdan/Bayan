@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import DOMPurify from 'dompurify'
 import { createPortal } from 'react-dom'
 import { PivotBuilder, type PivotAssignments } from '@/components/builder/PivotBuilder'
@@ -19,6 +20,9 @@ import { NumberFilterDetails, DateRangeDetails, ValuesFilterPicker } from './dia
 export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, alert, widget, parentDashboardId, defaultKind, defaultTemplate }: { open: boolean; mode: 'create'|'edit'; onCloseAction: () => void; onSavedAction: (a: AlertOut) => void; alert?: AlertOut | null; widget?: CarriedWidget | null; parentDashboardId?: string | null; defaultKind?: 'alert'|'notification'; defaultTemplate?: string }) {
   const { user } = useAuth()
   const { resolved } = useTheme()
+  const t = useTranslations('comms')
+  // Alias for use inside callbacks that shadow `t` with a local param (e.g. token maps)
+  const tr = t
   const tabBase = resolved === 'dark' ? 'sidebar-item-dark' : 'sidebar-item-light'
   const tabActive = resolved === 'dark' ? 'sidebar-item-active-dark' : 'sidebar-item-active-light'
   const [editAlertId, setEditAlertId] = useState<string | null>(null)
@@ -27,8 +31,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   const [enabled, setEnabled] = useState(true)
   const [emailTo, setEmailTo] = useState('')
   const [smsTo, setSmsTo] = useState('')
-  const [template, setTemplate] = useState(defaultTemplate ?? 'Current KPI value: {{kpi}}')
-  const [templateSms, setTemplateSms] = useState('KPI: {{kpi}}')
+  const [template, setTemplate] = useState(defaultTemplate ?? (t.raw('alertDialog.templates.emailDefault') as string))
+  const [templateSms, setTemplateSms] = useState(t.raw('alertDialog.templates.smsDefault') as string)
   const [customPlaceholders, setCustomPlaceholders] = useState<Array<{ name: string; html: string }>>([])
   const phAreaRefs = React.useRef<Array<HTMLTextAreaElement | null>>([])
   const [fmtSize, setFmtSize] = useState<string>('14')
@@ -317,7 +321,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           ...uniqP.map((v) => ({ kind: 'phone', label: v, value: v } as RecipientToken)),
         ])
       } catch {}
-      setTemplate(String(cfg.template || 'Current KPI value: {{kpi}}'))
+      setTemplate(String(cfg.template || (t.raw('alertDialog.templates.emailDefault') as string)))
       const r = cfg.render || { mode: 'kpi' }
       setRenderMode((r.mode || 'kpi') as any)
       try { const _ea = acts.find((a: any) => String(a?.type) === 'email') || {}; setAttachPdf(!!_ea.attachPdf); setPdfLandscape(!!_ea.pdfLandscape) } catch {}
@@ -374,7 +378,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         setAdvDatasourceId(String(cfgAny.datasourceId || ''))
         try {
           const smsAction = (Array.isArray(cfgAny.actions) ? cfgAny.actions : []).find((a: any) => String(a?.type) === 'sms')
-          setTemplateSms(String((smsAction && smsAction.message) || 'KPI: {{kpi}}'))
+          setTemplateSms(String((smsAction && smsAction.message) || (t.raw('alertDialog.templates.smsDefault') as string)))
         } catch {}
         try {
           const cp = (cfgAny as any).customPlaceholders
@@ -463,15 +467,15 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         setAdvOpen(advEnabled)
       } catch {}
     } else {
-      setName(widget?.title || 'New Alert')
+      setName(widget?.title || t('alertDialog.samples.newAlert'))
       setKind(defaultKind || 'alert')
       setEnabled(true)
       hydratedPickRef.current = null
       setEmailTo('')
       setSmsTo('')
       setRecipTokens([])
-      setTemplate(defaultTemplate ?? 'Place your spaceholder here: {{kpi}}')
-      setTemplateSms('KPI: {{kpi}}')
+      setTemplate(defaultTemplate ?? (t.raw('alertDialog.templates.placeholderHint') as string))
+      setTemplateSms(t.raw('alertDialog.templates.smsDefault') as string)
       setCustomPlaceholders([])
       setRenderMode('kpi')
       setTriggerType('threshold')
@@ -1232,7 +1236,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
       setTestActiveTab('email')
       setTestEvaluating(false)
     } catch (e: any) {
-      const msg = (e && (e.message || String(e))) || 'Failed to evaluate alert'
+      const msg = (e && (e.message || String(e))) || t('alertDialog.toasts.failedEvaluateAlert')
       setTestEmailHtml(`<div style="color:#ef4444">${msg}</div>`)
       setTestContext({ error: msg })
       setTestActiveTab('context')
@@ -1262,10 +1266,10 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
   return createPortal(
     <div className="fixed inset-0 z-[1200]">
       <div className="absolute inset-0 bg-black/40" onClick={() => onCloseAction()} />
-      <div role="dialog" aria-modal="true" aria-label={mode==='edit' ? 'Edit Alert' : 'Create Alert/Notification'} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1040px] max-w-[96vw] max-h-[90vh] overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-4">
+      <div role="dialog" aria-modal="true" aria-label={mode==='edit' ? t('alertDialog.header.editTitle') : t('alertDialog.header.createTitle')} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1040px] max-w-[96vw] max-h-[90vh] overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-4">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-sm font-medium">{mode==='edit' ? 'Edit Alert' : 'Create Alert/Notification'}</div>
-          <button aria-label="Close" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>✕</button>
+          <div className="text-sm font-medium">{mode==='edit' ? t('alertDialog.header.editTitle') : t('alertDialog.header.createTitle')}</div>
+          <button aria-label={t('alertDialog.common.close')} className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>✕</button>
         </div>
         <div className="flex gap-4 items-stretch min-h-0">
           <div className="w-44 shrink-0">
@@ -1277,7 +1281,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                   className={`${tabBase} ${uiSection===s ? tabActive : ''} w-full text-left`}
                   onClick={()=> setUiSection(s)}
                 >
-                  {s === 'insert' ? 'Insert Template' : (s[0].toUpperCase()+s.slice(1))}
+                  {t('alertDialog.sections.'+s)}
                 </button>
               ))}
             </div>
@@ -1285,19 +1289,19 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           <div className="flex-1 overflow-auto max-h-[70vh] pr-1">
             {uiSection === 'header' && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <label className="text-sm">Name<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={name} onChange={(e)=>setName(e.target.value)} /></label>
-                <label className="text-sm">Type<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={kind} onChange={(e)=>setKind(e.target.value as any)}><option value="alert">Alert</option><option value="notification">Notification</option></select></label>
-                <label className="text-sm inline-flex items-center gap-2 mt-6"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={enabled} onChange={(e)=>setEnabled(e.target.checked)} /><span>Enabled</span></label>
+                <label className="text-sm">{t('alertDialog.header.name')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={name} onChange={(e)=>setName(e.target.value)} /></label>
+                <label className="text-sm">{t('alertDialog.header.type')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={kind} onChange={(e)=>setKind(e.target.value as any)}><option value="alert">{t('alertDialog.header.alert')}</option><option value="notification">{t('alertDialog.header.notification')}</option></select></label>
+                <label className="text-sm inline-flex items-center gap-2 mt-6"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={enabled} onChange={(e)=>setEnabled(e.target.checked)} /><span>{t('alertDialog.header.enabled')}</span></label>
                 <div className="md:col-span-3">
-                  <div className="text-sm mb-1">Channels</div>
+                  <div className="text-sm mb-1">{t('alertDialog.header.channels')}</div>
                   <div className="flex items-center gap-4 text-xs">
-                    <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={chanEmail} onChange={(e)=> setChanEmail(e.target.checked)} /> Email</label>
-                    <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={chanSms} onChange={(e)=> setChanSms(e.target.checked)} /> SMS</label>
+                    <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={chanEmail} onChange={(e)=> setChanEmail(e.target.checked)} /> {t('alertDialog.header.email')}</label>
+                    <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={chanSms} onChange={(e)=> setChanSms(e.target.checked)} /> {t('alertDialog.header.sms')}</label>
                     {chanEmail && (renderMode === 'report' || attachPdf) && (
                       <>
-                        <label className="inline-flex items-center gap-2 ml-2 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> Attach PDF</label>
+                        <label className="inline-flex items-center gap-2 ml-2 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={attachPdf} onChange={(e)=> setAttachPdf(e.target.checked)} /> {t('alertDialog.header.attachPdf')}</label>
                         {attachPdf && (
-                          <label className="inline-flex items-center gap-2 ml-1 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={pdfLandscape} onChange={(e)=> setPdfLandscape(e.target.checked)} /> Landscape</label>
+                          <label className="inline-flex items-center gap-2 ml-1 pl-2 border-l border-[hsl(var(--border))]"><input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={pdfLandscape} onChange={(e)=> setPdfLandscape(e.target.checked)} /> {t('alertDialog.header.landscape')}</label>
                         )}
                       </>
                     )}
@@ -1305,30 +1309,30 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                 </div>
                 {kind==='notification' && (
                   <div className="md:col-span-3 mt-2">
-                    <div className="text-sm mb-1">Renderer</div>
+                    <div className="text-sm mb-1">{t('alertDialog.header.renderer')}</div>
                     <div className="flex items-center gap-2 text-xs mb-2">
-                      <button type="button" className={`px-2 py-1 rounded-md border border-[hsl(var(--border))] ${rendererUseCarried?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRendererUseCarried(true)}>Use carried widget</button>
-                      <button type="button" className={`px-2 py-1 rounded-md border border-[hsl(var(--border))] ${!rendererUseCarried?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRendererUseCarried(false)}>Pick from dashboard</button>
+                      <button type="button" className={`px-2 py-1 rounded-md border border-[hsl(var(--border))] ${rendererUseCarried?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRendererUseCarried(true)}>{t('alertDialog.header.useCarried')}</button>
+                      <button type="button" className={`px-2 py-1 rounded-md border border-[hsl(var(--border))] ${!rendererUseCarried?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRendererUseCarried(false)}>{t('alertDialog.header.pickFromDashboard')}</button>
                     </div>
                     {!rendererUseCarried && (
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <label className="text-sm">Dashboard<select className="mt-1 w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)]" value={pickDashId} onChange={(e)=> setPickDashId(e.target.value)}>
-                          <option value="">Select dashboard</option>
+                        <label className="text-sm">{t('alertDialog.header.dashboard')}<select className="mt-1 w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)]" value={pickDashId} onChange={(e)=> setPickDashId(e.target.value)}>
+                          <option value="">{t('alertDialog.header.selectDashboard')}</option>
                           {dashList.map(d => (<option key={d.id} value={d.id}>{d.name}</option>))}
                         </select></label>
-                        <label className="text-sm md:col-span-2">Widget<select className="mt-1 w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)]" value={pickWidgetId} onChange={(e)=> setPickWidgetId(e.target.value)} disabled={!pickDashId}>
-                          <option value="">Select widget</option>
+                        <label className="text-sm md:col-span-2">{t('alertDialog.header.widget')}<select className="mt-1 w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)]" value={pickWidgetId} onChange={(e)=> setPickWidgetId(e.target.value)} disabled={!pickDashId}>
+                          <option value="">{t('alertDialog.header.selectWidget')}</option>
                           {pickWidgets.map(w => (<option key={w.id} value={w.id}>{w.title}</option>))}
                         </select></label>
                       </div>
                     )}
                     {(!rendererUseCarried && !pickWidgetId) && (
-                      <div className="mt-2 text-xs">View as
+                      <div className="mt-2 text-xs">{t('alertDialog.header.viewAs')}
                         <span className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden ml-2 divide-x divide-[hsl(var(--border))]">
-                          <button type="button" className={`px-2 py-1 ${renderMode==='kpi'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('kpi')}>KPI</button>
-                          <button type="button" className={`px-2 py-1 ${renderMode==='table'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('table')}>Table</button>
-                          <button type="button" className={`px-2 py-1 ${renderMode==='chart'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('chart')}>Chart</button>
-                          <button type="button" className={`px-2 py-1 ${renderMode==='report'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('report')}>Report</button>
+                          <button type="button" className={`px-2 py-1 ${renderMode==='kpi'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('kpi')}>{t('alertDialog.render.kpi')}</button>
+                          <button type="button" className={`px-2 py-1 ${renderMode==='table'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('table')}>{t('alertDialog.render.table')}</button>
+                          <button type="button" className={`px-2 py-1 ${renderMode==='chart'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('chart')}>{t('alertDialog.render.chart')}</button>
+                          <button type="button" className={`px-2 py-1 ${renderMode==='report'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setRenderMode('report')}>{t('alertDialog.render.report')}</button>
                         </span>
                       </div>
                     )}
@@ -1341,19 +1345,19 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                           onChange={(e)=> setUseWidgetAspect(e.target.checked)}
                           disabled={(rendererUseCarried ? (!(widget?.id && ((widget?.dashboardId || parentDashboardId)))) : (!(pickDashId && pickWidgetId)))}
                         />
-                        <span>Use widget dimensions/aspect ratio</span>
+                        <span>{t('alertDialog.header.useWidgetAspect')}</span>
                       </label>
-                      <label className="text-sm">Snapshot width
+                      <label className="text-sm">{t('alertDialog.header.snapshotWidth')}
                         <input type="number" className="mt-1 w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)]" value={snapWidth} onChange={(e)=> setSnapWidth(Math.max(100, Math.min(4000, Number(e.target.value)||0)))} />
                       </label>
-                      <label className="text-sm">Snapshot height
+                      <label className="text-sm">{t('alertDialog.header.snapshotHeight')}
                         <input
                           type="number"
                           className={`mt-1 w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)] ${useWidgetAspect && refLayout ? 'opacity-60 cursor-not-allowed' : ''}`}
                           value={snapHeight}
                           onChange={(e)=> setSnapHeight(Math.max(80, Math.min(3000, Number(e.target.value)||0)))}
                           disabled={useWidgetAspect && !!refLayout}
-                          title={useWidgetAspect && refLayout ? 'Height derived from widget aspect ratio' : undefined}
+                          title={useWidgetAspect && refLayout ? t('alertDialog.header.heightDerived') : undefined}
                         />
                       </label>
                       
@@ -1365,24 +1369,24 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
 
             {uiSection === 'recipients' && (
               <div className="space-y-2 text-sm">
-                <div className="mb-1">Recipients</div>
+                <div className="mb-1">{t('alertDialog.recipients.title')}</div>
                 <div className="relative">
                   <div className="min-h-9 rounded-md border bg-[hsl(var(--secondary)/0.6)] p-1 flex flex-wrap gap-1 items-center">
                     {recipTokens.map((t, i) => {
                       const disp = (t.kind === 'contact') ? (t.name || t.label || t.value) : (t.kind==='tag' ? (`#${t.tag || t.value}`) : (t.value || ''))
                       const warnMissing = (t.kind==='contact') && (((chanEmail && !(t.email||'').trim())) || ((chanSms && !(t.phone||'').trim())))
-                      const title = warnMissing ? ((chanEmail && !(t.email||'').trim()) && (chanSms && !(t.phone||'').trim()) ? 'Missing email and phone for enabled channels' : (chanEmail && !(t.email||'').trim()) ? 'Missing email for Email channel' : 'Missing phone for SMS channel') : undefined
+                      const title = warnMissing ? ((chanEmail && !(t.email||'').trim()) && (chanSms && !(t.phone||'').trim()) ? tr('alertDialog.recipients.missingBoth') : (chanEmail && !(t.email||'').trim()) ? tr('alertDialog.recipients.missingEmail') : tr('alertDialog.recipients.missingPhone')) : undefined
                       return (
                         <span key={(t.kind==='contact'?`contact:${t.id}`:`${t.kind}:${t.value}`)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs bg-[hsl(var(--background))]" title={title}>
                           <span>{disp}</span>
-                          {warnMissing && (<span className="text-[10px] text-amber-600" aria-label="Missing contact info">⚠</span>)}
+                          {warnMissing && (<span className="text-[10px] text-amber-600" aria-label={tr('alertDialog.recipients.missingAria')}>⚠</span>)}
                           <button type="button" className="opacity-70 hover:opacity-100" onClick={()=> setRecipTokens(prev => prev.filter((_, idx)=> idx!==i))}>✕</button>
                         </span>
                       )
                     })}
                     <input
                       className="flex-1 min-w-[200px] h-7 bg-transparent outline-none text-xs px-2"
-                      placeholder="Type name, email, or phone; press Enter"
+                      placeholder={t('alertDialog.recipients.inputPlaceholder')}
                       value={recipInput}
                       onChange={(e)=> setRecipInput(e.target.value)}
                       onFocus={()=> setRecipSugOpen(true)}
@@ -1393,10 +1397,10 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                   {recipSugOpen && recipSuggestions.length>0 && (
                     <div className="absolute z-[1001] mt-1 w-full max-h-56 overflow-auto rounded-md border bg-[hsl(var(--card))] shadow">
                       <div className="sticky top-0 z-10 flex items-center justify-between px-2 py-1 border-b bg-[hsl(var(--card))] text-[11px]">
-                        <div>{Array.from(recipSel).length} selected</div>
+                        <div>{t('alertDialog.common.selectedCount', { n: Array.from(recipSel).length })}</div>
                         <div className="flex items-center gap-2">
-                          <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={addSelectedRecipients}>Add selected</button>
-                          <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={()=> setRecipSel(new Set())}>Clear</button>
+                          <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={addSelectedRecipients}>{t('alertDialog.common.addSelected')}</button>
+                          <button className="px-2 py-0.5 rounded border" onMouseDown={(e)=>e.preventDefault()} onClick={()=> setRecipSel(new Set())}>{t('alertDialog.common.clear')}</button>
                         </div>
                       </div>
                       {recipSuggestions.map((s, idx) => {
@@ -1412,26 +1416,26 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                     </div>
                   )}
                 </div>
-                <div className="text-[11px] text-muted-foreground">Selected channels determine which contact fields are used (email for Email channel, phone for SMS).</div>
+                <div className="text-[11px] text-muted-foreground">{t('alertDialog.recipients.channelHint')}</div>
               </div>
             )}
 
             {uiSection === 'insert' && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-sm font-medium">Message Templates</div>
+                  <div className="text-sm font-medium">{t('alertDialog.insert.title')}</div>
                   <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden text-xs divide-x divide-[hsl(var(--border))]">
-                    <button type="button" className={`px-2 py-1 ${msgKind==='email'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setMsgKind('email')}>Email</button>
-                    <button type="button" className={`px-2 py-1 ${msgKind==='sms'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setMsgKind('sms')}>SMS</button>
+                    <button type="button" className={`px-2 py-1 ${msgKind==='email'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setMsgKind('email')}>{t('alertDialog.header.email')}</button>
+                    <button type="button" className={`px-2 py-1 ${msgKind==='sms'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setMsgKind('sms')}>{t('alertDialog.header.sms')}</button>
                   </div>
                 </div>
                 <div className="rounded-md border border-[hsl(var(--border))] p-2 bg-[hsl(var(--background))]">
                   <div className="flex items-center justify-between mb-2">
                     <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden text-xs divide-x divide-[hsl(var(--border))]">
-                      <button type="button" className={`px-2 py-1 ${msgView==='preview'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setMsgView('preview')}>Preview</button>
-                      <button type="button" className={`px-2 py-1 ${msgView==='raw'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setMsgView('raw')}>Raw</button>
+                      <button type="button" className={`px-2 py-1 ${msgView==='preview'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setMsgView('preview')}>{t('alertDialog.insert.preview')}</button>
+                      <button type="button" className={`px-2 py-1 ${msgView==='raw'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setMsgView('raw')}>{t('alertDialog.insert.raw')}</button>
                     </div>
-                    <div className="text-[11px] text-muted-foreground">Use chips to insert variables</div>
+                    <div className="text-[11px] text-muted-foreground">{t('alertDialog.insert.useChips')}</div>
                   </div>
                   <div className="mb-2 flex flex-wrap gap-1">
                     {[
@@ -1465,41 +1469,41 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                     ].map(c => (
                       <button key={c.k} type="button" className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] text-xs" onClick={()=> {
                         const tok = ` {{${c.k}}}`
-                        if (msgKind==='email') setTemplate((t)=> (t||'') + tok)
-                        else setTemplateSms((t)=> (t||'') + tok)
-                      }}>{c.l}</button>
+                        if (msgKind==='email') setTemplate((v)=> (v||'') + tok)
+                        else setTemplateSms((v)=> (v||'') + tok)
+                      }}>{t('alertDialog.insert.chips.'+c.k)}</button>
                     ))}
                   </div>
                   <div className="mt-3 text-xs">
-                    <div className="text-xs mb-1">Formatting</div>
+                    <div className="text-xs mb-1">{t('alertDialog.insert.formatting')}</div>
                     {[{k:'_br',l:'Line break'}, {k:'_nl',l:'New line (SMS)'}].map(c => (
                       <button key={c.k} type="button" className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] text-xs" onClick={()=> {
                         if (c.k === '_br') {
-                          if (msgKind==='email') setTemplate((t)=> (t||'') + ' <br/>' )
-                          else setTemplateSms((t)=> (t||'') + '\n')
+                          if (msgKind==='email') setTemplate((v)=> (v||'') + ' <br/>' )
+                          else setTemplateSms((v)=> (v||'') + '\n')
                         } else if (c.k === '_nl') {
-                          if (msgKind==='email') setTemplate((t)=> (t||'') + ' <br/>' )
-                          else setTemplateSms((t)=> (t||'') + '\n')
+                          if (msgKind==='email') setTemplate((v)=> (v||'') + ' <br/>' )
+                          else setTemplateSms((v)=> (v||'') + '\n')
                         }
-                      }}>{c.l}</button>
+                      }}>{t('alertDialog.insert.'+(c.k==='_br'?'lineBreak':'newLineSms'))}</button>
                     ))}
                   </div>
 
                   <div className="mt-4">
-                    <div className="text-sm font-medium mb-1">Custom placeholders</div>
+                    <div className="text-sm font-medium mb-1">{t('alertDialog.insert.customPlaceholders')}</div>
                     <div className="space-y-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2">
                       {customPlaceholders.map((ph, idx) => (
                         <div key={idx} className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2 space-y-2">
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <label className="text-xs">Name
+                            <label className="text-xs">{t('alertDialog.insert.name')}
                               <input className="mt-1 w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)]" placeholder="PLACEHOLDER" value={ph.name} onChange={(e)=> setCustomPlaceholders((arr)=>{ const next=[...arr]; next[idx] = { ...next[idx], name: e.target.value }; return next })} />
                             </label>
                             <div className="md:col-span-2">
-                              <div className="text-xs">HTML</div>
+                              <div className="text-xs">{t('alertDialog.insert.html')}</div>
                               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                                 <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
-                                  <button type="button" className="px-2 py-1" onClick={()=> presetNormalAt(idx)}>Normal</button>
-                                  <button type="button" className="px-2 py-1" onClick={()=> presetTableAt(idx)}>Table</button>
+                                  <button type="button" className="px-2 py-1" onClick={()=> presetNormalAt(idx)}>{t('alertDialog.insert.normal')}</button>
+                                  <button type="button" className="px-2 py-1" onClick={()=> presetTableAt(idx)}>{t('alertDialog.insert.table')}</button>
                                 </div>
                                 <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
                                   <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx,'font-weight: normal; font-style: normal; text-decoration: none;')}>N</button>
@@ -1516,34 +1520,34 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                                     <option value="20">20</option>
                                     <option value="24">24</option>
                                   </select>
-                                  <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> spanStyleAt(idx, `font-size: ${fmtSize}px;`)}>Size</button>
+                                  <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> spanStyleAt(idx, `font-size: ${fmtSize}px;`)}>{t('alertDialog.insert.size')}</button>
                                 </div>
                                 <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden items-center">
                                   <input type="color" className="h-7 w-7 border-0 bg-transparent" value={fmtFontColor} onChange={(e)=> setFmtFontColor(e.target.value)} />
-                                  <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> spanStyleAt(idx, `color: ${fmtFontColor};`)}>Font</button>
+                                  <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> spanStyleAt(idx, `color: ${fmtFontColor};`)}>{t('alertDialog.insert.font')}</button>
                                 </div>
                                 <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden items-center">
                                   <input type="color" className="h-7 w-7 border-0 bg-transparent" value={fmtBgColor} onChange={(e)=> setFmtBgColor(e.target.value)} />
-                                  <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> spanStyleAt(idx, `background-color: ${fmtBgColor};`)}>Bg</button>
+                                  <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> spanStyleAt(idx, `background-color: ${fmtBgColor};`)}>{t('alertDialog.insert.bg')}</button>
                                 </div>
                                 <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden items-center gap-1 px-1">
                                   <input type="color" className="h-7 w-7 border-0 bg-transparent" value={fmtBorderColor} onChange={(e)=> setFmtBorderColor(e.target.value)} />
                                   <span className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
-                                    <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx, `display:inline-block; border: 1px solid ${fmtBorderColor}; padding: 4px; border-radius: 6px;`)}>Solid</button>
-                                    <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx, `display:inline-block; border: 1px dashed ${fmtBorderColor}; padding: 4px; border-radius: 6px;`)}>Dashed</button>
-                                    <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx, `display:inline-block; border: 1px dotted ${fmtBorderColor}; padding: 4px; border-radius: 6px;`)}>Dotted</button>
-                                    <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx, `display:inline-block; border: none;`)}>None</button>
+                                    <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx, `display:inline-block; border: 1px solid ${fmtBorderColor}; padding: 4px; border-radius: 6px;`)}>{t('alertDialog.insert.solid')}</button>
+                                    <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx, `display:inline-block; border: 1px dashed ${fmtBorderColor}; padding: 4px; border-radius: 6px;`)}>{t('alertDialog.insert.dashed')}</button>
+                                    <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx, `display:inline-block; border: 1px dotted ${fmtBorderColor}; padding: 4px; border-radius: 6px;`)}>{t('alertDialog.insert.dotted')}</button>
+                                    <button type="button" className="px-2 py-1" onClick={()=> spanStyleAt(idx, `display:inline-block; border: none;`)}>{t('alertDialog.insert.borderNone')}</button>
                                   </span>
                                 </div>
                                 <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden items-center gap-1 px-2">
-                                  <span className="text-[11px]">Spacing</span>
+                                  <span className="text-[11px]">{t('alertDialog.insert.spacing')}</span>
                                   <select className="h-7 px-1 bg-[hsl(var(--secondary)/0.6)]" value={String(fmtMarginTop)} onChange={(e)=> setFmtMarginTop(parseInt(e.target.value)||0)}>
-                                    {[0,4,8,12,16,24].map(v=> (<option key={v} value={v}>{`Top ${v}`}</option>))}
+                                    {[0,4,8,12,16,24].map(v=> (<option key={v} value={v}>{t('alertDialog.insert.marginTop', { n: v })}</option>))}
                                   </select>
                                   <select className="h-7 px-1 bg-[hsl(var(--secondary)/0.6)]" value={String(fmtMarginBottom)} onChange={(e)=> setFmtMarginBottom(parseInt(e.target.value)||0)}>
-                                    {[0,4,8,12,16,24].map(v=> (<option key={v} value={v}>{`Bottom ${v}`}</option>))}
+                                    {[0,4,8,12,16,24].map(v=> (<option key={v} value={v}>{t('alertDialog.insert.marginBottom', { n: v })}</option>))}
                                   </select>
-                                  <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))]" onClick={()=> spanStyleAt(idx, `display:inline-block; margin-top: ${fmtMarginTop}px; margin-bottom: ${fmtMarginBottom}px;`)}>Apply</button>
+                                  <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))]" onClick={()=> spanStyleAt(idx, `display:inline-block; margin-top: ${fmtMarginTop}px; margin-bottom: ${fmtMarginBottom}px;`)}>{t('alertDialog.insert.apply')}</button>
                                 </div>
                                 <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))]" onClick={()=> bulletsAt(idx)}>•</button>
                               </div>
@@ -1551,12 +1555,12 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                             </div>
                           </div>
                           <div className="flex items-center gap-2 text-xs">
-                            <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]" onClick={()=> { const k = (ph.name || '').trim(); if (!/^\w+$/.test(k)) return; const tok = ` {{${k}}}`; if (msgKind==='email') setTemplate((t)=> (t||'') + tok); else setTemplateSms((t)=> (t||'') + tok) }}>Insert tag</button>
-                            <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]" onClick={()=> setCustomPlaceholders((arr)=> arr.filter((_,i)=> i!==idx))}>Remove</button>
+                            <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]" onClick={()=> { const k = (ph.name || '').trim(); if (!/^\w+$/.test(k)) return; const tok = ` {{${k}}}`; if (msgKind==='email') setTemplate((v)=> (v||'') + tok); else setTemplateSms((v)=> (v||'') + tok) }}>{t('alertDialog.insert.insertTag')}</button>
+                            <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]" onClick={()=> setCustomPlaceholders((arr)=> arr.filter((_,i)=> i!==idx))}>{t('alertDialog.insert.remove')}</button>
                           </div>
                         </div>
                       ))}
-                      <button type="button" className="text-xs px-2 py-1 rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]" onClick={()=> setCustomPlaceholders((arr)=> [...arr, { name: '', html: '' }])}>Add placeholder</button>
+                      <button type="button" className="text-xs px-2 py-1 rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]" onClick={()=> setCustomPlaceholders((arr)=> [...arr, { name: '', html: '' }])}>{t('alertDialog.insert.addPlaceholder')}</button>
                     </div>
                   </div>
 
@@ -1622,33 +1626,9 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                       return out
                     }
                     if (msgView==='raw') {
-                      const tokenDefs = [
-                        {k:'kpi', l:'KPI'},
-                        {k:'kpi_fmt', l:'KPI (fmt)'},
-                        {k:'operator', l:'Operator'},
-                        {k:'threshold', l:'Threshold'},
-                        {k:'threshold_low', l:'Lower'},
-                        {k:'threshold_high', l:'Upper'},
-                        {k:'agg', l:'Agg'},
-                        {k:'measure', l:'Measure'},
-                        {k:'xField', l:'X Field'},
-                        {k:'xValue', l:'X Value'},
-                        {k:'xValueResolved', l:'X Resolved'},
-                        {k:'xValuePretty', l:'X Pretty'},
-                        {k:'xPick', l:'X Pick'},
-                        {k:'legendField', l:'Legend Field'},
-                        {k:'legend', l:'Legend'},
-                        {k:'filters', l:'Filters'},
-                        {k:'filters_values', l:'Filter Values'},
-                        {k:'filters_values_html', l:'Filter Chips'},
-                        {k:'filters_json', l:'Filters JSON'},
-                        {k:'KPI_IMG', l:'KPI IMG'},
-                        {k:'CHART_IMG', l:'CHART IMG'},
-                        {k:'TABLE_HTML', l:'TABLE HTML'},
-                        {k:'REPORT_HTML', l:'REPORT HTML'},
-                        {k:'source', l:'Source'},
-                        {k:'datasourceId', l:'Datasource'}
-                      ].concat((customPlaceholders||[]).map(it => ({ k: String(it?.name||'').trim(), l: `Custom: ${String(it?.name||'').trim()}` })).filter(it => /^\w+$/.test(it.k)))
+                      const tokenDefs = ([
+                        'kpi','kpi_fmt','operator','threshold','threshold_low','threshold_high','agg','measure','xField','xValue','xValueResolved','xValuePretty','xPick','legendField','legend','filters','filters_values','filters_values_html','filters_json','KPI_IMG','CHART_IMG','TABLE_HTML','REPORT_HTML','source','datasourceId'
+                      ]).map(k => ({ k, l: t('alertDialog.insert.chips.'+k) })).concat((customPlaceholders||[]).map(it => ({ k: String(it?.name||'').trim(), l: t('alertDialog.insert.customLabel', { name: String(it?.name||'').trim() }) })).filter(it => /^\w+$/.test(it.k)))
 
                       const target = tokenDefs.some(t=>t.k===fmtTarget) ? fmtTarget : (tokenDefs[0]?.k || 'kpi')
 
@@ -1697,8 +1677,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                               {tokenDefs.map(t => (<option key={t.k} value={t.k}>{t.l}</option>))}
                             </select>
                             <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
-                              <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, '<span style=\"display:inline-block; padding:4px;\">','</span>')}>Normal</button>
-                              <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, '<table style=\"width:100%; border-collapse:collapse;\"><tbody><tr><td>','</td></tr></tbody></table>')}>Table</button>
+                              <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, '<span style=\"display:inline-block; padding:4px;\">','</span>')}>{t('alertDialog.insert.normal')}</button>
+                              <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, '<table style=\"width:100%; border-collapse:collapse;\"><tbody><tr><td>','</td></tr></tbody></table>')}>{t('alertDialog.insert.table')}</button>
                             </div>
                             <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
                               <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target,'<span style=\"font-weight: normal; font-style: normal; text-decoration: none;\">','</span>')}>N</button>
@@ -1715,34 +1695,34 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                                 <option value="20">20</option>
                                 <option value="24">24</option>
                               </select>
-                              <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> wrapRawToken(target, `<span style=\"font-size: ${fmtSize}px;\">`, '</span>')}>Size</button>
+                              <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> wrapRawToken(target, `<span style=\"font-size: ${fmtSize}px;\">`, '</span>')}>{t('alertDialog.insert.size')}</button>
                             </div>
                             <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden items-center">
                               <input type="color" className="h-7 w-7 border-0 bg-transparent" value={fmtFontColor} onChange={(e)=> setFmtFontColor(e.target.value)} />
-                              <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> wrapRawToken(target, `<span style=\"color: ${fmtFontColor};\">`, '</span>')}>Font</button>
+                              <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> wrapRawToken(target, `<span style=\"color: ${fmtFontColor};\">`, '</span>')}>{t('alertDialog.insert.font')}</button>
                             </div>
                             <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden items-center">
                               <input type="color" className="h-7 w-7 border-0 bg-transparent" value={fmtBgColor} onChange={(e)=> setFmtBgColor(e.target.value)} />
-                              <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> wrapRawToken(target, `<span style=\"background-color: ${fmtBgColor};\">`, '</span>')}>Bg</button>
+                              <button type="button" className="px-2 py-1 border-l border-[hsl(var(--border))]" onClick={()=> wrapRawToken(target, `<span style=\"background-color: ${fmtBgColor};\">`, '</span>')}>{t('alertDialog.insert.bg')}</button>
                             </div>
                             <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden items-center gap-1 px-1">
                               <input type="color" className="h-7 w-7 border-0 bg-transparent" value={fmtBorderColor} onChange={(e)=> setFmtBorderColor(e.target.value)} />
                               <span className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
-                                <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; border: 1px solid ${fmtBorderColor}; padding: 4px; border-radius: 6px;\">`, '</span>')}>Solid</button>
-                                <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; border: 1px dashed ${fmtBorderColor}; padding: 4px; border-radius: 6px;\">`, '</span>')}>Dashed</button>
-                                <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; border: 1px dotted ${fmtBorderColor}; padding: 4px; border-radius: 6px;\">`, '</span>')}>Dotted</button>
-                                <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; border: none;\">`, '</span>')}>None</button>
+                                <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; border: 1px solid ${fmtBorderColor}; padding: 4px; border-radius: 6px;\">`, '</span>')}>{t('alertDialog.insert.solid')}</button>
+                                <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; border: 1px dashed ${fmtBorderColor}; padding: 4px; border-radius: 6px;\">`, '</span>')}>{t('alertDialog.insert.dashed')}</button>
+                                <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; border: 1px dotted ${fmtBorderColor}; padding: 4px; border-radius: 6px;\">`, '</span>')}>{t('alertDialog.insert.dotted')}</button>
+                                <button type="button" className="px-2 py-1" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; border: none;\">`, '</span>')}>{t('alertDialog.insert.borderNone')}</button>
                               </span>
                             </div>
                             <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden items-center gap-1 px-2">
-                              <span className="text-[11px]">Spacing</span>
+                              <span className="text-[11px]">{t('alertDialog.insert.spacing')}</span>
                               <select className="h-7 px-1 bg-[hsl(var(--secondary)/0.6)]" value={String(fmtMarginTop)} onChange={(e)=> setFmtMarginTop(parseInt(e.target.value)||0)}>
-                                {[0,4,8,12,16,24].map(v=> (<option key={v} value={v}>{`Top ${v}`}</option>))}
+                                {[0,4,8,12,16,24].map(v=> (<option key={v} value={v}>{t('alertDialog.insert.marginTop', { n: v })}</option>))}
                               </select>
                               <select className="h-7 px-1 bg-[hsl(var(--secondary)/0.6)]" value={String(fmtMarginBottom)} onChange={(e)=> setFmtMarginBottom(parseInt(e.target.value)||0)}>
-                                {[0,4,8,12,16,24].map(v=> (<option key={v} value={v}>{`Bottom ${v}`}</option>))}
+                                {[0,4,8,12,16,24].map(v=> (<option key={v} value={v}>{t('alertDialog.insert.marginBottom', { n: v })}</option>))}
                               </select>
-                              <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))]" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; margin-top: ${fmtMarginTop}px; margin-bottom: ${fmtMarginBottom}px;\">`, '</span>')}>Apply</button>
+                              <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))]" onClick={()=> wrapRawToken(target, `<span style=\"display:inline-block; margin-top: ${fmtMarginTop}px; margin-bottom: ${fmtMarginBottom}px;\">`, '</span>')}>{t('alertDialog.insert.apply')}</button>
                             </div>
                             <button type="button" className="px-2 py-1 rounded-md border border-[hsl(var(--border))]" onClick={bulletsRaw}>•</button>
                           </div>
@@ -1774,41 +1754,41 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         <div className="mt-4 space-y-3">
           <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2">
             <div className="flex items-center gap-2">
-              <div className="text-sm font-medium">Trigger</div>
+              <div className="text-sm font-medium">{t('alertDialog.trigger.title')}</div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={triggerTimeEnabled} onChange={(e)=> setTriggerTimeEnabled(e.target.checked)} /> Time condition</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={triggerTimeEnabled} onChange={(e)=> setTriggerTimeEnabled(e.target.checked)} /> {t('alertDialog.trigger.timeCondition')}</label>
               <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
-                <button type="button" className={`px-2 py-1 text-xs ${triggerLogic==='AND'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setTriggerLogic('AND')}>AND</button>
-                <button type="button" className={`px-2 py-1 text-xs ${triggerLogic==='OR'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setTriggerLogic('OR')}>OR</button>
+                <button type="button" className={`px-2 py-1 text-xs ${triggerLogic==='AND'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setTriggerLogic('AND')}>{t('alertDialog.trigger.and')}</button>
+                <button type="button" className={`px-2 py-1 text-xs ${triggerLogic==='OR'?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setTriggerLogic('OR')}>{t('alertDialog.trigger.or')}</button>
               </div>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={triggerThresholdEnabled} onChange={(e)=> setTriggerThresholdEnabled(e.target.checked)} /> Threshold condition</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={triggerThresholdEnabled} onChange={(e)=> setTriggerThresholdEnabled(e.target.checked)} /> {t('alertDialog.trigger.thresholdCondition')}</label>
             </div>
           </div>
 
           {triggerThresholdEnabled && (
             <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2">
-              <div className="text-sm font-medium mb-2">Threshold condition</div>
+              <div className="text-sm font-medium mb-2">{t('alertDialog.trigger.thresholdCondition')}</div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 {!advOpen ? (
                   <>
-                    <label className="text-sm">Aggregator<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={aggSel} onChange={(e)=> setAggSel(e.target.value)}>{['count','sum','avg','min','max','distinct'].map((a)=> (<option key={a} value={a}>{a}</option>))}</select></label>
-                    <label className="text-sm">Measure / Value<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={measureSel} onChange={(e)=> setMeasureSel(e.target.value)} disabled={aggSel==='count'}>
+                    <label className="text-sm">{t('alertDialog.trigger.aggregator')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={aggSel} onChange={(e)=> setAggSel(e.target.value)}>{['count','sum','avg','min','max','distinct'].map((a)=> (<option key={a} value={a}>{t('alertDialog.trigger.aggOptions.'+a)}</option>))}</select></label>
+                    <label className="text-sm">{t('alertDialog.trigger.measureValue')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={measureSel} onChange={(e)=> setMeasureSel(e.target.value)} disabled={aggSel==='count'}>
                       {measureOptions.map(o => (<option key={o.value} value={o.value}>{o.label}</option>))}
                     </select></label>
                   </>
                 ) : (
-                  <div className="text-xs col-span-2 self-end text-muted-foreground">KPI is defined in Advanced builder</div>
+                  <div className="text-xs col-span-2 self-end text-muted-foreground">{t('alertDialog.trigger.kpiInAdvanced')}</div>
                 )}
-                <label className="text-sm">Operator<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={operator} onChange={(e)=>setOperator(e.target.value)}><option value=">">&gt;</option><option value=">=">&gt;=</option><option value="<">&lt;</option><option value="<=">&lt;=</option><option value="==">==</option><option value="between">between (enter A,B)</option></select></label>
-                <label className="text-sm">Value<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder={operator==='between'? 'A,B' : 'number'} value={value} onChange={(e)=>setValue(e.target.value)} /></label>
+                <label className="text-sm">{t('alertDialog.trigger.operator')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={operator} onChange={(e)=>setOperator(e.target.value)}><option value=">">&gt;</option><option value=">=">&gt;=</option><option value="<">&lt;</option><option value="<=">&lt;=</option><option value="==">==</option><option value="between">{t('alertDialog.trigger.betweenHint')}</option></select></label>
+                <label className="text-sm">{t('alertDialog.trigger.value')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder={operator==='between'? 'A,B' : t('alertDialog.trigger.numberPlaceholder')} value={value} onChange={(e)=>setValue(e.target.value)} /></label>
               </div>
               {(advOpen && (advPivot as any)?.legend) ? (
                 <div className="mt-3">
-                  <label className="text-sm block">Category filter
+                  <label className="text-sm block">{t('alertDialog.trigger.categoryFilter')}
                     <input
                       className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]"
-                      placeholder={`Enter ${String((advPivot as any)?.legend)} value (optional)`}
+                      placeholder={t('alertDialog.trigger.categoryFilterPlaceholder', { field: String((advPivot as any)?.legend) })}
                       value={advXValue}
                       onChange={(e)=> {
                         const v = e.target.value
@@ -1832,38 +1812,38 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
 
           {triggerTimeEnabled && (
             <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2">
-              <div className="text-sm font-medium mb-2">Time condition</div>
+              <div className="text-sm font-medium mb-2">{t('alertDialog.trigger.timeCondition')}</div>
               <div className="text-sm">
-                <div className="mb-2">Schedule</div>
+                <div className="mb-2">{t('alertDialog.schedule.title')}</div>
                 <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
-                  <button type="button" className={`px-2 py-1 text-xs ${scheduleKind==='hourly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('hourly')}>Hourly</button>
-                  <button type="button" className={`px-2 py-1 text-xs ${scheduleKind==='weekly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('weekly')}>Weekly</button>
-                  <button type="button" className={`px-2 py-1 text-xs ${scheduleKind==='monthly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('monthly')}>Monthly</button>
+                  <button type="button" className={`px-2 py-1 text-xs ${scheduleKind==='hourly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('hourly')}>{t('alertDialog.schedule.hourly')}</button>
+                  <button type="button" className={`px-2 py-1 text-xs ${scheduleKind==='weekly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('weekly')}>{t('alertDialog.schedule.weekly')}</button>
+                  <button type="button" className={`px-2 py-1 text-xs ${scheduleKind==='monthly'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setScheduleKind('monthly')}>{t('alertDialog.schedule.monthly')}</button>
                 </div>
 
                 {scheduleKind === 'hourly' && (
                   <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                    <label className="text-sm md:col-span-1">Every N hours
+                    <label className="text-sm md:col-span-1">{t('alertDialog.schedule.everyNHours')}
                       <input type="number" min={1} max={24} className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)] text-[12px]" value={everyHours} onChange={(e)=> setEveryHours(Math.max(1, Math.min(24, Number(e.target.value||1))))} />
                     </label>
-                    <div className="text-xs text-muted-foreground md:col-span-2">Runs at the top of the hour, every N hours.</div>
+                    <div className="text-xs text-muted-foreground md:col-span-2">{t('alertDialog.schedule.hourlyHint')}</div>
                   </div>
                 )}
 
                 {scheduleKind === 'weekly' && (
                   <div className="mt-3 space-y-3">
                     <div>
-                      <div className="text-xs mb-1">Time (HH:mm)</div>
+                      <div className="text-xs mb-1">{t('alertDialog.schedule.time')}</div>
                       <input className="w-full md:w-[200px] h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)] text-[12px]" placeholder="09:00" value={timeOfDay} onChange={(e)=>setTimeOfDay(e.target.value)} />
                     </div>
                     <div>
-                      <div className="text-xs mb-1">Days of week</div>
+                      <div className="text-xs mb-1">{t('alertDialog.schedule.daysOfWeek')}</div>
                       <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden divide-x divide-[hsl(var(--border))]">
-                        {[{v:0,l:'Sun'},{v:1,l:'Mon'},{v:2,l:'Tue'},{v:3,l:'Wed'},{v:4,l:'Thu'},{v:5,l:'Fri'},{v:6,l:'Sat'}].map(d => (
+                        {[{v:0,l:t('alertDialog.schedule.weekdays.sun')},{v:1,l:t('alertDialog.schedule.weekdays.mon')},{v:2,l:t('alertDialog.schedule.weekdays.tue')},{v:3,l:t('alertDialog.schedule.weekdays.wed')},{v:4,l:t('alertDialog.schedule.weekdays.thu')},{v:5,l:t('alertDialog.schedule.weekdays.fri')},{v:6,l:t('alertDialog.schedule.weekdays.sat')}].map(d => (
                           <button key={d.v} type="button" className={`px-2 py-1 text-xs ${daysOfWeek.includes(d.v)?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setDaysOfWeek((prev)=> prev.includes(d.v) ? prev.filter(x=>x!==d.v) : [...prev, d.v].sort((a,b)=>a-b))}>{d.l}</button>
                         ))}
                       </div>
-                      <div className="mt-2 text-[11px] text-muted-foreground">Selected: {(() => { const labels=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; return daysOfWeek.length ? daysOfWeek.map(i=>labels[i]).join(', ') : 'None' })()}</div>
+                      <div className="mt-2 text-[11px] text-muted-foreground">{t('alertDialog.schedule.selected', { list: (() => { const labels=[t('alertDialog.schedule.weekdays.sun'),t('alertDialog.schedule.weekdays.mon'),t('alertDialog.schedule.weekdays.tue'),t('alertDialog.schedule.weekdays.wed'),t('alertDialog.schedule.weekdays.thu'),t('alertDialog.schedule.weekdays.fri'),t('alertDialog.schedule.weekdays.sat')]; return daysOfWeek.length ? daysOfWeek.map(i=>labels[i]).join(', ') : t('alertDialog.common.none') })() })}</div>
                     </div>
                   </div>
                 )}
@@ -1871,17 +1851,17 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                 {scheduleKind === 'monthly' && (
                   <div className="mt-3 space-y-3">
                     <div>
-                      <div className="text-xs mb-1">Time (HH:mm)</div>
+                      <div className="text-xs mb-1">{t('alertDialog.schedule.time')}</div>
                       <input className="w-full md:w-[200px] h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)] text-[12px]" placeholder="09:00" value={timeOfDay} onChange={(e)=>setTimeOfDay(e.target.value)} />
                     </div>
                     <div>
-                      <div className="text-xs mb-1">Days of month</div>
+                      <div className="text-xs mb-1">{t('alertDialog.schedule.daysOfMonth')}</div>
                       <div className="grid grid-cols-7 gap-1 text-xs">
                         {Array.from({ length: 31 }).map((_,i)=> i+1).map((d)=> (
                           <button key={d} type="button" className={`px-2 py-1 rounded-md border border-[hsl(var(--border))] ${daysOfMonth.includes(d)?'bg-[hsl(var(--muted))]':''}`} onClick={()=> setDaysOfMonth((prev)=> prev.includes(d) ? prev.filter(x=>x!==d) : [...prev, d].sort((a,b)=>a-b))}>{d}</button>
                         ))}
                       </div>
-                      <div className="mt-2 text-[11px] text-muted-foreground">Selected: {daysOfMonth.length ? daysOfMonth.join(', ') : 'None'}</div>
+                      <div className="mt-2 text-[11px] text-muted-foreground">{t('alertDialog.schedule.selected', { list: daysOfMonth.length ? daysOfMonth.join(', ') : t('alertDialog.common.none') })}</div>
                     </div>
                   </div>
                 )}
@@ -1891,57 +1871,57 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
 
           <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-medium">Advanced (define/override KPI)</div>
-              <label className="text-xs inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={advOpen} onChange={(e)=>setAdvOpen(e.target.checked)} /> Enable</label>
+              <div className="text-sm font-medium">{t('alertDialog.advanced.title')}</div>
+              <label className="text-xs inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={advOpen} onChange={(e)=>setAdvOpen(e.target.checked)} /> {t('alertDialog.advanced.enable')}</label>
             </div>
             {advOpen && (
               <div className="space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
-                  <label>Datasource<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={advDatasourceId} onChange={(e)=>setAdvDatasourceId(e.target.value)}><option value="">Select datasource</option>{dsList.map(ds => (<option key={ds.id} value={ds.id}>{ds.name}</option>))}</select></label>
-                  <label>Table / Source {advTablesLoading && (
+                  <label>{t('alertDialog.advanced.datasource')}<select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={advDatasourceId} onChange={(e)=>setAdvDatasourceId(e.target.value)}><option value="">{t('alertDialog.advanced.selectDatasource')}</option>{dsList.map(ds => (<option key={ds.id} value={ds.id}>{ds.name}</option>))}</select></label>
+                  <label>{t('alertDialog.advanced.tableSource')} {advTablesLoading && (
                     <span className="inline-flex items-center gap-1 text-[11px] ml-2 align-middle">
                       <span className="h-3 w-3 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>
-                      Loading…
+                      {t('alertDialog.common.loading')}
                     </span>
                   )}
                     <select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={advSource} onChange={(e)=>setAdvSource(e.target.value)} disabled={!advDatasourceId || advTablesLoading} aria-busy={advTablesLoading}>
-                      <option value="">{advDatasourceId ? (advTablesLoading ? 'Loading tables…' : (tableList.length>0 ? 'Select table' : 'No tables found or access denied')) : 'Select datasource first'}</option>
-                      {tableList.map(t => (<option key={t} value={t}>{t}</option>))}
+                      <option value="">{advDatasourceId ? (advTablesLoading ? t('alertDialog.advanced.loadingTables') : (tableList.length>0 ? t('alertDialog.advanced.selectTable') : t('alertDialog.advanced.noTables'))) : t('alertDialog.advanced.selectDatasourceFirst')}</option>
+                      {tableList.map(tbl => (<option key={tbl} value={tbl}>{tbl}</option>))}
                     </select>
                   </label>
-                  <label>X pick
+                  <label>{t('alertDialog.advanced.xPick')}
                     <select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={advXPick} onChange={(e)=> setAdvXPick(e.target.value as any)}>
-                      <option value="custom">Custom value</option>
-                      <option value="range">Range (from/to)</option>
-                      <option value="today">Today</option>
-                      <option value="yesterday">Yesterday</option>
-                      <option value="this_month">This Month</option>
-                      <option value="last">Last</option>
-                      <option value="min">Min</option>
-                      <option value="max">Max</option>
+                      <option value="custom">{t('alertDialog.advanced.xCustom')}</option>
+                      <option value="range">{t('alertDialog.advanced.xRange')}</option>
+                      <option value="today">{t('alertDialog.advanced.today')}</option>
+                      <option value="yesterday">{t('alertDialog.advanced.yesterday')}</option>
+                      <option value="this_month">{t('alertDialog.advanced.thisMonth')}</option>
+                      <option value="last">{t('alertDialog.advanced.last')}</option>
+                      <option value="min">{t('alertDialog.advanced.min')}</option>
+                      <option value="max">{t('alertDialog.advanced.max')}</option>
                     </select>
                   </label>
-                  <label>Calculation
+                  <label>{t('alertDialog.advanced.calculation')}
                     <select className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" value={advCalcMode} onChange={(e)=> setAdvCalcMode((e.target.value==='pivot'?'pivot':'query'))}>
-                      <option value="query">Query</option>
-                      <option value="pivot">PivotQuery</option>
+                      <option value="query">{t('alertDialog.advanced.query')}</option>
+                      <option value="pivot">{t('alertDialog.advanced.pivotQuery')}</option>
                     </select>
                   </label>
                 </div>
                 {advXPick === 'custom' && (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                    <label>X Value<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder="value to target (optional)" value={advXValue} onChange={(e)=>setAdvXValue(e.target.value)} /></label>
+                    <label>{t('alertDialog.advanced.xValue')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder={t('alertDialog.advanced.xValuePlaceholder')} value={advXValue} onChange={(e)=>setAdvXValue(e.target.value)} /></label>
                   </div>
                 )}
                 {advXPick === 'range' && (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                    <label>From<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder="from" value={advXFrom} onChange={(e)=>setAdvXFrom(e.target.value)} /></label>
-                    <label>To<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder="to" value={advXTo} onChange={(e)=>setAdvXTo(e.target.value)} /></label>
+                    <label>{t('alertDialog.advanced.from')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder={t('alertDialog.advanced.fromPlaceholder')} value={advXFrom} onChange={(e)=>setAdvXFrom(e.target.value)} /></label>
+                    <label>{t('alertDialog.advanced.to')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-[hsl(var(--secondary)/0.6)]" placeholder={t('alertDialog.advanced.toPlaceholder')} value={advXTo} onChange={(e)=>setAdvXTo(e.target.value)} /></label>
                   </div>
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2">
-                    <div className="text-xs font-medium mb-2">Builder</div>
+                    <div className="text-xs font-medium mb-2">{t('alertDialog.advanced.builder')}</div>
                     <PivotBuilder
                       fields={allFieldNames}
                       assignments={advPivot}
@@ -1966,11 +1946,11 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                       source={advSource}
                       valueRequired
                     />
-                    <div className="text-[11px] text-muted-foreground mt-2">Pick one Value (field+agg), optional X, and Filters.</div>
+                    <div className="text-[11px] text-muted-foreground mt-2">{t('alertDialog.advanced.builderHint')}</div>
                   </div>
                   <div className="space-y-2">
                     <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2">
-                      <div className="text-xs font-medium mb-2">Details</div>
+                      <div className="text-xs font-medium mb-2">{t('alertDialog.advanced.details')}</div>
                       {(() => {
                         try {
                           const whereObj = advWhere.trim() ? JSON.parse(advWhere) : {}
@@ -1980,16 +1960,16 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                             if (dateLikeFields.includes(detailField)) return <DateRangeDetails field={detailField} where={whereObj} onPatch={onPatch} />
                             return <ValuesFilterPicker field={detailField} datasourceId={advDatasourceId} source={advSource} where={whereObj} onApply={(vals)=> onPatch({ [detailField]: Array.isArray(vals)&&vals.length ? vals : undefined })} />
                           }
-                          return <div className="text-xs text-muted-foreground">Select a Filter chip or X axis to edit.</div>
-                        } catch { return <div className="text-xs text-muted-foreground">Select a Filter chip or X axis to edit.</div> }
+                          return <div className="text-xs text-muted-foreground">{t('alertDialog.advanced.selectFilterHint')}</div>
+                        } catch { return <div className="text-xs text-muted-foreground">{t('alertDialog.advanced.selectFilterHint')}</div> }
                       })()}
                     </div>
-                    <label className="block">Filters JSON (where)
+                    <label className="block">{t('alertDialog.advanced.filtersJson')}
                       <textarea className="mt-1 w-full h-28 px-2 py-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.6)] font-mono text-[12px]" placeholder='{"status":"paid"}' value={advWhere} onChange={(e)=>setAdvWhere(e.target.value)} />
                     </label>
                   </div>
                 </div>
-                <div className="text-xs text-muted-foreground">Advanced overrides will be used for evaluation, save, and sending.</div>
+                <div className="text-xs text-muted-foreground">{t('alertDialog.advanced.overridesHint')}</div>
               </div>
             )}
           </div>
@@ -2001,28 +1981,28 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         {uiSection === 'preview' && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-medium">Inline Test</div>
+            <div className="text-sm font-medium">{t('alertDialog.preview.inlineTest')}</div>
             <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onTestEvaluate} disabled={testEvaluating}>
               {testEvaluating ? (
                 <span className="inline-flex items-center gap-1">
                   <span className="h-3 w-3 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>
-                  <span>Testing…</span>
+                  <span>{t('alertDialog.preview.testing')}</span>
                 </span>
               ) : (
-                'Test evaluate'
+                t('alertDialog.preview.testEvaluate')
               )}
             </button>
           </div>
           {advOpen && (
             <div className="mb-2 text-xs text-muted-foreground">
-              <span className="mr-2">Local KPI (client):</span>
-              {localKpiLoading ? <span>Loading…</span> : <span className="font-mono">{localKpi == null ? '—' : String(localKpi)}</span>}
+              <span className="mr-2">{t('alertDialog.preview.localKpi')}</span>
+              {localKpiLoading ? <span>{t('alertDialog.common.loading')}</span> : <span className="font-mono">{localKpi == null ? '—' : String(localKpi)}</span>}
             </div>
           )}
           {advOpen && perCatStats && (
             <div className="mb-2 text-xs text-muted-foreground">
-              <span className="mr-2">Per-Legend matches:</span>
-              {perCatLoading ? 'Loading…' : `${perCatStats.matches} / ${perCatStats.total}`}
+              <span className="mr-2">{t('alertDialog.preview.perLegend')}</span>
+              {perCatLoading ? t('alertDialog.common.loading') : `${perCatStats.matches} / ${perCatStats.total}`}
             </div>
           )}
           {advOpen && !perCatLoading && perCatMatches.length > 0 && (
@@ -2060,15 +2040,15 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                   setUiSection('trigger')
                 }
                 return (
-                  <button key={i} type="button" onClick={onChipClick} title="Click to fill X Value (custom)"
+                  <button key={i} type="button" onClick={onChipClick} title={t('alertDialog.preview.chipTitle')}
                     className="inline-flex items-center gap-2 px-2 py-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[11px] hover:bg-[hsl(var(--muted))] cursor-pointer">
-                    <span className="opacity-70">X:</span>
+                    <span className="opacity-70">{t('alertDialog.preview.xLabel')}</span>
                     <span className="font-mono">{xDisp}</span>
                     <span className="opacity-30">•</span>
-                    <span className="opacity-70">Legend:</span>
+                    <span className="opacity-70">{t('alertDialog.preview.legendLabel')}</span>
                     <span className="font-mono">{catDisp}</span>
                     <span className="opacity-30">•</span>
-                    <span className="opacity-70">Value:</span>
+                    <span className="opacity-70">{t('alertDialog.preview.valueLabel')}</span>
                     <span className="font-mono">{valDisp}</span>
                   </button>
                 )
@@ -2078,7 +2058,7 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           )}
           {advOpen && !perCatLoading && perCatMatches.length > 0 && Array.isArray((advPivot.legend as any)) && ((advPivot.legend as any).length > 1) && (
             <div className="mb-3">
-              <div className="text-xs font-medium mb-1">Grouped Preview (client)</div>
+              <div className="text-xs font-medium mb-1">{t('alertDialog.preview.groupedPreview')}</div>
               {(() => {
                 try {
                   const legendDims = Array.isArray((advPivot.legend as any)) ? ((advPivot.legend as any) as string[]) : []
@@ -2126,17 +2106,17 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           )}
           {(testEmailHtml || testSmsText || testHtml || testContext) && (
             <div className="mb-2 inline-flex rounded-md border overflow-hidden text-xs">
-              <button type="button" className={`px-2 py-1 ${testActiveTab==='email'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setTestActiveTab('email')}>Email</button>
-              <button type="button" className={`px-2 py-1 border-l ${testActiveTab==='sms'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setTestActiveTab('sms')}>SMS</button>
-              <button type="button" className={`px-2 py-1 border-l ${testActiveTab==='context'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setTestActiveTab('context')}>Context</button>
-              <button type="button" className={`px-2 py-1 border-l ${testActiveTab==='raw'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setTestActiveTab('raw')}>Raw</button>
+              <button type="button" className={`px-2 py-1 ${testActiveTab==='email'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setTestActiveTab('email')}>{t('alertDialog.preview.tabEmail')}</button>
+              <button type="button" className={`px-2 py-1 border-l ${testActiveTab==='sms'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setTestActiveTab('sms')}>{t('alertDialog.preview.tabSms')}</button>
+              <button type="button" className={`px-2 py-1 border-l ${testActiveTab==='context'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setTestActiveTab('context')}>{t('alertDialog.preview.tabContext')}</button>
+              <button type="button" className={`px-2 py-1 border-l ${testActiveTab==='raw'?'bg-[hsl(var(--muted))]':''}`} onClick={()=>setTestActiveTab('raw')}>{t('alertDialog.preview.tabRaw')}</button>
             </div>
           )}
           {testActiveTab==='email' && (
             <div className="rounded-md border border-[hsl(var(--border))] bg-white overflow-auto" style={{ minHeight: 120 }}>
               {testEmailHtml
                 ? <iframe title="alert-inline-email" className="w-full h-[260px]" srcDoc={testEmailHtml} />
-                : <div className="p-2 text-xs text-muted-foreground">No HTML returned for Email.</div>}
+                : <div className="p-2 text-xs text-muted-foreground">{t('alertDialog.preview.noEmailHtml')}</div>}
             </div>
           )}
           {testActiveTab==='sms' && (
@@ -2150,12 +2130,12 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
               {(testHtml || testEmailHtml) ? (
                 <div>
                   <div className="mb-1 flex items-center justify-between">
-                    <div className="text-[11px] opacity-70">Raw HTML</div>
+                    <div className="text-[11px] opacity-70">{t('alertDialog.preview.rawHtml')}</div>
                     <button
                       type="button"
                       className="text-[11px] px-2 py-0.5 rounded border hover:bg-[hsl(var(--secondary)/0.6)]"
                       onClick={() => { try { navigator.clipboard.writeText(String(testHtml || testEmailHtml)) } catch {} }}
-                    >Copy</button>
+                    >{t('alertDialog.preview.copy')}</button>
                   </div>
                   <textarea
                     readOnly
@@ -2164,12 +2144,12 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
                   />
                 </div>
               ) : (
-                <div className="p-2 text-xs text-muted-foreground">No HTML available (server returned empty emailHtml).</div>
+                <div className="p-2 text-xs text-muted-foreground">{t('alertDialog.preview.noRawHtml')}</div>
               )}
             </div>
           )}
           <div className="mt-2 text-xs text-muted-foreground">
-            <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={showPayload} onChange={(e)=> setShowPayload(e.target.checked)} /> Show payload</label>
+            <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={showPayload} onChange={(e)=> setShowPayload(e.target.checked)} /> {t('alertDialog.preview.showPayload')}</label>
           </div>
           {showPayload && (
             <pre className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-2 text-xs overflow-auto max-h-[260px]">{JSON.stringify((lastPayload || buildPayload())?.config, null, 2)}</pre>
@@ -2181,34 +2161,34 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
           <div className="mt-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-3">
             {carriedSummary && (
               <div className="mb-4">
-                <div className="text-sm font-medium mb-2">Current KPI</div>
+                <div className="text-sm font-medium mb-2">{t('alertDialog.preview.currentKpi')}</div>
                 <div className="text-xs rounded-md border border-[hsl(var(--border))] p-2">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <div>Datasource: <span className="font-mono">{String((carriedSummary as any).datasourceId || '—')}</span></div>
-                    <div>Widget: <span className="font-mono">{String((carriedSummary as any).widgetId || '—')}</span></div>
-                    <div>Source: <span className="font-mono">{String((carriedSummary as any).source || '—')}</span></div>
-                    <div>Aggregator: <span className="font-mono">{String((carriedSummary as any).aggregator || '—')}</span></div>
-                    <div>Measure: <span className="font-mono">{String((carriedSummary as any).measure || '—')}</span></div>
-                    <div>X Field: <span className="font-mono">{String((carriedSummary as any).xField || '—')}</span></div>
-                    <div>X Value: <span className="font-mono">{String((carriedSummary as any).xValue ?? '—')}</span></div>
-                    <div>Legend Field: <span className="font-mono">{String((carriedSummary as any).legendField || '—')}</span></div>
-                    <div>Category: <span className="font-mono">{String((carriedSummary as any).category || '—')}</span></div>
-                    <div className="md:col-span-3">Where: <span className="font-mono break-all">{(carriedSummary as any).where ? JSON.stringify((carriedSummary as any).where) : '—'}</span></div>
+                    <div>{t('alertDialog.preview.fieldDatasource')} <span className="font-mono">{String((carriedSummary as any).datasourceId || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldWidget')} <span className="font-mono">{String((carriedSummary as any).widgetId || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldSource')} <span className="font-mono">{String((carriedSummary as any).source || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldAggregator')} <span className="font-mono">{String((carriedSummary as any).aggregator || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldMeasure')} <span className="font-mono">{String((carriedSummary as any).measure || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldXField')} <span className="font-mono">{String((carriedSummary as any).xField || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldXValue')} <span className="font-mono">{String((carriedSummary as any).xValue ?? '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldLegendField')} <span className="font-mono">{String((carriedSummary as any).legendField || '—')}</span></div>
+                    <div>{t('alertDialog.preview.fieldCategory')} <span className="font-mono">{String((carriedSummary as any).category || '—')}</span></div>
+                    <div className="md:col-span-3">{t('alertDialog.preview.fieldWhere')} <span className="font-mono break-all">{(carriedSummary as any).where ? JSON.stringify((carriedSummary as any).where) : '—'}</span></div>
                   </div>
                 </div>
               </div>
             )}
             {(mode==='edit' && runs.length>0) && (
               <div>
-                <div className="text-sm font-medium mb-2">Runs</div>
+                <div className="text-sm font-medium mb-2">{t('alertDialog.runs.title')}</div>
                 <div className="overflow-auto rounded-md border border-[hsl(var(--border))]">
                   <table className="min-w-full text-sm">
                     <thead className="bg-[hsl(var(--muted))]">
                       <tr>
-                        <th className="text-left px-2 py-1 font-medium">Started</th>
-                        <th className="text-left px-2 py-1 font-medium">Finished</th>
-                        <th className="text-left px-2 py-1 font-medium">Status</th>
-                        <th className="text-left px-2 py-1 font-medium">Message</th>
+                        <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.started')}</th>
+                        <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.finished')}</th>
+                        <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.status')}</th>
+                        <th className="text-left px-2 py-1 font-medium">{t('alertDialog.runs.message')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2229,8 +2209,8 @@ export default function AlertDialog({ open, mode, onCloseAction, onSavedAction, 
         )}
 
         <div className="mt-4 flex items-center gap-2">
-          <button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onSave}>Save</button>
-          <button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>Cancel</button>
+          <button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onSave}>{t('alertDialog.common.save')}</button>
+          <button className="text-xs px-3 py-2 rounded-md border hover:bg-[hsl(var(--secondary)/0.6)]" onClick={onCloseAction}>{t('alertDialog.common.cancel')}</button>
         </div>
       </div>
     </div>
