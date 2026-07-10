@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     update_channel: str = Field(default="stable")
     github_token: Optional[str] = Field(default=None, validation_alias=AliasChoices("GITHUB_TOKEN"))
     update_manifest_name: str = Field(default="bayan-manifest.json")
+    # Auto-open GitHub issues for uncaught backend exceptions. Default OFF — must be
+    # explicitly opted into. Even when on, connectivity/datasource errors are classified
+    # out (transient/environmental, not code bugs); only logic errors are reported.
+    issue_auto_report: bool = Field(default=False, validation_alias=AliasChoices("ISSUE_AUTO_REPORT"))
     # Optional seed for frontend current version when file is missing
     frontend__env: Optional[str] = Field(default=None, validation_alias=AliasChoices("FRONTEND_VERSION"))
 

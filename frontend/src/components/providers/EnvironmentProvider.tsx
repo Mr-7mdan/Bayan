@@ -46,7 +46,7 @@ const DEFAULTS: EnvironmentSettings = {
   orgLogoLight: BAYAN_DEFAULTS.orgLogoLight,
   orgLogoDark: BAYAN_DEFAULTS.orgLogoDark,
   favicon: BAYAN_DEFAULTS.favicon,
-  bugReportMode: 'auto',
+  bugReportMode: 'off',
 }
 const STORAGE_KEY = 'app.environment.settings'
 

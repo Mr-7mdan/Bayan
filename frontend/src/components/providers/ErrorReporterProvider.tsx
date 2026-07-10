@@ -44,6 +44,13 @@ function getBrowserInfo(): string | undefined {
   try { return typeof navigator !== 'undefined' ? navigator.userAgent : undefined } catch { return undefined }
 }
 
+// Network/connectivity/chunk-load failures are environmental (offline, backend down,
+// stale deploy) — not code defects. Never auto-open issues for them.
+function isConnectivityError(p: IssueReportIn): boolean {
+  const s = `${p.errorName || ''} ${p.message || ''}`.toLowerCase()
+  return /failed to fetch|networkerror|network error|load failed|err_network|err_internet|err_connection|loading chunk|chunkloaderror|dynamically imported module|connection (refused|reset|timed out)|timed out|offline/.test(s)
+}
+
 export default function ErrorReporterProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   const { env } = useEnvironment()
@@ -93,13 +100,13 @@ export default function ErrorReporterProvider({ children }: { children: React.Re
           metadata: { type: 'window.error' },
           occurredAt: new Date().toISOString(),
         }
-        const mode = env?.bugReportMode || 'auto'
+        const mode = env?.bugReportMode || 'off'
         if (mode === 'off') return
         if (mode === 'ask') {
           if (!askOpen) { setAskPayload(payload); setAskOpen(true) }
           return
         }
-        void report(payload)
+        { if (isConnectivityError(payload)) return; void report(payload) }
       } catch { /* noop */ }
     }
     const onRejection = (ev: PromiseRejectionEvent) => {
@@ -123,13 +130,13 @@ export default function ErrorReporterProvider({ children }: { children: React.Re
           metadata: { type: 'window.unhandledrejection' },
           occurredAt: new Date().toISOString(),
         }
-        const mode = env?.bugReportMode || 'auto'
+        const mode = env?.bugReportMode || 'off'
         if (mode === 'off') return
         if (mode === 'ask') {
           if (!askOpen) { setAskPayload(payload); setAskOpen(true) }
           return
         }
-        void report(payload)
+        { if (isConnectivityError(payload)) return; void report(payload) }
       } catch { /* noop */ }
     }
     if (typeof window !== 'undefined') {
@@ -170,10 +177,10 @@ export default function ErrorReporterProvider({ children }: { children: React.Re
         metadata: { type: 'react.error' },
         occurredAt: new Date().toISOString(),
       }
-      const mode = (env as any)?.bugReportMode || 'auto'
+      const mode = (env as any)?.bugReportMode || 'off'
       if (mode === 'off') { return }
       if (mode === 'ask') { if (!askOpen) { setAskPayload(payload); setAskOpen(true) } return }
-      void report(payload)
+      { if (isConnectivityError(payload)) return; void report(payload) }
     }
     render() {
       if (this.state.error) throw this.state.error

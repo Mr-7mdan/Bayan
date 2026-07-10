@@ -57,6 +57,43 @@ def _redact(value: Any, depth: int = 0) -> Any:
         return "[unserializable]"
 
 
+# Connectivity/datasource failures are transient and environmental — a MySQL box
+# that's down, a dropped network, a DuckDB file lock — not code defects. They must
+# NOT open GitHub issues (they'd churn noise and self-resolve). Everything else is
+# treated as a logic error worth reporting. Matched by exception class name OR by
+# substrings in the message so we don't have to import every optional DB driver.
+_CONNECTIVITY_ERR_NAMES = {
+    "connectionerror", "connectionreseterror", "connectionrefusederror",
+    "connectionabortederror", "brokenpipeerror", "timeouterror", "sockettimeout",
+    "gaierror", "connecttimeout", "connecterror", "readtimeout", "writetimeout",
+    "pooltimeout", "operationalerror", "interfaceerror", "endpointconnectionerror",
+    "poolerror", "dnserror",
+}
+_CONNECTIVITY_MSG_SUBSTR = (
+    "connection refused", "could not connect", "cannot connect", "can't connect",
+    "unable to connect", "connection reset", "connection aborted", "connection timed out",
+    "connection to server", "lost connection", "server has gone away", "broken pipe",
+    "timed out", "timeout expired", "read timed out", "network is unreachable",
+    "no route to host", "name or service not known", "getaddrinfo", "temporary failure in name resolution",
+    "unknown mysql server host", "can't reach database server", "could not translate host name",
+    "access denied for user", "authentication failed", "password authentication failed",
+    "ssl connection", "ssl handshake", "too many connections", "connection pool",
+    "conflicting lock", "could not set lock", "catalog", "attach", "database is locked",
+    "unable to open database file", "io error", "host is down", "connection closed",
+)
+
+
+def _classify_exception(err_name: str | None, message: str | None) -> str:
+    """Return 'connectivity' (transient/datasource — do NOT report) or 'logic' (report)."""
+    en = (err_name or "").strip().lower()
+    if en in _CONNECTIVITY_ERR_NAMES:
+        return "connectivity"
+    msg = (message or "").lower()
+    if any(s in msg for s in _CONNECTIVITY_MSG_SUBSTR):
+        return "connectivity"
+    return "logic"
+
+
 def _fingerprint(parts: Tuple[str, ...]) -> str:
     h = hashlib.sha1()
     for p in parts:
@@ -107,7 +144,9 @@ async def _find_issue_by_label(fp_label: str) -> Optional[dict]:
             "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        q = f"repo:{owner}/{repo} label:{fp_label} state:open"
+        # Match ANY state (open or closed): a previously-resolved exception must not
+        # reopen as a brand-new duplicate — comment on the existing issue instead.
+        q = f"repo:{owner}/{repo} label:{fp_label}"
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get("https://api.github.com/search/issues", headers=headers, params={"q": q})
             if r.status_code >= 400:
@@ -230,6 +269,12 @@ async def report_backend_exception(exc: BaseException, request: Request) -> None
                 line_no = last.lineno
         msg = str(exc)
         err_name = exc.__class__.__name__
+        # Default OFF: only auto-report when explicitly opted in (ISSUE_AUTO_REPORT).
+        if not settings.issue_auto_report:
+            return
+        # Never open issues for connectivity/datasource failures — transient, self-resolving.
+        if _classify_exception(err_name, msg) == "connectivity":
+            return
         url = str(request.url) if request else None
         version = settings.app_version
         extra = {

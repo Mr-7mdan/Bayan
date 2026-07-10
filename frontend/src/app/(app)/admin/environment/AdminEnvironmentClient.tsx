@@ -625,7 +625,7 @@ export default function AdminEnvironmentPage() {
                 <select
                   name="bug_report_mode"
                   className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background"
-                  value={env.bugReportMode || 'auto'}
+                  value={env.bugReportMode || 'off'}
                   onChange={(e)=> setEnv({ bugReportMode: e.target.value as any })}
                 >
                   <option value="auto">{t('admin.environment.submitAutomatically')}</option>
