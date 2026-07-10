@@ -9004,8 +9004,12 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
     if legend:
         week_start = str(payload.get("weekStart") or "mon").lower()
 
-        # Quote identifiers safely
-        def quote_ident(name: str) -> str:
+        # Quote identifiers safely. NOTE: named _legend_quote (not quote_ident) so it
+        # does NOT shadow the module-level quote_ident used elsewhere in this function
+        # (e.g. lines that call quote_ident(name, dialect_name)) — a local def named
+        # quote_ident makes it local for the whole function and breaks those with
+        # "cannot access free variable 'quote_ident'".
+        def _legend_quote(name: str) -> str:
             s = str(name or '').strip()
             if not s:
                 return s
@@ -9019,7 +9023,7 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
         # Map derived date-part like "OrderDate (Year)" to SQL expression per dialect
         def datepart_expr(col: str, kind_l: str) -> str:
             # Always quote the identifier so space/odd names are safe inside functions
-            q = quote_ident(col)
+            q = _legend_quote(col)
             # MSSQL
             if ("mssql" in dialect_name) or ("sqlserver" in dialect_name):
                 if kind_l == 'year': return f"CAST(YEAR({q}) AS varchar(10))"
@@ -9117,7 +9121,7 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
             # Check if this is a custom column and expand it
             if s in expr_map:
                 return f"({expr_map[s]})"
-            return quote_ident(s)
+            return _legend_quote(s)
 
         # Legend may be list or string (or stringified list)
         parts: list[str] = []
@@ -9390,6 +9394,16 @@ def _period_totals_impl(payload: dict, db: Session = Depends(get_db), actorId: O
                                 pass
                         if ":memory:" in (dsn or "").lower():
                             db_path = ":memory:"
+                except Exception:
+                    pass
+            # Remote (MySQL) attachments for DuckDB ATTACH replay. Computed here from
+            # the datasource options — the spec-11 refactor left this reference wired
+            # to a variable that only existed in the pre-split function's scope.
+            _pt_remote_attachments: list = []
+            if ds:
+                try:
+                    _pt_ra_opts = json.loads(getattr(ds, 'options_json', None) or '{}')
+                    _pt_remote_attachments = (_pt_ra_opts.get('transforms') or {}).get('remoteAttachments') or []
                 except Exception:
                     pass
             with open_duck_native(db_path) as conn:
