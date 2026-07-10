@@ -27,3 +27,6 @@ backend/.data/
 *.log
 logs/
 .playwright-mcp/
+
+# spec-01 junk dir (kept on disk, never released)
+garbage/
