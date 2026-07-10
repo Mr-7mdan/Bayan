@@ -11,7 +11,7 @@ import { Api, type DashboardListItem, type CollectionItemOut, type DashboardOut 
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
-import { EmptyState } from '@/components/ui'
+import { Button, EmptyState } from '@/components/ui'
 import DashboardCard from '@/components/dashboards/DashboardCard'
 
 // Removed local DashCard in favor of shared DashboardCard
@@ -402,8 +402,8 @@ export default function HomeWorkspacePage() {
             <Dialog.Title className="text-lg font-semibold">{t('common.deleteDialog.title')}</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground mt-1">{t('common.deleteDialog.desc', { name: confirmDeleteFor?.name || '' })}</Dialog.Description>
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('common.cancel')}</button></Dialog.Close>
-              <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-red-50 text-red-600" disabled={delBusy} onClick={confirmDelete}>{delBusy ? t('common.deleting') : t('common.delete')}</button>
+              <Dialog.Close asChild><Button type="button" size="sm" variant="outline">{t('common.cancel')}</Button></Dialog.Close>
+              <Button type="button" size="sm" variant="danger" disabled={delBusy} onClick={confirmDelete}>{delBusy ? t('common.deleting') : t('common.delete')}</Button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -427,8 +427,8 @@ export default function HomeWorkspacePage() {
                     <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" placeholder={t('common.publishDialog.tokenPlaceholder')} value={pubToken} onChange={(e) => setPubToken(e.target.value)} />
                   </label>
                   <div className="flex gap-2">
-                    <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" onClick={() => setPubToken(crypto.randomUUID())}>{t('common.publishDialog.generateToken')}</button>
-                    <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={pubBusy} onClick={async () => {
+                    <Button size="sm" variant="outline" type="button" onClick={() => setPubToken(crypto.randomUUID())}>{t('common.publishDialog.generateToken')}</Button>
+                    <Button size="sm" variant="primary" type="button" disabled={pubBusy} onClick={async () => {
                       if (!publishFor) return; setPubBusy(true); try {
                         const res = await Api.setPublishToken(publishFor.id, pubToken || undefined, user?.id)
                         setRecent((prev) => prev.map((x) => x.id === publishFor.id ? { ...x, published: true, publicId: res.publicId } : x))
@@ -443,12 +443,12 @@ export default function HomeWorkspacePage() {
                         const url = `${base}/v/${res.publicId}${pubToken ? `?token=${encodeURIComponent(pubToken)}` : ''}`
                         setPubLink(url); setToast(t('common.toasts.published')); window.setTimeout(() => setToast(''), 1600)
                       } finally { setPubBusy(false) }
-                    }}>{t('common.publishDialog.saveGenerateLink')}</button>
+                    }}>{t('common.publishDialog.saveGenerateLink')}</Button>
                   </div>
                   {!!pubLink && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground break-all">
                       <span className="font-mono flex-1">{pubLink}</span>
-                      <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" type="button" onClick={async () => { await copyToClipboard(pubLink); setToast(t('common.toasts.linkCopied')); window.setTimeout(() => setToast(''), 1600) }}>{t('common.copy')}</button>
+                      <Button size="sm" variant="outline" type="button" onClick={async () => { await copyToClipboard(pubLink); setToast(t('common.toasts.linkCopied')); window.setTimeout(() => setToast(''), 1600) }}>{t('common.copy')}</Button>
                     </div>
                   )}
                 </div>
@@ -466,20 +466,20 @@ export default function HomeWorkspacePage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" type="button" disabled={pubBusy || !shareUser.trim()} onClick={async () => {
+                    <Button size="sm" variant="primary" type="button" disabled={pubBusy || !shareUser.trim()} onClick={async () => {
                       if (!publishFor || !shareUser.trim()) return; setPubBusy(true); try {
                         // Reuse collection API to add to user collection
                         const me = user?.name || user?.id || 'Someone'
                         await Api.addToCollection(shareUser.trim(), { userId: shareUser.trim(), dashboardId: publishFor.id, sharedBy: me, dashboardName: publishFor.name, permission: sharePerm })
                         setToast(t('common.toasts.sharedWithUser')); window.setTimeout(() => setToast(''), 1600); setPublishFor(null)
                       } finally { setPubBusy(false) }
-                    }}>{t('common.publishDialog.shareDashboard')}</button>
+                    }}>{t('common.publishDialog.shareDashboard')}</Button>
                   </div>
                 </div>
               )}
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('common.close')}</button></Dialog.Close>
+              <Dialog.Close asChild><Button type="button" size="sm" variant="outline">{t('common.close')}</Button></Dialog.Close>
             </div>
           </Dialog.Content>
         </Dialog.Portal>

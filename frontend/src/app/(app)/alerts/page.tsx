@@ -12,6 +12,7 @@ import SmsConfigDialog from '@/components/alerts/SmsConfigDialog'
 import AlertDialog from '@/components/alerts/AlertDialog'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
+import { Button } from '@/components/ui'
 
 function parseISOForJS(iso?: string | null): Date | null {
   try {
@@ -347,15 +348,15 @@ export default function AlertsPage() {
             <Text className="mt-0 text-gray-500 dark:text-white">{t('alerts.header.subtitle')}</Text>
           </div>
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-1 rounded-md border btn-primary px-3 py-1.5 text-sm font-medium" onClick={() => setCreateOpen(true)}><RiAddLine className="w-4 h-4" />{t('alerts.toolbar.new')}</button>
+            <Button size="sm" variant="primary" icon={<RiAddLine className="w-4 h-4" />} onClick={() => setCreateOpen(true)}>{t('alerts.toolbar.new')}</Button>
             {isAdmin && (
               <>
-                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setDlgEmail(true)}><RiSettings3Line className="w-4 h-4" />{t('alerts.toolbar.emailConfig')}</button>
-                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={() => setDlgSms(true)}><RiSettings3Line className="w-4 h-4" />{t('alerts.toolbar.smsConfig')}</button>
+                <Button size="sm" variant="outline" icon={<RiSettings3Line className="w-4 h-4" />} onClick={() => setDlgEmail(true)}>{t('alerts.toolbar.emailConfig')}</Button>
+                <Button size="sm" variant="outline" icon={<RiSettings3Line className="w-4 h-4" />} onClick={() => setDlgSms(true)}>{t('alerts.toolbar.smsConfig')}</Button>
               </>
             )}
             {isAdmin && (
-              <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={onRefreshJobs}><RiRefreshLine className="w-4 h-4" />{t('alerts.toolbar.refreshScheduler')}</button>
+              <Button size="sm" variant="outline" icon={<RiRefreshLine className="w-4 h-4" />} onClick={onRefreshJobs}>{t('alerts.toolbar.refreshScheduler')}</Button>
             )}
           </div>
         </div>
@@ -437,32 +438,31 @@ export default function AlertsPage() {
                     <td className="px-3 py-2 truncate max-w-[320px]" title={a.lastStatus || ''}>{a.lastStatus || '—'}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
-                        <button
-                          className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 hover:bg-[hsl(var(--muted))]"
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          icon={<RiEdit2Line className="w-4 h-4" />}
                           title={t('alerts.tooltips.edit')}
+                          aria-label={t('alerts.tooltips.edit')}
                           onClick={() => onEdit(a)}
-                        >
-                          <RiEdit2Line className="w-4 h-4" />
-                        </button>
-                        <button
-                          className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          icon={<RiPlayLine className="w-4 h-4" />}
+                          loading={!!running[a.id]}
                           title={t('alerts.tooltips.runNow')}
+                          aria-label={t('alerts.tooltips.runNow')}
                           onClick={() => onRun(a.id)}
-                          disabled={!!running[a.id]}
-                        >
-                          {running[a.id] ? (
-                            <span className="h-4 w-4 border border-[hsl(var(--border))] border-l-transparent rounded-full animate-spin" aria-hidden="true"></span>
-                          ) : (
-                            <RiPlayLine className="w-4 h-4" />
-                          )}
-                        </button>
-                        <button
-                          className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 hover:bg-[hsl(var(--muted))]"
+                        />
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          icon={<RiDeleteBinLine className="w-4 h-4" />}
                           title={t('alerts.tooltips.delete')}
+                          aria-label={t('alerts.tooltips.delete')}
                           onClick={() => onDelete(a.id)}
-                        >
-                          <RiDeleteBinLine className="w-4 h-4" />
-                        </button>
+                        />
                       </div>
                     </td>
                   </tr>
@@ -474,9 +474,9 @@ export default function AlertsPage() {
             <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
               <span>{t('alerts.pagination.showing', { from: page * pageSize + 1, to: Math.min((page + 1) * pageSize, filtered.length), total: filtered.length })}</span>
               <div className="flex items-center gap-2">
-                <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('alerts.pagination.prev')}</button>
+                <Button size="sm" variant="outline" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('alerts.pagination.prev')}</Button>
                 <span>{t('alerts.pagination.pageOf', { page: page + 1, total: totalPages })}</span>
-                <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('alerts.pagination.next')}</button>
+                <Button size="sm" variant="outline" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('alerts.pagination.next')}</Button>
               </div>
             </div>
           )}

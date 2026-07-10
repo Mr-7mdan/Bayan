@@ -8,6 +8,7 @@ import { Select, SelectItem, Card, Title, Text } from '@tremor/react'
 import { Switch } from '@/components/Switch'
 import { Api, type ContactOut, type ContactIn } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { Button } from '@/components/ui'
 
 export default function ContactsPage() {
   const t = useTranslations('comms')
@@ -384,16 +385,16 @@ export default function ContactsPage() {
             <Text className="mt-0 text-gray-500 dark:text-white">{t('contacts.header.subtitle')}</Text>
           </div>
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-1 rounded-md border btn-primary px-3 py-1.5 text-sm font-medium" onClick={openAdd}>{t('contacts.toolbar.add')}</button>
+            <Button size="sm" variant="primary" onClick={openAdd}>{t('contacts.toolbar.add')}</Button>
             {isAdmin && (
               <>
                 <label className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] cursor-pointer">
                   {t('contacts.toolbar.import')}
                   <input type="file" accept="application/json" className="hidden" onChange={(e)=> importJson(e.target.files)} />
                 </label>
-                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" onClick={exportSelected} disabled={!Object.values(selectedIds).some(Boolean)}>{t('contacts.toolbar.export')}</button>
-                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openBulkEmail}>{t('contacts.toolbar.sendBulkEmail')}</button>
-                <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={openBulkSms}>{t('contacts.toolbar.sendBulkSms')}</button>
+                <Button size="sm" variant="outline" onClick={exportSelected} disabled={!Object.values(selectedIds).some(Boolean)}>{t('contacts.toolbar.export')}</Button>
+                <Button size="sm" variant="outline" onClick={openBulkEmail}>{t('contacts.toolbar.sendBulkEmail')}</Button>
+                <Button size="sm" variant="outline" onClick={openBulkSms}>{t('contacts.toolbar.sendBulkSms')}</Button>
               </>
             )}
           </div>
@@ -416,7 +417,7 @@ export default function ContactsPage() {
         <div className={`mb-3 rounded-md border px-3 py-2 text-sm ${notice.type==='success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
           <div className="flex items-center justify-between gap-2">
             <span>{notice.text}</span>
-            <button className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]" onClick={()=> setNotice(null)}>{t('contacts.notice.dismiss')}</button>
+            <Button size="sm" variant="outline" onClick={()=> setNotice(null)}>{t('contacts.notice.dismiss')}</Button>
           </div>
           {Array.isArray(notice.details) && notice.details.length > 0 && (
             <div className="mt-2 max-h-40 overflow-auto text-xs">
@@ -457,12 +458,12 @@ export default function ContactsPage() {
                 <td className="px-2 py-2">{it.phone || ''}</td>
                 <td className="px-2 py-2 text-xs">{(it.tags || []).map((t)=> (<span key={t} className="inline-block px-2 py-0.5 rounded-full border mr-1 mb-1">{t}</span>))}</td>
                 <td className="px-2 py-2">
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 hover:bg-[hsl(var(--muted))]" onClick={()=> toggleActive(it)}>{it.active ? t('contacts.table.statusActive') : t('contacts.table.statusInactive')}</button>
+                  <Button size="sm" variant="outline" onClick={()=> toggleActive(it)}>{it.active ? t('contacts.table.statusActive') : t('contacts.table.statusInactive')}</Button>
                 </td>
                 <td className="px-2 py-2">
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 hover:bg-[hsl(var(--muted))]" onClick={()=> openEdit(it)}>{t('contacts.table.edit')}</button>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 py-1 hover:bg-[hsl(var(--muted))] text-red-600" onClick={()=> remove(it)}>{t('contacts.table.delete')}</button>
+                    <Button size="sm" variant="outline" onClick={()=> openEdit(it)}>{t('contacts.table.edit')}</Button>
+                    <Button size="sm" variant="danger" onClick={()=> remove(it)}>{t('contacts.table.delete')}</Button>
                   </div>
                 </td>
               </tr>
@@ -480,9 +481,9 @@ export default function ContactsPage() {
           {t('contacts.pagination.showing', { from: (page-1)*pageSize + 1, to: Math.min(page*pageSize, total), total })}
         </span>
         <div className="flex items-center gap-2">
-          <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page<=1} onClick={()=> setPage((p)=> Math.max(1, p-1))}>{t('contacts.pagination.prev')}</button>
+          <Button size="sm" variant="outline" disabled={page<=1} onClick={()=> setPage((p)=> Math.max(1, p-1))}>{t('contacts.pagination.prev')}</Button>
           <span>{t('contacts.pagination.page', { page, pages })}</span>
-          <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page>=pages} onClick={()=> setPage((p)=> Math.min(pages, p+1))}>{t('contacts.pagination.next')}</button>
+          <Button size="sm" variant="outline" disabled={page>=pages} onClick={()=> setPage((p)=> Math.min(pages, p+1))}>{t('contacts.pagination.next')}</Button>
           <span className="whitespace-nowrap min-w-[84px] ml-4">{t('contacts.pagination.perPage')}</span>
           <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
             [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
@@ -508,7 +509,7 @@ export default function ContactsPage() {
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] max-w-[95vw] rounded-lg border bg-card p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-medium">{editId ? t('contacts.form.editTitle') : t('contacts.form.addTitle')}</div>
-              <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={()=> setEditOpen(false)}>✕</button>
+              <Button size="sm" variant="ghost" aria-label="Close" onClick={()=> setEditOpen(false)}>✕</Button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="text-sm">{t('contacts.form.name')}<input className="mt-1 w-full h-8 px-2 rounded-md border bg-background" value={editModel.name||''} onChange={(e)=> setEditModel((m)=> ({ ...m, name: e.target.value }))} /></label>
@@ -551,8 +552,8 @@ export default function ContactsPage() {
               </div>
             </div>
             <div className="mt-4 flex items-center gap-2">
-              <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted" onClick={saveEdit}>{t('contacts.form.save')}</button>
-              <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted" onClick={()=> setEditOpen(false)}>{t('contacts.form.cancel')}</button>
+              <Button size="sm" variant="primary" onClick={saveEdit}>{t('contacts.form.save')}</Button>
+              <Button size="sm" variant="outline" onClick={()=> setEditOpen(false)}>{t('contacts.form.cancel')}</Button>
             </div>
           </div>
         </div>
@@ -565,7 +566,7 @@ export default function ContactsPage() {
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[720px] max-w-[95vw] rounded-lg border bg-card p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-medium">{t('contacts.email.title')}</div>
-              <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={()=> setBulkEmailOpen(false)}>✕</button>
+              <Button size="sm" variant="ghost" aria-label="Close" onClick={()=> setBulkEmailOpen(false)}>✕</Button>
             </div>
             <div className="space-y-2 text-sm">
               <div className="text-sm">
@@ -645,8 +646,8 @@ export default function ContactsPage() {
               </label>
             </div>
             <div className="mt-3 flex items-center gap-2">
-              <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted disabled:opacity-60" disabled={bulkEmailSending} onClick={sendBulkEmail}>{bulkEmailSending ? t('contacts.email.sending') : t('contacts.email.send')}</button>
-              <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted" onClick={()=> setBulkEmailOpen(false)}>{t('contacts.email.cancel')}</button>
+              <Button size="sm" variant="primary" disabled={bulkEmailSending} onClick={sendBulkEmail}>{bulkEmailSending ? t('contacts.email.sending') : t('contacts.email.send')}</Button>
+              <Button size="sm" variant="outline" onClick={()=> setBulkEmailOpen(false)}>{t('contacts.email.cancel')}</Button>
             </div>
           </div>
         </div>
@@ -659,7 +660,7 @@ export default function ContactsPage() {
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[640px] max-w-[95vw] rounded-lg border bg-card p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-medium">{t('contacts.sms.title')}</div>
-              <button className="text-xs px-2 py-1 rounded-md border hover:bg-muted" onClick={()=> setBulkSmsOpen(false)}>✕</button>
+              <Button size="sm" variant="ghost" aria-label="Close" onClick={()=> setBulkSmsOpen(false)}>✕</Button>
             </div>
             <div className="space-y-2 text-sm">
               <div className="text-sm">
@@ -720,8 +721,8 @@ export default function ContactsPage() {
               </label>
             </div>
             <div className="mt-3 flex items-center gap-2">
-              <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted disabled:opacity-60" disabled={bulkSmsSending} onClick={sendBulkSms}>{bulkSmsSending ? t('contacts.sms.sending') : t('contacts.sms.send')}</button>
-              <button className="text-xs px-3 py-2 rounded-md border hover:bg-muted" onClick={()=> setBulkSmsOpen(false)}>{t('contacts.sms.cancel')}</button>
+              <Button size="sm" variant="primary" disabled={bulkSmsSending} onClick={sendBulkSms}>{bulkSmsSending ? t('contacts.sms.sending') : t('contacts.sms.send')}</Button>
+              <Button size="sm" variant="outline" onClick={()=> setBulkSmsOpen(false)}>{t('contacts.sms.cancel')}</Button>
             </div>
           </div>
         </div>
