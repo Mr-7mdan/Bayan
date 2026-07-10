@@ -10,6 +10,7 @@ import type { IntrospectResponse as IR } from '@/lib/api'
 import { Select, SelectItem, Card, TextInput } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { RiEditBoxLine } from '@remixicon/react'
+import { useTranslations } from 'next-intl'
 
 type Row = {
   table: string
@@ -23,6 +24,7 @@ type Row = {
 }
 
 export default function DataModelPage() {
+  const t = useTranslations('data')
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -146,7 +148,7 @@ export default function DataModelPage() {
           if (!stop) setUsers(usersList || [])
         } catch {}
       } catch (e: any) {
-        if (!stop) setError(String(e?.message || 'Failed to load Data Model'))
+        if (!stop) setError(String(e?.message || t('dataModel.errors.loadFailed')))
       } finally {
         if (!stop) setLoading(false)
       }
@@ -255,16 +257,16 @@ export default function DataModelPage() {
   return (
     <div className="p-4 space-y-4">
       <div>
-        <h1 className="text-base font-medium">Data Model</h1>
-        <div className="text-xs text-muted-foreground">Manage local DuckDB tables, view columns, preview data, and delete tables. Create custom columns and joins via SQL Advanced.</div>
+        <h1 className="text-base font-medium">{t('dataModel.title')}</h1>
+        <div className="text-xs text-muted-foreground">{t('dataModel.subtitle')}</div>
       </div>
 
       {/* Local DuckDBs management */}
       <div className="rounded-xl border-2 border-[hsl(var(--border))] p-3">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-medium">Local DuckDBs</div>
-            <div className="text-xs text-muted-foreground">Create a new local DuckDB file, set default for new widgets, or delete old entries.</div>
+            <div className="text-sm font-medium">{t('dataModel.localDucks.title')}</div>
+            <div className="text-xs text-muted-foreground">{t('dataModel.localDucks.subtitle')}</div>
           </div>
           <div className="flex items-center gap-2 text-xs">
             {selectedDuckId && (() => {
@@ -273,28 +275,28 @@ export default function DataModelPage() {
                 <button
                   className="px-2 py-1 rounded-md border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5 text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10"
                   onClick={() => setExplorerDs(selDs)}
-                >Open Explorer</button>
+                >{t('dataModel.localDucks.openExplorer')}</button>
               ) : null
             })()}
             <button
               className="px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
               onClick={() => setCreateOpen(true)}
-            >Create New DuckDB</button>
+            >{t('dataModel.localDucks.createNew')}</button>
           </div>
         </div>
         <div className="mt-2 text-[11px] text-muted-foreground">
-          <span>Active DuckDB for scheduled syncs:</span>
+          <span>{t('dataModel.localDucks.activeForSyncs')}</span>
           <code className="ml-1 px-1 py-0.5 rounded bg-[hsl(var(--card))] border">{activeDuckPath || '-'}</code>
         </div>
         <div className="mt-2 overflow-x-auto">
           <table className="min-w-full text-xs">
             <thead>
               <tr className="text-left border-b border-[hsl(var(--border))]">
-                <th className="px-2 py-1">Name</th>
-                <th className="px-2 py-1">Type</th>
-                <th className="px-2 py-1">Default (UI)</th>
-                <th className="px-2 py-1">Owner</th>
-                <th className="px-2 py-1">Actions</th>
+                <th className="px-2 py-1">{t('dataModel.localDucks.colName')}</th>
+                <th className="px-2 py-1">{t('dataModel.localDucks.colType')}</th>
+                <th className="px-2 py-1">{t('dataModel.localDucks.colDefault')}</th>
+                <th className="px-2 py-1">{t('dataModel.localDucks.colOwner')}</th>
+                <th className="px-2 py-1">{t('dataModel.localDucks.colActions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -311,26 +313,26 @@ export default function DataModelPage() {
                         : 'hover:bg-gray-50 dark:hover:bg-gray-800/30 border-l-4 border-l-transparent'
                     }`}
                     onClick={() => setViewingDuckId(d.id)}
-                    title="Click to view tables from this DuckDB"
+                    title={t('dataModel.localDucks.viewTablesTooltip')}
                   >
                     <td className="px-2 py-1">
                       <div className="flex items-center gap-2">
                         {isActiveSync && (
                           <span 
                             className="inline-block w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" 
-                            title="Active for scheduled syncs"
+                            title={t('dataModel.localDucks.activeSyncTooltip')}
                           ></span>
                         )}
                         <span className={isViewing ? 'font-semibold' : ''}>{d.name}</span>
-                        {isViewing && <span className="text-xs text-blue-600 dark:text-blue-400">(viewing)</span>}
+                        {isViewing && <span className="text-xs text-blue-600 dark:text-blue-400">{t('dataModel.localDucks.viewing')}</span>}
                       </div>
                     </td>
                     <td className="px-2 py-1">{d.type}</td>
-                    <td className="px-2 py-1">{isDefault ? 'Yes' : 'No'}</td>
+                    <td className="px-2 py-1">{isDefault ? t('dataModel.localDucks.yes') : t('dataModel.localDucks.no')}</td>
                     <td className="px-2 py-1">
                       {(() => {
                         const owner = users.find(u => u.id === (d as any).userId)
-                        return owner ? (owner.username || owner.email || 'Unknown') : '—'
+                        return owner ? (owner.username || owner.email || t('dataModel.localDucks.unknownOwner')) : '—'
                       })()}
                     </td>
                     <td className="px-2 py-1">
@@ -339,12 +341,12 @@ export default function DataModelPage() {
                           <button className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]" onClick={(e)=>{
                             e.stopPropagation()
                             try { if (typeof window !== 'undefined') { localStorage.setItem('default_ds_id', d.id); window.dispatchEvent(new CustomEvent('default-ds-change')); setDefaultDsId(d.id) } } catch {}
-                          }}>Make Default</button>
+                          }}>{t('dataModel.localDucks.makeDefault')}</button>
                         )}
                         {!isActiveSync && (
                           <button
                             className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
-                            title="Use this database for scheduled sync tasks (admin only)"
+                            title={t('dataModel.localDucks.setActiveTooltip')}
                             onClick={async (e) => {
                               e.stopPropagation()
                               try {
@@ -356,19 +358,19 @@ export default function DataModelPage() {
                                 console.error('Set active failed', e)
                               }
                             }}
-                          >Set Active (Sync)</button>
+                          >{t('dataModel.localDucks.setActive')}</button>
                         )}
                         <button
                           className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
                           onClick={(e) => { e.stopPropagation(); setExplorerDs(d) }}
-                        >Explorer</button>
-                        <button 
-                          className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" 
+                        >{t('dataModel.localDucks.explorer')}</button>
+                        <button
+                          className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]"
                           onClick={(e)=>{
                             e.stopPropagation()
                             setConfirmDeleteDuck({ open: true, duck: d })
                           }}
-                        >Delete</button>
+                        >{t('dataModel.common.delete')}</button>
                       </div>
                     </td>
                   </tr>
@@ -381,16 +383,16 @@ export default function DataModelPage() {
 
       <div className="mt-4 mb-2 flex items-center justify-between">
         <div className="text-sm font-medium">
-          Tables from: <span className="text-blue-600 dark:text-blue-400">{datasources.find(d => d.id === selectedDuckId)?.name || 'No DuckDB selected'}</span>
+          {t('dataModel.tables.tablesFrom')} <span className="text-blue-600 dark:text-blue-400">{datasources.find(d => d.id === selectedDuckId)?.name || t('dataModel.tables.noDuckSelected')}</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">{baseRows.length} table{baseRows.length !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-muted-foreground">{t('dataModel.tables.tableCount', { count: baseRows.length })}</span>
           {selectedDuckId && (
             <button
               className="text-xs px-2.5 py-1 rounded-md border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5 text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 font-medium"
               onClick={() => setImportOpen(true)}
             >
-              + Import Table
+              {t('dataModel.tables.importTable')}
             </button>
           )}
         </div>
@@ -398,11 +400,11 @@ export default function DataModelPage() {
 
       <div className="flex items-center py-2 gap-2">
         <div className="flex items-center gap-2">
-          <label htmlFor="searchDataModel" className="text-sm mr-2 text-gray-600 dark:text-gray-300">Search</label>
-          <input id="searchDataModel" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search tables..." className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
+          <label htmlFor="searchDataModel" className="text-sm mr-2 text-gray-600 dark:text-gray-300">{t('dataModel.tables.search')}</label>
+          <input id="searchDataModel" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('dataModel.tables.searchPlaceholder')} className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
         </div>
         <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-          <span className="whitespace-nowrap min-w-[84px]">Per page</span>
+          <span className="whitespace-nowrap min-w-[84px]">{t('dataModel.tables.perPage')}</span>
           <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
             [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
             [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -424,23 +426,23 @@ export default function DataModelPage() {
         <table className="min-w-full text-sm table-fixed">
           <thead className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
             <tr>
-              <th className="text-left px-3 py-2 font-medium w-[35%]">Table</th>
-              <th className="text-left px-3 py-2 font-medium">Records</th>
-              <th className="text-left px-3 py-2 font-medium">Last Synced</th>
-              <th className="text-left px-3 py-2 font-medium">Source Datasource</th>
-              <th className="text-left px-3 py-2 font-medium">Next Sync</th>
-              <th className="text-left px-3 py-2 font-medium">Actions</th>
+              <th className="text-left px-3 py-2 font-medium w-[35%]">{t('dataModel.grid.hTable')}</th>
+              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hRecords')}</th>
+              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hLastSynced')}</th>
+              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hSourceDatasource')}</th>
+              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hNextSync')}</th>
+              <th className="text-left px-3 py-2 font-medium">{t('dataModel.grid.hActions')}</th>
             </tr>
           </thead>
           <tbody className="bg-[hsl(var(--background))]">
             {loading && (
-              <tr><td className="px-3 py-3 text-muted-foreground" colSpan={6}>Loading…</td></tr>
+              <tr><td className="px-3 py-3 text-muted-foreground" colSpan={6}>{t('dataModel.grid.loading')}</td></tr>
             )}
             {error && !loading && (
               <tr><td className="px-3 py-3 text-red-600" colSpan={6}>{error}</td></tr>
             )}
             {!loading && !error && filtered.length === 0 && (
-              <tr><td className="px-3 py-3 text-muted-foreground" colSpan={6}>No tables.</td></tr>
+              <tr><td className="px-3 py-3 text-muted-foreground" colSpan={6}>{t('dataModel.grid.noTables')}</td></tr>
             )}
             {!loading && !error && visible.map((r) => {
               const tasks = tasksByDs[r.datasourceId] || []
@@ -489,11 +491,11 @@ export default function DataModelPage() {
                                     return next
                                   })
                                   setRenamingTable(null)
-                                  setToast({ message: `Table renamed to "${newName}"`, type: 'success' })
+                                  setToast({ message: t('dataModel.toasts.tableRenamed', { name: newName }), type: 'success' })
                                   setTimeout(() => setToast(null), 3000)
                                 } catch (err) {
                                   console.error('Failed to rename table:', err)
-                                  setToast({ message: `Failed to rename table: ${(err as any)?.message || 'Unknown error'}`, type: 'error' })
+                                  setToast({ message: t('dataModel.toasts.renameFailed', { error: (err as any)?.message || t('dataModel.toasts.unknownError') }), type: 'error' })
                                   setTimeout(() => setToast(null), 4000)
                                 }
                               } else if (e.key === 'Escape') {
@@ -516,7 +518,7 @@ export default function DataModelPage() {
                                 e.stopPropagation()
                                 setRenamingTable({ dsId: r.datasourceId, oldName: r.table, newName: r.table })
                               }}
-                              title="Rename table"
+                              title={t('dataModel.grid.renameTooltip')}
                             >
                               <RiEditBoxLine className="w-3.5 h-3.5" />
                             </button>
@@ -530,18 +532,18 @@ export default function DataModelPage() {
                     <td className="px-3 py-2">{nextSync ? nextSync : '—'}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
-                        <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setPreview({ open: true, dsId: r.datasourceId, table: r.table })}>View</button>
+                        <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setPreview({ open: true, dsId: r.datasourceId, table: r.table })}>{t('dataModel.grid.view')}</button>
                         <button
                           className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
                           onClick={() => {
                             const schemaOne: IR = { schemas: [{ name: 'main', tables: [{ name: r.table, columns: cols }] }] }
                             setAdv({ open: true, dsId: r.datasourceId, dsType: r.datasourceType, source: r.table, schema: schemaOne })
                           }}
-                        >Advanced SQL</button>
+                        >{t('dataModel.grid.advancedSql')}</button>
                         {task && (
                           <button
                             className="text-xs px-2 py-1 rounded-md border hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300"
-                            title="Flush local data and reset sync state for this table"
+                            title={t('dataModel.grid.flushTooltip')}
                             onClick={async () => {
                               try {
                                 await Api.flushSyncTask(r.datasourceId, task.id, user?.id)
@@ -551,20 +553,20 @@ export default function DataModelPage() {
                                     ? { ...x, rowCount: null, lastSyncAt: null }
                                     : x
                                 ))
-                                setToast({ message: `Flushed local table "${r.table}". Run sync again to reload data.`, type: 'success' })
+                                setToast({ message: t('dataModel.toasts.tableFlushed', { name: r.table }), type: 'success' })
                                 setTimeout(() => setToast(null), 4000)
                               } catch (err) {
                                 console.error('[DataModel] Failed to flush table:', err)
-                                setToast({ message: `Failed to flush table: ${(err as any)?.message || 'Unknown error'}`, type: 'error' })
+                                setToast({ message: t('dataModel.toasts.flushFailed', { error: (err as any)?.message || t('dataModel.toasts.unknownError') }), type: 'error' })
                                 setTimeout(() => setToast(null), 5000)
                               }
                             }}
-                          >Flush</button>
+                          >{t('dataModel.grid.flush')}</button>
                         )}
-                        <button 
-                          className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]" 
+                        <button
+                          className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]"
                           onClick={() => setConfirmDeleteTable({ open: true, dsId: r.datasourceId, table: r.table })}
-                        >Delete</button>
+                        >{t('dataModel.common.delete')}</button>
                       </div>
                     </td>
                   </tr>
@@ -574,12 +576,12 @@ export default function DataModelPage() {
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                           {/* Regular Columns */}
                           <div>
-                            <div className="text-[11px] font-medium mb-1">Columns</div>
+                            <div className="text-[11px] font-medium mb-1">{t('dataModel.expanded.columnsLabel')}</div>
                             <div className="overflow-x-auto">
                               <table className="w-full table-fixed text-[11px]">
                                 <tbody>
                                   {cols.length === 0 ? (
-                                    <tr><td className="px-2 py-1 text-muted-foreground">No columns</td></tr>
+                                    <tr><td className="px-2 py-1 text-muted-foreground">{t('dataModel.expanded.noColumns')}</td></tr>
                                   ) : cols.map((c) => (
                                     <tr key={c.name} className="align-top">
                                       <td className="w-[180px] px-2 py-0.5"><span className="inline-flex px-1.5 py-0.5 rounded bg-card font-mono">{c.name}</span></td>
@@ -594,7 +596,7 @@ export default function DataModelPage() {
                           {/* Custom Columns */}
                           <div>
                             <div className="flex items-center justify-between mb-1">
-                              <div className="text-[11px] font-medium">Custom Columns & Transforms</div>
+                              <div className="text-[11px] font-medium">{t('dataModel.expanded.customColumnsTitle')}</div>
                               <button 
                                 className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
                                 onClick={() => {
@@ -602,7 +604,7 @@ export default function DataModelPage() {
                                   setAdv({ open: true, dsId: r.datasourceId, dsType: r.datasourceType, source: r.table, schema: schemaOne })
                                 }}
                               >
-                                Edit
+                                {t('dataModel.common.edit')}
                               </button>
                             </div>
                             <div className="overflow-x-auto">
@@ -620,7 +622,7 @@ export default function DataModelPage() {
                                 })
                                 
                                 if (customCols.length === 0) {
-                                  return <div className="px-2 py-1 text-[11px] text-muted-foreground">No custom columns or transforms</div>
+                                  return <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('dataModel.expanded.noCustomColumns')}</div>
                                 }
                                 
                                 // Check which custom columns are active (have all dependencies in this table)
@@ -700,7 +702,7 @@ export default function DataModelPage() {
                                   <div className="space-y-2">
                                     {active.length > 0 && (
                                       <div>
-                                        <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mb-1">Active</div>
+                                        <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mb-1">{t('dataModel.expanded.active')}</div>
                                         <table className="w-full table-fixed text-[11px]">
                                           <tbody>
                                             {active.map((cc, idx) => (
@@ -728,7 +730,7 @@ export default function DataModelPage() {
                                                     if (typeof cc.scope === 'string') return `(${cc.scope})`
                                                     if (typeof cc.scope === 'object') {
                                                       if (cc.scope.level === 'table') {
-                                                        return `(table: ${cc.scope.table || 'unknown'})`
+                                                        return t('dataModel.expanded.scopeTable', { table: cc.scope.table || t('dataModel.expanded.unknown') })
                                                       }
                                                       return `(${cc.scope.level || 'datasource'})`
                                                     }
@@ -744,7 +746,7 @@ export default function DataModelPage() {
                                     
                                     {inactive.length > 0 && (
                                       <div>
-                                        <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-600 mb-1">Inactive (missing dependencies)</div>
+                                        <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-600 mb-1">{t('dataModel.expanded.inactive')}</div>
                                         <table className="w-full table-fixed text-[11px]">
                                           <tbody>
                                             {inactive.map((cc, idx) => (
@@ -782,7 +784,7 @@ export default function DataModelPage() {
                                                     if (typeof cc.scope === 'string') return `(${cc.scope})`
                                                     if (typeof cc.scope === 'object') {
                                                       if (cc.scope.level === 'table') {
-                                                        return `(table: ${cc.scope.table || 'unknown'})`
+                                                        return t('dataModel.expanded.scopeTable', { table: cc.scope.table || t('dataModel.expanded.unknown') })
                                                       }
                                                       return `(${cc.scope.level || 'datasource'})`
                                                     }
@@ -812,11 +814,11 @@ export default function DataModelPage() {
       </div>
       {!loading && filtered.length > 0 && (
         <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
-          <span>Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, filtered.length)} of {filtered.length}</span>
+          <span>{t('dataModel.pagination.showing', { start: page * pageSize + 1, end: Math.min((page + 1) * pageSize, filtered.length), total: filtered.length })}</span>
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>Prev</button>
-            <span>Page {page + 1} / {totalPages}</span>
-            <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>Next</button>
+            <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('dataModel.pagination.prev')}</button>
+            <span>{t('dataModel.pagination.pageOf', { page: page + 1, total: totalPages })}</span>
+            <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('dataModel.pagination.next')}</button>
           </div>
         </div>
       )}
@@ -879,18 +881,18 @@ export default function DataModelPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/40" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-[hsl(var(--card))] p-6 shadow-lg">
-            <Dialog.Title className="text-lg font-semibold mb-2">Delete Table</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold mb-2">{t('dataModel.dialogs.deleteTableTitle')}</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground mb-4">
-              Are you sure you want to delete the table <span className="font-mono font-semibold text-foreground">{confirmDeleteTable.table}</span>? This action cannot be undone.
+              {t.rich('dataModel.dialogs.deleteTableConfirm', { name: confirmDeleteTable.table ?? '', strong: (chunks) => <span className="font-mono font-semibold text-foreground">{chunks}</span> })}
             </Dialog.Description>
             <div className="flex items-center justify-end gap-2">
               <button 
                 className="px-3 py-1.5 text-sm rounded-md border hover:bg-[hsl(var(--muted))]"
                 onClick={() => setConfirmDeleteTable({ open: false })}
               >
-                Cancel
+                {t('dataModel.common.cancel')}
               </button>
-              <button 
+              <button
                 className="px-3 py-1.5 text-sm rounded-md border bg-red-600 text-white hover:bg-red-700"
                 onClick={async () => {
                   try {
@@ -902,7 +904,7 @@ export default function DataModelPage() {
                   }
                 }}
               >
-                Delete
+                {t('dataModel.common.delete')}
               </button>
             </div>
           </Dialog.Content>
@@ -914,16 +916,16 @@ export default function DataModelPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/40" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-[hsl(var(--card))] p-6 shadow-lg">
-            <Dialog.Title className="text-lg font-semibold mb-2">Delete DuckDB</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold mb-2">{t('dataModel.dialogs.deleteDuckTitle')}</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground mb-4">
-              Are you sure you want to delete the DuckDB datasource <span className="font-semibold text-foreground">{confirmDeleteDuck.duck?.name}</span>? All tables and data will be permanently deleted. This action cannot be undone.
+              {t.rich('dataModel.dialogs.deleteDuckConfirm', { name: confirmDeleteDuck.duck?.name ?? '', strong: (chunks) => <span className="font-semibold text-foreground">{chunks}</span> })}
             </Dialog.Description>
             <div className="flex items-center justify-end gap-2">
               <button 
                 className="px-3 py-1.5 text-sm rounded-md border hover:bg-[hsl(var(--muted))]"
                 onClick={() => setConfirmDeleteDuck({ open: false })}
               >
-                Cancel
+                {t('dataModel.common.cancel')}
               </button>
               <button 
                 className="px-3 py-1.5 text-sm rounded-md border bg-red-600 text-white hover:bg-red-700"
@@ -945,7 +947,7 @@ export default function DataModelPage() {
                   }
                 }}
               >
-                Delete
+                {t('dataModel.common.delete')}
               </button>
             </div>
           </Dialog.Content>
@@ -957,15 +959,15 @@ export default function DataModelPage() {
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40" onClick={() => setCreateOpen(false)}>
           <Card className="w-[440px] p-0" onClick={(e:any)=>e.stopPropagation()}>
             <div className="px-4 py-3 border-b">
-              <div className="text-sm font-semibold">Create Local DuckDB</div>
+              <div className="text-sm font-semibold">{t('dataModel.dialogs.createDuckTitle')}</div>
             </div>
             <div className="p-4 space-y-3">
-              <label className="text-xs">Name
-                <TextInput className="mt-1" value={newName} onChange={(e:any)=>setNewName(e.target.value)} placeholder="Local DuckDB" />
+              <label className="text-xs">{t('dataModel.dialogs.nameLabel')}
+                <TextInput className="mt-1" value={newName} onChange={(e:any)=>setNewName(e.target.value)} placeholder={t('dataModel.dialogs.namePlaceholder')} />
               </label>
             </div>
             <div className="px-4 py-3 border-t flex items-center justify-end gap-2">
-              <button type="button" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={()=>{ setCreateOpen(false) }}>Cancel</button>
+              <button type="button" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={()=>{ setCreateOpen(false) }}>{t('dataModel.common.cancel')}</button>
               <button
                 type="button"
                 className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
@@ -988,7 +990,7 @@ export default function DataModelPage() {
                     setCreating(false)
                   }
                 }}
-              >{creating ? 'Creating…' : 'Create'}</button>
+              >{creating ? t('dataModel.dialogs.creating') : t('dataModel.dialogs.create')}</button>
             </div>
           </Card>
         </div>
@@ -1024,7 +1026,7 @@ export default function DataModelPage() {
                 sourceTable: null,
               }]
             })
-            setToast({ message: `Table "${tableName}" imported with ${rowCount.toLocaleString()} rows`, type: 'success' })
+            setToast({ message: t('dataModel.toasts.tableImported', { name: tableName, count: rowCount }), type: 'success' })
             setTimeout(() => setToast(null), 4000)
           }}
         />

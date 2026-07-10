@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Select, SelectItem } from '@tremor/react'
 import { Api, type DatasourceOut, type UserRowOut, type DatasourceShareOut } from '@/lib/api'
@@ -16,8 +17,9 @@ import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 export const dynamic = 'force-dynamic'
 
 function StatusPill({ active }: { active: boolean }) {
+  const t = useTranslations('data')
   const color = active ? 'bg-emerald-600' : 'bg-gray-400'
-  const label = active ? 'Active' : 'Inactive'
+  const label = active ? t('datasources.common.active') : t('datasources.common.inactive')
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-[hsl(var(--secondary)/0.6)] px-2 py-1 text-[11px] font-medium text-[hsl(var(--muted-foreground))] ring-1 ring-inset ring-[hsl(var(--border))]">
       <span className={`${color} size-2 rounded-full`} aria-hidden={true} />
@@ -31,6 +33,7 @@ type DsMeta = { loading?: boolean; error?: string | null; schemas: number; table
 function fmt(iso?: string | null) { try { return iso ? new Date(iso).toLocaleString() : '—' } catch { return '—' } }
 
 function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplore, onExecuteSql }: { ds: DatasourceOut; meta: DsMeta; onOpen: (ds: DatasourceOut) => void; onEdit: (ds: DatasourceOut) => void; onDelete: (ds: DatasourceOut) => Promise<void>; onToggleActive: (ds: DatasourceOut, next: boolean) => Promise<void>; onExplore: (ds: DatasourceOut) => void; onExecuteSql: (ds: DatasourceOut) => void }) {
+  const t = useTranslations('data')
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [busy, setBusy] = useState<'delete' | null>(null)
@@ -67,17 +70,17 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
           </div>
           <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
             <Popover.Trigger asChild>
-              <button className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] focus:outline-none" aria-label="Actions" onClick={(e) => e.stopPropagation()}>
+              <button className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] focus:outline-none" aria-label={t('datasources.list.actions')} onClick={(e) => e.stopPropagation()}>
                 <RiMore2Line className="w-5 h-5 opacity-80" />
               </button>
             </Popover.Trigger>
             <Popover.Portal>
             <Popover.Content side="bottom" align="end" className="z-50 w-56 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--popover))] shadow-none p-1">
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExplore(ds) }}>Data Explorer</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExecuteSql(ds) }}>Execute SQL</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>Edit</button>
+              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExplore(ds) }}>{t('datasources.list.dataExplorer')}</button>
+              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onExecuteSql(ds) }}>{t('datasources.list.executeSql')}</button>
+              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(ds) }}>{t('datasources.list.edit')}</button>
               {(user?.role === 'admin') && (
-                <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); openShare() }}>Share with…</button>
+                <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); openShare() }}>{t('datasources.list.shareWith')}</button>
               )}
               <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); try {
                 const data = await Api.exportDatasource(ds.id, true, user?.id)
@@ -92,7 +95,7 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                 document.body.appendChild(a)
                 a.click()
                 a.remove()
-              } catch {} }}>Export (.json)</button>
+              } catch {} }}>{t('datasources.list.exportJson')}</button>
               <button
                 className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]"
                 onClick={async (e) => {
@@ -101,45 +104,45 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                   try {
                     const res = await Api.disposeDatasourceEngine(ds.id)
                     if (res?.disposed) {
-                      try { window.alert(`Disposed ${res.target} engine pool`) } catch {}
+                      try { window.alert(t('datasources.list.disposedEngine', { target: res.target })) } catch {}
                     } else {
-                      try { window.alert(res?.message || 'No engine disposed') } catch {}
+                      try { window.alert(res?.message || t('datasources.list.noEngineDisposed')) } catch {}
                     }
                   } catch (err: any) {
-                    try { window.alert(err?.message || 'Failed to dispose engine pool') } catch {}
+                    try { window.alert(err?.message || t('datasources.list.disposeFailed')) } catch {}
                   }
                 }}
-              >Dispose Engine Pool</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onToggleActive(ds, !meta.active) }}>{meta.active ? 'Deactivate' : 'Activate'}</button>
-              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmOpen(true) }}>Delete</button>
+              >{t('datasources.list.disposeEnginePool')}</button>
+              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={async (e) => { e.stopPropagation(); setMenuOpen(false); await onToggleActive(ds, !meta.active) }}>{meta.active ? t('datasources.list.deactivate') : t('datasources.list.activate')}</button>
+              <button className="w-full text-left text-sm px-3 py-2 rounded-md hover:bg-[hsl(var(--muted))]" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmOpen(true) }}>{t('datasources.list.delete')}</button>
             </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-4 text-[13px]">
-          <div className="flex items-center space-x-1.5"><RiBuildingLine className="size-5 text-tremor-content-subtle dark:text-dark-tremor-content-subtle" aria-hidden /><p className="text-[hsl(var(--muted-foreground))]">Databases ({meta.schemas})</p></div>
-          <div className="flex items-center space-x-1.5"><RiMapPin2Line className="size-5 text-tremor-content-subtle dark:text-dark-tremor-content-subtle" aria-hidden /><p className="text-[hsl(var(--muted-foreground))]">Tables ({meta.tables})</p></div>
-          <div className="flex items-center space-x-1.5"><RiUserLine className="size-5 text-tremor-content-subtle dark:text-dark-tremor-content-subtle" aria-hidden /><p className="text-[hsl(var(--muted-foreground))]">Views ({meta.views})</p></div>
+          <div className="flex items-center space-x-1.5"><RiBuildingLine className="size-5 text-tremor-content-subtle dark:text-dark-tremor-content-subtle" aria-hidden /><p className="text-[hsl(var(--muted-foreground))]">{t('datasources.list.databases', { count: meta.schemas })}</p></div>
+          <div className="flex items-center space-x-1.5"><RiMapPin2Line className="size-5 text-tremor-content-subtle dark:text-dark-tremor-content-subtle" aria-hidden /><p className="text-[hsl(var(--muted-foreground))]">{t('datasources.list.tables', { count: meta.tables })}</p></div>
+          <div className="flex items-center space-x-1.5"><RiUserLine className="size-5 text-tremor-content-subtle dark:text-dark-tremor-content-subtle" aria-hidden /><p className="text-[hsl(var(--muted-foreground))]">{t('datasources.list.views', { count: meta.views })}</p></div>
         </div>
       </div>
       <div className="px-2 pb-2 pt-4">
         <div className="block sm:flex sm:items-end sm:justify-between">
           <div className="flex items-center gap-2 text-[13px] text-[hsl(var(--muted-foreground))]">
             <span className="inline-block w-3 h-3 rounded-full border-2 border-blue-500" aria-hidden />
-            <span>Last used: {fmt(meta.lastUsedAt)}</span>
+            <span>{t('datasources.list.lastUsed', { value: fmt(meta.lastUsedAt) })}</span>
           </div>
-          <p className="mt-2 text-[13px] text-[hsl(var(--muted-foreground))] sm:mt-0">{meta.loading ? 'Analyzing…' : (meta.error ? 'Failed to analyze' : '')}</p>
+          <p className="mt-2 text-[13px] text-[hsl(var(--muted-foreground))] sm:mt-0">{meta.loading ? t('datasources.list.analyzing') : (meta.error ? t('datasources.list.failedAnalyze') : '')}</p>
         </div>
       </div>
       <Dialog.Root open={confirmOpen} onOpenChange={setConfirmOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/40" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-            <Dialog.Title className="text-lg font-semibold">Delete datasource?</Dialog.Title>
-            <Dialog.Description className="text-sm text-muted-foreground mt-1">This action cannot be undone. This will permanently delete "{ds.name}".</Dialog.Description>
+            <Dialog.Title className="text-lg font-semibold">{t('datasources.list.deleteTitle')}</Dialog.Title>
+            <Dialog.Description className="text-sm text-muted-foreground mt-1">{t('datasources.list.deleteDescription', { name: ds.name })}</Dialog.Description>
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button></Dialog.Close>
-              <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-red-50 text-red-600" disabled={busy === 'delete'} onClick={async () => { setBusy('delete'); try { await onDelete(ds) } finally { setBusy(null); setConfirmOpen(false) } }}>{busy === 'delete' ? 'Deleting…' : 'Delete'}</button>
+              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('datasources.list.cancel')}</button></Dialog.Close>
+              <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-red-50 text-red-600" disabled={busy === 'delete'} onClick={async () => { setBusy('delete'); try { await onDelete(ds) } finally { setBusy(null); setConfirmOpen(false) } }}>{busy === 'delete' ? t('datasources.list.deleting') : t('datasources.list.delete')}</button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -149,40 +152,40 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/40" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-card" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-            <Dialog.Title className="text-lg font-semibold">Share datasource</Dialog.Title>
-            <Dialog.Description className="text-sm text-muted-foreground mt-1">Grant access to another user. Only admins can share.</Dialog.Description>
+            <Dialog.Title className="text-lg font-semibold">{t('datasources.list.shareTitle')}</Dialog.Title>
+            <Dialog.Description className="text-sm text-muted-foreground mt-1">{t('datasources.list.shareDescription')}</Dialog.Description>
             {/* Add share */}
             <div className="mt-4 grid grid-cols-[1fr_auto_auto] gap-2 items-end">
               <div>
-                <div className="text-xs text-muted-foreground mb-1">User</div>
+                <div className="text-xs text-muted-foreground mb-1">{t('datasources.list.user')}</div>
                 <select className="w-full text-sm px-2 py-1.5 rounded-md border bg-background" value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
-                  <option value="">Select user…</option>
+                  <option value="">{t('datasources.list.selectUser')}</option>
                   {users.filter(u => !shares.some(s => s.userId === u.id)).map(u => (
                     <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
                   ))}
                 </select>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-1">Permission</div>
+                <div className="text-xs text-muted-foreground mb-1">{t('datasources.list.permission')}</div>
                 <select className="text-sm px-2 py-1.5 rounded-md border bg-background" value={perm} onChange={(e) => setPerm((e.target.value as 'ro'|'rw') || 'ro')}>
-                  <option value="ro">Read‑only</option>
-                  <option value="rw">Read‑write</option>
+                  <option value="ro">{t('datasources.list.readOnly')}</option>
+                  <option value="rw">{t('datasources.list.readWrite')}</option>
                 </select>
               </div>
               <div className="pb-1">
                 <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted disabled:opacity-50" disabled={shareBusy || !selectedUserId} onClick={async () => {
                   setShareBusy(true); setShareError('')
-                  try { await Api.addDatasourceShare(ds.id, { userId: selectedUserId, permission: perm }, user?.id); setSelectedUserId(''); await refreshShares() } catch (e: any) { setShareError(e?.message || 'Failed') } finally { setShareBusy(false) }
-                }}>{shareBusy ? 'Adding…' : 'Add'}</button>
+                  try { await Api.addDatasourceShare(ds.id, { userId: selectedUserId, permission: perm }, user?.id); setSelectedUserId(''); await refreshShares() } catch (e: any) { setShareError(e?.message || t('datasources.list.failed')) } finally { setShareBusy(false) }
+                }}>{shareBusy ? t('datasources.list.adding') : t('datasources.list.add')}</button>
               </div>
             </div>
             {!!shareError && <div className="mt-2 text-sm text-red-600">{shareError}</div>}
             {/* Existing shares */}
             <div className="mt-4">
-              <div className="text-sm font-medium mb-1">Shared with</div>
+              <div className="text-sm font-medium mb-1">{t('datasources.list.sharedWith')}</div>
               <div className="rounded-md border divide-y">
                 {shares.length === 0 ? (
-                  <div className="px-2 py-2 text-sm text-muted-foreground">No shares yet.</div>
+                  <div className="px-2 py-2 text-sm text-muted-foreground">{t('datasources.list.noShares')}</div>
                 ) : shares.map((s) => (
                   <div key={s.userId} className="px-2 py-2 flex items-center justify-between gap-2">
                     <div className="text-sm">
@@ -190,13 +193,13 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                       {s.email && <span className="ml-2 text-muted-foreground">{s.email}</span>}
                       <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded border">{s.permission.toUpperCase()}</span>
                     </div>
-                    <button className="px-2 py-0.5 rounded-md border hover:bg-muted" onClick={async () => { try { await Api.deleteDatasourceShare(ds.id, s.userId, user?.id); await refreshShares() } catch (e: any) { setShareError(e?.message || 'Failed to remove share') } }}>Remove</button>
+                    <button className="px-2 py-0.5 rounded-md border hover:bg-muted" onClick={async () => { try { await Api.deleteDatasourceShare(ds.id, s.userId, user?.id); await refreshShares() } catch (e: any) { setShareError(e?.message || t('datasources.list.failedRemoveShare')) } }}>{t('datasources.list.remove')}</button>
                   </div>
                 ))}
               </div>
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Close</button></Dialog.Close>
+              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('datasources.list.close')}</button></Dialog.Close>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -206,13 +209,15 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
 }
 
 function MyDatasourcesPageInner() {
+  const t = useTranslations('data')
   const { user } = useAuth()
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [items, setItems] = useState<DatasourceOut[]>([])
   const { notify } = useProgressToast()
-  const setToast = (m: string) => { if (m) notify(m, /fail|error|invalid|no datasources/i.test(m) ? 'error' : 'success') }
+  // ponytail: severity was inferred from English text; take an explicit type so Arabic toasts still show the right color, falling back to the old heuristic.
+  const setToast = (m: string, type?: 'error' | 'success') => { if (m) notify(m, type ?? (/fail|error|invalid|no datasources/i.test(m) ? 'error' : 'success')) }
   const [tabIndex, setTabIndex] = useState(0)
   const prevTabIndex = useRef(0)
   const [slideDir, setSlideDir] = useState<'left' | 'right'>('right')
@@ -247,7 +252,7 @@ function MyDatasourcesPageInner() {
             return next
           })
         }
-      } catch (e: any) { if (!cancelled) setError(e?.message || 'Failed to load datasources') } finally { if (!cancelled) setLoading(false) }
+      } catch (e: any) { if (!cancelled) setError(e?.message || t('datasources.list.errorLoad')) } finally { if (!cancelled) setLoading(false) }
     }
     void run(); return () => { cancelled = true }
   }, [user?.id])
@@ -315,34 +320,34 @@ function MyDatasourcesPageInner() {
   const onExecuteSql = (ds: DatasourceOut) => setExecuteSqlDs(ds)
   const onOpen = (ds: DatasourceOut) => { router.push(`/datasources/${ds.id}` as `/datasources/${string}`) }
   const onEdit = (ds: DatasourceOut) => { setDlgInitial(ds); setDlgMode('edit'); setDlgOpen(true) }
-  const onDelete = async (ds: DatasourceOut) => { await Api.deleteDatasource(ds.id); setItems((prev) => prev.filter((x) => x.id !== ds.id)); setToast('Deleted'); window.setTimeout(() => setToast(''), 1600) }
+  const onDelete = async (ds: DatasourceOut) => { await Api.deleteDatasource(ds.id); setItems((prev) => prev.filter((x) => x.id !== ds.id)); setToast(t('datasources.list.toastDeleted'), 'success'); window.setTimeout(() => setToast(''), 1600) }
 
   const onToggleActive = async (ds: DatasourceOut, next: boolean) => {
     try {
       await Api.setDatasourceActive(ds.id, next, user?.id)
       setMetaById((m) => ({ ...m, [ds.id]: { ...(m[ds.id] || { schemas: 0, tables: 0, views: 0, lastUsedAt: null }), active: next, loading: false, error: null } }))
       setItems((prev) => prev.map((x) => x.id === ds.id ? { ...x, active: next } as DatasourceOut : x))
-      setToast(next ? 'Activated' : 'Deactivated'); window.setTimeout(() => setToast(''), 1500)
+      setToast(next ? t('datasources.list.toastActivated') : t('datasources.list.toastDeactivated'), 'success'); window.setTimeout(() => setToast(''), 1500)
     } catch (e: any) {
-      setToast(e?.message || 'Failed to update status'); window.setTimeout(() => setToast(''), 1800)
+      setToast(e?.message || t('datasources.list.errorUpdateStatus'), 'error'); window.setTimeout(() => setToast(''), 1800)
     }
   }
 
   const onSaved = (ds: DatasourceOut) => {
     setItems((prev) => prev.map((x) => x.id === ds.id ? { ...x, ...ds } : x))
     setMetaById((m) => ({ ...m, [ds.id]: { ...(m[ds.id] || { schemas: 0, tables: 0, views: 0 }), active: ds.active ?? (m[ds.id]?.active ?? true), loading: false, error: null, lastUsedAt: m[ds.id]?.lastUsedAt || null } }))
-    setToast('Saved'); window.setTimeout(() => setToast(''), 1600)
+    setToast(t('datasources.list.toastSaved'), 'success'); window.setTimeout(() => setToast(''), 1600)
   }
   const onCreated = (ds: DatasourceOut) => {
     setItems((prev) => [ds, ...prev])
     setMetaById((m) => ({ ...m, [ds.id]: { schemas: 0, tables: 0, views: 0, lastUsedAt: null, loading: false, error: null, active: ds.active ?? true } }))
-    setToast('Created'); window.setTimeout(() => setToast(''), 1600)
+    setToast(t('datasources.list.toastCreated'), 'success'); window.setTimeout(() => setToast(''), 1600)
   }
 
   const renderList = (list: DatasourceOut[]) => (
     <div className={`space-y-4 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}`}>
-      {loading && <Text>Loading…</Text>}
-      {!loading && list.length === 0 && <Text>No datasources match your search.</Text>}
+      {loading && <Text>{t('datasources.list.loading')}</Text>}
+      {!loading && list.length === 0 && <Text>{t('datasources.list.noMatch')}</Text>}
       {!loading && list.map((ds) => (
         <SourceRow key={ds.id} ds={ds} meta={metaById[ds.id] || { schemas: 0, tables: 0, views: 0, active: true }} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} onExplore={onExplore} onExecuteSql={onExecuteSql} />
       ))}
@@ -354,11 +359,11 @@ function MyDatasourcesPageInner() {
       <Card className="p-0 bg-[hsl(var(--background))]">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--background))] border-b border-[hsl(var(--border))]">
           <div>
-            <Title className="text-gray-500 dark:text-white">My Datasources</Title>
-            <Text className="mt-0 text-gray-500 dark:text-white">Manage your datasources here</Text>
+            <Title className="text-gray-500 dark:text-white">{t('datasources.list.title')}</Title>
+            <Text className="mt-0 text-gray-500 dark:text-white">{t('datasources.list.subtitle')}</Text>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => { setDlgInitial(undefined); setDlgMode('create'); setDlgOpen(true) }} className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium">Add Datasource</button>
+            <button onClick={() => { setDlgInitial(undefined); setDlgMode('create'); setDlgOpen(true) }} className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium">{t('datasources.list.addDatasource')}</button>
             <button
               className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
               onClick={async () => {
@@ -374,15 +379,15 @@ function MyDatasourcesPageInner() {
                   a.click()
                   a.remove()
                 } catch (e) {
-                  setToast('Export failed'); window.setTimeout(() => setToast(''), 2000)
+                  setToast(t('datasources.list.exportFailed'), 'error'); window.setTimeout(() => setToast(''), 2000)
                 }
               }}
-            >Export All (.json)</button>
+            >{t('datasources.list.exportAll')}</button>
             <button
               className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50"
               disabled={busyImport}
               onClick={() => fileRef.current?.click()}
-            >{busyImport ? 'Importing…' : 'Import JSON'}</button>
+            >{busyImport ? t('datasources.list.importing') : t('datasources.list.importJson')}</button>
             <input ref={fileRef} hidden type="file" accept="application/json" onChange={async (e) => {
               const file = e.target.files?.[0]
               if (!file) return
@@ -394,13 +399,13 @@ function MyDatasourcesPageInner() {
                 if (Array.isArray(json)) items = json
                 else if (Array.isArray(json?.items)) items = json.items
                 else if (Array.isArray(json?.datasources)) items = json.datasources
-                if (!items.length) { setToast('No datasources found'); window.setTimeout(() => setToast(''), 2000); return }
+                if (!items.length) { setToast(t('datasources.list.noDatasourcesFound'), 'error'); window.setTimeout(() => setToast(''), 2000); return }
                 await Api.importDatasources(items, user?.id || undefined)
                 const res = await Api.listDatasources(user?.id || undefined, user?.id || undefined)
                 setItems(res || [])
-                setToast('Imported'); window.setTimeout(() => setToast(''), 1600)
+                setToast(t('datasources.list.toastImported'), 'success'); window.setTimeout(() => setToast(''), 1600)
               } catch (err: any) {
-                setToast(err?.message || 'Import failed'); window.setTimeout(() => setToast(''), 2000)
+                setToast(err?.message || t('datasources.list.importFailed'), 'error'); window.setTimeout(() => setToast(''), 2000)
               } finally {
                 setBusyImport(false)
                 try { if (fileRef.current) fileRef.current.value = '' } catch {}
@@ -411,18 +416,18 @@ function MyDatasourcesPageInner() {
         {error && <div className="px-4 py-2 text-sm text-red-600">{error}</div>}
         <TabGroup index={tabIndex} onIndexChange={(i) => { setSlideDir(i > prevTabIndex.current ? 'left' : 'right'); prevTabIndex.current = i; setTabIndex(i); }}>
           <TabList className="px-3 py-1.5 border-b border-[hsl(var(--border))]">
-            <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]"><span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Active</span><span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring ui-selected:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring ui-selected:dark:text-dark-tremor-content-emphasis sm:inline-flex">{activeItems.length}</span></Tab>
-            <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]"><span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Inactive</span><span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring ui-selected:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring ui-selected:dark:text-dark-tremor-content-emphasis sm:inline-flex">{inactiveItems.length}</span></Tab>
+            <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]"><span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">{t('datasources.list.tabActive')}</span><span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring ui-selected:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring ui-selected:dark:text-dark-tremor-content-emphasis sm:inline-flex">{activeItems.length}</span></Tab>
+            <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]"><span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">{t('datasources.list.tabInactive')}</span><span className="ml-2 hidden rounded-tremor-small bg-tremor-background px-2 py-1 text-xs font-semibold tabular-nums ring-1 ring-inset ring-tremor-ring ui-selected:text-tremor-content-emphasis dark:bg-dark-tremor-background dark:ring-dark-tremor-ring ui-selected:dark:text-dark-tremor-content-emphasis sm:inline-flex">{inactiveItems.length}</span></Tab>
           </TabList>
           <TabPanels className="pt-0">
             <TabPanel className="px-3 pb-3 pt-0">
               <div className="flex items-center py-2 gap-2">
                 <div className="flex items-center gap-2">
-                  <label htmlFor="searchSourcesActive" className="text-sm mr-2 text-gray-600 dark:text-gray-300">Search</label>
-                  <input id="searchSourcesActive" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search datasources..." className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
+                  <label htmlFor="searchSourcesActive" className="text-sm mr-2 text-gray-600 dark:text-gray-300">{t('datasources.list.search')}</label>
+                  <input id="searchSourcesActive" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('datasources.list.searchPlaceholder')} className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
                 </div>
                 <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-                  <span className="whitespace-nowrap min-w-[84px]">Per page</span>
+                  <span className="whitespace-nowrap min-w-[84px]">{t('datasources.list.perPage')}</span>
                   <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                     [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
                     [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -442,11 +447,11 @@ function MyDatasourcesPageInner() {
               {renderList(visibleActive)}
               {!loading && activeItems.length > 0 && (
                 <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
-                  <span>Showing {pageActive * pageSize + 1}–{Math.min((pageActive + 1) * pageSize, activeItems.length)} of {activeItems.length}</span>
+                  <span>{t('datasources.list.showing', { from: pageActive * pageSize + 1, to: Math.min((pageActive + 1) * pageSize, activeItems.length), total: activeItems.length })}</span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageActive <= 0} onClick={() => setPageActive((p) => Math.max(0, p - 1))}>Prev</button>
-                    <span>Page {pageActive + 1} / {totalPagesActive}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageActive >= totalPagesActive - 1} onClick={() => setPageActive((p) => Math.min(totalPagesActive - 1, p + 1))}>Next</button>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageActive <= 0} onClick={() => setPageActive((p) => Math.max(0, p - 1))}>{t('datasources.list.prev')}</button>
+                    <span>{t('datasources.list.pageOf', { page: pageActive + 1, total: totalPagesActive })}</span>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageActive >= totalPagesActive - 1} onClick={() => setPageActive((p) => Math.min(totalPagesActive - 1, p + 1))}>{t('datasources.list.next')}</button>
                   </div>
                 </div>
               )}
@@ -454,11 +459,11 @@ function MyDatasourcesPageInner() {
             <TabPanel className="px-3 pb-3 pt-0">
               <div className="flex items-center py-2 gap-2">
                 <div className="flex items-center gap-2">
-                  <label htmlFor="searchSourcesInactive" className="text-sm mr-2 text-gray-600 dark:text-gray-300">Search</label>
-                  <input id="searchSourcesInactive" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search datasources..." className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
+                  <label htmlFor="searchSourcesInactive" className="text-sm mr-2 text-gray-600 dark:text-gray-300">{t('datasources.list.search')}</label>
+                  <input id="searchSourcesInactive" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('datasources.list.searchPlaceholder')} className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
                 </div>
                 <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-                  <span className="whitespace-nowrap min-w-[84px]">Per page</span>
+                  <span className="whitespace-nowrap min-w-[84px]">{t('datasources.list.perPage')}</span>
                   <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                     [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
                     [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -478,11 +483,11 @@ function MyDatasourcesPageInner() {
               {renderList(visibleInactive)}
               {!loading && inactiveItems.length > 0 && (
                 <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
-                  <span>Showing {pageInactive * pageSize + 1}–{Math.min((pageInactive + 1) * pageSize, inactiveItems.length)} of {inactiveItems.length}</span>
+                  <span>{t('datasources.list.showing', { from: pageInactive * pageSize + 1, to: Math.min((pageInactive + 1) * pageSize, inactiveItems.length), total: inactiveItems.length })}</span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageInactive <= 0} onClick={() => setPageInactive((p) => Math.max(0, p - 1))}>Prev</button>
-                    <span>Page {pageInactive + 1} / {totalPagesInactive}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageInactive >= totalPagesInactive - 1} onClick={() => setPageInactive((p) => Math.min(totalPagesInactive - 1, p + 1))}>Next</button>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageInactive <= 0} onClick={() => setPageInactive((p) => Math.max(0, p - 1))}>{t('datasources.list.prev')}</button>
+                    <span>{t('datasources.list.pageOf', { page: pageInactive + 1, total: totalPagesInactive })}</span>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageInactive >= totalPagesInactive - 1} onClick={() => setPageInactive((p) => Math.min(totalPagesInactive - 1, p + 1))}>{t('datasources.list.next')}</button>
                   </div>
                 </div>
               )}
@@ -498,8 +503,9 @@ function MyDatasourcesPageInner() {
 }
 
  export default function MyDatasourcesPage() {
+   const t = useTranslations('data')
    return (
-     <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
+     <Suspense fallback={<div className="p-3 text-sm">{t('datasources.list.loading')}</div>}>
        <MyDatasourcesPageInner />
      </Suspense>
    )

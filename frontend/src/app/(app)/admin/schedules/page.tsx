@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type React from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Card, Title, Text, TextInput, Badge, TabGroup, TabList, Tab, TabPanels, TabPanel, Select, SelectItem } from '@tremor/react'
 import * as Popover from '@radix-ui/react-popover'
 import { RiFocus2Line, RiArrowDownSLine, RiClipboardLine } from '@remixicon/react'
@@ -16,6 +17,8 @@ import CustomQueryEditor from '@/components/builder/CustomQueryEditor'
 export const dynamic = 'force-dynamic'
 
 function AdminSchedulesInner() {
+  const t = useTranslations('data')
+  const tt = t // ponytail: alias for use inside .map((t) => ...) blocks where `t` is the row and shadows the translator
   const { user } = useAuth()
   const router = useRouter()
   const isAdmin = (user?.role || '').toLowerCase() === 'admin'
@@ -185,7 +188,7 @@ function AdminSchedulesInner() {
       return await Api.updateSyncTask(selectedId as string, editingTaskId as string, payload, user?.id)
     },
     onSuccess: async () => {
-      show('Task', 'Saved')
+      show(t('admin.schedules.toastTask'), t('admin.schedules.savedMsg'))
       setEditingTaskId(null)
       setDestEdited(false)
       setCronMode('custom')
@@ -232,18 +235,18 @@ function AdminSchedulesInner() {
   const runAll = useMutation({
     mutationFn: async () => Api.runSyncNow(selectedId as string, undefined, user?.id),
     onSuccess: (res) => {
-      if (res?.ok === false) { show('Sync', res?.message || 'Failed to start'); return }
+      if (res?.ok === false) { show(t('admin.schedules.toastSync'), res?.message || t('admin.schedules.failedToStart')); return }
       startMonitoring(selectedId as string, user?.id)
       void qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
       void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
     },
-    onError: (e: any) => show('Sync', e?.message || 'Failed to start'),
+    onError: (e: any) => show(t('admin.schedules.toastSync'), e?.message || t('admin.schedules.failedToStart')),
   })
 
   const runOne = useMutation({
     mutationFn: async (taskId: string) => Api.runSyncNow(selectedId as string, taskId, user?.id),
     onSuccess: (res) => {
-      if (res?.ok === false) { show('Sync', res?.message || 'Failed to start'); return }
+      if (res?.ok === false) { show(t('admin.schedules.toastSync'), res?.message || t('admin.schedules.failedToStart')); return }
       if (selectedId) startMonitoring(selectedId, user?.id)
       void qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
       void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
@@ -252,12 +255,12 @@ function AdminSchedulesInner() {
       const isTimeout = e?.message?.toLowerCase().includes('timeout') || e?.message?.toLowerCase().includes('timed out')
       if (isTimeout) {
         // Sync likely started but response timed out - start monitoring anyway
-        show('Sync Started', 'Sync is running (response timed out, but sync continues in background)')
+        show(t('admin.schedules.toastSyncStarted'), t('admin.schedules.syncTimedOutMsg'))
         if (selectedId) startMonitoring(selectedId, user?.id)
         void qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
         void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
       } else {
-        show('Sync', e?.message || 'Failed to start')
+        show(t('admin.schedules.toastSync'), e?.message || t('admin.schedules.failedToStart'))
       }
     },
   })
@@ -268,18 +271,18 @@ function AdminSchedulesInner() {
       // Show detailed feedback based on what actually happened
       const { cancel_requested, force_reset, message } = result
       if (force_reset > 0 && cancel_requested > 0) {
-        show('Sync Abort', `Reset ${force_reset} stuck sync(s), flagged ${cancel_requested} active sync(s) for cancellation`)
+        show(t('admin.schedules.toastSyncAbort'), t('admin.schedules.abortResetAndFlag', { resetCount: force_reset, flagCount: cancel_requested }))
       } else if (force_reset > 0) {
-        show('Sync Abort', `Force reset ${force_reset} stuck sync(s)`)
+        show(t('admin.schedules.toastSyncAbort'), t('admin.schedules.abortForceReset', { count: force_reset }))
       } else if (cancel_requested > 0) {
-        show('Sync Abort', `Flagged ${cancel_requested} active sync(s) for cancellation`)
+        show(t('admin.schedules.toastSyncAbort'), t('admin.schedules.abortFlagged', { count: cancel_requested }))
       } else {
-        show('Sync Abort', message || 'No syncs to abort')
+        show(t('admin.schedules.toastSyncAbort'), message || t('admin.schedules.noSyncsToAbort'))
       }
       void qc.invalidateQueries({ queryKey: ['sync-tasks', selectedId] })
       void qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
     },
-    onError: (e: any) => show('Sync Abort', e?.message || 'Abort failed'),
+    onError: (e: any) => show(t('admin.schedules.toastSyncAbort'), e?.message || t('admin.schedules.abortFailed')),
   })
 
   const clearLogs = useMutation({
@@ -288,10 +291,10 @@ function AdminSchedulesInner() {
       return await Api.clearSyncLogs(selectedId as string, undefined, user?.id)
     },
     onSuccess: async (res) => {
-      show('Logs', `Cleared ${res?.deleted ?? 0} entries`)
+      show(t('admin.schedules.toastLogs'), t('admin.schedules.clearedEntries', { count: res?.deleted ?? 0 }))
       await qc.invalidateQueries({ queryKey: ['sync-logs', selectedId] })
     },
-    onError: (e: any) => show('Logs', e?.message || 'Failed to clear logs'),
+    onError: (e: any) => show(t('admin.schedules.toastLogs'), e?.message || t('admin.schedules.failedToClearLogs')),
   })
 
   const runningCount = useMemo(() => (tasksQ.data || []).filter((t) => t.inProgress).length, [tasksQ.data])
@@ -357,13 +360,13 @@ function AdminSchedulesInner() {
       <Card className="p-0 bg-[hsl(var(--background))]">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
           <div>
-            <Title className="text-gray-500 dark:text-white">Schedule Workers</Title>
+            <Title className="text-gray-500 dark:text-white">{t('admin.schedules.pageTitle')}</Title>
             <div className="mt-1 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-              <span className="opacity-80">Manage snapshot & incremental tasks, run them, and view logs.</span>
+              <span className="opacity-80">{t('admin.schedules.pageSubtitle')}</span>
               {selectedId && (
                 <>
-                  <Badge color="emerald">Running: {runningCount}</Badge>
-                  <Badge color="indigo">Scheduled: {scheduledCount}</Badge>
+                  <Badge color="emerald">{t('admin.schedules.runningBadge', { count: runningCount })}</Badge>
+                  <Badge color="indigo">{t('admin.schedules.scheduledBadge', { count: scheduledCount })}</Badge>
                 </>
               )}
             </div>
@@ -372,7 +375,7 @@ function AdminSchedulesInner() {
             <div className="min-w-[220px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
               [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
               [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
-              <Select value={selectedId || ''} onValueChange={(v) => setSelectedId(v || null)} placeholder="Select datasource…" className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent">
+              <Select value={selectedId || ''} onValueChange={(v) => setSelectedId(v || null)} placeholder={t('admin.schedules.selectDatasourcePlaceholder')} className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent">
                 {(dsQ.data || []).map((d) => (
                   <SelectItem key={d.id} value={d.id}>{d.name} ({d.type})</SelectItem>
                 ))}
@@ -383,13 +386,13 @@ function AdminSchedulesInner() {
               disabled={!selectedId || runAll.isPending}
               onClick={() => runAll.mutate()}
             >
-              Run all now
+              {t('admin.schedules.runAllNow')}
             </button>
             <button
               className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={() => refreshSchedules.mutate()}
             >
-              Refresh schedules
+              {t('admin.schedules.refreshSchedules')}
             </button>
           </div>
         </div>
@@ -397,42 +400,42 @@ function AdminSchedulesInner() {
           <TabGroup index={tabIndex} onIndexChange={(i) => { setSlideDir(i > prevTabIndex.current ? 'left' : 'right'); prevTabIndex.current = i; setTabIndex(i) }}>
             <TabList className="px-3 py-1.5 border-b border-[hsl(var(--border))]">
               <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
-                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Create Tasks</span>
+                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">{t('admin.schedules.tabCreateTasks')}</span>
               </Tab>
               <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
-                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Running Tasks</span>
+                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">{t('admin.schedules.tabRunningTasks')}</span>
               </Tab>
               <Tab className="pb-2 px-1 mr-4 font-medium border-b-2 border-transparent transition-colors hover:border-[hsl(var(--primary)/0.4)] ui-selected:border-[hsl(var(--primary))]">
-                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">Scheduled Tasks</span>
+                <span className="text-gray-500 dark:text-gray-400 ui-selected:text-[hsl(var(--primary-deep))] ui-selected:dark:text-[hsl(var(--primary))]">{t('admin.schedules.tabScheduledTasks')}</span>
               </Tab>
             </TabList>
             <TabPanels className="pt-0">
               <TabPanel className={`px-3 pb-3 pt-0 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}`}>
                 {/* Create Task */}
                 <div className="rounded-md border bg-[hsl(var(--card))]">
-                  <div className="px-3 py-2 border-b text-sm font-medium">Create Task</div>
+                  <div className="px-3 py-2 border-b text-sm font-medium">{t('admin.schedules.createTask')}</div>
                   <div className="p-3 grid grid-cols-1 md:grid-cols-6 gap-3 text-sm">
                     <div>
-                      <div className="text-xs text-muted-foreground">Mode</div>
+                      <div className="text-xs text-muted-foreground">{t('admin.schedules.mode')}</div>
                       <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                         [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
                         [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
                         <Select value={form.mode} onValueChange={(v) => setForm((f) => ({ ...f, mode: (v as 'snapshot'|'sequence') }))} className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent">
-                          <SelectItem value="snapshot">snapshot</SelectItem>
-                          <SelectItem value="sequence">sequence</SelectItem>
+                          <SelectItem value="snapshot">{t('admin.schedules.modeSnapshot')}</SelectItem>
+                          <SelectItem value="sequence">{t('admin.schedules.modeSequence')}</SelectItem>
                         </Select>
                       </div>
                     </div>
                     {!isApiDs && (
                       <div>
-                        <div className="text-xs text-muted-foreground">Source schema (auto‑selected)</div>
+                        <div className="text-xs text-muted-foreground">{t('admin.schedules.sourceSchemaLabel')}</div>
                         <div className="relative rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                           [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
                           [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
                           <Select
                             value={(form.sourceSchema || '') as string}
                             onValueChange={(v) => { /* schema fixed by default; we keep it readonly */ }}
-                            placeholder={form.sourceSchema ? `Schema: ${form.sourceSchema}` : (selectedId ? 'Determining schema…' : 'Select a datasource')}
+                            placeholder={form.sourceSchema ? t('admin.schedules.schemaPrefix', { name: form.sourceSchema }) : (selectedId ? t('admin.schedules.determiningSchema') : t('admin.schedules.selectADatasource'))}
                             className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent"
                             disabled={true}
                           >
@@ -448,7 +451,7 @@ function AdminSchedulesInner() {
                     )}
                     {!isApiDs && (
                       <div>
-                        <div className="text-xs text-muted-foreground">Source table</div>
+                        <div className="text-xs text-muted-foreground">{t('admin.schedules.sourceTable')}</div>
                         <div className="flex items-center gap-2">
                           <div className="relative flex-1 rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                             [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
@@ -456,7 +459,7 @@ function AdminSchedulesInner() {
                             <Select
                               value={form.sourceTable}
                               onValueChange={(v) => { setForm((f) => ({ ...f, sourceTable: v || '', selectColumns: [] })); if (!destEdited && v) setForm((f) => ({ ...f, destTableName: v })); }}
-                              placeholder={!form.sourceSchema ? 'Detecting schema…' : (tablesOnlyQ.isFetching ? 'Loading tables…' : 'Select table')}
+                              placeholder={!form.sourceSchema ? t('admin.schedules.detectingSchema') : (tablesOnlyQ.isFetching ? t('admin.schedules.loadingTables') : t('admin.schedules.selectTable'))}
                               className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent"
                               disabled={!form.sourceSchema || tablesOnlyQ.isFetching}
                             >
@@ -473,7 +476,7 @@ function AdminSchedulesInner() {
                           <button
                             type="button"
                             className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-md border hover:bg-muted"
-                            title="Preview top 1000 rows"
+                            title={t('admin.schedules.previewTop1000')}
                             disabled={!selectedId || !form.sourceTable}
                             onClick={() => setPreviewOpen(true)}
                           >
@@ -483,7 +486,7 @@ function AdminSchedulesInner() {
                       </div>
                     )}
                     <div>
-                      <div className="text-xs text-muted-foreground">Dest table</div>
+                      <div className="text-xs text-muted-foreground">{t('admin.schedules.destTable')}</div>
                       <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                         [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
                         <TextInput className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent" value={form.destTableName} onChange={(e) => { setDestEdited(true); setForm((f) => ({ ...f, destTableName: e.target.value })) }} placeholder="orders_mat" />
@@ -491,7 +494,7 @@ function AdminSchedulesInner() {
                     </div>
                     {form.mode === 'sequence' && !isApiDs && (
                       <div>
-                        <div className="text-xs text-muted-foreground">Sequence column</div>
+                        <div className="text-xs text-muted-foreground">{t('admin.schedules.sequenceColumn')}</div>
                         <div className="relative rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]">
                           <Popover.Root open={seqOpen} onOpenChange={(o) => { setSeqOpen(o); if (!o) setSeqSearch('') }}>
                             <Popover.Trigger asChild>
@@ -501,7 +504,7 @@ function AdminSchedulesInner() {
                                 disabled={!form.sourceTable || introspectQ.isFetching || availableColumns.length === 0}
                               >
                                 <span className="truncate">
-                                  {introspectQ.isFetching ? 'Loading columns…' : (form.sequenceColumn || (!form.sourceTable ? 'Select a table first' : 'Select sequence column'))}
+                                  {introspectQ.isFetching ? t('admin.schedules.loadingColumns') : (form.sequenceColumn || (!form.sourceTable ? t('admin.schedules.selectTableFirst') : t('admin.schedules.selectSequenceColumn')))}
                                 </span>
                                 {form.sourceTable && introspectQ.isFetching
                                   ? <svg className="animate-spin h-3 w-3 opacity-70" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
@@ -513,7 +516,7 @@ function AdminSchedulesInner() {
                                 <input
                                   autoFocus
                                   className="w-full mb-1.5 px-2 py-1 text-xs rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]/40"
-                                  placeholder="Search columns…"
+                                  placeholder={t('admin.schedules.searchColumns')}
                                   value={seqSearch}
                                   onChange={(e) => setSeqSearch(e.target.value)}
                                 />
@@ -522,7 +525,7 @@ function AdminSchedulesInner() {
                                     <button
                                       className="w-full text-left px-2 py-1 rounded text-muted-foreground hover:bg-[hsl(var(--muted))] italic"
                                       onClick={() => { setForm((f) => ({ ...f, sequenceColumn: undefined })); setSeqOpen(false); setSeqSearch('') }}
-                                    >— Clear selection</button>
+                                    >{t('admin.schedules.clearSelection')}</button>
                                   )}
                                   {availableColumns
                                     .filter((c) => !seqSearch || c.toLowerCase().includes(seqSearch.toLowerCase()))
@@ -534,7 +537,7 @@ function AdminSchedulesInner() {
                                       >{c}</button>
                                     ))}
                                   {availableColumns.filter((c) => !seqSearch || c.toLowerCase().includes(seqSearch.toLowerCase())).length === 0 && (
-                                    <div className="text-muted-foreground px-2 py-1">No matches</div>
+                                    <div className="text-muted-foreground px-2 py-1">{t('admin.schedules.noMatches')}</div>
                                   )}
                                 </div>
                                 <Popover.Arrow className="fill-[hsl(var(--card))]" />
@@ -546,7 +549,7 @@ function AdminSchedulesInner() {
                     )}
                     {!isApiDs && (
                       <div>
-                        <div className="text-xs text-muted-foreground">PK columns</div>
+                        <div className="text-xs text-muted-foreground">{t('admin.schedules.pkColumns')}</div>
                         <div className="flex flex-col gap-1">
                           <div className="relative flex-1 min-w-0 rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]">
                             <Popover.Root onOpenChange={(o) => { if (!o) setPkSearch('') }}>
@@ -556,7 +559,7 @@ function AdminSchedulesInner() {
                                   className="w-full h-9 px-3 inline-flex items-center justify-between text-sm text-[hsl(var(--foreground))]"
                                   disabled={!form.sourceTable || availableColumns.length === 0}
                                 >
-                                  <span className="truncate">{(form.pkColumns || []).length ? `${(form.pkColumns || []).length} selected` : 'Select columns'}</span>
+                                  <span className="truncate">{(form.pkColumns || []).length ? t('admin.schedules.nSelected', { count: (form.pkColumns || []).length }) : t('admin.schedules.selectColumns')}</span>
                                   <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                                 </button>
                               </Popover.Trigger>
@@ -565,13 +568,13 @@ function AdminSchedulesInner() {
                                   <input
                                     autoFocus
                                     className="w-full mb-1.5 px-2 py-1 text-xs rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]/40"
-                                    placeholder="Search columns…"
+                                    placeholder={t('admin.schedules.searchColumns')}
                                     value={pkSearch}
                                     onChange={(e) => setPkSearch(e.target.value)}
                                   />
                                   <div className="max-h-56 overflow-auto text-xs">
                                     {availableColumns.length === 0 && (
-                                      <div className="text-muted-foreground px-1 py-0.5">No columns (select a table)</div>
+                                      <div className="text-muted-foreground px-1 py-0.5">{t('admin.schedules.noColumnsSelectTable')}</div>
                                     )}
                                     {availableColumns
                                       .filter((c) => !pkSearch || c.toLowerCase().includes(pkSearch.toLowerCase()))
@@ -591,7 +594,7 @@ function AdminSchedulesInner() {
                                         </label>
                                       ))}
                                     {availableColumns.length > 0 && availableColumns.filter((c) => !pkSearch || c.toLowerCase().includes(pkSearch.toLowerCase())).length === 0 && (
-                                      <div className="text-muted-foreground px-1 py-0.5">No matches</div>
+                                      <div className="text-muted-foreground px-1 py-0.5">{t('admin.schedules.noMatches')}</div>
                                     )}
                                   </div>
                                   <Popover.Arrow className="fill-[hsl(var(--card))]" />
@@ -613,7 +616,7 @@ function AdminSchedulesInner() {
                       </div>
                     )}
                     <div>
-                      <div className="text-xs text-muted-foreground">Batch size</div>
+                      <div className="text-xs text-muted-foreground">{t('admin.schedules.batchSize')}</div>
                       <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                         [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
                         <TextInput className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent" value={(form.batchSize as any) || ''} onChange={(e) => setForm((f) => ({ ...f, batchSize: Number(e.target.value) || undefined }))} placeholder="10000" />
@@ -627,8 +630,8 @@ function AdminSchedulesInner() {
                         onClick={() => setForm((f) => ({ ...f, customQuery: f.customQuery === undefined ? '' : (f.customQuery === null ? '' : undefined) }))}
                       >
                         <RiArrowDownSLine className={`h-3.5 w-3.5 transition-transform ${form.customQuery !== undefined && form.customQuery !== null ? 'rotate-0' : '-rotate-90'}`} />
-                        Custom base query
-                        {form.customQuery ? <span className="ml-1 text-[10px] px-1 py-0 rounded bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]">active</span> : null}
+                        {t('admin.schedules.customBaseQuery')}
+                        {form.customQuery ? <span className="ml-1 text-[10px] px-1 py-0 rounded bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]">{t('admin.schedules.active')}</span> : null}
                       </button>
                       {form.customQuery !== undefined && form.customQuery !== null && (
                         <CustomQueryEditor
@@ -643,20 +646,20 @@ function AdminSchedulesInner() {
                     </div>
                     <div className="md:col-span-2 md:col-start-1 flex flex-col justify-end gap-2">
                       <div>
-                        <div className="text-xs text-muted-foreground">Cron mode</div>
+                        <div className="text-xs text-muted-foreground">{t('admin.schedules.cronMode')}</div>
                         <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                           [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
                           [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
                           <Select value={cronMode} onValueChange={(v) => setCronMode((v as 'custom'|'every_n_hours'|'manual'))} className="w-full rounded-none ring-0 focus:ring-0 shadow-none focus:shadow-none bg-transparent">
-                            <SelectItem value="manual">Manual only</SelectItem>
-                            <SelectItem value="custom">Custom cron</SelectItem>
-                            <SelectItem value="every_n_hours">Every N hours</SelectItem>
+                            <SelectItem value="manual">{t('admin.schedules.cronManualOnly')}</SelectItem>
+                            <SelectItem value="custom">{t('admin.schedules.cronCustom')}</SelectItem>
+                            <SelectItem value="every_n_hours">{t('admin.schedules.cronEveryNHours')}</SelectItem>
                           </Select>
                         </div>
                       </div>
                       {cronMode === 'every_n_hours' && (
                         <div>
-                          <div className="text-xs text-muted-foreground">Every N hours</div>
+                          <div className="text-xs text-muted-foreground">{t('admin.schedules.everyNHoursLabel')}</div>
                           <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                             [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
                             <TextInput
@@ -673,11 +676,11 @@ function AdminSchedulesInner() {
                       )}
                       {cronMode === 'manual' ? (
                         <div className="rounded-md border border-dashed border-[hsl(var(--border))] px-3 py-2 text-xs text-muted-foreground">
-                          No schedule — run manually only
+                          {t('admin.schedules.noScheduleManual')}
                         </div>
                       ) : (
                         <div>
-                          <div className="text-xs text-muted-foreground">Cron</div>
+                          <div className="text-xs text-muted-foreground">{t('admin.schedules.cron')}</div>
                           <div className="rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                             [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none">
                             <TextInput
@@ -693,7 +696,7 @@ function AdminSchedulesInner() {
                     </div>
                     <div className="md:col-span-2 md:col-start-3 flex items-end" />
                     <div className="md:col-start-5 flex items-end md:justify-start">
-                      <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> Enabled</label>
+                      <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> {t('admin.schedules.enabled')}</label>
                     </div>
                     <div className="md:col-start-6 flex items-end md:justify-start gap-2">
                       <button
@@ -705,26 +708,26 @@ function AdminSchedulesInner() {
                           else createTask.mutate(form)
                         }}
                       >
-                        {editingTaskId ? 'Save' : 'Create'}
+                        {editingTaskId ? t('admin.schedules.save') : t('admin.schedules.create')}
                       </button>
                       {editingTaskId && (
                         <button
                           className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed h-9"
                           onClick={cancelEdit}
                           disabled={saveTask.isPending}
-                        >Cancel</button>
+                        >{t('admin.schedules.cancel')}</button>
                       )}
                     </div>
                   </div>
                   {/* Hints */}
                   <div className="px-3 pb-3">
                     <div className="mt-2 rounded-md border p-2 bg-[hsl(var(--background))]">
-                      <div className="text-xs font-semibold mb-1">Hints</div>
+                      <div className="text-xs font-semibold mb-1">{t('admin.schedules.hints')}</div>
                       <ul className="text-[11px] space-y-1 text-muted-foreground list-disc pl-4">
-                        <li><strong>Snapshot</strong>: copies the full table (stage then swap). Good for small-to-medium tables or daily refresh.</li>
-                        <li><strong>Sequence</strong>: incremental upsert using a monotonic sequence column (e.g., auto-increment id or updated_at timestamp).</li>
-                        <li><strong>PK columns</strong>: the primary key columns that uniquely identify a row. Use comma for composite keys (e.g., <code>order_id,line_no</code>). Required for correct upserts in sequence mode.</li>
-                        <li><strong>Cron</strong>: schedules automatic runs (e.g., <code>0 2 * * *</code> runs daily at 02:00). Times are evaluated on the server.</li>
+                        <li>{t.rich('admin.schedules.hintSnapshot', { strong: (c) => <strong>{c}</strong> })}</li>
+                        <li>{t.rich('admin.schedules.hintSequence', { strong: (c) => <strong>{c}</strong> })}</li>
+                        <li>{t.rich('admin.schedules.hintPk', { strong: (c) => <strong>{c}</strong>, code: (c) => <code>{c}</code> })}</li>
+                        <li>{t.rich('admin.schedules.hintCron', { strong: (c) => <strong>{c}</strong>, code: (c) => <code>{c}</code> })}</li>
                       </ul>
                     </div>
                   </div>
@@ -733,9 +736,9 @@ function AdminSchedulesInner() {
                 {/* Tasks table with pagination */}
                 <div className="rounded-md border overflow-hidden mt-4 bg-[hsl(var(--card))]">
                   <div className="px-3 py-2 border-b text-sm font-medium flex items-center justify-between">
-                    <span>Tasks</span>
+                    <span>{t('admin.schedules.tasks')}</span>
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="min-w-[140px] whitespace-nowrap">Rows per page</span>
+                      <span className="min-w-[140px] whitespace-nowrap">{t('admin.schedules.rowsPerPage')}</span>
                       <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                         [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
                         [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -749,20 +752,20 @@ function AdminSchedulesInner() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                          <th className="text-left font-medium px-2 py-1">Mode</th>
-                          <th className="text-left font-medium px-2 py-1">Source</th>
-                          <th className="text-left font-medium px-2 py-1">Dest</th>
-                          <th className="text-left font-medium px-2 py-1">PKs</th>
-                          <th className="text-left font-medium px-2 py-1">Seq</th>
-                          <th className="text-left font-medium px-2 py-1">Batch</th>
-                          <th className="text-left font-medium px-2 py-1">Cron</th>
-                          <th className="text-left font-medium px-2 py-1">Query</th>
-                          <th className="text-left font-medium px-2 py-1">Enabled</th>
-                          <th className="text-left font-medium px-2 py-1">Last run</th>
-                          <th className="text-left font-medium px-2 py-1">Rows</th>
-                          <th className="text-left font-medium px-2 py-1">Duration (s)</th>
-                          <th className="text-left font-medium px-2 py-1">Status</th>
-                          <th className="text-left font-medium px-2 py-1">Actions</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colSource')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colDest')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colPks')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colSeq')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colBatch')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colCron')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colQuery')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colEnabled')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colLastRun')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colRows')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colDuration')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colStatus')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colActions')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -774,70 +777,70 @@ function AdminSchedulesInner() {
                             <td className="px-2 py-1">{t.pkColumns?.join(', ')}</td>
                             <td className="px-2 py-1">{t.sequenceColumn || '—'}</td>
                             <td className="px-2 py-1">{t.batchSize || '—'}</td>
-                            <td className="px-2 py-1">{t.scheduleCron || <span className="text-muted-foreground text-[11px]">manual</span>}</td>
+                            <td className="px-2 py-1">{t.scheduleCron || <span className="text-muted-foreground text-[11px]">{tt('admin.schedules.manual')}</span>}</td>
                             <td className="px-2 py-1">
                               {t.customQuery ? (
-                                <span className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))] font-mono" title={t.customQuery}>custom</span>
+                                <span className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))] font-mono" title={t.customQuery}>{tt('admin.schedules.customBadge')}</span>
                               ) : '—'}
                             </td>
-                            <td className="px-2 py-1">{t.enabled ? 'Yes' : 'No'}</td>
+                            <td className="px-2 py-1">{t.enabled ? tt('admin.schedules.yes') : tt('admin.schedules.no')}</td>
                             <td className="px-2 py-1">{t.lastRunAt ? (parseUtcDate(t.lastRunAt)?.toLocaleString() ?? '—') : '—'}</td>
                             <td className="px-2 py-1">{typeof t.lastRowCount === 'number' ? t.lastRowCount.toLocaleString() : '—'}</td>
                             <td className="px-2 py-1">{typeof durationByTask[t.id] === 'number' ? durationByTask[t.id].toLocaleString() : '—'}</td>
                             <td className="px-2 py-1 whitespace-nowrap">{t.inProgress ? (
-                              <span className="text-emerald-700 dark:text-emerald-300">Running {typeof t.progressCurrent === 'number' && typeof t.progressTotal === 'number' ? `(${t.progressCurrent}/${t.progressTotal})` : ''}</span>
+                              <span className="text-emerald-700 dark:text-emerald-300">{typeof t.progressCurrent === 'number' && typeof t.progressTotal === 'number' ? tt('admin.schedules.runningWithProgress', { current: t.progressCurrent, total: t.progressTotal }) : tt('admin.schedules.running')}</span>
                             ) : (t.error ? (
                               <span className="inline-flex items-center gap-1">
-                                <span className="text-red-600">Error</span>
+                                <span className="text-red-600">{tt('admin.schedules.error')}</span>
                                 <button
-                                  title="Copy error to clipboard"
+                                  title={tt('admin.schedules.copyErrorToClipboard')}
                                   className="p-0.5 rounded hover:bg-[hsl(var(--muted))] text-red-500"
                                   onClick={() => navigator.clipboard.writeText(t.error ?? '')}
                                 ><RiClipboardLine className="w-3.5 h-3.5" /></button>
                               </span>
-                            ) : 'Idle')}
+                            ) : tt('admin.schedules.idle'))}
                             </td>
                             <td className="px-2 py-1">
                               <div className="flex items-center gap-2">
                                 <button
                                   className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
-                                  title="Edit"
+                                  title={tt('admin.schedules.edit')}
                                   onClick={() => beginEdit(t)}
-                                >Edit</button>
+                                >{tt('admin.schedules.edit')}</button>
                                 {t.inProgress ? (
                                   <button
                                     className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title="Abort"
+                                    title={tt('admin.schedules.abort')}
                                     onClick={() => abortOne.mutate(t.id)}
-                                  >Abort</button>
+                                  >{tt('admin.schedules.abort')}</button>
                                 ) : (
                                   <button
                                     className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title="Run now"
+                                    title={tt('admin.schedules.runNow')}
                                     onClick={() => runOne.mutate(t.id)}
-                                  >Run</button>
+                                  >{tt('admin.schedules.run')}</button>
                                 )}
                                 <button
                                   className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed text-red-600"
-                                  title="Delete"
+                                  title={tt('admin.schedules.delete')}
                                   onClick={() => deleteTask.mutate(t.id)}
-                                >Delete</button>
+                                >{tt('admin.schedules.delete')}</button>
                               </div>
                             </td>
                           </tr>
                         ))}
                         {tasksData.length === 0 && (
-                          <tr><td colSpan={14} className="px-2 py-2 text-muted-foreground">No tasks yet. Create one above.</td></tr>
+                          <tr><td colSpan={14} className="px-2 py-2 text-muted-foreground">{t('admin.schedules.noTasksYet')}</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
                   {/* Pagination controls */}
                   <div className="flex items-center justify-between px-3 py-2 border-t text-xs">
-                    <div>Page {taskPage} of {totalTaskPages}</div>
+                    <div>{t('admin.schedules.pageOf', { page: taskPage, total: totalTaskPages })}</div>
                     <div className="flex items-center gap-2">
-                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={taskPage<=1} onClick={() => setTaskPage((p) => Math.max(1, p-1))}>Prev</button>
-                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={taskPage>=totalTaskPages} onClick={() => setTaskPage((p) => Math.min(totalTaskPages, p+1))}>Next</button>
+                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={taskPage<=1} onClick={() => setTaskPage((p) => Math.max(1, p-1))}>{t('admin.schedules.prev')}</button>
+                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={taskPage>=totalTaskPages} onClick={() => setTaskPage((p) => Math.min(totalTaskPages, p+1))}>{t('admin.schedules.next')}</button>
                     </div>
                   </div>
                 </div>
@@ -845,19 +848,19 @@ function AdminSchedulesInner() {
                 {/* Logs with pagination */}
                 <div className="rounded-md border overflow-hidden mt-4 bg-[hsl(var(--card))]">
                   <div className="px-3 py-2 border-b text-sm font-medium flex items-center justify-between">
-                    <span>Logs</span>
+                    <span>{t('admin.schedules.logs')}</span>
                     <div className="flex items-center gap-2 text-xs">
                       <button
                         className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={!selectedId || (logsData.length === 0) || clearLogs.isPending}
                         onClick={() => {
                           if (!selectedId) return
-                          const ok = window.confirm('Clear logs for this datasource? This will permanently delete the shown run entries.')
+                          const ok = window.confirm(t('admin.schedules.clearLogsConfirm'))
                           if (!ok) return
                           clearLogs.mutate()
                         }}
-                      >Clear logs</button>
-                      <span className="min-w-[140px] whitespace-nowrap">Rows per page</span>
+                      >{t('admin.schedules.clearLogs')}</button>
+                      <span className="min-w-[140px] whitespace-nowrap">{t('admin.schedules.rowsPerPage')}</span>
                       <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                         [&_*]:!border-0 [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!outline-none [&_*]:!shadow-none
                         [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -871,14 +874,14 @@ function AdminSchedulesInner() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                          <th className="text-left font-medium px-2 py-1">Started</th>
-                          <th className="text-left font-medium px-2 py-1">Mode</th>
-                          <th className="text-left font-medium px-2 py-1">Task</th>
-                          <th className="text-left font-medium px-2 py-1">Source Table</th>
-                          <th className="text-left font-medium px-2 py-1">Dest Table</th>
-                          <th className="text-left font-medium px-2 py-1">Rows</th>
-                          <th className="text-left font-medium px-2 py-1">Finished</th>
-                          <th className="text-left font-medium px-2 py-1">Error</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logStarted')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logTask')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logSourceTable')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logDestTable')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colRows')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.logFinished')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.error')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -897,9 +900,9 @@ function AdminSchedulesInner() {
                               <td className="px-2 py-1">{r.finishedAt ? (parseUtcDate(r.finishedAt)?.toLocaleString() ?? '—') : '—'}</td>
                               <td className="px-2 py-1 whitespace-nowrap">{r.error ? (
                                 <span className="inline-flex items-center gap-1">
-                                  <span className="text-red-600">Error</span>
+                                  <span className="text-red-600">{t('admin.schedules.error')}</span>
                                   <button
-                                    title="Copy error to clipboard"
+                                    title={t('admin.schedules.copyErrorToClipboard')}
                                     className="p-0.5 rounded hover:bg-[hsl(var(--muted))] text-red-500"
                                     onClick={() => navigator.clipboard.writeText(r.error ?? '')}
                                   ><RiClipboardLine className="w-3.5 h-3.5" /></button>
@@ -909,17 +912,17 @@ function AdminSchedulesInner() {
                           )
                         })}
                         {logsData.length === 0 && (
-                          <tr><td colSpan={8} className="px-2 py-2 text-muted-foreground">No logs.</td></tr>
+                          <tr><td colSpan={8} className="px-2 py-2 text-muted-foreground">{t('admin.schedules.noLogs')}</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
                   {/* Pagination controls */}
                   <div className="flex items-center justify-between px-3 py-2 border-t text-xs">
-                    <div>Page {logPage} of {totalLogPages}</div>
+                    <div>{t('admin.schedules.pageOf', { page: logPage, total: totalLogPages })}</div>
                     <div className="flex items-center gap-2">
-                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={logPage<=1} onClick={() => setLogPage((p) => Math.max(1, p-1))}>Prev</button>
-                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={logPage>=totalLogPages} onClick={() => setLogPage((p) => Math.min(totalLogPages, p+1))}>Next</button>
+                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={logPage<=1} onClick={() => setLogPage((p) => Math.max(1, p-1))}>{t('admin.schedules.prev')}</button>
+                      <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-2 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={logPage>=totalLogPages} onClick={() => setLogPage((p) => Math.min(totalLogPages, p+1))}>{t('admin.schedules.next')}</button>
                     </div>
                   </div>
                 </div>
@@ -928,20 +931,20 @@ function AdminSchedulesInner() {
               <TabPanel className={`px-3 pb-3 pt-0 ${slideDir === 'left' ? 'anim-slide-left' : 'anim-slide-right'}`}>
                 {/* Running Tasks */}
                 <div className="rounded-md border overflow-hidden bg-[hsl(var(--card))]">
-                  <div className="px-3 py-2 border-b text-sm font-medium">Running Tasks</div>
+                  <div className="px-3 py-2 border-b text-sm font-medium">{t('admin.schedules.runningTasksTitle')}</div>
                   <div className="overflow-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                          <th className="text-left font-medium px-2 py-1">Task</th>
-                          <th className="text-left font-medium px-2 py-1">Mode</th>
-                          <th className="text-left font-medium px-2 py-1">Progress</th>
-                          <th className="text-left font-medium px-2 py-1">Actions</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colTask')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colMode')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colProgress')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colActions')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {!selectedId ? (
-                          <tr><td colSpan={4} className="px-2 py-2 text-muted-foreground">Please select a datasource from the dropdown above.</td></tr>
+                          <tr><td colSpan={4} className="px-2 py-2 text-muted-foreground">{t('admin.schedules.selectDatasourcePrompt')}</td></tr>
                         ) : (
                           <>
                             {(tasksQ.data || []).filter((t) => t.inProgress).map((t, idx) => (
@@ -953,12 +956,12 @@ function AdminSchedulesInner() {
                                   <button
                                     className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onClick={() => abortOne.mutate(t.id)}
-                                  >Abort</button>
+                                  >{tt('admin.schedules.abort')}</button>
                                 </td>
                               </tr>
                             ))}
                             {runningCount === 0 && (
-                              <tr><td colSpan={4} className="px-2 py-2 text-muted-foreground">No running tasks.</td></tr>
+                              <tr><td colSpan={4} className="px-2 py-2 text-muted-foreground">{t('admin.schedules.noRunningTasks')}</td></tr>
                             )}
                           </>
                         )}
@@ -972,27 +975,27 @@ function AdminSchedulesInner() {
                 {/* Scheduled Tasks + Jobs */}
                 <div className="rounded-md border overflow-hidden bg-[hsl(var(--card))]">
                   <div className="px-3 py-2 border-b text-sm font-medium flex items-center justify-between">
-                    <span>Scheduled Tasks</span>
+                    <span>{t('admin.schedules.scheduledTasksTitle')}</span>
                     <button
                       className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => refreshSchedules.mutate()}
                       disabled={refreshSchedules.isPending}
                     >
-                      Refresh schedules
+                      {t('admin.schedules.refreshSchedules')}
                     </button>
                   </div>
                   <div className="overflow-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                          <th className="text-left font-medium px-2 py-1">Task</th>
-                          <th className="text-left font-medium px-2 py-1">Cron</th>
-                          <th className="text-left font-medium px-2 py-1">Next run</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colTask')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colCron')}</th>
+                          <th className="text-left font-medium px-2 py-1">{t('admin.schedules.colNextRun')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {!selectedId ? (
-                          <tr><td colSpan={3} className="px-2 py-2 text-muted-foreground">Please select a datasource from the dropdown above.</td></tr>
+                          <tr><td colSpan={3} className="px-2 py-2 text-muted-foreground">{t('admin.schedules.selectDatasourcePrompt')}</td></tr>
                         ) : (
                           <>
                             {(tasksQ.data || []).filter((t) => !!t.scheduleCron).map((t, idx) => {
@@ -1006,7 +1009,7 @@ function AdminSchedulesInner() {
                               )
                             })}
                             {scheduledCount === 0 && (
-                              <tr><td colSpan={3} className="px-2 py-2 text-muted-foreground">No scheduled tasks.</td></tr>
+                              <tr><td colSpan={3} className="px-2 py-2 text-muted-foreground">{t('admin.schedules.noScheduledTasks')}</td></tr>
                             )}
                           </>
                         )}
@@ -1024,8 +1027,9 @@ function AdminSchedulesInner() {
 }
 
 export default function AdminSchedulesPage() {
+  const t = useTranslations('data')
   return (
-    <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
+    <Suspense fallback={<div className="p-3 text-sm">{t('admin.schedules.loading')}</div>}>
       <AdminSchedulesInner />
     </Suspense>
   )

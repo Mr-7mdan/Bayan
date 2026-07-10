@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Card, Title, Text, Select, SelectItem } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useAuth } from '@/components/providers/AuthProvider'
@@ -10,6 +11,7 @@ import { Api, type HolidayRuleCreate, type HolidayRuleOut } from '@/lib/api'
 export const dynamic = 'force-dynamic'
 
 export default function AdminHolidaysPage() {
+  const t = useTranslations('data')
   const { user } = useAuth()
   const router = useRouter()
   const isAdmin = (user?.role || '').toLowerCase() === 'admin'
@@ -84,7 +86,7 @@ export default function AdminHolidaysPage() {
       const list = await Api.listHolidays()
       setRows(list || [])
     } catch (e: any) {
-      setError(e?.message || 'Failed to load holidays')
+      setError(e?.message || t('admin.holidays.errLoad'))
     } finally { setLoading(false) }
   }
 
@@ -111,9 +113,9 @@ export default function AdminHolidaysPage() {
       await Api.createHoliday(payload)
       setCreateOpen(false); resetCreateForm()
       await load()
-      showToast('Holiday created')
+      showToast(t('admin.holidays.toastCreated'))
     } catch (e: any) {
-      setCrError(e?.message || 'Failed to create holiday')
+      setCrError(e?.message || t('admin.holidays.errCreate'))
     } finally { setCrBusy(false) }
   }
 
@@ -140,9 +142,9 @@ export default function AdminHolidaysPage() {
       await Api.updateHoliday(editTarget.id, payload)
       setEditOpen(false); setEditTarget(null)
       await load()
-      showToast('Holiday updated')
+      showToast(t('admin.holidays.toastUpdated'))
     } catch (e: any) {
-      setEdError(e?.message || 'Failed to update holiday')
+      setEdError(e?.message || t('admin.holidays.errUpdate'))
     } finally { setEdBusy(false) }
   }
 
@@ -154,9 +156,9 @@ export default function AdminHolidaysPage() {
       await Api.deleteHoliday(deleteTarget.id)
       setDeleteOpen(false); setDeleteTarget(null)
       await load()
-      showToast('Holiday deleted')
+      showToast(t('admin.holidays.toastDeleted'))
     } catch (e: any) {
-      showToast(e?.message || 'Failed to delete')
+      showToast(e?.message || t('admin.holidays.errDelete'))
     } finally { setDelBusy(false) }
   }
 
@@ -168,9 +170,9 @@ export default function AdminHolidaysPage() {
     try {
       const result = await Api.uploadHolidays(file)
       await load()
-      showToast(`Uploaded ${result.created} holiday(s)`)
+      showToast(t('admin.holidays.toastUploaded', { count: result.created }))
     } catch (err: any) {
-      showToast(err?.message || 'Upload failed')
+      showToast(err?.message || t('admin.holidays.errUpload'))
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -182,11 +184,11 @@ export default function AdminHolidaysPage() {
       <table className="min-w-full text-sm">
         <thead className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
           <tr>
-            <th className="text-left px-3 py-2 font-medium">Name</th>
-            <th className="text-left px-3 py-2 font-medium">Type</th>
-            <th className="text-left px-3 py-2 font-medium">Specific Date</th>
-            <th className="text-left px-3 py-2 font-medium">Recurrence</th>
-            <th className="text-left px-3 py-2 font-medium">Actions</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colName')}</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colType')}</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colSpecificDate')}</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colRecurrence')}</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.holidays.colActions')}</th>
           </tr>
         </thead>
         <tbody className="bg-[hsl(var(--background))]">
@@ -201,11 +203,11 @@ export default function AdminHolidaysPage() {
                   <button
                     className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
                     onClick={() => openEdit(r)}
-                  >Edit</button>
+                  >{t('admin.holidays.edit')}</button>
                   <button
                     className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
                     onClick={() => { setDeleteTarget(r); setDeleteOpen(true) }}
-                  >Delete</button>
+                  >{t('admin.holidays.delete')}</button>
                 </div>
               </td>
             </tr>
@@ -218,13 +220,13 @@ export default function AdminHolidaysPage() {
   if (!isAdmin) return null
 
   return (
-    <Suspense fallback={<div className="p-3 text-sm">Loading&hellip;</div>}>
+    <Suspense fallback={<div className="p-3 text-sm">{t('admin.holidays.loading')}</div>}>
     <div className="space-y-3">
       <Card className="p-0 bg-[hsl(var(--background))]">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--background))] border-b border-[hsl(var(--border))]">
           <div>
-            <Title className="text-gray-500 dark:text-white">Holidays</Title>
-            <Text className="mt-0 text-gray-500 dark:text-white">Manage holiday rules for date presets</Text>
+            <Title className="text-gray-500 dark:text-white">{t('admin.holidays.title')}</Title>
+            <Text className="mt-0 text-gray-500 dark:text-white">{t('admin.holidays.subtitle')}</Text>
           </div>
           <div className="flex items-center gap-2">
             <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={onUpload} />
@@ -232,21 +234,21 @@ export default function AdminHolidaysPage() {
               className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
-            >{uploading ? 'Uploading\u2026' : 'Upload CSV'}</button>
+            >{uploading ? t('admin.holidays.uploading') : t('admin.holidays.uploadCsv')}</button>
             <button
               className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium"
               onClick={() => { resetCreateForm(); setCreateOpen(true) }}
-            >Add Holiday</button>
+            >{t('admin.holidays.addHoliday')}</button>
           </div>
         </div>
         <div className="p-3 space-y-3">
           <div className="flex items-center py-2 gap-2">
             <div className="flex items-center gap-2">
-              <label htmlFor="searchHolidays" className="text-sm mr-2 text-gray-600 dark:text-gray-300">Search</label>
-              <input id="searchHolidays" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search holidays..." className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
+              <label htmlFor="searchHolidays" className="text-sm mr-2 text-gray-600 dark:text-gray-300">{t('admin.holidays.searchLabel')}</label>
+              <input id="searchHolidays" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('admin.holidays.searchPlaceholder')} className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
             </div>
             <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-              <span className="whitespace-nowrap min-w-[84px]">Per page</span>
+              <span className="whitespace-nowrap min-w-[84px]">{t('admin.holidays.perPage')}</span>
               <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                 [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
                 [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -264,15 +266,15 @@ export default function AdminHolidaysPage() {
             </div>
           </div>
           {error && <div className="text-sm text-red-600">{error}</div>}
-          {loading ? <Text>Loading&hellip;</Text> : (
+          {loading ? <Text>{t('admin.holidays.loading')}</Text> : (
             <>
               {table}
               <div className="mt-1 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
-                <span>Showing {filteredRows.length === 0 ? 0 : page * pageSize + 1}&ndash;{Math.min((page + 1) * pageSize, filteredRows.length)} of {filteredRows.length}</span>
+                <span>{t('admin.holidays.showing', { from: filteredRows.length === 0 ? 0 : page * pageSize + 1, to: Math.min((page + 1) * pageSize, filteredRows.length), total: filteredRows.length })}</span>
                 <div className="flex items-center gap-2">
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>Prev</button>
-                  <span>Page {page + 1} / {totalPages}</span>
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>Next</button>
+                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('admin.holidays.prev')}</button>
+                  <span>{t('admin.holidays.pageIndicator', { page: page + 1, total: totalPages })}</span>
+                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('admin.holidays.next')}</button>
                 </div>
               </div>
             </>
@@ -285,33 +287,33 @@ export default function AdminHolidaysPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/30" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Add holiday</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold">{t('admin.holidays.addDialogTitle')}</Dialog.Title>
             <div className="mt-3 space-y-3">
-              <label className="text-sm block">Name
-                <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={crName} onChange={(e) => setCrName(e.target.value)} placeholder="e.g. National Day" />
+              <label className="text-sm block">{t('admin.holidays.fieldName')}
+                <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={crName} onChange={(e) => setCrName(e.target.value)} placeholder={t('admin.holidays.namePlaceholder')} />
               </label>
-              <label className="text-sm block">Rule Type
+              <label className="text-sm block">{t('admin.holidays.fieldRuleType')}
                 <select className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={crRuleType} onChange={(e) => setCrRuleType(e.target.value as 'specific' | 'recurring')}>
-                  <option value="specific">Specific Date</option>
-                  <option value="recurring">Recurring</option>
+                  <option value="specific">{t('admin.holidays.optionSpecific')}</option>
+                  <option value="recurring">{t('admin.holidays.optionRecurring')}</option>
                 </select>
               </label>
               {crRuleType === 'specific' && (
-                <label className="text-sm block">Date
+                <label className="text-sm block">{t('admin.holidays.fieldDate')}
                   <input type="date" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={crSpecificDate} onChange={(e) => setCrSpecificDate(e.target.value)} />
                 </label>
               )}
               {crRuleType === 'recurring' && (
-                <label className="text-sm block">Recurrence Expression
-                  <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={crRecurrenceExpr} onChange={(e) => setCrRecurrenceExpr(e.target.value)} placeholder="e.g. MM-DD or cron" />
+                <label className="text-sm block">{t('admin.holidays.fieldRecurrenceExpr')}
+                  <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={crRecurrenceExpr} onChange={(e) => setCrRecurrenceExpr(e.target.value)} placeholder={t('admin.holidays.recurrencePlaceholder')} />
                 </label>
               )}
               {crError && <div className="text-sm text-red-600">{crError}</div>}
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
+                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.holidays.cancel')}</button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={crBusy || !crName} onClick={onCreate}>{crBusy ? 'Creating\u2026' : 'Create'}</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={crBusy || !crName} onClick={onCreate}>{crBusy ? t('admin.holidays.creating') : t('admin.holidays.create')}</button>
               </div>
             </div>
           </Dialog.Content>
@@ -323,33 +325,33 @@ export default function AdminHolidaysPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/30" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Edit holiday</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold">{t('admin.holidays.editDialogTitle')}</Dialog.Title>
             <div className="mt-3 space-y-3">
-              <label className="text-sm block">Name
+              <label className="text-sm block">{t('admin.holidays.fieldName')}
                 <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={edName} onChange={(e) => setEdName(e.target.value)} />
               </label>
-              <label className="text-sm block">Rule Type
+              <label className="text-sm block">{t('admin.holidays.fieldRuleType')}
                 <select className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={edRuleType} onChange={(e) => setEdRuleType(e.target.value as 'specific' | 'recurring')}>
-                  <option value="specific">Specific Date</option>
-                  <option value="recurring">Recurring</option>
+                  <option value="specific">{t('admin.holidays.optionSpecific')}</option>
+                  <option value="recurring">{t('admin.holidays.optionRecurring')}</option>
                 </select>
               </label>
               {edRuleType === 'specific' && (
-                <label className="text-sm block">Date
+                <label className="text-sm block">{t('admin.holidays.fieldDate')}
                   <input type="date" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={edSpecificDate} onChange={(e) => setEdSpecificDate(e.target.value)} />
                 </label>
               )}
               {edRuleType === 'recurring' && (
-                <label className="text-sm block">Recurrence Expression
-                  <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={edRecurrenceExpr} onChange={(e) => setEdRecurrenceExpr(e.target.value)} placeholder="e.g. MM-DD or cron" />
+                <label className="text-sm block">{t('admin.holidays.fieldRecurrenceExpr')}
+                  <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={edRecurrenceExpr} onChange={(e) => setEdRecurrenceExpr(e.target.value)} placeholder={t('admin.holidays.recurrencePlaceholder')} />
                 </label>
               )}
               {edError && <div className="text-sm text-red-600">{edError}</div>}
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
+                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.holidays.cancel')}</button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={edBusy || !edName} onClick={onEdit}>{edBusy ? 'Saving\u2026' : 'Save'}</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={edBusy || !edName} onClick={onEdit}>{edBusy ? t('admin.holidays.saving') : t('admin.holidays.save')}</button>
               </div>
             </div>
           </Dialog.Content>
@@ -361,14 +363,14 @@ export default function AdminHolidaysPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/30" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Delete holiday</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold">{t('admin.holidays.deleteDialogTitle')}</Dialog.Title>
             <div className="mt-3 space-y-3">
-              <Text>Are you sure you want to delete <strong>{deleteTarget?.name}</strong>?</Text>
+              <Text>{t.rich('admin.holidays.deleteConfirm', { name: deleteTarget?.name || '', strong: (chunks) => <strong>{chunks}</strong> })}</Text>
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
+                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.holidays.cancel')}</button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border text-red-600 hover:bg-red-50 dark:hover:bg-red-950" disabled={delBusy} onClick={onDelete}>{delBusy ? 'Deleting\u2026' : 'Delete'}</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border text-red-600 hover:bg-red-50 dark:hover:bg-red-950" disabled={delBusy} onClick={onDelete}>{delBusy ? t('admin.holidays.deleting') : t('admin.holidays.delete')}</button>
               </div>
             </div>
           </Dialog.Content>

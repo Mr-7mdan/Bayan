@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text, Select, SelectItem } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -10,6 +11,7 @@ import { Api, type UserOut, type UserRowOut } from '@/lib/api'
 export const dynamic = 'force-dynamic'
 
 export default function AdminUsersPage() {
+  const t = useTranslations('data')
   const { user } = useAuth()
   const router = useRouter()
   const isAdmin = (user?.role || '').toLowerCase() === 'admin'
@@ -73,7 +75,7 @@ export default function AdminUsersPage() {
       const list = await Api.adminListUsers(user.id)
       setRows(list || [])
     } catch (e: any) {
-      setError(e?.message || 'Failed to load users')
+      setError(e?.message || t('admin.users.errorLoad'))
     } finally { setLoading(false) }
   }
 
@@ -85,7 +87,7 @@ export default function AdminUsersPage() {
       await Api.adminSetActive(user.id, row.id, next)
       setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, active: next } : r))
     } catch (e: any) {
-      setToast(e?.message || 'Failed to update')
+      setToast(e?.message || t('admin.users.errorUpdate'))
       window.setTimeout(() => setToast(''), 1600)
     }
   }
@@ -98,9 +100,9 @@ export default function AdminUsersPage() {
       setCreateOpen(false)
       setCuName(''); setCuEmail(''); setCuPassword(''); setCuRole('user')
       await load()
-      setToast('User created'); window.setTimeout(() => setToast(''), 1500)
+      setToast(t('admin.users.toastCreated')); window.setTimeout(() => setToast(''), 1500)
     } catch (e: any) {
-      setCuError(e?.message || 'Failed to create user')
+      setCuError(e?.message || t('admin.users.errorCreate'))
     } finally {
       setCuBusy(false)
     }
@@ -112,9 +114,9 @@ export default function AdminUsersPage() {
     try {
       await Api.adminSetPassword(user.id, pwdTarget.id, pwdNew)
       setPwdOpen(false); setPwdNew(''); setPwdTarget(null)
-      setToast('Password updated'); window.setTimeout(() => setToast(''), 1500)
+      setToast(t('admin.users.toastPasswordUpdated')); window.setTimeout(() => setToast(''), 1500)
     } catch (e: any) {
-      setPwdError(e?.message || 'Failed to update password')
+      setPwdError(e?.message || t('admin.users.errorPassword'))
     } finally { setPwdBusy(false) }
   }
 
@@ -123,11 +125,11 @@ export default function AdminUsersPage() {
       <table className="min-w-full text-sm">
         <thead className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
           <tr>
-            <th className="text-left px-3 py-2 font-medium">Name</th>
-            <th className="text-left px-3 py-2 font-medium">Email</th>
-            <th className="text-left px-3 py-2 font-medium">Role</th>
-            <th className="text-left px-3 py-2 font-medium">Active</th>
-            <th className="text-left px-3 py-2 font-medium">Actions</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colName')}</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colEmail')}</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colRole')}</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colActive')}</th>
+            <th className="text-left px-3 py-2 font-medium">{t('admin.users.colActions')}</th>
           </tr>
         </thead>
         <tbody className="bg-[hsl(var(--background))]">
@@ -136,17 +138,17 @@ export default function AdminUsersPage() {
               <td className="px-3 py-2">{r.name}</td>
               <td className="px-3 py-2">{r.email}</td>
               <td className="px-3 py-2 capitalize">{r.role}</td>
-              <td className="px-3 py-2">{r.active ? 'Yes' : 'No'}</td>
+              <td className="px-3 py-2">{r.active ? t('admin.users.yes') : t('admin.users.no')}</td>
               <td className="px-3 py-2">
                 <div className="flex items-center gap-2">
                   <button
                     className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
                     onClick={() => onSetActive(r, !r.active)}
-                  >{r.active ? 'Deactivate' : 'Activate'}</button>
+                  >{r.active ? t('admin.users.deactivate') : t('admin.users.activate')}</button>
                   <button
                     className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
                     onClick={() => { setPwdTarget(r); setPwdOpen(true) }}
-                  >Change Password</button>
+                  >{t('admin.users.changePassword')}</button>
                 </div>
               </td>
             </tr>
@@ -154,29 +156,29 @@ export default function AdminUsersPage() {
         </tbody>
       </table>
     </div>
-  ), [pageRows])
+  ), [pageRows, t])
 
   if (!isAdmin) return null
 
   return (
-    <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
+    <Suspense fallback={<div className="p-3 text-sm">{t('admin.users.loading')}</div>}>
     <div className="space-y-3">
       <Card className="p-0 bg-[hsl(var(--background))]">
         <div className="flex items-center justify-between px-3 py-2 bg-[hsl(var(--background))] border-b border-[hsl(var(--border))]">
           <div>
-            <Title className="text-gray-500 dark:text-white">Users</Title>
-            <Text className="mt-0 text-gray-500 dark:text-white">Manage system users</Text>
+            <Title className="text-gray-500 dark:text-white">{t('admin.users.title')}</Title>
+            <Text className="mt-0 text-gray-500 dark:text-white">{t('admin.users.subtitle')}</Text>
           </div>
-          <button className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium" onClick={() => setCreateOpen(true)}>Create User</button>
+          <button className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium" onClick={() => setCreateOpen(true)}>{t('admin.users.createUser')}</button>
         </div>
         <div className="p-3 space-y-3">
           <div className="flex items-center py-2 gap-2">
             <div className="flex items-center gap-2">
-              <label htmlFor="searchUsers" className="text-sm mr-2 text-gray-600 dark:text-gray-300">Search</label>
-              <input id="searchUsers" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users..." className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
+              <label htmlFor="searchUsers" className="text-sm mr-2 text-gray-600 dark:text-gray-300">{t('admin.users.search')}</label>
+              <input id="searchUsers" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('admin.users.searchPlaceholder')} className="w-56 md:w-72 px-2 py-1.5 rounded-md border bg-[hsl(var(--card))]" />
             </div>
             <div className="ml-auto flex items-center gap-2 text-sm shrink-0">
-              <span className="whitespace-nowrap min-w-[84px]">Per page</span>
+              <span className="whitespace-nowrap min-w-[84px]">{t('admin.users.perPage')}</span>
               <div className="min-w-[96px] rounded-[10px] border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]
                 [&_*]:!border-0 [&_*]:!border-transparent [&_*]:!ring-0 [&_*]:!ring-offset-0 [&_*]:!ring-transparent [&_*]:!outline-none [&_*]:!shadow-none
                 [&_button]:rounded-[10px] [&_[role=combobox]]:rounded-[10px]">
@@ -194,15 +196,15 @@ export default function AdminUsersPage() {
             </div>
           </div>
           {error && <div className="text-sm text-red-600">{error}</div>}
-          {loading ? <Text>Loading…</Text> : (
+          {loading ? <Text>{t('admin.users.loading')}</Text> : (
             <>
               {table}
               <div className="mt-1 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
-                <span>Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, filteredRows.length)} of {filteredRows.length}</span>
+                <span>{t('admin.users.showing', { from: page * pageSize + 1, to: Math.min((page + 1) * pageSize, filteredRows.length), total: filteredRows.length })}</span>
                 <div className="flex items-center gap-2">
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>Prev</button>
-                  <span>Page {page + 1} / {totalPages}</span>
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>Next</button>
+                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('admin.users.prev')}</button>
+                  <span>{t('admin.users.pageOf', { page: page + 1, total: totalPages })}</span>
+                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('admin.users.next')}</button>
                 </div>
               </div>
             </>
@@ -215,29 +217,29 @@ export default function AdminUsersPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/30" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Create user</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold">{t('admin.users.createDialogTitle')}</Dialog.Title>
             <div className="mt-3 space-y-3">
-              <label className="text-sm block">Full Name
+              <label className="text-sm block">{t('admin.users.fullName')}
                 <input className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={cuName} onChange={(e) => setCuName(e.target.value)} />
               </label>
-              <label className="text-sm block">Email
+              <label className="text-sm block">{t('admin.users.colEmail')}
                 <input type="email" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={cuEmail} onChange={(e) => setCuEmail(e.target.value)} />
               </label>
-              <label className="text-sm block">Password
+              <label className="text-sm block">{t('admin.users.password')}
                 <input type="password" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={cuPassword} onChange={(e) => setCuPassword(e.target.value)} />
               </label>
-              <label className="text-sm block">Role
+              <label className="text-sm block">{t('admin.users.colRole')}
                 <select className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={cuRole} onChange={(e) => setCuRole((e.target.value as 'user'|'admin') || 'user')}>
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
+                  <option value="user">{t('admin.users.roleUser')}</option>
+                  <option value="admin">{t('admin.users.roleAdmin')}</option>
                 </select>
               </label>
               {cuError && <div className="text-sm text-red-600">{cuError}</div>}
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
+                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.users.cancel')}</button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={cuBusy || !cuEmail || !cuPassword} onClick={onCreate}>{cuBusy ? 'Creating…' : 'Create'}</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border btn-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled={cuBusy || !cuEmail || !cuPassword} onClick={onCreate}>{cuBusy ? t('admin.users.creating') : t('admin.users.create')}</button>
               </div>
             </div>
           </Dialog.Content>
@@ -249,17 +251,17 @@ export default function AdminUsersPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/30" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[70] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-card p-4 shadow-card">
-            <Dialog.Title className="text-lg font-semibold">Change password ({pwdTarget?.email})</Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold">{t('admin.users.changePasswordTitle', { email: pwdTarget?.email ?? '' })}</Dialog.Title>
             <div className="mt-3 space-y-3">
-              <label className="text-sm block">New Password
+              <label className="text-sm block">{t('admin.users.newPassword')}
                 <input type="password" className="mt-1 w-full px-2 py-1.5 rounded-md border bg-background" value={pwdNew} onChange={(e) => setPwdNew(e.target.value)} />
               </label>
               {pwdError && <div className="text-sm text-red-600">{pwdError}</div>}
               <div className="flex items-center justify-end gap-2">
                 <Dialog.Close asChild>
-                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Cancel</button>
+                  <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('admin.users.cancel')}</button>
                 </Dialog.Close>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" disabled={pwdBusy || !pwdNew} onClick={onSetPassword}>{pwdBusy ? 'Saving…' : 'Save'}</button>
+                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" disabled={pwdBusy || !pwdNew} onClick={onSetPassword}>{pwdBusy ? t('admin.users.saving') : t('admin.users.save')}</button>
               </div>
             </div>
           </Dialog.Content>

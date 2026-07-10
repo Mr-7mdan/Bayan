@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense } from 'react'
+import { useTranslations } from 'next-intl'
 import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Badge, TextInput } from '@tremor/react'
 import { Api, parseUtcDate, type IntrospectResponse, type DatasourceDetailOut, type SyncTaskOut, type LocalStatsResponse } from '@/lib/api'
 import TablePreviewDialog from '@/components/builder/TablePreviewDialog'
@@ -15,6 +16,7 @@ const SchemaGraph = nextDynamic(() => import('@/components/datasources/SchemaGra
 export const dynamic = 'force-dynamic'
 
 export default function DatasourceDetailPage() {
+  const t = useTranslations('data')
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
   const searchParams = useSearchParams()
@@ -58,7 +60,7 @@ export default function DatasourceDetailPage() {
         if (isApi) { setError(null) }
       } catch (e: unknown) {
         if (!stop) {
-          const msg = e instanceof Error ? e.message : 'Failed to load datasource'
+          const msg = e instanceof Error ? e.message : t('datasources.detail.errorLoad')
           setDsError(msg)
           setTasksError(msg)
           setLocalError(msg)
@@ -120,6 +122,7 @@ export default function DatasourceDetailPage() {
   }
 
   const Tree = ({ data }: { data: IntrospectResponse }) => {
+    const tt = t // ponytail: table rows below use `t` as the loop var, shadowing the translator
     const owners = new Set(preferredOwners(ds?.type))
     const schemas = (data.schemas || []).filter((s) => !isRoleSchema(s.name) && (owners.size ? owners.has(s.name.toLowerCase()) : true))
     const tables = schemas.flatMap((s, si) => (s.tables || []).map((t, ti) => ({ ...t, __schema: s.name, __key: `${String(s.name)}.${t.name}#${si}-${ti}` }))) as Array<any>
@@ -132,7 +135,7 @@ export default function DatasourceDetailPage() {
                 <summary className="flex items-center gap-2 px-1 py-0.5 hover:bg-muted/50 rounded cursor-pointer min-w-0">
                   <RiTableLine className="h-4 w-4 opacity-80" />
                   <span className="px-1.5 py-0.5 text-xs rounded bg-muted max-w-[260px] truncate" title={t.name}>{t.name}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">{t.columns?.length || 0} cols</span>
+                  <span className="ml-auto text-xs text-muted-foreground">{tt('datasources.detail.colsCount', { count: t.columns?.length || 0 })}</span>
                 </summary>
                 <div className="mt-1 ml-6">
                   <table className="w-full table-fixed text-[11px]">
@@ -202,14 +205,14 @@ export default function DatasourceDetailPage() {
   }, [tasks])
 
   return (
-    <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
+    <Suspense fallback={<div className="p-3 text-sm">{t('datasources.detail.loading')}</div>}>
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <Title className="text-gray-700 dark:text-gray-100">{ds?.name || 'Datasource'}</Title>
+          <Title className="text-gray-700 dark:text-gray-100">{ds?.name || t('datasources.detail.fallbackName')}</Title>
           <div className="mt-1 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
             <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-white/60 px-2 py-1 text-[11px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200 dark:bg-white/5 dark:text-gray-200 dark:ring-gray-800">{ds?.type || '—'}</span>
-            <span className="opacity-80">ID:</span>
+            <span className="opacity-80">{t('datasources.detail.idLabel')}</span>
             <span className="font-mono">{id}</span>
           </div>
         </div>
@@ -218,12 +221,12 @@ export default function DatasourceDetailPage() {
       {/* Datasource Config */}
       <Card className="p-3">
         <div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-2">
-          <h3 className="text-sm font-semibold">Datasource Config</h3>
+          <h3 className="text-sm font-semibold">{t('datasources.detail.configTitle')}</h3>
           <div className="text-xs text-muted-foreground flex items-center gap-2">
             {typeof ds?.active === 'boolean' && (
-              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-white/60 px-2 py-1 text-[11px] font-medium ring-1 ring-inset ${ds.active ? 'text-emerald-700 ring-emerald-200 dark:text-emerald-300 dark:ring-emerald-900/60' : 'text-gray-600 ring-gray-200 dark:text-gray-300 dark:ring-gray-800'}`}>{ds.active ? 'Active' : 'Inactive'}</span>
+              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-white/60 px-2 py-1 text-[11px] font-medium ring-1 ring-inset ${ds.active ? 'text-emerald-700 ring-emerald-200 dark:text-emerald-300 dark:ring-emerald-900/60' : 'text-gray-600 ring-gray-200 dark:text-gray-300 dark:ring-gray-800'}`}>{ds.active ? t('datasources.common.active') : t('datasources.common.inactive')}</span>
             )}
-            {dsLoading && <Text>Loading…</Text>}
+            {dsLoading && <Text>{t('datasources.detail.loading')}</Text>}
             {dsError && <Text className="text-red-600">{dsError}</Text>}
             {!!(tasks && tasks.length) && (
               <button
@@ -233,47 +236,47 @@ export default function DatasourceDetailPage() {
                   try {
                     const res = await Api.runSyncNow(id, undefined, user?.id)
                     if (res?.ok === false) {
-                      show('Sync', res?.message || 'Failed to start')
+                      show(t('datasources.detail.syncTitle'), res?.message || t('datasources.detail.failedToStart'))
                       return
                     }
                     startMonitoring(id, user?.id)
                   } catch (e: any) {
-                    show('Sync', e?.message || 'Failed to start')
+                    show(t('datasources.detail.syncTitle'), e?.message || t('datasources.detail.failedToStart'))
                   }
                 }}
-                title={ds?.active === false ? 'Datasource is inactive' : 'Run all tasks now'}
-              >Run now</button>
+                title={ds?.active === false ? t('datasources.detail.inactiveHint') : t('datasources.detail.runAllHint')}
+              >{t('datasources.detail.runNow')}</button>
             )}
           </div>
         </div>
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Type</div>
+            <div className="text-xs text-muted-foreground">{t('datasources.detail.type')}</div>
             <div className="font-medium">{ds?.type || '—'}</div>
           </div>
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Created</div>
+            <div className="text-xs text-muted-foreground">{t('datasources.detail.created')}</div>
             <div>{ds?.createdAt ? new Date(ds.createdAt).toLocaleString() : '—'}</div>
           </div>
           {/* Compact Sync Summary */}
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Sync Summary</div>
+            <div className="text-xs text-muted-foreground">{t('datasources.detail.syncSummary')}</div>
             {tasksLoading ? (
-              <div>Loading…</div>
+              <div>{t('datasources.detail.loading')}</div>
             ) : tasksError ? (
               <div className="text-danger">{tasksError}</div>
             ) : (
               <div className="text-sm text-gray-700 dark:text-gray-200">
-                <span className="mr-3">Snapshot: <span className="font-medium">{syncSummary.snapshot}</span></span>
-                <span className="mr-3">Sequence: <span className="font-medium">{syncSummary.sequence}</span></span>
-                <span className="mr-3">Running: <span className="font-medium">{syncSummary.running}</span></span>
-                <span>Last run: <span className="font-medium">{syncSummary.lastRun || '—'}</span></span>
+                <span className="mr-3">{t('datasources.detail.snapshot')}: <span className="font-medium">{syncSummary.snapshot}</span></span>
+                <span className="mr-3">{t('datasources.detail.sequence')}: <span className="font-medium">{syncSummary.sequence}</span></span>
+                <span className="mr-3">{t('datasources.detail.running')}: <span className="font-medium">{syncSummary.running}</span></span>
+                <span>{t('datasources.detail.lastRun')}: <span className="font-medium">{syncSummary.lastRun || '—'}</span></span>
               </div>
             )}
           </div>
           {/* Sync options quick view */}
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Sync Options</div>
+            <div className="text-xs text-muted-foreground">{t('datasources.detail.syncOptions')}</div>
             <div className="text-sm text-gray-700 dark:text-gray-200">
               {(() => {
                 const sync = (ds?.options as any)?.sync || {}
@@ -281,27 +284,27 @@ export default function DatasourceDetailPage() {
                 const blk = Array.isArray(sync?.blackoutDaily) ? sync.blackoutDaily : []
                 return (
                   <>
-                    <span className="mr-3">Max concurrent: <span className="font-medium">{maxc}</span></span>
-                    <span>Blackouts: <span className="font-medium">{blk.length ? blk.map((w: any) => `${w.start}–${w.end}`).join(', ') : '—'}</span></span>
+                    <span className="mr-3">{t('datasources.detail.maxConcurrent')}: <span className="font-medium">{maxc}</span></span>
+                    <span>{t('datasources.detail.blackouts')}: <span className="font-medium">{blk.length ? blk.map((w: any) => `${w.start}–${w.end}`).join(', ') : '—'}</span></span>
                   </>
                 )
               })()}
             </div>
           </div>
           <div className="space-y-1 md:col-span-2">
-            <div className="text-xs text-muted-foreground">Connection URI</div>
+            <div className="text-xs text-muted-foreground">{t('datasources.detail.connectionUri')}</div>
             <div className="flex items-center gap-2">
               <code className="text-xs font-mono break-all px-2 py-1 rounded-md border bg-background w-full">{revealDsn ? (ds?.connectionUri || '') : (maskedDsn || '—')}</code>
-              <button type="button" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setRevealDsn((v) => !v)}>{revealDsn ? 'Hide' : 'Reveal'}</button>
+              <button type="button" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setRevealDsn((v) => !v)}>{revealDsn ? t('datasources.detail.hide') : t('datasources.detail.reveal')}</button>
               <button
                 type="button"
                 className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
                 onClick={() => { const txt = revealDsn ? (ds?.connectionUri || '') : (maskedDsn || ''); if (txt) void navigator.clipboard.writeText(txt) }}
-              >Copy</button>
+              >{t('datasources.detail.copy')}</button>
             </div>
           </div>
           <div className="space-y-1 md:col-span-2">
-            <div className="text-xs text-muted-foreground">Options</div>
+            <div className="text-xs text-muted-foreground">{t('datasources.detail.options')}</div>
             <div className="rounded-md border p-2 bg-background max-h-[180px] overflow-auto">
               <pre className="text-xs whitespace-pre-wrap">{ds?.options ? JSON.stringify(ds.options, null, 2) : '{ }'}</pre>
             </div>
@@ -313,41 +316,41 @@ export default function DatasourceDetailPage() {
       {syncSummary.running > 0 && (
         <Card className="p-3">
           <div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-2">
-            <h3 className="text-sm font-semibold">Running Sync Tasks</h3>
+            <h3 className="text-sm font-semibold">{t('datasources.detail.runningTasksTitle')}</h3>
             <button
               className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-700 dark:text-gray-200 px-2 py-1 text-xs hover:bg-[hsl(var(--muted))]"
               onClick={async () => {
-                if (!confirm(`Reset ${syncSummary.running} stuck sync task(s)? This will mark them as no longer in progress.`)) return
+                if (!confirm(t('datasources.detail.resetConfirm', { count: syncSummary.running }))) return
                 try {
                   const result = await Api.resetStuckSyncs(id, user?.id)
-                  show('Success', `Reset ${result.reset_count} stuck sync task(s)`)
+                  show(t('datasources.detail.successTitle'), t('datasources.detail.resetSuccess', { count: result.reset_count }))
                   // Refresh tasks
                   const updated = await Api.getSyncStatus(id, user?.id)
                   setTasks(updated)
                 } catch (err: any) {
-                  show('Error', err?.message || 'Failed to reset stuck syncs')
+                  show(t('datasources.detail.errorTitle'), err?.message || t('datasources.detail.resetFailed'))
                 }
               }}
             >
-              Reset All Stuck Syncs
+              {t('datasources.detail.resetAllStuck')}
             </button>
           </div>
           <div className="mt-3 space-y-2">
-            {tasks?.filter(t => t.inProgress).map(t => (
-              <div key={t.id} className="flex items-center justify-between p-2 rounded-md border bg-background">
+            {tasks?.filter(task => task.inProgress).map(task => (
+              <div key={task.id} className="flex items-center justify-between p-2 rounded-md border bg-background">
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{t.destTableName || 'Unknown'}</div>
+                  <div className="text-sm font-medium truncate">{task.destTableName || t('datasources.detail.unknown')}</div>
                   <div className="text-xs text-muted-foreground">
-                    Mode: {t.mode} • Last run: {t.lastRunAt ? (parseUtcDate(t.lastRunAt)?.toLocaleString() ?? '—') : '—'}
+                    {t('datasources.detail.mode')}: {task.mode} • {t('datasources.detail.lastRun')}: {task.lastRunAt ? (parseUtcDate(task.lastRunAt)?.toLocaleString() ?? '—') : '—'}
                   </div>
-                  {t.progressPhase && (
+                  {task.progressPhase && (
                     <div className="text-xs text-muted-foreground mt-1">
-                      Phase: {t.progressPhase} {t.progressCurrent != null && t.progressTotal != null && `(${t.progressCurrent}/${t.progressTotal})`}
+                      {t('datasources.detail.phase')}: {task.progressPhase} {task.progressCurrent != null && task.progressTotal != null && `(${task.progressCurrent}/${task.progressTotal})`}
                     </div>
                   )}
                 </div>
                 <div className="ml-3">
-                  <Badge color="amber">In Progress</Badge>
+                  <Badge color="amber">{t('datasources.detail.inProgress')}</Badge>
                 </div>
               </div>
             ))}
@@ -358,50 +361,50 @@ export default function DatasourceDetailPage() {
       {/* Local Stats Panel */}
       <Card className="p-3">
         <div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-2">
-          <h3 className="text-sm font-semibold">Local Stats</h3>
-          {localLoading && <Text>Loading…</Text>}
+          <h3 className="text-sm font-semibold">{t('datasources.detail.localStats')}</h3>
+          {localLoading && <Text>{t('datasources.detail.loading')}</Text>}
           {localError && <Text className="text-red-600">{localError}</Text>}
         </div>
         {localStats && (
           <div className="mt-3 text-sm">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Engine Path</div>
+                <div className="text-xs text-muted-foreground">{t('datasources.detail.enginePath')}</div>
                 <div className="font-mono break-all">{localStats.enginePath}</div>
               </div>
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">File Size</div>
-                <div>{(localStats.fileSize / (1024 * 1024)).toFixed(2)} MB</div>
+                <div className="text-xs text-muted-foreground">{t('datasources.detail.fileSize')}</div>
+                <div>{t('datasources.detail.megabytes', { size: (localStats.fileSize / (1024 * 1024)).toFixed(2) })}</div>
               </div>
             </div>
             <div className="mt-3">
-              <div className="text-xs text-muted-foreground mb-1">Materialized Tables</div>
+              <div className="text-xs text-muted-foreground mb-1">{t('datasources.detail.materializedTables')}</div>
               <div className="rounded-md border overflow-hidden">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-[hsl(var(--muted))] text-gray-700 dark:text-gray-200">
-                      <th className="text-left font-medium px-2 py-1">Table</th>
-                      <th className="text-left font-medium px-2 py-1">Row Count</th>
-                      <th className="text-left font-medium px-2 py-1">Last Sync</th>
-                      <th className="text-left font-medium px-2 py-1">Actions</th>
+                      <th className="text-left font-medium px-2 py-1">{t('datasources.detail.colTable')}</th>
+                      <th className="text-left font-medium px-2 py-1">{t('datasources.detail.colRowCount')}</th>
+                      <th className="text-left font-medium px-2 py-1">{t('datasources.detail.colLastSync')}</th>
+                      <th className="text-left font-medium px-2 py-1">{t('datasources.detail.colActions')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {localStats.tables.length === 0 ? (
-                      <tr><td className="px-2 py-2 text-muted-foreground" colSpan={4}>No materialized tables yet.</td></tr>
+                      <tr><td className="px-2 py-2 text-muted-foreground" colSpan={4}>{t('datasources.detail.noMaterialized')}</td></tr>
                     ) : (
-                      localStats.tables.map((t) => (
-                        <tr key={t.table} className="border-t">
-                          <td className="px-2 py-1 font-mono">{t.table}</td>
-                          <td className="px-2 py-1">{typeof t.rowCount === 'number' ? t.rowCount.toLocaleString() : '—'}</td>
-                          <td className="px-2 py-1">{t.lastSyncAt ? new Date(t.lastSyncAt).toLocaleString() : '—'}</td>
+                      localStats.tables.map((row) => (
+                        <tr key={row.table} className="border-t">
+                          <td className="px-2 py-1 font-mono">{row.table}</td>
+                          <td className="px-2 py-1">{typeof row.rowCount === 'number' ? row.rowCount.toLocaleString() : '—'}</td>
+                          <td className="px-2 py-1">{row.lastSyncAt ? new Date(row.lastSyncAt).toLocaleString() : '—'}</td>
                           <td className="px-2 py-1">
                             <button
                               type="button"
                               className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
-                              onClick={() => { setPreviewTable(t.table); setPreviewOpen(true) }}
-                              title="Preview table"
-                            >Preview</button>
+                              onClick={() => { setPreviewTable(row.table); setPreviewOpen(true) }}
+                              title={t('datasources.detail.previewTitle')}
+                            >{t('datasources.detail.preview')}</button>
                           </td>
                         </tr>
                       ))
@@ -416,25 +419,25 @@ export default function DatasourceDetailPage() {
 
       {(ds?.type || '').toLowerCase() !== 'api' && (
         <Card>
-          {loading ? <Text>Loading…</Text> : error ? (
+          {loading ? <Text>{t('datasources.detail.loading')}</Text> : error ? (
             <Text className="text-red-600">{error}</Text>
           ) : (
             <TabGroup>
               <TabList>
-                <Tab>Tree</Tab>
-                <Tab>Raw</Tab>
-                <Tab>Graph</Tab>
+                <Tab>{t('datasources.detail.tabTree')}</Tab>
+                <Tab>{t('datasources.detail.tabRaw')}</Tab>
+                <Tab>{t('datasources.detail.tabGraph')}</Tab>
               </TabList>
               <TabPanels>
                 <TabPanel>
                   <div className="mb-2 flex items-center gap-2">
-                    <Text className="text-sm">Search</Text>
-                    <TextInput className="w-72" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter tables or columns" />
+                    <Text className="text-sm">{t('datasources.detail.search')}</Text>
+                    <TextInput className="w-72" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('datasources.detail.filterPlaceholder')} />
                     {filtered && (
-                      <Badge color="blue">{filtered.schemas?.reduce((a, s) => a + (s.tables?.length || 0), 0)} tables</Badge>
+                      <Badge color="blue">{t('datasources.detail.tablesCount', { count: filtered.schemas?.reduce((a, s) => a + (s.tables?.length || 0), 0) })}</Badge>
                     )}
                   </div>
-                  {filtered ? <Tree data={filtered} /> : <Text>No data.</Text>}
+                  {filtered ? <Tree data={filtered} /> : <Text>{t('datasources.detail.noData')}</Text>}
                 </TabPanel>
                 <TabPanel>
                   <div className="text-sm max-h-[420px] overflow-auto">
@@ -442,7 +445,7 @@ export default function DatasourceDetailPage() {
                   </div>
                 </TabPanel>
                 <TabPanel>
-                  {schema ? <SchemaGraph schema={schema} height={560} /> : <Text>No schema.</Text>}
+                  {schema ? <SchemaGraph schema={schema} height={560} /> : <Text>{t('datasources.detail.noSchema')}</Text>}
                 </TabPanel>
               </TabPanels>
             </TabGroup>
