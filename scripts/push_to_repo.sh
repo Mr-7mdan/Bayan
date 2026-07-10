@@ -72,6 +72,12 @@ if ! git rev-parse HEAD >/dev/null 2>&1; then
   git commit -m "chore: initial commit" || true
 fi
 
+# Never release session/data/tooling dirs; untrack if present (files kept on disk).
+# Runs before the ban preflight so it never aborts on these.
+for _p in .data .playwright-mcp .shared/ui-ux-pro-max; do
+  git rm -r --cached -q -- "$_p" 2>/dev/null || true
+done
+
 CHANGES="$(git status --porcelain || true)"
 if [ -n "$CHANGES" ]; then
   echo "[push] Committing pending changes"
@@ -100,7 +106,7 @@ fi
 
 REWROTE=false
 # Preflight: detect tracked banned paths and handle first-commit rewrite safely
-BAN_REGEX='(^|/)node_modules/|(^|/)\.next/|^scripts/out/|(^|/)dist/'
+BAN_REGEX='(^|/)node_modules/|(^|/)\.next/|^scripts/out/|(^|/)dist/|^\.data/|^\.playwright-mcp/|^\.shared/ui-ux-pro-max/'
 TRACKED_BANNED=$(git ls-files -z | tr '\0' '\n' | grep -E "${BAN_REGEX}" || true)
 if [ -n "${TRACKED_BANNED}" ]; then
   COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 0)
@@ -115,6 +121,9 @@ if [ -n "${TRACKED_BANNED}" ]; then
     git rm -r --cached -q -- dist || true
     git rm -r --cached -q -- frontend/dist || true
     git rm -r --cached -q -- backend/dist || true
+    git rm -r --cached -q -- .data || true
+    git rm -r --cached -q -- .playwright-mcp || true
+    git rm -r --cached -q -- .shared/ui-ux-pro-max || true
     # Re-stage ignores and everything else, then amend the initial commit in-place
     git add .gitignore frontend/.gitignore || true
     git add -A
