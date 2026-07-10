@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from 'next-intl'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react'
 import { Api, QueryApi } from '@/lib/api'
@@ -70,6 +71,7 @@ function TableCard({
   tabbedGuard?: boolean
   tabbedField?: string
 }) {
+  const t = useTranslations('reports')
   const { filters } = useFilters()
   const { user } = useAuth()
   const [uiWhere, setUiWhere] = useState<Record<string, any>>({})
@@ -1004,7 +1006,7 @@ function TableCard({
         </div>
       ) : q.error ? (
         <div className="text-sm text-red-600">
-          Failed to load table
+          {t('widgetStates.failedTable')}
           {typeof window !== 'undefined' && process.env.NODE_ENV !== 'production' && (
             <div className="mt-2 text-xs font-mono whitespace-pre-wrap">
               {String((q.error as any)?.message || q.error)}
@@ -1012,7 +1014,7 @@ function TableCard({
           )}
         </div>
       ) : rows.length === 0 ? (
-        <div className="text-sm text-muted-foreground">No data</div>
+        <div className="text-sm text-muted-foreground">{t('widgetStates.noData')}</div>
       ) : (
         <>
           {(() => {

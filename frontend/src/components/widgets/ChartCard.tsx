@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useMemo, useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import { useQuery } from '@tanstack/react-query'
 import { Api } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
@@ -111,6 +112,7 @@ export default function ChartCard({
   tabbedGuard?: boolean
   tabbedField?: string
 }) {
+  const t = useTranslations('reports')
   // Normalize querySpec: strip root-level agg when series is defined (backend prioritizes root-level agg)
   const querySpec = useMemo(() => {
     const qs = querySpecRaw as any
@@ -6759,7 +6761,7 @@ export default function ChartCard({
       // Validate data before rendering to prevent ECharts errors
       if (nodes.length === 0 || finalLinks.length === 0) {
         return <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-          {q.isLoading ? 'Loading...' : 'No data available for Sankey chart'}
+          {q.isLoading ? t('widgetStates.loading') : t('widgetStates.noDataSankey')}
         </div>
       }
       
@@ -7371,9 +7373,9 @@ export default function ChartCard({
       ) : q.error ? (
         <div className="flex flex-col items-center justify-center gap-2 h-[220px] text-center px-4">
           <RiErrorWarningLine className="h-6 w-6 text-[hsl(var(--danger))]" aria-hidden="true" />
-          <div className="text-sm text-muted-foreground">Couldn’t load this chart.</div>
+          <div className="text-sm text-muted-foreground">{t('widgetStates.couldntLoadChart')}</div>
           <UiButton variant="ghost" size="sm" icon={<RiRestartLine className="h-3.5 w-3.5" aria-hidden="true" />} onClick={() => { void q.refetch() }}>
-            Retry
+            {t('widgetStates.retry')}
           </UiButton>
         </div>
       ) : (!isMulti && queryMode === 'spec' && !yLooksNumeric && (querySpec as any)?.select?.length >= 2) ? (
@@ -7382,7 +7384,7 @@ export default function ChartCard({
         </div>
       ) : data.length === 0 ? (
         <div className="h-[220px] flex items-center justify-center">
-          <EmptyState icon={<RiInboxLine className="h-5 w-5" aria-hidden="true" />} title="No data" hint="No rows match the current filters." />
+          <EmptyState icon={<RiInboxLine className="h-5 w-5" aria-hidden="true" />} title={t('widgetStates.noData')} hint={t('widgetStates.noRowsMatch')} />
         </div>
       ) : (
         <>

@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 import {
   RiCloseLine,
@@ -234,6 +235,7 @@ export default function TableCellsEditorModal({
   onCloseAction,
   onChangeAction,
 }: Props) {
+  const t = useTranslations('reports')
   const [tbl, setTbl] = useState(table)
   useEffect(() => { if (open) setTbl(table) }, [open, table])
 
@@ -540,17 +542,17 @@ export default function TableCellsEditorModal({
         {/* Header */}
         <header className="flex items-start justify-between px-5 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))]">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold tracking-tight">Table Formatter</h2>
+            <h2 className="text-sm font-semibold tracking-tight">{t('tableCells.title')}</h2>
             <p className="text-2xs text-muted-foreground mt-0.5">
-              Format rows, columns, cells. Merge, reorder, control widths, wrap, alignment. Edit cell content from the table preview in the main view.
+              {t('tableCells.subtitle')}
             </p>
           </div>
           <button
             type="button"
             className="text-muted-foreground hover:text-foreground p-1.5 rounded-md hover:bg-[hsl(var(--secondary)/0.6)] transition-colors duration-150 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))]"
             onClick={onCloseAction}
-            aria-label="Close (Esc)"
-            title="Close (Esc)"
+            aria-label={t('tableCells.closeEsc')}
+            title={t('tableCells.closeEsc')}
           >
             <RiCloseLine className="h-5 w-5" />
           </button>
@@ -558,36 +560,36 @@ export default function TableCellsEditorModal({
 
         {/* Toolbar */}
         <div className="flex items-center gap-3 px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.25)] flex-wrap">
-          <ToolbarGroup label="Merge">
-            <ToolbarButton onClick={doMerge} disabled={!canMerge} title="Merge selection (⌘M)" icon={<RiMergeCellsHorizontal className="h-3.5 w-3.5" />}>Merge</ToolbarButton>
-            <ToolbarButton onClick={doMergeHorizontal} disabled={!sel || selSize.w <= 1} title="Merge each row in the selection horizontally"><span className="font-mono">↔</span> Rows</ToolbarButton>
-            <ToolbarButton onClick={doMergeVertical} disabled={!sel || selSize.h <= 1} title="Merge each column in the selection vertically"><span className="font-mono">↕</span> Columns</ToolbarButton>
-            <ToolbarButton onClick={doUnmerge} disabled={!canUnmerge} title="Unmerge selection (⌘⇧M)" icon={<RiSplitCellsHorizontal className="h-3.5 w-3.5" />}>Unmerge</ToolbarButton>
+          <ToolbarGroup label={t('tableCells.groupMerge')}>
+            <ToolbarButton onClick={doMerge} disabled={!canMerge} title={t('tableCells.mergeTooltip')} icon={<RiMergeCellsHorizontal className="h-3.5 w-3.5" />}>{t('tableCells.merge')}</ToolbarButton>
+            <ToolbarButton onClick={doMergeHorizontal} disabled={!sel || selSize.w <= 1} title={t('tableCells.mergeRowsTooltip')}><span className="font-mono">↔</span> {t('tableCells.rows')}</ToolbarButton>
+            <ToolbarButton onClick={doMergeVertical} disabled={!sel || selSize.h <= 1} title={t('tableCells.mergeColumnsTooltip')}><span className="font-mono">↕</span> {t('tableCells.columns')}</ToolbarButton>
+            <ToolbarButton onClick={doUnmerge} disabled={!canUnmerge} title={t('tableCells.unmergeTooltip')} icon={<RiSplitCellsHorizontal className="h-3.5 w-3.5" />}>{t('tableCells.unmerge')}</ToolbarButton>
           </ToolbarGroup>
 
-          <ToolbarGroup label="Rows">
-            <ToolbarButton onClick={() => insertRowAt(tbl.rows)} title="Add a new row at the bottom" icon={<RiAddLine className="h-3.5 w-3.5" />}>Add row</ToolbarButton>
+          <ToolbarGroup label={t('tableCells.groupRows')}>
+            <ToolbarButton onClick={() => insertRowAt(tbl.rows)} title={t('tableCells.addRowTooltip')} icon={<RiAddLine className="h-3.5 w-3.5" />}>{t('tableCells.addRow')}</ToolbarButton>
           </ToolbarGroup>
 
-          <ToolbarGroup label="Layout">
+          <ToolbarGroup label={t('tableCells.groupLayout')}>
             <button
               type="button"
               onClick={() => setWrapText(!wrapText)}
-              title={wrapText ? 'Text wraps to multiple lines (click to disable)' : 'Text stays on a single line (click to enable wrap)'}
+              title={wrapText ? t('tableCells.wrapOnTooltip') : t('tableCells.wrapOffTooltip')}
               aria-pressed={wrapText}
               className={`text-2xs h-7 px-2 rounded-md border transition-colors duration-150 cursor-pointer inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${wrapText
                 ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] border-[hsl(var(--primary))]'
                 : 'border-[hsl(var(--border))] bg-[hsl(var(--background))] hover:bg-[hsl(var(--muted))]'}`}
             >
-              <RiTextWrap className="h-3.5 w-3.5" /> Wrap text
+              <RiTextWrap className="h-3.5 w-3.5" /> {t('tableCells.wrapText')}
             </button>
           </ToolbarGroup>
 
           <div className="ml-auto flex items-center gap-2 text-2xs text-muted-foreground">
             <RiInformationLine className="h-3.5 w-3.5" />
             {sel
-              ? <span><span className="font-medium text-foreground">{selSize.h}×{selSize.w}</span> selected</span>
-              : <span>Click a cell to start. <span className="opacity-70">Shift+click extends.</span></span>}
+              ? <span><span className="font-medium text-foreground">{selSize.h}×{selSize.w}</span> {t('tableCells.selectedCount')}</span>
+              : <span>{t('tableCells.clickToStart')} <span className="opacity-70">{t('tableCells.shiftExtends')}</span></span>}
           </div>
         </div>
 
@@ -609,7 +611,7 @@ export default function TableCellsEditorModal({
                   <th
                     className="sticky top-0 left-0 z-20 bg-[hsl(var(--muted))] border-r border-b border-[hsl(var(--border))] text-2xs font-semibold text-muted-foreground p-0 cursor-pointer hover:bg-[hsl(var(--secondary))] transition-colors duration-150"
                     onClick={selectAll}
-                    title="Select all cells"
+                    title={t('tableCells.selectAllCells')}
                   >
                     <div className="h-7 flex items-center justify-center">⌗</div>
                   </th>
@@ -617,10 +619,10 @@ export default function TableCellsEditorModal({
                     <th
                       key={i}
                       className="sticky top-0 z-10 bg-[hsl(var(--muted))] border-r border-b border-[hsl(var(--border))] px-2 h-7 text-2xs font-semibold text-muted-foreground truncate cursor-pointer hover:bg-[hsl(var(--secondary))] transition-colors duration-150"
-                      title={`${lbl} — click to select column`}
+                      title={`${lbl} — ${t('tableCells.selectColumnHint')}`}
                       onClick={() => selectCol(i)}
                     >
-                      {lbl || `Col ${i + 1}`}
+                      {lbl || t('tableCells.colFallback', { n: i + 1 })}
                     </th>
                   ))}
                 </tr>
@@ -636,18 +638,18 @@ export default function TableCellsEditorModal({
                       <td
                         className={`sticky left-0 z-[5] border-r border-b border-[hsl(var(--border))] p-0 cursor-pointer transition-colors duration-150 ${sel && (ri >= Math.min(sel.r1, sel.r2) && ri <= Math.max(sel.r1, sel.r2)) ? 'bg-[hsl(var(--primary)/0.12)]' : 'bg-[hsl(var(--muted)/0.6)] hover:bg-[hsl(var(--secondary))]'}`}
                         onClick={() => selectRow(ri)}
-                        title={`Select row ${ri + 1}`}
+                        title={t('tableCells.selectRow', { n: ri + 1 })}
                       >
                         <div className="h-9 px-1 flex items-center gap-0.5">
                           <RiDraggable className="h-3 w-3 text-muted-foreground/60 shrink-0" />
                           <span className="text-2xs tabular-nums font-mono text-muted-foreground w-4 text-right">{ri + 1}</span>
                           {rowHasFmt && (
-                            <span className="ml-0.5 inline-block w-1 h-1 rounded-full bg-[hsl(var(--primary))]" title="Row has custom formatting" aria-label="Row formatted" />
+                            <span className="ml-0.5 inline-block w-1 h-1 rounded-full bg-[hsl(var(--primary))]" title={t('tableCells.rowHasFormatting')} aria-label={t('tableCells.rowFormatted')} />
                           )}
                           <div className="ml-auto flex items-center opacity-0 group-hover/row:opacity-100 transition-opacity duration-150">
-                            <IconBtn onClick={(e) => { e.stopPropagation(); moveRowUp(ri) }} disabled={ri === 0} title="Move up"><RiArrowUpLine className="h-3 w-3" /></IconBtn>
-                            <IconBtn onClick={(e) => { e.stopPropagation(); moveRowDown(ri) }} disabled={ri >= tbl.rows - 1} title="Move down"><RiArrowDownLine className="h-3 w-3" /></IconBtn>
-                            <IconBtn onClick={(e) => { e.stopPropagation(); deleteRow(ri) }} disabled={tbl.rows <= 1} title="Delete row" danger><RiDeleteBinLine className="h-3 w-3" /></IconBtn>
+                            <IconBtn onClick={(e) => { e.stopPropagation(); moveRowUp(ri) }} disabled={ri === 0} title={t('tableCells.moveUp')}><RiArrowUpLine className="h-3 w-3" /></IconBtn>
+                            <IconBtn onClick={(e) => { e.stopPropagation(); moveRowDown(ri) }} disabled={ri >= tbl.rows - 1} title={t('tableCells.moveDown')}><RiArrowDownLine className="h-3 w-3" /></IconBtn>
+                            <IconBtn onClick={(e) => { e.stopPropagation(); deleteRow(ri) }} disabled={tbl.rows <= 1} title={t('tableCells.deleteRow')} danger><RiDeleteBinLine className="h-3 w-3" /></IconBtn>
                           </div>
                         </div>
                       </td>
@@ -682,7 +684,7 @@ export default function TableCellsEditorModal({
                               <CellPreview cell={cell} variables={variables} wrapText={wrapText} />
                             </div>
                             {isMergedAnchor && (
-                              <span className="absolute top-0.5 right-0.5 text-2xs font-semibold tabular-nums px-1 rounded bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" title={`Merged ${rspan}×${cspan}`}>{rspan}×{cspan}</span>
+                              <span className="absolute top-0.5 right-0.5 text-2xs font-semibold tabular-nums px-1 rounded bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" title={t('tableCells.mergedBadge', { rows: rspan, cols: cspan })}>{rspan}×{cspan}</span>
                             )}
                           </td>
                         )
@@ -698,38 +700,38 @@ export default function TableCellsEditorModal({
           <aside className="w-[320px] shrink-0 border-l border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-auto">
             <div className="p-4 space-y-5">
               <div>
-                <h3 className="text-xs font-semibold text-foreground tracking-tight">Selection</h3>
+                <h3 className="text-xs font-semibold text-foreground tracking-tight">{t('tableCells.selection')}</h3>
                 <p className="text-2xs text-muted-foreground mt-0.5">
                   {sel
                     ? <>{(() => { const n = normRect(sel); return `${n.r2 - n.r1 + 1} row${n.r2 - n.r1 ? 's' : ''} × ${n.c2 - n.c1 + 1} col${n.c2 - n.c1 ? 's' : ''}` })()}</>
-                    : 'No selection. Click a cell, row number, or column header.'}
+                    : t('tableCells.noSelection')}
                 </p>
               </div>
 
               {sel ? (
                 <>
                   {/* Cell alignment */}
-                  <Section title="Cell alignment">
-                    <Field label="Horizontal">
+                  <Section title={t('tableCells.cellAlignment')}>
+                    <Field label={t('tableCells.horizontal')}>
                       <ToggleGroup<Align>
-                        ariaLabel="Horizontal alignment"
+                        ariaLabel={t('tableCells.horizontalAlignment')}
                         value={selAlign}
                         options={[
-                          { value: 'left',   label: 'Left',   icon: <RiAlignLeft   className="h-3.5 w-3.5" /> },
-                          { value: 'center', label: 'Center', icon: <RiAlignCenter className="h-3.5 w-3.5" /> },
-                          { value: 'right',  label: 'Right',  icon: <RiAlignRight  className="h-3.5 w-3.5" /> },
+                          { value: 'left',   label: t('tableCells.left'),   icon: <RiAlignLeft   className="h-3.5 w-3.5" /> },
+                          { value: 'center', label: t('tableCells.center'), icon: <RiAlignCenter className="h-3.5 w-3.5" /> },
+                          { value: 'right',  label: t('tableCells.right'),  icon: <RiAlignRight  className="h-3.5 w-3.5" /> },
                         ]}
                         onChangeAction={(v) => patchSelectedCellsStyle({ align: v })}
                       />
                     </Field>
-                    <Field label="Vertical">
+                    <Field label={t('tableCells.vertical')}>
                       <ToggleGroup<VAlign>
-                        ariaLabel="Vertical alignment"
+                        ariaLabel={t('tableCells.verticalAlignment')}
                         value={selVAlign}
                         options={[
-                          { value: 'top',    label: 'Top',    icon: <RiAlignTop        className="h-3.5 w-3.5" /> },
-                          { value: 'middle', label: 'Middle', icon: <RiAlignVertically className="h-3.5 w-3.5" /> },
-                          { value: 'bottom', label: 'Bottom', icon: <RiAlignBottom     className="h-3.5 w-3.5" /> },
+                          { value: 'top',    label: t('tableCells.top'),    icon: <RiAlignTop        className="h-3.5 w-3.5" /> },
+                          { value: 'middle', label: t('tableCells.middle'), icon: <RiAlignVertically className="h-3.5 w-3.5" /> },
+                          { value: 'bottom', label: t('tableCells.bottom'), icon: <RiAlignBottom     className="h-3.5 w-3.5" /> },
                         ]}
                         onChangeAction={(v) => patchSelectedCellsStyle({ verticalAlign: v })}
                       />
@@ -737,7 +739,7 @@ export default function TableCellsEditorModal({
                   </Section>
 
                   {/* Column width */}
-                  <Section title={selSingleCol != null ? `Column ${selSingleCol + 1}` : `Columns ${normRect(sel).c1 + 1}–${normRect(sel).c2 + 1}`}>
+                  <Section title={selSingleCol != null ? t('tableCells.column', { n: selSingleCol + 1 }) : t('tableCells.columnsRange', { from: normRect(sel).c1 + 1, to: normRect(sel).c2 + 1 })}>
                     <ColumnWidthEditor
                       cols={(() => { const n = normRect(sel); return Array.from({ length: n.c2 - n.c1 + 1 }, (_, i) => n.c1 + i) })()}
                       colWidths={tbl.colWidths}
@@ -771,7 +773,7 @@ export default function TableCellsEditorModal({
               ) : (
                 <div className="rounded-md border border-dashed border-[hsl(var(--border))] p-4 text-center">
                   <p className="text-2xs text-muted-foreground leading-snug">
-                    Select a cell, click a row number, or click a column header to start formatting.
+                    {t('tableCells.startFormattingHint')}
                   </p>
                 </div>
               )}
@@ -782,16 +784,16 @@ export default function TableCellsEditorModal({
         {/* Status bar */}
         <footer className="flex items-center justify-between gap-3 px-4 h-9 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] text-2xs text-muted-foreground">
           <div className="flex items-center gap-3">
-            <span><span className="font-medium text-foreground">{tbl.rows}</span> rows × <span className="font-medium text-foreground">{totalCols}</span> cols</span>
-            {wrapText && <><span aria-hidden>•</span><span className="text-[hsl(var(--primary))]">wrap on</span></>}
+            <span><span className="font-medium text-foreground">{tbl.rows}</span> {t('tableCells.rows').toLowerCase()} × <span className="font-medium text-foreground">{totalCols}</span> {t('tableCells.columns').toLowerCase()}</span>
+            {wrapText && <><span aria-hidden>•</span><span className="text-[hsl(var(--primary))]">{t('tableCells.wrapOn')}</span></>}
             {mergedRegionsCount > 0 && <><span aria-hidden>•</span><span><span className="font-medium text-foreground">{mergedRegionsCount}</span> merged region{mergedRegionsCount === 1 ? '' : 's'}</span></>}
-            {sel && <><span aria-hidden>•</span><span>Selection <span className="font-medium text-foreground">{selSize.h}×{selSize.w}</span></span></>}
+            {sel && <><span aria-hidden>•</span><span>{t('tableCells.selectionLabel')} <span className="font-medium text-foreground">{selSize.h}×{selSize.w}</span></span></>}
           </div>
           <div className="flex items-center gap-2 text-2xs">
-            <Kbd>⌘M</Kbd> merge <span className="opacity-50">·</span>
-            <Kbd>⌘⇧M</Kbd> unmerge <span className="opacity-50">·</span>
-            <Kbd>Shift</Kbd>+arrows extend <span className="opacity-50">·</span>
-            <Kbd>Esc</Kbd> close
+            <Kbd>⌘M</Kbd> {t('tableCells.mergeHint')} <span className="opacity-50">·</span>
+            <Kbd>⌘⇧M</Kbd> {t('tableCells.unmergeHint')} <span className="opacity-50">·</span>
+            <Kbd>Shift</Kbd>+arrows {t('tableCells.extendHint')} <span className="opacity-50">·</span>
+            <Kbd>Esc</Kbd> {t('tableCells.closeHint')}
           </div>
         </footer>
       </div>
@@ -864,6 +866,7 @@ function ColumnWidthEditor({
   colWidths: number[] | undefined
   onSetWidthAction: (col: number, px: number | undefined) => void
 }) {
+  const t = useTranslations('reports')
   const single = cols.length === 1 ? cols[0] : null
   // Aggregate value when many cols selected: shared value or undefined
   const aggregate = useMemo(() => {
@@ -880,8 +883,8 @@ function ColumnWidthEditor({
 
   return (
     <div className="space-y-2">
-      <Field label="Mode">
-        <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden" role="radiogroup" aria-label="Column width mode">
+      <Field label={t('tableCells.mode')}>
+        <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden" role="radiogroup" aria-label={t('tableCells.mode')}>
           <button
             type="button"
             role="radio"
@@ -889,7 +892,7 @@ function ColumnWidthEditor({
             className={`px-2 h-7 text-2xs cursor-pointer transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${isAuto ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'bg-[hsl(var(--background))] text-muted-foreground hover:bg-[hsl(var(--muted))]'}`}
             onClick={() => cols.forEach(c => onSetWidthAction(c, undefined))}
           >
-            Auto-fit
+            {t('tableCells.autoFit')}
           </button>
           <button
             type="button"
@@ -898,11 +901,11 @@ function ColumnWidthEditor({
             className={`px-2 h-7 text-2xs cursor-pointer transition-colors duration-150 border-l border-[hsl(var(--border))] focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] ${!isAuto ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'bg-[hsl(var(--background))] text-muted-foreground hover:bg-[hsl(var(--muted))]'}`}
             onClick={() => cols.forEach(c => { if (!(colWidths?.[c])) onSetWidthAction(c, 120) })}
           >
-            Fixed
+            {t('tableCells.fixed')}
           </button>
         </div>
       </Field>
-      <Field label="Width (px)">
+      <Field label={t('tableCells.width')}>
         <input
           type="number"
           className="w-full h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -945,6 +948,7 @@ function RowFormattingPanel({
   onResetAction: () => void
   onSetHeightAction: (row: number, px: number | undefined) => void
 }) {
+  const t = useTranslations('reports')
   const single = selectedRows.length === 1 ? rowStyles?.[selectedRows[0]] : undefined
   const heightAggregate = useMemo(() => {
     if (selectedRows.length === 1) return rowHeights?.[selectedRows[0]] ?? 0
@@ -960,37 +964,37 @@ function RowFormattingPanel({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-foreground tracking-tight">Row formatting</h3>
+        <h3 className="text-xs font-semibold text-foreground tracking-tight">{t('tableCells.rowFormatting')}</h3>
         <button
           type="button"
           className="text-2xs text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer underline-offset-2 hover:underline"
           onClick={onResetAction}
         >
-          Reset row styles
+          {t('tableCells.resetRowStyles')}
         </button>
       </div>
 
-      <Section title="Colors">
+      <Section title={t('tableCells.colors')}>
         <div className="grid grid-cols-2 gap-3">
-          <ColorField label="Background" value={single?.bg} onChangeAction={(v) => onApplyAction({ bg: v })} placeholder="#ffffff" />
-          <ColorField label="Text"       value={single?.color} onChangeAction={(v) => onApplyAction({ color: v })} placeholder="#111827" />
+          <ColorField label={t('tableCells.background')} value={single?.bg} onChangeAction={(v) => onApplyAction({ bg: v })} placeholder="#ffffff" />
+          <ColorField label={t('tableCells.text')}       value={single?.color} onChangeAction={(v) => onApplyAction({ color: v })} placeholder="#111827" />
         </div>
       </Section>
 
-      <Section title="Typography">
+      <Section title={t('tableCells.typography')}>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Weight">
+          <Field label={t('tableCells.weight')}>
             <select
               className="w-full h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 cursor-pointer focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
               value={single?.fontWeight || 'normal'}
               onChange={(e) => onApplyAction({ fontWeight: e.target.value as any })}
             >
-              <option value="normal">Normal</option>
-              <option value="semibold">Semibold</option>
-              <option value="bold">Bold</option>
+              <option value="normal">{t('tableCells.weightNormal')}</option>
+              <option value="semibold">{t('tableCells.weightSemibold')}</option>
+              <option value="bold">{t('tableCells.weightBold')}</option>
             </select>
           </Field>
-          <Field label="Size (px)">
+          <Field label={t('tableCells.sizePx')}>
             <input
               type="number"
               className="w-full h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150"
@@ -1002,8 +1006,8 @@ function RowFormattingPanel({
         </div>
       </Section>
 
-      <Section title="Row height">
-        <Field label={wrapText ? 'Height (px)' : 'Height (px) — wrap text to enable'}>
+      <Section title={t('tableCells.rowHeight')}>
+        <Field label={wrapText ? t('tableCells.heightPx') : t('tableCells.heightPxWrap')}>
           <input
             type="number"
             className="w-full h-7 text-2xs rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 focus:ring-2 focus:ring-[hsl(var(--primary))] outline-none transition-shadow duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1024,9 +1028,9 @@ function RowFormattingPanel({
         </p>
       </Section>
 
-      <Section title="Borders">
+      <Section title={t('tableCells.borders')}>
         <BorderEditor
-          label="Top"
+          label={t('tableCells.borderTop')}
           style={single?.borderTopStyle}
           color={single?.borderTopColor}
           width={single?.borderTopWidth}
@@ -1035,7 +1039,7 @@ function RowFormattingPanel({
           onChangeWidthAction={(v) => onApplyAction({ borderTopWidth: v })}
         />
         <BorderEditor
-          label="Bottom"
+          label={t('tableCells.borderBottom')}
           style={single?.borderBottomStyle}
           color={single?.borderBottomColor}
           width={single?.borderBottomWidth}
@@ -1069,6 +1073,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function ColorField({
   label, value, onChangeAction, placeholder,
 }: { label: string; value: string | undefined; onChangeAction: (v: string | undefined) => void; placeholder: string }) {
+  const t = useTranslations('reports')
   return (
     <div>
       <label className="block text-2xs font-medium text-muted-foreground mb-1">{label}</label>
@@ -1093,8 +1098,8 @@ function ColorField({
             type="button"
             className="text-2xs text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer"
             onClick={() => onChangeAction(undefined)}
-            title="Clear"
-            aria-label={`Clear ${label}`}
+            title={t('tableCells.clear')}
+            aria-label={`${t('tableCells.clear')} ${label}`}
           >
             ✕
           </button>
@@ -1116,19 +1121,20 @@ function BorderEditor({
   onChangeColorAction: (v: string | undefined) => void
   onChangeWidthAction: (v: number | undefined) => void
 }) {
+  const t = useTranslations('reports')
   return (
     <div className="rounded-md border border-[hsl(var(--border))] p-2 bg-[hsl(var(--secondary)/0.25)]">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-2xs font-medium text-muted-foreground">{label} border</span>
+        <span className="text-2xs font-medium text-muted-foreground">{t('tableCells.borderSide', { side: label })}</span>
         {(style || color || width != null) && (
           <button
             type="button"
             className="text-2xs text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer"
             onClick={() => { onChangeStyleAction(undefined); onChangeColorAction(undefined); onChangeWidthAction(undefined) }}
-            title={`Clear ${label} border`}
-            aria-label={`Clear ${label} border`}
+            title={t('tableCells.clearBorderSide', { side: label })}
+            aria-label={t('tableCells.clearBorderSide', { side: label })}
           >
-            Clear
+            {t('tableCells.clear')}
           </button>
         )}
       </div>
@@ -1139,7 +1145,7 @@ function BorderEditor({
           onChange={(e) => onChangeStyleAction(e.target.value || undefined)}
           aria-label={`${label} border style`}
         >
-          <option value="">inherit</option>
+          <option value="">{t('tableCells.inherit')}</option>
           {BORDER_STYLES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <input

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import dynamic from 'next/dynamic'
 import { useQueries } from '@tanstack/react-query'
 import { QueryApi } from '@/lib/api'
@@ -317,6 +318,7 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
   resolvedValues: Record<string, { value: unknown; loading: boolean }>
   allWidgets?: Record<string, WidgetConfig>
 }) {
+  const t = useTranslations('reports')
   const resolveText = (text: string | undefined | null): string => {
     if (!text) return text ?? ''
     return text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, name) => {
@@ -377,9 +379,9 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
 
   if (element.type === 'spaceholder') {
     const v = variables.find(v => v.id === element.variableId)
-    if (!v) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">No variable</div>
+    if (!v) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">{t('widgetStates.noVariable')}</div>
     const rv = resolvedValues[v.id]
-    if (!rv || rv.loading) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs animate-pulse">Loading…</div>
+    if (!rv || rv.loading) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs animate-pulse">{t('widgetStates.loadingEllipsis')}</div>
     let condRule: ReturnType<typeof matchConditionalRule> = null
     if (v.conditionalFormat?.enabled) {
       const num = Number(rv.value)

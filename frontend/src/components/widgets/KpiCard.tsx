@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from 'next-intl'
 import { Metric } from '@tremor/react'
 import dynamic from 'next/dynamic'
 import { Api, QueryApi, RequestGuard } from '@/lib/api'
@@ -58,6 +59,7 @@ function KpiCard({
   pivot?: WidgetConfig['pivot']
   widgetId?: string
 }) {
+  const t = useTranslations('reports')
   const { env } = useEnvironment()
   const { filters } = useFilters()
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -1116,7 +1118,7 @@ function KpiCard({
           <div className="h-4 bg-muted rounded w-1/3" />
         </div>
       ) : kpi.error ? (
-        <Metric className="text-red-600">Error</Metric>
+        <Metric className="text-red-600">{t('widgetStates.error')}</Metric>
       ) : (
         <div className="space-y-1">
           {/* Basic-family presets; also supports multi-tile when Legend present */}

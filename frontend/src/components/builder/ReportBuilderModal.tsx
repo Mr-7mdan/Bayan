@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Api, QueryApi } from '@/lib/api'
@@ -264,6 +265,7 @@ function VariableEditor({
   onDuplicate?: () => void
   widgetId?: string
 }) {
+  const t = useTranslations('reports')
   const { user } = useAuth()
   const dsQ = useQuery({ queryKey: ['datasources'], queryFn: () => Api.listDatasources(undefined, user?.id) })
   const datasources = dsQ.data || []
@@ -609,21 +611,21 @@ function VariableEditor({
       <div className="p-3 space-y-2.5">
         {/* Variable Name */}
         <div>
-          <label className="block text-2xs font-medium text-muted-foreground mb-1">Name</label>
+          <label className="block text-2xs font-medium text-muted-foreground mb-1">{t('builder.varName')}</label>
           <input
             className="w-full h-7 text-2xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow font-mono"
             value={variable.name}
             onChange={(e) => handleChange({ name: e.target.value })}
-            placeholder="variableName"
+            placeholder={t('builder.varNamePlaceholder')}
           />
         </div>
         {/* Type selector */}
         <div>
-          <label className="block text-2xs font-medium text-muted-foreground mb-1">Type</label>
+          <label className="block text-2xs font-medium text-muted-foreground mb-1">{t('builder.varType')}</label>
           <select className="w-full h-7 text-2xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={varType} onChange={(e) => handleChange({ type: e.target.value as any })}>
-            <option value="query">Query (from datasource)</option>
-            <option value="expression">Expression (calculated)</option>
-            <option value="datetime">Date / Time</option>
+            <option value="query">{t('builder.varTypeQuery')}</option>
+            <option value="expression">{t('builder.varTypeExpression')}</option>
+            <option value="datetime">{t('builder.varTypeDatetime')}</option>
           </select>
         </div>
 
@@ -642,7 +644,7 @@ function VariableEditor({
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-2xs font-medium text-muted-foreground mb-1">Value</label>
+                <label className="block text-2xs font-medium text-muted-foreground mb-1">{t('builder.varValue')}</label>
                 <select className="w-full h-7 text-xs rounded-md border bg-secondary/40 px-2 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow cursor-pointer" value={variable.datetimeExpr || 'now'} onChange={(e) => handleChange({ datetimeExpr: e.target.value as any })}>
                   <optgroup label="Now">
                     <option value="now">now()</option>
@@ -1788,6 +1790,7 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
 
 // ─── Image Properties Sub-component ─────────────────────────────────
 function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (el: ReportElement) => void }) {
+  const t = useTranslations('reports')
   const img = element.image || { url: '', objectFit: 'contain' as const }
   const patch = (p: Partial<typeof img>) => onUpdate({ ...element, image: { ...img, ...p } })
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1808,16 +1811,16 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
         <button
           className={`flex-1 transition-colors ${tab === 'url' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'}`}
           onClick={() => setTab('url')}
-        >URL</button>
+        >{t('builder.elUrlTab')}</button>
         <button
           className={`flex-1 border-l transition-colors ${tab === 'upload' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'}`}
           onClick={() => setTab('upload')}
-        >Upload</button>
+        >{t('builder.elUpload')}</button>
       </div>
 
       {tab === 'url' ? (
         <div>
-          <label className="block text-2xs text-muted-foreground mb-1">Image URL</label>
+          <label className="block text-2xs text-muted-foreground mb-1">{t('builder.elImageUrl')}</label>
           <input
             className="w-full h-7 text-xs rounded border bg-secondary/60 px-2"
             value={img.url?.startsWith('data:') ? '' : (img.url || '')}
@@ -1827,7 +1830,7 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
         </div>
       ) : (
         <div>
-          <label className="block text-2xs text-muted-foreground mb-1">Image File</label>
+          <label className="block text-2xs text-muted-foreground mb-1">{t('builder.elImageFile')}</label>
           <input
             ref={fileInputRef}
             type="file"
@@ -1841,7 +1844,7 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
           >
             <RiImageLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate text-muted-foreground">
-              {img.url?.startsWith('data:') ? 'Replace image…' : 'Choose file…'}
+              {img.url?.startsWith('data:') ? t('builder.elReplaceImage') : t('builder.elChooseFile')}
             </span>
           </button>
           {img.url?.startsWith('data:') && (
@@ -1853,16 +1856,16 @@ function ImageProps({ element, onUpdate }: { element: ReportElement; onUpdate: (
       )}
 
       <div>
-        <label className="block text-2xs text-muted-foreground mb-1">Alt Text</label>
-        <input className="w-full h-7 text-xs rounded border bg-secondary/60 px-2" value={img.alt || ''} onChange={(e) => patch({ alt: e.target.value })} placeholder="Image description" />
+        <label className="block text-2xs text-muted-foreground mb-1">{t('builder.elAltText')}</label>
+        <input className="w-full h-7 text-xs rounded border bg-secondary/60 px-2" value={img.alt || ''} onChange={(e) => patch({ alt: e.target.value })} placeholder={t('builder.elAltTextPlaceholder')} />
       </div>
       <div>
-        <label className="block text-2xs text-muted-foreground mb-1">Object Fit</label>
+        <label className="block text-2xs text-muted-foreground mb-1">{t('builder.elObjectFit')}</label>
         <select className="w-full h-7 text-xs rounded border bg-secondary/60 px-2" value={img.objectFit || 'contain'} onChange={(e) => patch({ objectFit: e.target.value as any })}>
-          <option value="contain">Contain</option>
-          <option value="cover">Cover</option>
-          <option value="fill">Fill</option>
-          <option value="none">None</option>
+          <option value="contain">{t('builder.elFitContain')}</option>
+          <option value="cover">{t('builder.elFitCover')}</option>
+          <option value="fill">{t('builder.elFitFill')}</option>
+          <option value="none">{t('builder.elFitNone')}</option>
         </select>
       </div>
     </div>
@@ -1881,6 +1884,7 @@ function ElementProps({
   allWidgets?: Record<string, WidgetConfig>
   onUpdate: (el: ReportElement) => void
 }) {
+  const t = useTranslations('reports')
   const [cellsEditorOpen, setCellsEditorOpen] = useState(false)
 
   if (element.type === 'label') {
@@ -1888,11 +1892,11 @@ function ElementProps({
     const patch = (p: Partial<typeof lbl>) => onUpdate({ ...element, label: { ...lbl, ...p } })
     return (
       <div className="space-y-2">
-        <label className="block text-2xs text-muted-foreground">Text <span className="text-2xs opacity-60">Use {'{{varName}}'} for variables</span></label>
+        <label className="block text-2xs text-muted-foreground">{t('builder.elLabelText')} <span className="text-2xs opacity-60">Use {'{{varName}}'} for variables</span></label>
         <textarea className="w-full h-16 text-xs rounded border bg-secondary/60 px-2 py-1 resize-none" value={lbl.text} onChange={(e) => patch({ text: e.target.value })} />
         {variables.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            <span className="text-2xs text-muted-foreground">Insert:</span>
+            <span className="text-2xs text-muted-foreground">{t('builder.elInsert')}</span>
             {variables.map((v) => (
               <button
                 key={v.id}
@@ -1906,19 +1910,19 @@ function ElementProps({
         )}
         <div className="grid grid-cols-3 gap-2">
           <div>
-            <label className="block text-2xs text-muted-foreground mb-0.5">Size</label>
+            <label className="block text-2xs text-muted-foreground mb-0.5">{t('builder.elSize')}</label>
             <input type="number" className="w-full h-6 text-2xs rounded border bg-secondary/60 px-1" value={lbl.fontSize || 14} onChange={(e) => patch({ fontSize: +e.target.value })} />
           </div>
           <div>
-            <label className="block text-2xs text-muted-foreground mb-0.5">Weight</label>
+            <label className="block text-2xs text-muted-foreground mb-0.5">{t('builder.elWeight')}</label>
             <select className="w-full h-6 text-2xs rounded border bg-secondary/60 px-1" value={lbl.fontWeight || 'normal'} onChange={(e) => patch({ fontWeight: e.target.value as any })}>
-              <option value="normal">Normal</option>
-              <option value="semibold">Semi</option>
-              <option value="bold">Bold</option>
+              <option value="normal">{t('builder.elWeightNormal')}</option>
+              <option value="semibold">{t('builder.elWeightSemi')}</option>
+              <option value="bold">{t('builder.elWeightBold')}</option>
             </select>
           </div>
           <div>
-            <label className="block text-2xs text-muted-foreground mb-0.5">H. Align</label>
+            <label className="block text-2xs text-muted-foreground mb-0.5">{t('builder.elHAlign')}</label>
             <div className="flex rounded border overflow-hidden h-6">
               {(['left','center','right'] as const).map((a, i) => (
                 <button key={a} title={a.charAt(0).toUpperCase()+a.slice(1)} onClick={() => patch({ align: a })}
@@ -1933,7 +1937,7 @@ function ElementProps({
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div>
-            <label className="block text-2xs text-muted-foreground mb-0.5">V. Align</label>
+            <label className="block text-2xs text-muted-foreground mb-0.5">{t('builder.elVAlign')}</label>
             <div className="flex rounded border overflow-hidden h-6">
               {(['top','middle','bottom'] as const).map((a, i) => (
                 <button key={a} title={a.charAt(0).toUpperCase()+a.slice(1)} onClick={() => patch({ verticalAlign: a })}
@@ -2023,9 +2027,9 @@ function ElementProps({
   if (element.type === 'spaceholder') {
     return (
       <div className="space-y-2">
-        <label className="block text-2xs text-muted-foreground">Variable</label>
+        <label className="block text-2xs text-muted-foreground">{t('builder.elVariable')}</label>
         <select className="w-full h-7 text-xs rounded border bg-secondary/60 px-2" value={element.variableId || ''} onChange={(e) => onUpdate({ ...element, variableId: e.target.value })}>
-          <option value="">Select variable…</option>
+          <option value="">{t('builder.elSelectVariable')}</option>
           {variables.map((v) => <option key={v.id} value={v.id}>{`{{${v.name}}}`}</option>)}
         </select>
       </div>
@@ -3511,6 +3515,13 @@ export default function ReportBuilderModal({
   onSaveAction: (next: WidgetConfig) => void
   allWidgets?: Record<string, WidgetConfig>
 }) {
+  const t = useTranslations('reports')
+  const elementTypeLabel = (type: ReportElement['type']) =>
+    type === 'label' ? t('builder.elementLabel')
+    : type === 'image' ? t('builder.elementImage')
+    : type === 'table' ? t('builder.elementTable')
+    : type === 'chart' ? t('builder.elementChart')
+    : t('builder.elementVarSlot')
   const report = config.options?.report
   const [state, setState] = useState<ReportState>({
     gridCols: report?.gridCols || 12,
@@ -3760,7 +3771,7 @@ export default function ReportBuilderModal({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b bg-card shrink-0">
           <div className="flex items-center gap-3">
-            <button onClick={requestClose} className="text-muted-foreground hover:text-foreground p-1.5 rounded-md hover:bg-secondary transition-colors" title="Close">
+            <button onClick={requestClose} className="text-muted-foreground hover:text-foreground p-1.5 rounded-md hover:bg-secondary transition-colors" title={t('builder.close')}>
               <RiArrowLeftLine className="h-4 w-4" />
             </button>
             <div className="h-5 w-px bg-border" />
@@ -3769,27 +3780,27 @@ export default function ReportBuilderModal({
                 <RiSettings3Line className="h-4 w-4 text-primary" />
               </div>
               <div>
-                <h2 className="text-sm font-semibold leading-tight">Report Builder</h2>
-                <span className="text-2xs text-muted-foreground leading-none">{config.title} · {state.elements.length} elements · {state.variables.length} variables</span>
+                <h2 className="text-sm font-semibold leading-tight">{t('builder.title')}</h2>
+                <span className="text-2xs text-muted-foreground leading-none">{t('builder.subtitle', { title: config.title, elements: state.elements.length, variables: state.variables.length })}</span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {exportError && <span className="text-2xs text-[hsl(var(--danger))] max-w-[220px] truncate" title={exportError}>{exportError}</span>}
             {dirty
-              ? <span className="inline-flex items-center gap-1 text-2xs font-medium text-[hsl(var(--warning))]"><span className="h-1.5 w-1.5 rounded-full bg-current" />Unsaved changes</span>
+              ? <span className="inline-flex items-center gap-1 text-2xs font-medium text-[hsl(var(--warning))]"><span className="h-1.5 w-1.5 rounded-full bg-current" />{t('builder.unsavedChanges')}</span>
               : <StatusPill state={saveState} />}
             <button
               type="button"
               onClick={() => setHelpOpen(v => !v)}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-              title="Keyboard shortcuts"
-              aria-label="Keyboard shortcuts"
+              title={t('builder.keyboardShortcuts')}
+              aria-label={t('builder.keyboardShortcuts')}
             >
               <RiQuestionLine className="h-4 w-4" />
             </button>
-            <Button variant="outline" size="sm" icon={<RiDownloadLine className="h-3.5 w-3.5" />} loading={exporting} onClick={handleExport}>Export PDF</Button>
-            <Button variant="primary" size="sm" icon={<RiSave3Line className="h-3.5 w-3.5" />} onClick={handleSave}>Save Report</Button>
+            <Button variant="outline" size="sm" icon={<RiDownloadLine className="h-3.5 w-3.5" />} loading={exporting} onClick={handleExport}>{t('builder.exportPdf')}</Button>
+            <Button variant="primary" size="sm" icon={<RiSave3Line className="h-3.5 w-3.5" />} onClick={handleSave}>{t('builder.saveReport')}</Button>
           </div>
         </div>
 
@@ -3797,11 +3808,11 @@ export default function ReportBuilderModal({
         {helpOpen && (
           <div className="absolute end-4 top-14 z-[210] w-64 rounded-lg border border-[hsl(var(--border))] bg-popover text-popover-foreground shadow-popover anim-menu-in">
             <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-3 py-2">
-              <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">Keyboard shortcuts</span>
-              <button type="button" onClick={() => setHelpOpen(false)} aria-label="Close" className="text-muted-foreground hover:text-foreground"><RiCloseLine className="h-3.5 w-3.5" /></button>
+              <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{t('builder.keyboardShortcuts')}</span>
+              <button type="button" onClick={() => setHelpOpen(false)} aria-label={t('builder.close')} className="text-muted-foreground hover:text-foreground"><RiCloseLine className="h-3.5 w-3.5" /></button>
             </div>
             <ul className="px-3 py-2 space-y-1.5 text-xs">
-              {[['Delete / Backspace', 'Remove selected element'], ['Arrow keys', 'Nudge selected element'], ['Click', 'Select element'], ['Drag', 'Move / resize on canvas']].map(([k, d]) => (
+              {[[t('builder.shortcutKeysDeleteBackspace'), t('builder.shortcutRemove')], [t('builder.shortcutKeysArrows'), t('builder.shortcutNudge')], [t('builder.shortcutKeysClick'), t('builder.shortcutSelect')], [t('builder.shortcutKeysDrag'), t('builder.shortcutMove')]].map(([k, d]) => (
                 <li key={k} className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">{d}</span>
                   <kbd className="shrink-0 rounded border border-[hsl(var(--border))] bg-muted px-1.5 py-0.5 text-2xs font-medium">{k}</kbd>
@@ -3814,10 +3825,10 @@ export default function ReportBuilderModal({
         {/* Draft restore offer */}
         {draftOffer && (
           <div className="flex items-center gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--warning)/0.1)] px-4 py-2">
-            <span className="text-xs text-foreground">An unsaved draft was found for this report.</span>
+            <span className="text-xs text-foreground">{t('builder.draftFound')}</span>
             <div className="ms-auto flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={dismissDraft}>Discard draft</Button>
-              <Button variant="secondary" size="sm" onClick={restoreDraft}>Restore draft</Button>
+              <Button variant="ghost" size="sm" onClick={dismissDraft}>{t('builder.discardDraft')}</Button>
+              <Button variant="secondary" size="sm" onClick={restoreDraft}>{t('builder.restoreDraft')}</Button>
             </div>
           </div>
         )}
@@ -3833,12 +3844,12 @@ export default function ReportBuilderModal({
                 <button
                   className={`w-9 h-9 rounded-lg border flex flex-col items-center justify-center gap-0.5 transition-all ${leftTab === tab ? 'bg-primary/10 border-primary/30 text-primary' : 'border-transparent text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
                   onClick={() => setLeftTab(tab)}
-                  title={tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  title={tab === 'elements' ? t('builder.tabElements') : tab === 'variables' ? t('builder.tabVariables') : t('builder.tabSettings')}
                 >
                   {tab === 'elements' && <RiTableLine className="h-3.5 w-3.5" />}
                   {tab === 'variables' && <RiHashtag className="h-3.5 w-3.5" />}
                   {tab === 'settings' && <RiSettings3Line className="h-3.5 w-3.5" />}
-                  <span className="text-2xs font-semibold tracking-wide leading-none capitalize">{tab}</span>
+                  <span className="text-2xs font-semibold tracking-wide leading-none capitalize">{tab === 'elements' ? t('builder.tabElements') : tab === 'variables' ? t('builder.tabVariables') : t('builder.tabSettings')}</span>
                 </button>
               </React.Fragment>
             ))}
@@ -3850,39 +3861,39 @@ export default function ReportBuilderModal({
             {/* Elements tab */}
             {leftTab === 'elements' && (<>
               <div className="px-3 py-2 border-b bg-card/60 shrink-0">
-                <div className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Add Element</div>
+                <div className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">{t('builder.addElement')}</div>
               </div>
               <div className="p-2.5 border-b shrink-0">
                 <div className="grid grid-cols-2 gap-1.5">
                   <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('label')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--chart-1)/0.1)] group-hover:bg-[hsl(var(--chart-1)/0.2)] transition-colors"><RiText className="h-3.5 w-3.5 text-[hsl(var(--chart-1))]" /></div>
-                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">Label</span>
+                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">{t('builder.elementLabel')}</span>
                   </button>
                   <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('image')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--chart-3)/0.1)] group-hover:bg-[hsl(var(--chart-3)/0.2)] transition-colors"><RiImageLine className="h-3.5 w-3.5 text-[hsl(var(--chart-3))]" /></div>
-                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">Image</span>
+                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">{t('builder.elementImage')}</span>
                   </button>
                   <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('table')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--success)/0.1)] group-hover:bg-[hsl(var(--success)/0.2)] transition-colors"><RiTableLine className="h-3.5 w-3.5 text-success" /></div>
-                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">Table</span>
+                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">{t('builder.elementTable')}</span>
                   </button>
                   <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('spaceholder')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--accent)/0.1)] group-hover:bg-[hsl(var(--accent)/0.2)] transition-colors"><RiHashtag className="h-3.5 w-3.5 text-accent" /></div>
-                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">Var Slot</span>
+                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">{t('builder.elementVarSlot')}</span>
                   </button>
                   <button className="flex flex-col items-center gap-1 text-2xs px-2 py-2.5 rounded-lg border border-border/60 hover:bg-secondary hover:border-primary/30 transition-all cursor-pointer group" onClick={() => addElement('chart')}>
                     <div className="flex items-center justify-center h-7 w-7 rounded-md bg-[hsl(var(--chart-2)/0.1)] group-hover:bg-[hsl(var(--chart-2)/0.2)] transition-colors"><RiBarChart2Line className="h-3.5 w-3.5 text-[hsl(var(--chart-2))]" /></div>
-                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">Chart</span>
+                    <span className="text-muted-foreground group-hover:text-foreground transition-colors">{t('builder.elementChart')}</span>
                   </button>
                 </div>
               </div>
               <div className="flex items-center justify-between px-3 py-2 border-b bg-card/60 shrink-0">
-                <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Layers <span className="text-primary">({state.elements.length})</span></span>
+                <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">{t('builder.layers')} <span className="text-primary">({state.elements.length})</span></span>
               </div>
               <div className="flex-1 overflow-y-auto px-2 py-1">
                 {state.elements.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <p className="text-2xs text-muted-foreground">No elements yet</p>
+                    <p className="text-2xs text-muted-foreground">{t('builder.noElements')}</p>
                   </div>
                 ) : state.elements.map((el) => (
                   <div
@@ -3895,7 +3906,7 @@ export default function ReportBuilderModal({
                     {el.type === 'table' && <RiTableLine className="h-3 w-3 shrink-0 text-success" />}
                     {el.type === 'spaceholder' && <RiHashtag className="h-3 w-3 shrink-0 text-accent" />}
                     {el.type === 'chart' && <RiBarChart2Line className="h-3 w-3 shrink-0 text-[hsl(var(--chart-2))]" />}
-                    <span className="truncate flex-1 text-2xs">{el.type === 'label' ? (el.label?.text?.slice(0, 20) || 'Label') : el.type === 'image' ? 'Image' : el.type === 'table' ? `Table ${el.table?.rows}×${el.table?.cols}` : el.type === 'chart' ? (el.chart?.title || 'Chart (unlinked)') : `{{${state.variables.find(v => v.id === el.variableId)?.name || '?'}}}`}</span>
+                    <span className="truncate flex-1 text-2xs">{el.type === 'label' ? (el.label?.text?.slice(0, 20) || t('builder.elementLabel')) : el.type === 'image' ? t('builder.elementImage') : el.type === 'table' ? `${t('builder.elementTable')} ${el.table?.rows}×${el.table?.cols}` : el.type === 'chart' ? (el.chart?.title || t('builder.chartUnlinked')) : `{{${state.variables.find(v => v.id === el.variableId)?.name || '?'}}}`}</span>
                     <button className="text-destructive hover:bg-destructive/10 rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => { e.stopPropagation(); deleteElement(el.id) }}>
                       <RiDeleteBinLine className="h-3 w-3" />
                     </button>
@@ -3907,16 +3918,16 @@ export default function ReportBuilderModal({
             {/* Variables tab */}
             {leftTab === 'variables' && (<>
               <div className="px-3 py-2 border-b bg-card/60 shrink-0">
-                <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Variables <span className="text-primary">({state.variables.length})</span></span>
+                <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">{t('builder.variables')} <span className="text-primary">({state.variables.length})</span></span>
               </div>
               <div className="px-2 py-1.5 border-b shrink-0">
-                <input type="text" value={varSearch} onChange={e => setVarSearch(e.target.value)} placeholder="Search variables…" className="w-full h-6 text-2xs rounded border bg-secondary/40 px-2 outline-none focus:ring-1 focus:ring-primary/40 transition-shadow" />
+                <input type="text" value={varSearch} onChange={e => setVarSearch(e.target.value)} placeholder={t('builder.searchVariables')} className="w-full h-6 text-2xs rounded border bg-secondary/40 px-2 outline-none focus:ring-1 focus:ring-primary/40 transition-shadow" />
               </div>
               <div ref={varListRef} className="flex-1 overflow-y-auto">
                 {state.variables.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 px-3 text-center">
                     <RiHashtag className="h-5 w-5 text-muted-foreground/50 mb-2" />
-                    <p className="text-2xs text-muted-foreground">No variables yet</p>
+                    <p className="text-2xs text-muted-foreground">{t('builder.noVariables')}</p>
                   </div>
                 ) : state.variables.filter(v => !varSearch.trim() || v.name.toLowerCase().includes(varSearch.toLowerCase())).map((v) => (
                   <div
@@ -3943,8 +3954,8 @@ export default function ReportBuilderModal({
                           <button
                             type="button"
                             className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
-                            title="Rename variable"
-                            aria-label="Rename variable"
+                            title={t('builder.renameVariable')}
+                            aria-label={t('builder.renameVariable')}
                             onClick={e => { e.stopPropagation(); setRenamingVarId(v.id); setRenameValue(v.name); setSelectedVarId(v.id); setSelectedId(null) }}
                           >
                             <RiPencilLine className="h-3 w-3" />
@@ -3954,7 +3965,7 @@ export default function ReportBuilderModal({
                       <div className="text-2xs text-muted-foreground truncate">{v.value?.field || v.expression || v.datetimeExpr || '—'}</div>
                     </div>
                     <span
-                      title={v.type === 'expression' ? 'Expression' : v.type === 'datetime' ? 'Date/time' : 'Query'}
+                      title={v.type === 'expression' ? t('builder.typeExpression') : v.type === 'datetime' ? t('builder.typeDatetime') : t('builder.typeQuery')}
                       className={`inline-flex items-center justify-center h-5 w-5 rounded-full shrink-0 ${v.type === 'expression' ? 'bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))]' : v.type === 'datetime' ? 'bg-[hsl(var(--chart-2)/0.12)] text-[hsl(var(--chart-2))]' : 'bg-primary/10 text-primary'}`}
                     >
                       {v.type === 'expression' ? <RiFunctions className="h-3 w-3" /> : v.type === 'datetime' ? <RiCalendarLine className="h-3 w-3" /> : <RiHashtag className="h-3 w-3" />}
@@ -3964,7 +3975,7 @@ export default function ReportBuilderModal({
               </div>
               <div className="p-2 border-t shrink-0">
                 <button className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg border-2 border-dashed border-primary/30 hover:border-primary/60 hover:bg-primary/5 text-2xs font-medium text-primary transition-all" onClick={addVariable}>
-                  <RiAddLine className="h-3.5 w-3.5" /> New Variable
+                  <RiAddLine className="h-3.5 w-3.5" /> {t('builder.newVariable')}
                 </button>
               </div>
             </>)}
@@ -3972,26 +3983,26 @@ export default function ReportBuilderModal({
             {/* Settings tab */}
             {leftTab === 'settings' && (<>
               <div className="px-3 py-2 border-b bg-card/60 shrink-0">
-                <div className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Grid Settings</div>
+                <div className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">{t('builder.gridSettings')}</div>
               </div>
               <div className="p-3 space-y-3">
                 <div className="grid grid-cols-3 gap-1.5">
                   <div>
-                    <label className="block text-2xs text-muted-foreground mb-0.5">Cols</label>
+                    <label className="block text-2xs text-muted-foreground mb-0.5">{t('builder.cols')}</label>
                     <input type="number" className="w-full h-7 text-2xs rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.gridCols} onChange={(e) => setState(s => ({ ...s, gridCols: Math.max(1, +e.target.value) }))} />
                   </div>
                   <div>
-                    <label className="block text-2xs text-muted-foreground mb-0.5">Rows</label>
+                    <label className="block text-2xs text-muted-foreground mb-0.5">{t('builder.rows')}</label>
                     <input type="number" className="w-full h-7 text-2xs rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.gridRows} onChange={(e) => setState(s => ({ ...s, gridRows: Math.max(1, +e.target.value) }))} />
                   </div>
                   <div>
-                    <label className="block text-2xs text-muted-foreground mb-0.5">Cell px</label>
+                    <label className="block text-2xs text-muted-foreground mb-0.5">{t('builder.cellPx')}</label>
                     <input type="number" className="w-full h-7 text-2xs rounded-md border bg-secondary/50 px-1.5 focus:ring-1 focus:ring-primary/40 outline-none transition-shadow" value={state.cellSize} onChange={(e) => setState(s => ({ ...s, cellSize: Math.max(10, +e.target.value) }))} />
                   </div>
                 </div>
                 <label className="flex items-center gap-2 text-2xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                   <input type="checkbox" className="rounded border-border accent-primary" checked={state.showGridLines} onChange={(e) => setState(s => ({ ...s, showGridLines: e.target.checked }))} />
-                  Show grid lines
+                  {t('builder.showGridLines')}
                 </label>
               </div>
             </>)}
@@ -4002,13 +4013,13 @@ export default function ReportBuilderModal({
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
             {/* Canvas toolbar */}
             <div className="flex items-center gap-3 px-3 py-1.5 border-b bg-card/40 shrink-0">
-              <button type="button" onClick={() => setHelpOpen(true)} className="inline-flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground transition-colors" title="Keyboard shortcuts">
-                <RiQuestionLine className="h-3.5 w-3.5" /> Shortcuts
+              <button type="button" onClick={() => setHelpOpen(true)} className="inline-flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground transition-colors" title={t('builder.keyboardShortcuts')}>
+                <RiQuestionLine className="h-3.5 w-3.5" /> {t('builder.shortcuts')}
               </button>
               <div className="flex-1" />
               <label className="flex items-center gap-1.5 text-2xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                 <input type="checkbox" className="rounded border-border accent-primary" checked={state.showGridLines} onChange={(e) => setState(s => ({ ...s, showGridLines: e.target.checked }))} />
-                Grid
+                {t('builder.grid')}
               </label>
             </div>
             {/* Canvas body */}
@@ -4026,13 +4037,13 @@ export default function ReportBuilderModal({
             {/* Status bar */}
             <div className="flex items-center gap-3 px-3 py-1 border-t bg-card/40 shrink-0">
               {selectedEl ? (
-                <><span className="text-2xs font-medium text-foreground/80 capitalize">{selectedEl.type}</span><span className="text-2xs text-muted-foreground">X:{selectedEl.gridX} Y:{selectedEl.gridY} W:{selectedEl.gridW} H:{selectedEl.gridH}</span></>
+                <><span className="text-2xs font-medium text-foreground/80 capitalize">{elementTypeLabel(selectedEl.type)}</span><span className="text-2xs text-muted-foreground">X:{selectedEl.gridX} Y:{selectedEl.gridY} W:{selectedEl.gridW} H:{selectedEl.gridH}</span></>
               ) : (
-                <span className="text-2xs text-muted-foreground">Click an element to select</span>
+                <span className="text-2xs text-muted-foreground">{t('builder.clickToSelect')}</span>
               )}
               <div className="flex-1" />
-              <span className="text-2xs text-muted-foreground">{state.gridCols} cols · {state.gridRows} rows · {state.cellSize}px</span>
-              <span className="text-2xs text-primary/80">{state.elements.length} el · {state.variables.length} var</span>
+              <span className="text-2xs text-muted-foreground">{t('builder.gridSummary', { cols: state.gridCols, rows: state.gridRows, cell: state.cellSize })}</span>
+              <span className="text-2xs text-primary/80">{t('builder.elVarSummary', { elements: state.elements.length, variables: state.variables.length })}</span>
             </div>
           </div>
 
@@ -4048,16 +4059,16 @@ export default function ReportBuilderModal({
                     {selectedEl.type === 'table' && <RiTableLine className="h-3 w-3" />}
                     {selectedEl.type === 'spaceholder' && <RiHashtag className="h-3 w-3" />}
                     {selectedEl.type === 'chart' && <RiBarChart2Line className="h-3 w-3" />}
-                    <span className="capitalize">{selectedEl.type}</span>
+                    <span className="capitalize">{elementTypeLabel(selectedEl.type)}</span>
                   </span>
-                  <button className="ml-auto text-destructive/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-1 transition-colors" onClick={() => deleteElement(selectedEl.id)} title="Delete">
+                  <button className="ml-auto text-destructive/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-1 transition-colors" onClick={() => deleteElement(selectedEl.id)} title={t('builder.delete')}>
                     <RiDeleteBinLine className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ) : selectedVarId ? (
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-2xs font-semibold bg-accent/10 text-accent border border-accent/25">
-                    <RiHashtag className="h-3 w-3" /> Variable Editor
+                    <RiHashtag className="h-3 w-3" /> {t('builder.variableEditor')}
                   </span>
                   {(() => {
                     const sv = state.variables.find(v => v.id === selectedVarId)
@@ -4065,14 +4076,14 @@ export default function ReportBuilderModal({
                       <div className="flex items-center gap-1 ml-auto">
                         {confirmDeleteVarId === selectedVarId ? (
                           <>
-                            <span className="text-2xs text-destructive font-medium">Delete?</span>
-                            <button className="text-2xs px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground" onClick={() => { deleteVariable(sv.id); setConfirmDeleteVarId(null) }}>Yes</button>
-                            <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors" onClick={() => setConfirmDeleteVarId(null)}>No</button>
+                            <span className="text-2xs text-destructive font-medium">{t('builder.deleteQuestion')}</span>
+                            <button className="text-2xs px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground" onClick={() => { deleteVariable(sv.id); setConfirmDeleteVarId(null) }}>{t('builder.yes')}</button>
+                            <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted transition-colors" onClick={() => setConfirmDeleteVarId(null)}>{t('builder.no')}</button>
                           </>
                         ) : (
                           <>
-                            <button title="Duplicate" className="text-muted-foreground hover:text-foreground hover:bg-secondary p-1 rounded transition-colors" onClick={() => duplicateVariable(sv.id)}><RiFileCopyLine className="h-3.5 w-3.5" /></button>
-                            <button title="Delete" className="text-destructive/70 hover:text-destructive hover:bg-destructive/10 p-1 rounded transition-colors" onClick={() => setConfirmDeleteVarId(sv.id)}><RiDeleteBinLine className="h-3.5 w-3.5" /></button>
+                            <button title={t('builder.duplicate')} className="text-muted-foreground hover:text-foreground hover:bg-secondary p-1 rounded transition-colors" onClick={() => duplicateVariable(sv.id)}><RiFileCopyLine className="h-3.5 w-3.5" /></button>
+                            <button title={t('builder.delete')} className="text-destructive/70 hover:text-destructive hover:bg-destructive/10 p-1 rounded transition-colors" onClick={() => setConfirmDeleteVarId(sv.id)}><RiDeleteBinLine className="h-3.5 w-3.5" /></button>
                           </>
                         )}
                       </div>
@@ -4080,7 +4091,7 @@ export default function ReportBuilderModal({
                   })()}
                 </div>
               ) : (
-                <p className="text-2xs text-muted-foreground">Select an element or variable</p>
+                <p className="text-2xs text-muted-foreground">{t('builder.selectElementOrVariable')}</p>
               )}
             </div>
 
@@ -4089,7 +4100,7 @@ export default function ReportBuilderModal({
               {selectedEl && (
                 <div className="p-3 space-y-3">
                   <div className="rounded-lg border bg-secondary/30 p-2.5 space-y-2.5">
-                    <div className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">Position &amp; Size</div>
+                    <div className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{t('builder.positionSize')}</div>
                     <div className="grid grid-cols-4 gap-2">
                       {([
                         ['X', selectedEl.gridX, (n: number) => updateElement(selectedEl.id, { gridX: Math.max(0, n) })],
@@ -4104,20 +4115,20 @@ export default function ReportBuilderModal({
                       ))}
                     </div>
                     <div className="space-y-1">
-                      <div className="text-2xs font-medium text-muted-foreground">Align to canvas</div>
+                      <div className="text-2xs font-medium text-muted-foreground">{t('builder.alignToCanvas')}</div>
                       <div className="flex items-center gap-1">
                         {([
-                          ['left', RiAlignLeft, 'Align left'],
-                          ['hcenter', RiAlignCenter, 'Center horizontally'],
-                          ['right', RiAlignRight, 'Align right'],
+                          ['left', RiAlignLeft, t('builder.alignLeft')],
+                          ['hcenter', RiAlignCenter, t('builder.centerHorizontally')],
+                          ['right', RiAlignRight, t('builder.alignRight')],
                         ] as const).map(([axis, Icon, tip]) => (
                           <button key={axis} type="button" title={tip} aria-label={tip} onClick={() => alignSelected(axis)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[hsl(var(--border))] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"><Icon className="h-4 w-4" /></button>
                         ))}
                         <div className="mx-0.5 h-5 w-px bg-border" />
                         {([
-                          ['top', RiAlignTop, 'Align top'],
-                          ['vcenter', RiAlignVertically, 'Center vertically'],
-                          ['bottom', RiAlignBottom, 'Align bottom'],
+                          ['top', RiAlignTop, t('builder.alignTop')],
+                          ['vcenter', RiAlignVertically, t('builder.centerVertically')],
+                          ['bottom', RiAlignBottom, t('builder.alignBottom')],
                         ] as const).map(([axis, Icon, tip]) => (
                           <button key={axis} type="button" title={tip} aria-label={tip} onClick={() => alignSelected(axis)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[hsl(var(--border))] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"><Icon className="h-4 w-4" /></button>
                         ))}
@@ -4149,7 +4160,7 @@ export default function ReportBuilderModal({
                   <div className="flex items-center justify-center h-10 w-10 rounded-full bg-secondary mb-3">
                     <RiSettings3Line className="h-5 w-5 text-muted-foreground" />
                   </div>
-                  <p className="text-xs text-muted-foreground">Select an element on the canvas<br />or a variable from the list to edit</p>
+                  <p className="text-xs text-muted-foreground">{t('builder.selectHint')}</p>
                 </div>
               )}
             </div>
@@ -4161,15 +4172,15 @@ export default function ReportBuilderModal({
       <Modal
         open={confirmClose}
         onClose={() => setConfirmClose(false)}
-        title="Discard unsaved changes?"
-        description="Your changes to this report haven't been saved. A draft is kept locally so you can restore it next time."
+        title={t('builder.confirmCloseTitle')}
+        description={t('builder.confirmCloseDesc')}
         size="sm"
         footer={<>
-          <Button variant="ghost" size="sm" onClick={() => setConfirmClose(false)}>Keep editing</Button>
-          <Button variant="danger" size="sm" onClick={discardAndClose}>Discard &amp; close</Button>
+          <Button variant="ghost" size="sm" onClick={() => setConfirmClose(false)}>{t('builder.keepEditing')}</Button>
+          <Button variant="danger" size="sm" onClick={discardAndClose}>{t('builder.discardAndClose')}</Button>
         </>}
       >
-        <p className="text-sm text-muted-foreground">You can also cancel and click Save Report to keep your work.</p>
+        <p className="text-sm text-muted-foreground">{t('builder.confirmCloseHint')}</p>
       </Modal>
     </div>,
     document.body

@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useMemo, useEffect, useState, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import dynamic from 'next/dynamic'
 import { useQuery } from '@tanstack/react-query'
 import { useFilters } from '@/components/providers/FiltersProvider'
@@ -239,6 +240,7 @@ function HeatmapCard({
   tabbedGuard?: boolean
   tabbedField?: string
 }) {
+  const t = useTranslations('reports')
   const { filters } = useFilters()
   const { user } = useAuth()
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -1010,7 +1012,7 @@ function HeatmapCard({
   // correlation preset removed
 
   if (q.isLoading) return (<div ref={containerRef} className="space-y-2 animate-pulse"><div className="h-6 bg-muted rounded w-1/2" /><div className="h-[280px] bg-muted rounded" /></div>)
-  if (q.error) return (<div ref={containerRef} className="text-sm text-red-600">Failed to load heatmap</div>)
+  if (q.error) return (<div ref={containerRef} className="text-sm text-red-600">{t('widgetStates.failedHeatmap')}</div>)
 
   const keyBase = `${preset}|${(namedRows || []).length}|${wantTabs ? 'tabs' : 'no-tabs'}`
 
@@ -1220,7 +1222,7 @@ function HeatmapCard({
             {pairs.length > 0 ? (
               <ReactECharts ref={echartsRef} key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
             ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{t('widgetStates.noDataAvailable')}</div>
             )}
           </div>
         </div>
@@ -1309,7 +1311,7 @@ function HeatmapCard({
             {pairs.length > 0 ? (
               <ReactECharts ref={echartsRef} key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
             ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{t('widgetStates.noDataAvailable')}</div>
             )}
           </div>
         </div>
@@ -1384,7 +1386,7 @@ function HeatmapCard({
             {dataForSeries.length > 0 ? (
               <ReactECharts ref={echartsRef} key={keyBase} option={option} style={{ height: '100%' }} notMerge={true} lazyUpdate={true} />
             ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">No data available</div>
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{t('widgetStates.noDataAvailable')}</div>
             )}
           </div>
         </div>
@@ -1394,7 +1396,7 @@ function HeatmapCard({
   return (
     <div className="h-full flex flex-col" ref={containerRef}>
       {filterbarsUI}
-      <div className="text-sm text-muted-foreground">No data</div>
+      <div className="text-sm text-muted-foreground">{t('widgetStates.noData')}</div>
     </div>
   )
 }
