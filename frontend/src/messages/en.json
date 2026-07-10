@@ -59,6 +59,12 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "close": "Close",
-    "search": "Search"
+    "search": "Search",
+    "status": {
+      "saving": "Saving…",
+      "saved": "Saved",
+      "failed": "Save failed",
+      "retry": "Retry"
+    }
   }
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { RiCheckLine, RiErrorWarningLine } from '@remixicon/react'
 
 export type StatusPillState = 'idle' | 'saving' | 'saved' | 'error'
@@ -24,13 +25,18 @@ export interface StatusPillProps {
 export default function StatusPill({
   state,
   onRetry,
-  savingLabel = 'Saving…',
-  savedLabel = 'Saved',
-  errorLabel = 'Save failed',
-  retryLabel = 'Retry',
+  savingLabel,
+  savedLabel,
+  errorLabel,
+  retryLabel,
   saveFadeMs = 2000,
   className = '',
 }: StatusPillProps) {
+  const t = useTranslations('common.status')
+  const saving = savingLabel ?? t('saving')
+  const saved = savedLabel ?? t('saved')
+  const errored = errorLabel ?? t('failed')
+  const retry = retryLabel ?? t('retry')
   const [faded, setFaded] = useState(false)
 
   useEffect(() => {
@@ -47,7 +53,7 @@ export default function StatusPill({
     return (
       <span className={`${base} text-muted-foreground`}>
         <span aria-hidden className="inline-block h-3 w-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
-        {savingLabel}
+        {saving}
       </span>
     )
   }
@@ -58,7 +64,7 @@ export default function StatusPill({
         className={`${base} text-[hsl(var(--success))] transition-opacity [transition-duration:var(--dur-base)] [transition-timing-function:var(--ease-out)] ${faded ? 'opacity-0' : 'opacity-100'}`}
       >
         <RiCheckLine className="h-3.5 w-3.5" />
-        {savedLabel}
+        {saved}
       </span>
     )
   }
@@ -67,14 +73,14 @@ export default function StatusPill({
   return (
     <span className={`${base} text-[hsl(var(--danger))]`}>
       <RiErrorWarningLine className="h-3.5 w-3.5" />
-      {errorLabel}
+      {errored}
       {onRetry && (
         <button
           type="button"
           onClick={onRetry}
           className="ms-1 rounded px-1 underline underline-offset-2 hover:no-underline"
         >
-          {retryLabel}
+          {retry}
         </button>
       )}
     </span>
