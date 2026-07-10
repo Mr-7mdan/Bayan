@@ -10,6 +10,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 import { RiDatabase2Line, RiTableLine, RiBracesLine } from '@remixicon/react'
+import { Button } from '@/components/ui'
 import nextDynamic from 'next/dynamic'
 const SchemaGraph = nextDynamic(() => import('@/components/datasources/SchemaGraph'), { ssr: false })
 
@@ -229,8 +230,10 @@ export default function DatasourceDetailPage() {
             {dsLoading && <Text>{t('datasources.detail.loading')}</Text>}
             {dsError && <Text className="text-red-600">{dsError}</Text>}
             {!!(tasks && tasks.length) && (
-              <button
-                className="ml-2 inline-flex items-center rounded-md border btn-primary px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              <Button
+                className="ml-2"
+                size="sm"
+                variant="primary"
                 disabled={ds?.active === false}
                 onClick={async () => {
                   try {
@@ -245,7 +248,7 @@ export default function DatasourceDetailPage() {
                   }
                 }}
                 title={ds?.active === false ? t('datasources.detail.inactiveHint') : t('datasources.detail.runAllHint')}
-              >{t('datasources.detail.runNow')}</button>
+              >{t('datasources.detail.runNow')}</Button>
             )}
           </div>
         </div>
@@ -295,12 +298,13 @@ export default function DatasourceDetailPage() {
             <div className="text-xs text-muted-foreground">{t('datasources.detail.connectionUri')}</div>
             <div className="flex items-center gap-2">
               <code className="text-xs font-mono break-all px-2 py-1 rounded-md border bg-background w-full">{revealDsn ? (ds?.connectionUri || '') : (maskedDsn || '—')}</code>
-              <button type="button" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setRevealDsn((v) => !v)}>{revealDsn ? t('datasources.detail.hide') : t('datasources.detail.reveal')}</button>
-              <button
+              <Button type="button" size="sm" variant="outline" onClick={() => setRevealDsn((v) => !v)}>{revealDsn ? t('datasources.detail.hide') : t('datasources.detail.reveal')}</Button>
+              <Button
                 type="button"
-                className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
+                size="sm"
+                variant="outline"
                 onClick={() => { const txt = revealDsn ? (ds?.connectionUri || '') : (maskedDsn || ''); if (txt) void navigator.clipboard.writeText(txt) }}
-              >{t('datasources.detail.copy')}</button>
+              >{t('datasources.detail.copy')}</Button>
             </div>
           </div>
           <div className="space-y-1 md:col-span-2">
@@ -317,8 +321,9 @@ export default function DatasourceDetailPage() {
         <Card className="p-3">
           <div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-2">
             <h3 className="text-sm font-semibold">{t('datasources.detail.runningTasksTitle')}</h3>
-            <button
-              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-700 dark:text-gray-200 px-2 py-1 text-xs hover:bg-[hsl(var(--muted))]"
+            <Button
+              size="sm"
+              variant="outline"
               onClick={async () => {
                 if (!confirm(t('datasources.detail.resetConfirm', { count: syncSummary.running }))) return
                 try {
@@ -333,7 +338,7 @@ export default function DatasourceDetailPage() {
               }}
             >
               {t('datasources.detail.resetAllStuck')}
-            </button>
+            </Button>
           </div>
           <div className="mt-3 space-y-2">
             {tasks?.filter(task => task.inProgress).map(task => (
@@ -399,12 +404,13 @@ export default function DatasourceDetailPage() {
                           <td className="px-2 py-1">{typeof row.rowCount === 'number' ? row.rowCount.toLocaleString() : '—'}</td>
                           <td className="px-2 py-1">{row.lastSyncAt ? new Date(row.lastSyncAt).toLocaleString() : '—'}</td>
                           <td className="px-2 py-1">
-                            <button
+                            <Button
                               type="button"
-                              className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
+                              size="sm"
+                              variant="outline"
                               onClick={() => { setPreviewTable(row.table); setPreviewOpen(true) }}
                               title={t('datasources.detail.previewTitle')}
-                            >{t('datasources.detail.preview')}</button>
+                            >{t('datasources.detail.preview')}</Button>
                           </td>
                         </tr>
                       ))

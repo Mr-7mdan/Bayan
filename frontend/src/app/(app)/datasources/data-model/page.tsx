@@ -10,6 +10,7 @@ import type { IntrospectResponse as IR } from '@/lib/api'
 import { Select, SelectItem, Card, TextInput } from '@tremor/react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { RiEditBoxLine } from '@remixicon/react'
+import { Button } from '@/components/ui'
 import { useTranslations } from 'next-intl'
 
 type Row = {
@@ -272,16 +273,18 @@ export default function DataModelPage() {
             {selectedDuckId && (() => {
               const selDs = datasources.find(d => d.id === selectedDuckId)
               return selDs ? (
-                <button
-                  className="px-2 py-1 rounded-md border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5 text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10"
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => setExplorerDs(selDs)}
-                >{t('dataModel.localDucks.openExplorer')}</button>
+                >{t('dataModel.localDucks.openExplorer')}</Button>
               ) : null
             })()}
-            <button
-              className="px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
+            <Button
+              size="sm"
+              variant="primary"
               onClick={() => setCreateOpen(true)}
-            >{t('dataModel.localDucks.createNew')}</button>
+            >{t('dataModel.localDucks.createNew')}</Button>
           </div>
         </div>
         <div className="mt-2 text-[11px] text-muted-foreground">
@@ -338,14 +341,15 @@ export default function DataModelPage() {
                     <td className="px-2 py-1">
                       <div className="flex items-center gap-2">
                         {!isDefault && (
-                          <button className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]" onClick={(e)=>{
+                          <Button size="sm" variant="outline" onClick={(e)=>{
                             e.stopPropagation()
                             try { if (typeof window !== 'undefined') { localStorage.setItem('default_ds_id', d.id); window.dispatchEvent(new CustomEvent('default-ds-change')); setDefaultDsId(d.id) } } catch {}
-                          }}>{t('dataModel.localDucks.makeDefault')}</button>
+                          }}>{t('dataModel.localDucks.makeDefault')}</Button>
                         )}
                         {!isActiveSync && (
-                          <button
-                            className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
+                          <Button
+                            size="sm"
+                            variant="outline"
                             title={t('dataModel.localDucks.setActiveTooltip')}
                             onClick={async (e) => {
                               e.stopPropagation()
@@ -358,19 +362,21 @@ export default function DataModelPage() {
                                 console.error('Set active failed', e)
                               }
                             }}
-                          >{t('dataModel.localDucks.setActive')}</button>
+                          >{t('dataModel.localDucks.setActive')}</Button>
                         )}
-                        <button
-                          className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={(e) => { e.stopPropagation(); setExplorerDs(d) }}
-                        >{t('dataModel.localDucks.explorer')}</button>
-                        <button
-                          className="px-2 py-0.5 rounded border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]"
+                        >{t('dataModel.localDucks.explorer')}</Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
                           onClick={(e)=>{
                             e.stopPropagation()
                             setConfirmDeleteDuck({ open: true, duck: d })
                           }}
-                        >{t('dataModel.common.delete')}</button>
+                        >{t('dataModel.common.delete')}</Button>
                       </div>
                     </td>
                   </tr>
@@ -388,12 +394,13 @@ export default function DataModelPage() {
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">{t('dataModel.tables.tableCount', { count: baseRows.length })}</span>
           {selectedDuckId && (
-            <button
-              className="text-xs px-2.5 py-1 rounded-md border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5 text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 font-medium"
+            <Button
+              size="sm"
+              variant="outline"
               onClick={() => setImportOpen(true)}
             >
               {t('dataModel.tables.importTable')}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -532,17 +539,19 @@ export default function DataModelPage() {
                     <td className="px-3 py-2">{nextSync ? nextSync : '—'}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
-                        <button className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={() => setPreview({ open: true, dsId: r.datasourceId, table: r.table })}>{t('dataModel.grid.view')}</button>
-                        <button
-                          className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
+                        <Button size="sm" variant="outline" onClick={() => setPreview({ open: true, dsId: r.datasourceId, table: r.table })}>{t('dataModel.grid.view')}</Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={() => {
                             const schemaOne: IR = { schemas: [{ name: 'main', tables: [{ name: r.table, columns: cols }] }] }
                             setAdv({ open: true, dsId: r.datasourceId, dsType: r.datasourceType, source: r.table, schema: schemaOne })
                           }}
-                        >{t('dataModel.grid.advancedSql')}</button>
+                        >{t('dataModel.grid.advancedSql')}</Button>
                         {task && (
-                          <button
-                            className="text-xs px-2 py-1 rounded-md border hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+                          <Button
+                            size="sm"
+                            variant="outline"
                             title={t('dataModel.grid.flushTooltip')}
                             onClick={async () => {
                               try {
@@ -561,12 +570,13 @@ export default function DataModelPage() {
                                 setTimeout(() => setToast(null), 5000)
                               }
                             }}
-                          >{t('dataModel.grid.flush')}</button>
+                          >{t('dataModel.grid.flush')}</Button>
                         )}
-                        <button
-                          className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--danger))/0.12] text-[hsl(var(--danger))]"
+                        <Button
+                          size="sm"
+                          variant="danger"
                           onClick={() => setConfirmDeleteTable({ open: true, dsId: r.datasourceId, table: r.table })}
-                        >{t('dataModel.common.delete')}</button>
+                        >{t('dataModel.common.delete')}</Button>
                       </div>
                     </td>
                   </tr>
@@ -597,15 +607,16 @@ export default function DataModelPage() {
                           <div>
                             <div className="flex items-center justify-between mb-1">
                               <div className="text-[11px] font-medium">{t('dataModel.expanded.customColumnsTitle')}</div>
-                              <button 
-                                className="text-[10px] px-1.5 py-0.5 rounded border hover:bg-[hsl(var(--muted))]"
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={() => {
                                   const schemaOne: IR = { schemas: [{ name: 'main', tables: [{ name: r.table, columns: cols }] }] }
                                   setAdv({ open: true, dsId: r.datasourceId, dsType: r.datasourceType, source: r.table, schema: schemaOne })
                                 }}
                               >
                                 {t('dataModel.common.edit')}
-                              </button>
+                              </Button>
                             </div>
                             <div className="overflow-x-auto">
                               {(() => {
@@ -816,9 +827,9 @@ export default function DataModelPage() {
         <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
           <span>{t('dataModel.pagination.showing', { start: page * pageSize + 1, end: Math.min((page + 1) * pageSize, filtered.length), total: filtered.length })}</span>
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('dataModel.pagination.prev')}</button>
+            <Button size="sm" variant="outline" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('dataModel.pagination.prev')}</Button>
             <span>{t('dataModel.pagination.pageOf', { page: page + 1, total: totalPages })}</span>
-            <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('dataModel.pagination.next')}</button>
+            <Button size="sm" variant="outline" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>{t('dataModel.pagination.next')}</Button>
           </div>
         </div>
       )}
@@ -886,14 +897,16 @@ export default function DataModelPage() {
               {t.rich('dataModel.dialogs.deleteTableConfirm', { name: confirmDeleteTable.table ?? '', strong: (chunks) => <span className="font-mono font-semibold text-foreground">{chunks}</span> })}
             </Dialog.Description>
             <div className="flex items-center justify-end gap-2">
-              <button 
-                className="px-3 py-1.5 text-sm rounded-md border hover:bg-[hsl(var(--muted))]"
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => setConfirmDeleteTable({ open: false })}
               >
                 {t('dataModel.common.cancel')}
-              </button>
-              <button
-                className="px-3 py-1.5 text-sm rounded-md border bg-red-600 text-white hover:bg-red-700"
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
                 onClick={async () => {
                   try {
                     await Api.dropLocalTable(confirmDeleteTable.dsId!, confirmDeleteTable.table!, user?.id)
@@ -905,7 +918,7 @@ export default function DataModelPage() {
                 }}
               >
                 {t('dataModel.common.delete')}
-              </button>
+              </Button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -921,14 +934,16 @@ export default function DataModelPage() {
               {t.rich('dataModel.dialogs.deleteDuckConfirm', { name: confirmDeleteDuck.duck?.name ?? '', strong: (chunks) => <span className="font-semibold text-foreground">{chunks}</span> })}
             </Dialog.Description>
             <div className="flex items-center justify-end gap-2">
-              <button 
-                className="px-3 py-1.5 text-sm rounded-md border hover:bg-[hsl(var(--muted))]"
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => setConfirmDeleteDuck({ open: false })}
               >
                 {t('dataModel.common.cancel')}
-              </button>
-              <button 
-                className="px-3 py-1.5 text-sm rounded-md border bg-red-600 text-white hover:bg-red-700"
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
                 onClick={async () => {
                   try {
                     const duckId = confirmDeleteDuck.duck?.id
@@ -948,7 +963,7 @@ export default function DataModelPage() {
                 }}
               >
                 {t('dataModel.common.delete')}
-              </button>
+              </Button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -967,10 +982,11 @@ export default function DataModelPage() {
               </label>
             </div>
             <div className="px-4 py-3 border-t flex items-center justify-end gap-2">
-              <button type="button" className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]" onClick={()=>{ setCreateOpen(false) }}>{t('dataModel.common.cancel')}</button>
-              <button
+              <Button type="button" size="sm" variant="outline" onClick={()=>{ setCreateOpen(false) }}>{t('dataModel.common.cancel')}</Button>
+              <Button
                 type="button"
-                className="text-xs px-2 py-1 rounded-md border hover:bg-[hsl(var(--muted))]"
+                size="sm"
+                variant="primary"
                 disabled={creating || !(newName||'').trim()}
                 onClick={async ()=>{
                   setCreating(true)
@@ -990,7 +1006,7 @@ export default function DataModelPage() {
                     setCreating(false)
                   }
                 }}
-              >{creating ? t('dataModel.dialogs.creating') : t('dataModel.dialogs.create')}</button>
+              >{creating ? t('dataModel.dialogs.creating') : t('dataModel.dialogs.create')}</Button>
             </div>
           </Card>
         </div>

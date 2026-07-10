@@ -13,6 +13,7 @@ import DataExplorerDialog from '@/components/builder/DataExplorerDialogV2'
 import ExecuteSqlDialog from '@/components/datasources/ExecuteSqlDialog'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
+import { Button } from '@/components/ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -141,8 +142,8 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
             <Dialog.Title className="text-lg font-semibold">{t('datasources.list.deleteTitle')}</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground mt-1">{t('datasources.list.deleteDescription', { name: ds.name })}</Dialog.Description>
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('datasources.list.cancel')}</button></Dialog.Close>
-              <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-red-50 text-red-600" disabled={busy === 'delete'} onClick={async () => { setBusy('delete'); try { await onDelete(ds) } finally { setBusy(null); setConfirmOpen(false) } }}>{busy === 'delete' ? t('datasources.list.deleting') : t('datasources.list.delete')}</button>
+              <Dialog.Close asChild><Button type="button" size="sm" variant="outline">{t('datasources.list.cancel')}</Button></Dialog.Close>
+              <Button type="button" size="sm" variant="danger" disabled={busy === 'delete'} onClick={async () => { setBusy('delete'); try { await onDelete(ds) } finally { setBusy(null); setConfirmOpen(false) } }}>{busy === 'delete' ? t('datasources.list.deleting') : t('datasources.list.delete')}</Button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -173,10 +174,10 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                 </select>
               </div>
               <div className="pb-1">
-                <button className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted disabled:opacity-50" disabled={shareBusy || !selectedUserId} onClick={async () => {
+                <Button size="sm" variant="primary" disabled={shareBusy || !selectedUserId} onClick={async () => {
                   setShareBusy(true); setShareError('')
                   try { await Api.addDatasourceShare(ds.id, { userId: selectedUserId, permission: perm }, user?.id); setSelectedUserId(''); await refreshShares() } catch (e: any) { setShareError(e?.message || t('datasources.list.failed')) } finally { setShareBusy(false) }
-                }}>{shareBusy ? t('datasources.list.adding') : t('datasources.list.add')}</button>
+                }}>{shareBusy ? t('datasources.list.adding') : t('datasources.list.add')}</Button>
               </div>
             </div>
             {!!shareError && <div className="mt-2 text-sm text-red-600">{shareError}</div>}
@@ -193,13 +194,13 @@ function SourceRow({ ds, meta, onOpen, onEdit, onDelete, onToggleActive, onExplo
                       {s.email && <span className="ml-2 text-muted-foreground">{s.email}</span>}
                       <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded border">{s.permission.toUpperCase()}</span>
                     </div>
-                    <button className="px-2 py-0.5 rounded-md border hover:bg-muted" onClick={async () => { try { await Api.deleteDatasourceShare(ds.id, s.userId, user?.id); await refreshShares() } catch (e: any) { setShareError(e?.message || t('datasources.list.failedRemoveShare')) } }}>{t('datasources.list.remove')}</button>
+                    <Button size="sm" variant="danger" onClick={async () => { try { await Api.deleteDatasourceShare(ds.id, s.userId, user?.id); await refreshShares() } catch (e: any) { setShareError(e?.message || t('datasources.list.failedRemoveShare')) } }}>{t('datasources.list.remove')}</Button>
                   </div>
                 ))}
               </div>
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Dialog.Close asChild><button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('datasources.list.close')}</button></Dialog.Close>
+              <Dialog.Close asChild><Button type="button" size="sm" variant="outline">{t('datasources.list.close')}</Button></Dialog.Close>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -363,9 +364,10 @@ function MyDatasourcesPageInner() {
             <Text className="mt-0 text-gray-500 dark:text-white">{t('datasources.list.subtitle')}</Text>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => { setDlgInitial(undefined); setDlgMode('create'); setDlgOpen(true) }} className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium">{t('datasources.list.addDatasource')}</button>
-            <button
-              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+            <Button size="sm" variant="primary" onClick={() => { setDlgInitial(undefined); setDlgMode('create'); setDlgOpen(true) }}>{t('datasources.list.addDatasource')}</Button>
+            <Button
+              size="sm"
+              variant="outline"
               onClick={async () => {
                 try {
                   const data = await Api.exportDatasources({ includeSyncTasks: true, actorId: user?.id || undefined })
@@ -382,12 +384,13 @@ function MyDatasourcesPageInner() {
                   setToast(t('datasources.list.exportFailed'), 'error'); window.setTimeout(() => setToast(''), 2000)
                 }
               }}
-            >{t('datasources.list.exportAll')}</button>
-            <button
-              className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50"
+            >{t('datasources.list.exportAll')}</Button>
+            <Button
+              size="sm"
+              variant="outline"
               disabled={busyImport}
               onClick={() => fileRef.current?.click()}
-            >{busyImport ? t('datasources.list.importing') : t('datasources.list.importJson')}</button>
+            >{busyImport ? t('datasources.list.importing') : t('datasources.list.importJson')}</Button>
             <input ref={fileRef} hidden type="file" accept="application/json" onChange={async (e) => {
               const file = e.target.files?.[0]
               if (!file) return
@@ -449,9 +452,9 @@ function MyDatasourcesPageInner() {
                 <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                   <span>{t('datasources.list.showing', { from: pageActive * pageSize + 1, to: Math.min((pageActive + 1) * pageSize, activeItems.length), total: activeItems.length })}</span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageActive <= 0} onClick={() => setPageActive((p) => Math.max(0, p - 1))}>{t('datasources.list.prev')}</button>
+                    <Button size="sm" variant="outline" disabled={pageActive <= 0} onClick={() => setPageActive((p) => Math.max(0, p - 1))}>{t('datasources.list.prev')}</Button>
                     <span>{t('datasources.list.pageOf', { page: pageActive + 1, total: totalPagesActive })}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageActive >= totalPagesActive - 1} onClick={() => setPageActive((p) => Math.min(totalPagesActive - 1, p + 1))}>{t('datasources.list.next')}</button>
+                    <Button size="sm" variant="outline" disabled={pageActive >= totalPagesActive - 1} onClick={() => setPageActive((p) => Math.min(totalPagesActive - 1, p + 1))}>{t('datasources.list.next')}</Button>
                   </div>
                 </div>
               )}
@@ -485,9 +488,9 @@ function MyDatasourcesPageInner() {
                 <div className="mt-3 flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                   <span>{t('datasources.list.showing', { from: pageInactive * pageSize + 1, to: Math.min((pageInactive + 1) * pageSize, inactiveItems.length), total: inactiveItems.length })}</span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageInactive <= 0} onClick={() => setPageInactive((p) => Math.max(0, p - 1))}>{t('datasources.list.prev')}</button>
+                    <Button size="sm" variant="outline" disabled={pageInactive <= 0} onClick={() => setPageInactive((p) => Math.max(0, p - 1))}>{t('datasources.list.prev')}</Button>
                     <span>{t('datasources.list.pageOf', { page: pageInactive + 1, total: totalPagesInactive })}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageInactive >= totalPagesInactive - 1} onClick={() => setPageInactive((p) => Math.min(totalPagesInactive - 1, p + 1))}>{t('datasources.list.next')}</button>
+                    <Button size="sm" variant="outline" disabled={pageInactive >= totalPagesInactive - 1} onClick={() => setPageInactive((p) => Math.min(totalPagesInactive - 1, p + 1))}>{t('datasources.list.next')}</Button>
                   </div>
                 </div>
               )}

@@ -12,7 +12,7 @@ import { Api, type DashboardListItem, type FavoriteOut } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useEnvironment } from '@/components/providers/EnvironmentProvider'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
-import { EmptyState } from '@/components/ui'
+import { Button, EmptyState } from '@/components/ui'
 import { RiSearchLine, RiDashboardLine, RiAddLine } from '@remixicon/react'
 import * as Dialog from '@radix-ui/react-dialog'
 
@@ -445,18 +445,20 @@ export default function MyDashboardsPage() {
             <Text className="mt-0 text-muted-foreground">{t('dashboardsMine.subtitle')}</Text>
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
-              className="inline-flex items-center rounded-md border btn-primary px-3 py-1.5 text-sm font-medium"
+              size="sm"
+              variant="primary"
               onClick={() => { try { window.dispatchEvent(new CustomEvent('open-create-dashboard')) } catch {} }}
             >
               {t('dashboardsMine.buildNew')}
-            </button>
+            </Button>
             {isAdmin && (
               <>
-                <button
+                <Button
                   type="button"
-                  className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))]"
+                  size="sm"
+                  variant="outline"
                   onClick={async () => {
                     try {
                       const data = await Api.exportDashboards({ userId: user?.id || 'dev_user', includeDatasources: true, includeSyncTasks: true, actorId: user?.id || undefined })
@@ -475,15 +477,16 @@ export default function MyDashboardsPage() {
                   }}
                 >
                   {t('dashboardsMine.exportAll')}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-500 dark:text-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50"
+                  size="sm"
+                  variant="outline"
                   disabled={busyImport}
                   onClick={() => fileRef.current?.click()}
                 >
                   {busyImport ? t('dashboardsMine.importing') : t('dashboardsMine.importJson')}
-                </button>
+                </Button>
                 <input ref={fileRef} type="file" accept="application/json" hidden onChange={async (e) => {
                   const file = e.target.files?.[0]
                   if (!file) return
@@ -604,9 +607,9 @@ export default function MyDashboardsPage() {
                   {t('common.showing', { from: pageAll * pageSize + 1, to: Math.min((pageAll + 1) * pageSize, filteredAll.length), total: filteredAll.length })}
                 </span>
                 <div className="flex items-center gap-2">
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageAll <= 0} onClick={() => setPageAll((p) => Math.max(0, p - 1))}>{t('common.prev')}</button>
+                  <Button size="sm" variant="outline" disabled={pageAll <= 0} onClick={() => setPageAll((p) => Math.max(0, p - 1))}>{t('common.prev')}</Button>
                   <span>{t('common.pageOf', { current: pageAll + 1, total: totalPagesAll })}</span>
-                  <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageAll >= totalPagesAll - 1} onClick={() => setPageAll((p) => Math.min(totalPagesAll - 1, p + 1))}>{t('common.next')}</button>
+                  <Button size="sm" variant="outline" disabled={pageAll >= totalPagesAll - 1} onClick={() => setPageAll((p) => Math.min(totalPagesAll - 1, p + 1))}>{t('common.next')}</Button>
                 </div>
               </div>
             )}
@@ -654,9 +657,9 @@ export default function MyDashboardsPage() {
                     {t('common.showing', { from: pagePub * pageSize + 1, to: Math.min((pagePub + 1) * pageSize, filteredPublished.length), total: filteredPublished.length })}
                   </span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pagePub <= 0} onClick={() => setPagePub((p) => Math.max(0, p - 1))}>{t('common.prev')}</button>
+                    <Button size="sm" variant="outline" disabled={pagePub <= 0} onClick={() => setPagePub((p) => Math.max(0, p - 1))}>{t('common.prev')}</Button>
                     <span>{t('common.pageOf', { current: pagePub + 1, total: totalPagesPub })}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pagePub >= totalPagesPub - 1} onClick={() => setPagePub((p) => Math.min(totalPagesPub - 1, p + 1))}>{t('common.next')}</button>
+                    <Button size="sm" variant="outline" disabled={pagePub >= totalPagesPub - 1} onClick={() => setPagePub((p) => Math.min(totalPagesPub - 1, p + 1))}>{t('common.next')}</Button>
                   </div>
                 </div>
               )}
@@ -677,18 +680,19 @@ export default function MyDashboardsPage() {
             </Dialog.Description>
             <div className="mt-4 flex items-center justify-end gap-2">
               <Dialog.Close asChild>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('common.cancel')}</button>
+                <Button type="button" size="sm" variant="outline">{t('common.cancel')}</Button>
               </Dialog.Close>
-              <button
+              <Button
                 type="button"
-                className="text-sm px-3 py-1.5 rounded-md border hover:bg-red-50 text-red-600 disabled:opacity-50"
+                size="sm"
+                variant="danger"
                 disabled={delBusy}
                 onClick={async () => {
                   if (!confirmDeleteFor) return
                   setDelBusy(true)
                   try { await onDelete(confirmDeleteFor) } finally { setDelBusy(false); setConfirmDeleteFor(null) }
                 }}
-              >{delBusy ? t('common.deleting') : t('common.delete')}</button>
+              >{delBusy ? t('common.deleting') : t('common.delete')}</Button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -729,15 +733,17 @@ export default function MyDashboardsPage() {
                     />
                   </label>
                   <div className="flex gap-2">
-                    <button
-                      className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted"
+                    <Button
+                      size="sm"
+                      variant="outline"
                       type="button"
                       onClick={() => setPubToken(genUDID())}
                     >
                       {t('common.publishDialog.generateToken')}
-                    </button>
-                    <button
-                      className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted"
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="primary"
                       type="button"
                       disabled={pubBusy}
                       onClick={async () => {
@@ -766,20 +772,21 @@ export default function MyDashboardsPage() {
                       }}
                     >
                       {t('common.publishDialog.saveGenerateLink')}
-                    </button>
+                    </Button>
                   </div>
                   {!!pubLink && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground break-all">
                       <span className="font-mono flex-1">{pubLink}</span>
-                      <button
-                        className="text-xs px-2 py-1 rounded-md border hover:bg-muted"
+                      <Button
+                        size="sm"
+                        variant="outline"
                         type="button"
                         onClick={async () => {
                           const ok = await copyToClipboard(pubLink)
                           setToast(ok ? t('common.toasts.linkCopied') : t('common.toasts.copyFailed'))
                           window.setTimeout(() => setToast(''), 1600)
                         }}
-                      >{t('common.copy')}</button>
+                      >{t('common.copy')}</Button>
                     </div>
                   )}
                 </div>
@@ -811,8 +818,9 @@ export default function MyDashboardsPage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted"
+                    <Button
+                      size="sm"
+                      variant="primary"
                       type="button"
                       disabled={pubBusy || !shareUser.trim()}
                       onClick={async () => {
@@ -839,14 +847,14 @@ export default function MyDashboardsPage() {
                       }}
                     >
                       {t('common.publishDialog.shareDashboard')}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
               <Dialog.Close asChild>
-                <button type="button" className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">{t('common.close')}</button>
+                <Button type="button" size="sm" variant="outline">{t('common.close')}</Button>
               </Dialog.Close>
             </div>
           </Dialog.Content>

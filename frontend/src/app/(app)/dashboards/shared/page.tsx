@@ -9,7 +9,7 @@ import { useAuth } from '@/components/providers/AuthProvider'
 import DashboardCard from '@/components/dashboards/DashboardCard'
 import { RiSearchLine, RiFolderSharedLine } from '@remixicon/react'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
-import { EmptyState } from '@/components/ui'
+import { Button, EmptyState } from '@/components/ui'
 
 // Using shared DashboardCard
 
@@ -216,9 +216,9 @@ export default function CollectionsPage() {
                     {t('common.showing', { from: pageMine * pageSize + 1, to: Math.min((pageMine + 1) * pageSize, filteredMine.length), total: filteredMine.length })}
                   </span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageMine <= 0} onClick={() => setPageMine((p) => Math.max(0, p - 1))}>{t('common.prev')}</button>
+                    <Button size="sm" variant="outline" disabled={pageMine <= 0} onClick={() => setPageMine((p) => Math.max(0, p - 1))}>{t('common.prev')}</Button>
                     <span>{t('common.pageOf', { current: pageMine + 1, total: totalPagesMine })}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageMine >= totalPagesMine - 1} onClick={() => setPageMine((p) => Math.min(totalPagesMine - 1, p + 1))}>{t('common.next')}</button>
+                    <Button size="sm" variant="outline" disabled={pageMine >= totalPagesMine - 1} onClick={() => setPageMine((p) => Math.min(totalPagesMine - 1, p + 1))}>{t('common.next')}</Button>
                   </div>
                 </div>
               )}
@@ -283,9 +283,9 @@ export default function CollectionsPage() {
                     {t('common.showing', { from: pageCollab * pageSize + 1, to: Math.min((pageCollab + 1) * pageSize, filteredCollab.length), total: filteredCollab.length })}
                   </span>
                   <div className="flex items-center gap-2">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageCollab <= 0} onClick={() => setPageCollab((p) => Math.max(0, p - 1))}>{t('common.prev')}</button>
+                    <Button size="sm" variant="outline" disabled={pageCollab <= 0} onClick={() => setPageCollab((p) => Math.max(0, p - 1))}>{t('common.prev')}</Button>
                     <span>{t('common.pageOf', { current: pageCollab + 1, total: totalPagesCollab })}</span>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-gray-600 dark:text-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--muted))] disabled:opacity-50 disabled:cursor-not-allowed" disabled={pageCollab >= totalPagesCollab - 1} onClick={() => setPageCollab((p) => Math.min(totalPagesCollab - 1, p + 1))}>{t('common.next')}</button>
+                    <Button size="sm" variant="outline" disabled={pageCollab >= totalPagesCollab - 1} onClick={() => setPageCollab((p) => Math.min(totalPagesCollab - 1, p + 1))}>{t('common.next')}</Button>
                   </div>
                 </div>
               )}
