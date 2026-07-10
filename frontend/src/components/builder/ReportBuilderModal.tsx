@@ -2490,16 +2490,21 @@ function CellVarSelect({ value, variables, onChange }: {
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const containerRef = useRef<HTMLDivElement>(null)
+  // Portal position: the dropdown is rendered to document.body (fixed) so it
+  // escapes the table element's overflow-hidden/auto box, which was clipping it.
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const dropRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) { setSearch(''); return }
     setTimeout(() => searchRef.current?.focus(), 0)
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      if (
+        dropRef.current && !dropRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -2511,21 +2516,30 @@ function CellVarSelect({ value, variables, onChange }: {
     : variables
 
   return (
-    <div ref={containerRef} className="relative flex-1 min-w-0">
+    <div className="relative flex-1 min-w-0">
       <button
+        ref={btnRef}
         type="button"
         className="w-full flex items-center gap-0.5 bg-transparent text-2xs font-mono text-start min-w-0 outline-none"
-        onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (!open && btnRef.current) {
+            const r = btnRef.current.getBoundingClientRect()
+            setPos({ top: r.bottom + 4, left: r.left })
+          }
+          setOpen(o => !o)
+        }}
         onMouseDown={(e) => e.stopPropagation()}
         title={selected?.name || 'Select variable…'}
       >
         <span className="flex-1 truncate">{selected ? selected.name : <span className="text-muted-foreground italic">Select…</span>}</span>
         <RiArrowDownSLine className="h-3 w-3 shrink-0 text-muted-foreground" />
       </button>
-      {open && (
+      {open && createPortal(
         <div
-          className="absolute z-[60] left-0 top-full mt-0.5 border rounded-lg shadow-xl min-w-[180px] w-max max-w-[260px]"
-          style={{ backgroundColor: 'hsl(var(--card))' }}
+          ref={dropRef}
+          className="border rounded-lg shadow-xl min-w-[180px] w-max max-w-[260px]"
+          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999, backgroundColor: 'hsl(var(--card))' }}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
@@ -2559,7 +2573,8 @@ function CellVarSelect({ value, variables, onChange }: {
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -2577,6 +2592,9 @@ function InlineTableEditor({
   if (!table) return null
 
   const [cellMenuOpen, setCellMenuOpen] = useState<{ row: number; col: number } | null>(null)
+  // Portal position for the cell 3-dots menu (fixed, so it escapes the table's
+  // overflow-hidden/auto box that was clipping the absolute-positioned menu).
+  const [cellMenuPos, setCellMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<number | null>(null)
   const [deleteConfirmCol, setDeleteConfirmCol] = useState<number | null>(null)
   const [normalized, setNormalized] = useState(false)
@@ -2967,13 +2985,20 @@ function InlineTableEditor({
                   <button
                     className={`text-2xs px-0.5 rounded shrink-0 transition-colors ${isMenuOpen ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-muted-foreground'}`}
                     onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => { e.stopPropagation(); setCellMenuOpen(isMenuOpen ? null : { row: ri, col: ci }) }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (isMenuOpen) { setCellMenuOpen(null); return }
+                      const r = e.currentTarget.getBoundingClientRect()
+                      // right-align the ~200px menu to the trigger, clamped to viewport
+                      setCellMenuPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.right - 200, window.innerWidth - 208)) })
+                      setCellMenuOpen({ row: ri, col: ci })
+                    }}
                     title="Cell options"
                   >
                     ⋮
                   </button>
-                  {isMenuOpen && (
-                    <div className="absolute z-50 right-0 top-full mt-1 border rounded-lg shadow-lg p-2 min-w-[200px] space-y-2" style={{ backgroundColor: 'hsl(var(--card))' }} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                  {isMenuOpen && createPortal(
+                    <div className="border rounded-lg shadow-lg p-2 min-w-[200px] space-y-2" style={{ position: 'fixed', top: cellMenuPos.top, left: cellMenuPos.left, zIndex: 9999, backgroundColor: 'hsl(var(--card))' }} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
                       {/* Type toggle */}
                       <div className="flex gap-1">
                         <button className={`flex-1 text-2xs py-1 rounded-md transition-colors ${cell.type === 'text' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}`}
@@ -3182,7 +3207,8 @@ function InlineTableEditor({
                           )
                         })()}
                       </div>
-                    </div>
+                    </div>,
+                        document.body
                   )}
                 </div>
               </td>
@@ -3448,8 +3474,16 @@ function GridCanvas({
                                 overflow: el.table!.wrapText ? undefined : 'hidden',
                                 textOverflow: el.table!.wrapText ? undefined : 'ellipsis',
                               }}>
-                                {cell.type === 'text' ? (cell.text || '') : (
-                                  <span className="text-primary/60 font-mono text-2xs">{`{{${variables.find(v => v.id === cell.variableId)?.name || '?'}}}`}</span>
+                                {cell.type === 'text' ? (cell.text || '') : cell.type === 'period' ? (
+                                  <span className="inline-flex items-center gap-0.5 rounded-full bg-[hsl(var(--accent)/0.15)] text-accent px-1.5 py-0.5 text-2xs font-medium align-middle max-w-full">
+                                    <RiCalendarLine className="h-2.5 w-2.5 shrink-0 opacity-80" />
+                                    <span className="truncate">{PERIOD_LABEL[cell.datetimeExpr || ''] || cell.datetimeExpr || 'Period'}</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-0.5 rounded-full bg-[hsl(var(--primary)/0.12)] text-primary px-1.5 py-0.5 text-2xs font-medium align-middle max-w-full">
+                                    <RiHashtag className="h-2.5 w-2.5 shrink-0 opacity-80" />
+                                    <span className="truncate">{variables.find(v => v.id === cell.variableId)?.name || '?'}</span>
+                                  </span>
                                 )}
                               </td>
                               )
@@ -3837,12 +3871,12 @@ export default function ReportBuilderModal({
         <div className="flex flex-1 min-h-0 overflow-hidden">
 
           {/* Icon Rail */}
-          <div className="w-[52px] border-r bg-card/60 flex flex-col items-center py-2 gap-1 shrink-0">
+          <div className="w-[72px] border-r bg-card/60 flex flex-col items-stretch px-1.5 py-2 gap-1 shrink-0">
             {(['elements', 'variables', 'settings'] as const).map((tab, i) => (
               <React.Fragment key={tab}>
-                {i === 2 && <div className="w-7 h-px bg-border my-1" />}
+                {i === 2 && <div className="w-full h-px bg-border my-1" />}
                 <button
-                  className={`w-9 h-9 rounded-lg border flex flex-col items-center justify-center gap-0.5 transition-all ${leftTab === tab ? 'bg-primary/10 border-primary/30 text-primary' : 'border-transparent text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
+                  className={`w-full px-1 py-1.5 rounded-lg border flex flex-col items-center justify-center gap-0.5 transition-all ${leftTab === tab ? 'bg-primary/10 border-primary/30 text-primary' : 'border-transparent text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
                   onClick={() => setLeftTab(tab)}
                   title={tab === 'elements' ? t('builder.tabElements') : tab === 'variables' ? t('builder.tabVariables') : t('builder.tabSettings')}
                 >
