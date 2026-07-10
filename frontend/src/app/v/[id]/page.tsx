@@ -12,6 +12,11 @@ import type { WidgetConfig } from '@/types/widgets'
 import KpiCard from '@/components/widgets/KpiCard'
 import ChartCard from '@/components/widgets/ChartCard'
 import TableCard from '@/components/widgets/TableCard'
+import ReportCard from '@/components/widgets/ReportCard'
+import HeatmapCard from '@/components/widgets/HeatmapCard'
+import TextCard from '@/components/widgets/TextCard'
+import SpacerCard from '@/components/widgets/SpacerCard'
+import CompositionCard from '@/components/widgets/CompositionCard'
 import GlobalFiltersBar from '@/components/builder/GlobalFiltersBar'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { RiBookmarkLine, RiBookmarkFill } from '@remixicon/react'
@@ -362,7 +367,17 @@ export default function ViewDashboard() {
                     widgetId={cfg.id}
                   />
                 )}
-                {cfg.type === 'chart' && (
+                {cfg.type === 'chart' && ((cfg as any).chartType === 'heatmap' ? (
+                  <HeatmapCard
+                    title={cfg.title}
+                    sql={cfg.sql}
+                    datasourceId={cfg.datasourceId}
+                    options={cfg.options}
+                    queryMode={cfg.queryMode as any}
+                    querySpec={cfg.querySpec as any}
+                    widgetId={cfg.id}
+                  />
+                ) : (
                   <ChartCard
                     title={cfg.title}
                     sql={cfg.sql}
@@ -377,7 +392,7 @@ export default function ViewDashboard() {
                     layout="measure"
                     reservedTop={titleHeights[item.i] ?? 0}
                   />
-                )}
+                ))}
                 {cfg.type === 'table' && (
                   <TableCard
                     title={cfg.title}
@@ -393,6 +408,24 @@ export default function ViewDashboard() {
                     customColumns={cfg.customColumns as any}
                     pivot={cfg.pivot as any}
                   />
+                )}
+                {cfg.type === 'report' && (
+                  <ReportCard
+                    title={cfg.title}
+                    options={cfg.options}
+                    widgetId={cfg.id}
+                    datasourceId={cfg.datasourceId}
+                    allWidgets={widgets}
+                  />
+                )}
+                {cfg.type === 'text' && (
+                  <TextCard title={cfg.title} options={cfg.options} />
+                )}
+                {cfg.type === 'spacer' && (
+                  <SpacerCard options={cfg.options} />
+                )}
+                {cfg.type === 'composition' && (
+                  <CompositionCard title={cfg.title} options={cfg.options} widgets={widgets} interactive={false} />
                 )}
               </div>
             </div>
