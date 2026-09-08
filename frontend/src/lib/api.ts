@@ -164,6 +164,7 @@ export type DatasourceExportItem = {
   syncTasks?: SyncTaskExportItem[] | null
 }
 
+// Mirrors DatasourceExportItem so an export file can be posted back untouched.
 export type DatasourceImportItem = {
   id?: string | null
   name: string
@@ -172,11 +173,33 @@ export type DatasourceImportItem = {
   options?: Record<string, any> | null
   userId?: string | null
   active?: boolean | null
+  createdAt?: string | null
   syncTasks?: SyncTaskImportItem[] | null
 }
 
 export type DatasourceImportRequest = { items: DatasourceImportItem[] }
-export type DatasourceImportResponse = { created: number; updated: number; items: DatasourceOut[]; idMap?: Record<string, string> | null }
+
+export type DatasourceImportStatus = 'created' | 'updated' | 'failed'
+
+export type DatasourceImportResult = {
+  sourceName: string
+  name: string
+  status: DatasourceImportStatus
+  id?: string | null
+  message?: string | null
+  syncTasksImported: number
+  syncTasksFailed: number
+  warnings: string[]
+}
+
+export type DatasourceImportResponse = {
+  created: number
+  updated: number
+  failed: number
+  items: DatasourceOut[]
+  idMap?: Record<string, string> | null
+  results: DatasourceImportResult[]
+}
 
 export type DashboardExportItem = {
   id: string
@@ -225,6 +248,9 @@ export type SyncTaskExportItem = {
 
 export type SyncTaskImportItem = {
   id?: string | null
+  datasourceId?: string | null
+  groupKey?: string | null
+  createdAt?: string | null
   sourceSchema?: string | null
   sourceTable: string
   destTableName: string
@@ -377,6 +403,17 @@ function handleAuthFailure(): void {
     }
   } catch {}
 }
+
+// Ad-hoc SQL from the Execute SQL console is analytical, not a UI fetch: it can
+// scan millions of rows. The 15s default aborted those client-side long before
+// the server gave up, so the console reported a timeout on a query that was
+// still running fine. Kept under the server ceilings (gunicorn --timeout,
+// waitress --channel-timeout) so the server, not the browser, decides the limit.
+export const QUERY_TIMEOUT_MS = (() => {
+  const raw = typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_QUERY_TIMEOUT_MS : undefined
+  const n = raw ? parseInt(raw, 10) : NaN
+  return Number.isFinite(n) && n > 0 ? n : 300000
+})()
 
 async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Promise<T> {
   const controller = new AbortController()
@@ -549,7 +586,7 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
     const extAborted = !!externalSignal?.aborted
     if (e?.name === 'AbortError') {
       if (extAborted) { throw e }
-      throw new Error('Request timed out')
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
     }
     try { _offlineUntil = Date.now() + 1500 } catch {}
     if (aborted && extAborted) {
@@ -711,7 +748,7 @@ export const Api = {
   introspectLocal: (signal?: AbortSignal) => http<IntrospectResponse>(`/datasources/_local/schema`, { signal }, 60000),
   deleteDatasource: (id: string) => http<void>(`/datasources/${id}`, { method: 'DELETE' }),
   health: () => http<{ status: string; app: string; env: string }>(`/healthz`),
-  query: (payload: QueryRequest, signal?: AbortSignal) => http<QueryResponse>('/query', { method: 'POST', body: JSON.stringify(payload), signal }),
+  query: (payload: QueryRequest, signal?: AbortSignal, timeoutMs: number = QUERY_TIMEOUT_MS) => http<QueryResponse>('/query', { method: 'POST', body: JSON.stringify(payload), signal }, timeoutMs),
   pivot: (payload: PivotRequest) => http<QueryResponse>('/query/pivot', { method: 'POST', body: JSON.stringify(payload) }),
   // SQL preview generation may also be slow with complex transforms; extend timeout a bit
   pivotSql: (payload: PivotRequest) => http<PivotSqlResponse>('/query/pivot/sql', { method: 'POST', body: JSON.stringify(payload) }, 30000),
@@ -1102,7 +1139,8 @@ export type DashboardDefinition = {
 
 export type DashboardSaveRequest = {
   id?: string
-  name: string
+  /** Omit on update to keep the stored title. Required when creating. */
+  name?: string
   userId?: string
   definition: DashboardDefinition
 }

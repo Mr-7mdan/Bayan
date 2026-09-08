@@ -34,6 +34,11 @@ class Settings(BaseSettings):
 
     # Wall-clock cap on a single data-sync job before the slot is released (spec 10)
     sync_job_timeout_seconds: int = Field(default=3600, validation_alias=AliasChoices("SYNC_JOB_TIMEOUT_SECONDS"))
+    # Server-side statement timeout for ad-hoc SQL on POST /query (the Execute SQL
+    # console). Applied per dialect as statement_timeout / MAX_EXECUTION_TIME /
+    # LOCK_TIMEOUT. Keep it at or below the proxy read timeout, otherwise the
+    # gateway 504s while the database is still happily working.
+    query_statement_timeout_ms: int = Field(default=300000, validation_alias=AliasChoices("QUERY_STATEMENT_TIMEOUT_MS"))
 
     # Metadata backups (spec 24): nightly VACUUM INTO with count-based retention
     backup_dir: str = Field(default=".data/backups", validation_alias=AliasChoices("BACKUP_DIR"))

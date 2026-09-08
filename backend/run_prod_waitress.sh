@@ -19,7 +19,9 @@ PORT="${PORT:-8000}"
 THREADS="${THREADS:-8}"
 CONN_LIMIT="${CONN_LIMIT:-1024}"
 BACKLOG="${BACKLOG:-2048}"
-CHANNEL_TIMEOUT="${CHANNEL_TIMEOUT:-120}"
+# Matches the gunicorn --timeout ceiling; waitress closes the channel on a
+# request that produces no data for this long, which a slow query does.
+CHANNEL_TIMEOUT="${CHANNEL_TIMEOUT:-300}"
 IDENT="${IDENT:-reporting-api}"
 
 # Preflight: terminate any process listening on PORT (opt-in)

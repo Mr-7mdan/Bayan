@@ -1,0 +1,158 @@
+- generic [active] [ref=f9e1]:
+  - generic [ref=f9e2]:
+    - complementary [ref=f9e3]:
+      - generic [ref=f9e4]:
+        - img [ref=f9e6]
+        - generic [ref=f9e10]:
+          - generic [ref=f9e11]: Bayan
+          - generic [ref=f9e12]: Label Studio
+      - navigation [ref=f9e16]:
+        - link "Templates" [ref=f9e17] [cursor=pointer]:
+          - /url: /templates
+          - img [ref=f9e18]
+          - text: Templates
+        - link "Designer" [ref=f9e22] [cursor=pointer]:
+          - /url: /designer/new
+          - img [ref=f9e23]
+          - text: Designer
+        - link "Print Console" [ref=f9e28] [cursor=pointer]:
+          - /url: /print
+          - img [ref=f9e29]
+          - text: Print Console
+        - link "Data" [ref=f9e31] [cursor=pointer]:
+          - /url: /data
+          - img [ref=f9e32]
+          - text: Data
+        - link "Printers" [ref=f9e36] [cursor=pointer]:
+          - /url: /printers
+          - img [ref=f9e37]
+          - text: Printers
+        - link "Users" [ref=f9e41] [cursor=pointer]:
+          - /url: /users
+          - img [ref=f9e42]
+          - text: Users
+        - link "API Keys" [ref=f9e47] [cursor=pointer]:
+          - /url: /keys
+          - img [ref=f9e48]
+          - text: API Keys
+        - link "Audit" [ref=f9e51] [cursor=pointer]:
+          - /url: /audit
+          - img [ref=f9e52]
+          - text: Audit
+      - generic [ref=f9e55]: v0.1.0 · Admin
+    - generic [ref=f9e56]:
+      - banner [ref=f9e57]:
+        - generic [ref=f9e58]: Bayan Label Studio
+        - generic [ref=f9e59]:
+          - button "Toggle theme" [ref=f9e60] [cursor=pointer]:
+            - img
+            - img
+          - button "AD Administrator" [ref=f9e61] [cursor=pointer]:
+            - generic [ref=f9e63]: AD
+            - generic [ref=f9e64]: Administrator
+      - main [ref=f9e65]:
+        - generic [ref=f9e66]:
+          - generic [ref=f9e67]:
+            - textbox "Template name" [ref=f9e68]: Untitled Label
+            - generic [ref=f9e69]: Unsaved
+            - generic [ref=f9e70]:
+              - button "Import ZPL" [ref=f9e71] [cursor=pointer]:
+                - img
+                - text: Import ZPL
+              - button "Export ZPL" [ref=f9e72] [cursor=pointer]:
+                - img
+                - text: Export ZPL
+              - combobox [disabled] [ref=f9e73]:
+                - generic: Current
+                - img [ref=f9e74]
+              - button "Validate" [ref=f9e76] [cursor=pointer]:
+                - img
+                - text: Validate
+              - button "Save" [ref=f9e77] [cursor=pointer]:
+                - img
+                - text: Save
+              - generic [ref=f9e78]:
+                - button "Publish" [disabled]:
+                  - img
+                  - text: Publish
+          - generic [ref=f9e79]:
+            - button "Add Text" [ref=f9e80] [cursor=pointer]:
+              - img
+            - button "Add Barcode" [ref=f9e81] [cursor=pointer]:
+              - img
+            - button "Add Box" [ref=f9e82] [cursor=pointer]:
+              - img
+            - button "Add Line" [ref=f9e83] [cursor=pointer]:
+              - img
+            - button "Add Ellipse" [ref=f9e84] [cursor=pointer]:
+              - img
+            - button "Add Image" [ref=f9e85] [cursor=pointer]:
+              - img
+            - button "Add Table" [ref=f9e86] [cursor=pointer]:
+              - img
+            - button "Add RFID" [ref=f9e87] [cursor=pointer]:
+              - img
+            - button "Undo" [disabled]:
+              - img
+            - button "Redo" [disabled]:
+              - img
+            - button "Insert via command" [ref=f9e88] [cursor=pointer]:
+              - img
+            - button "Copy" [disabled]:
+              - img
+            - button "Paste" [ref=f9e89] [cursor=pointer]:
+              - img
+            - button "Duplicate" [disabled]:
+              - img
+            - button "Bring forward" [disabled]:
+              - img
+            - button "Send backward" [disabled]:
+              - img
+            - button "Delete" [disabled]:
+              - img
+            - generic [ref=f9e90]:
+              - button "Canvas" [ref=f9e91] [cursor=pointer]
+              - button "ZPL" [ref=f9e92] [cursor=pointer]
+          - generic [ref=f9e93]: Select an object to format it.
+          - generic [ref=f9e94]:
+            - generic [ref=f9e96]:
+              - tablist [ref=f9e97]:
+                - tab "Data" [selected] [ref=f9e98] [cursor=pointer]
+                - tab "Forms" [ref=f9e99] [cursor=pointer]
+                - tab "Layers" [ref=f9e100] [cursor=pointer]
+                - tab "Label" [ref=f9e101] [cursor=pointer]
+              - tabpanel "Data" [ref=f9e102]:
+                - generic [ref=f9e107]:
+                  - generic [ref=f9e108]:
+                    - generic [ref=f9e109]:
+                      - img [ref=f9e110]
+                      - generic [ref=f9e114]: Data source
+                    - combobox [ref=f9e116] [cursor=pointer]:
+                      - generic: None (use samples)
+                      - img [ref=f9e117]
+                  - generic [ref=f9e119]:
+                    - generic [ref=f9e120]: 0 fields
+                    - button "Add field" [ref=f9e121] [cursor=pointer]:
+                      - img
+                      - text: Add field
+                  - paragraph [ref=f9e122]: No data fields yet. Add one to bind objects to data.
+            - separator [ref=f9e123]:
+              - img [ref=f9e125]
+            - generic [ref=f9e164]:
+              - button "Zoom out" [ref=f9e165] [cursor=pointer]: −
+              - button "Fit / reset zoom" [ref=f9e166] [cursor=pointer]: 100%
+              - button "Zoom in" [ref=f9e167] [cursor=pointer]: +
+            - separator [ref=f9e139]:
+              - img [ref=f9e141]
+            - generic [ref=f9e149]:
+              - tablist [ref=f9e150]:
+                - tab "Properties" [selected] [ref=f9e151] [cursor=pointer]
+                - tab "Preview" [ref=f9e152] [cursor=pointer]
+              - tabpanel "Properties" [ref=f9e153]:
+                - generic [ref=f9e154]: Select an object on the canvas to edit its properties.
+          - generic [ref=f9e155]:
+            - generic [ref=f9e156]: Label 100×50 mm (800×400 dots · 8 dpmm)
+            - generic [ref=f9e157]: 0 object(s)
+            - generic [ref=f9e158]: 0 field(s) · 0 form(s)
+  - region "Notifications alt+T"
+  - alert [ref=f9e159]

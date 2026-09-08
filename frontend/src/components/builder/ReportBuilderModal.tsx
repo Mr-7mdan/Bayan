@@ -1246,7 +1246,13 @@ function ManualFilterValues({ field, source, datasourceId, widgetId, selected, o
 // Week-start-day: 0=Sunday (default via NEXT_PUBLIC_WEEK_START_DAY), 1=Monday
 const _DEFAULT_WEEK_START = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEK_START_DAY) || 'SUN'
 const _DEFAULT_WEEKENDS = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN'
-function DateRuleEditor({ field, where, onPatch }: { field: string; where: Record<string, any>; onPatch: (patch: Record<string, any>) => void }) {
+function DateRuleEditor({ field, where, onPatch, dateColumns, onFieldChange }: {
+  field: string; where: Record<string, any>; onPatch: (patch: Record<string, any>) => void
+  /** Date-typed columns on the source table, minus ones already filtered. */
+  dateColumns?: string[]
+  /** Rebind this rule to a different column, carrying the rule with it. */
+  onFieldChange?: (next: string) => void
+}) {
   type DateOp = 'eq'|'ne'|'gt'|'gte'|'lt'|'lte'|'between'
   const [mode, setMode] = useState<'preset'|'custom'>('preset')
   const [config, setConfig] = useState<PresetConfig>({ ...DEFAULT_PRESET })
@@ -1254,6 +1260,10 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
   const [op, setOp] = useState<DateOp>('eq')
   const [a, setA] = useState(''); const [b, setB] = useState('')
   const preview = usePresetPreview(mode === 'preset' ? config : null)
+  // The rule can outlive the column it points at (renamed table, wrong instance,
+  // hand-edited JSON). Silently filtering on a column that is not there is what
+  // makes a report return numbers nobody can reproduce, so say it out loud.
+  const missingField = !!dateColumns && dateColumns.length > 0 && !dateColumns.includes(field)
 
   // On mount: detect legacy string or structured object
   useEffect(() => {
@@ -1373,9 +1383,32 @@ function DateRuleEditor({ field, where, onPatch }: { field: string; where: Recor
   return (
     <div className="rounded-md border bg-card p-2 space-y-2">
       <div className="flex items-center justify-between">
-        <div className="text-2xs font-medium">Date rule: {field}</div>
+        {onFieldChange && dateColumns ? (
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="text-2xs font-medium shrink-0">Date rule:</span>
+            <select
+              className={`min-w-0 flex-1 px-1 py-0.5 rounded bg-secondary/60 text-2xs ${missingField ? 'border border-destructive text-destructive' : ''}`}
+              value={field}
+              title={missingField ? `"${field}" is not a column on this table — pick a real date column` : 'Change the column this rule filters on'}
+              onChange={e => { const v = e.target.value; if (v && v !== field) onFieldChange(v) }}
+            >
+              {/* Keep the current field selectable even when it does not exist,
+                  otherwise the select silently jumps to another column. */}
+              {missingField && <option value={field}>{field} — not in this table</option>}
+              {dateColumns.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div className="text-2xs font-medium">Date rule: {field}</div>
+        )}
         <button className="text-2xs px-1.5 py-0.5 rounded border hover:bg-muted" onClick={() => { setMode('preset'); setConfig({ ...DEFAULT_PRESET }); setOp('eq'); setA(''); setB(''); onPatch({ [field]: undefined, [`${field}__gte`]: undefined, [`${field}__gt`]: undefined, [`${field}__lt`]: undefined, [`${field}__lte`]: undefined, [`${field}__ne`]: undefined, [`${field}__date_preset`]: undefined, [`${field}__op`]: undefined }) }}>Clear</button>
       </div>
+      {missingField && (
+        <p className="text-2xs text-destructive leading-snug">
+          “{field}” is not a column on this table. This rule filters on nothing —
+          pick a date column above to fix it.
+        </p>
+      )}
       <div className="flex items-center gap-3 text-2xs">
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='preset'} onChange={() => setMode('preset')} /> Preset</label>
         <label className="inline-flex items-center gap-1"><input type="radio" checked={mode==='custom'} onChange={() => setMode('custom')} /> Custom</label>
@@ -1582,9 +1615,10 @@ function NumberRuleEditor({ field, where, onPatch }: { field: string; where: Rec
 }
 
 // Per-field filter with Manual/Rule tabs (like ConfiguratorPanel chip details)
-function ReportFieldFilter({ field, source, datasourceId, widgetId, dbType, where, onWhereChange, onRemove }: {
+function ReportFieldFilter({ field, source, datasourceId, widgetId, dbType, where, onWhereChange, onRemove, dateColumns, onFieldChange }: {
   field: string; source: string; datasourceId?: string; widgetId?: string; dbType?: string | null
   where: Record<string, any>; onWhereChange: (w: Record<string, any>) => void; onRemove: () => void
+  dateColumns?: string[]; onFieldChange?: (next: string) => void
 }) {
   const initialTab: 'manual'|'rule' = Array.isArray(where?.[field]) && (where[field] as any[]).length > 0 ? 'manual' : 'rule'
   const [tab, setTab] = useState<'manual'|'rule'>(initialTab)
@@ -1662,7 +1696,7 @@ function ReportFieldFilter({ field, source, datasourceId, widgetId, dbType, wher
       {tab === 'manual' ? (
         <ManualFilterValues field={field} source={source} datasourceId={datasourceId} widgetId={widgetId} selected={currentSelected} onApply={handleManualApply} />
       ) : kind === 'date' ? (
-        <DateRuleEditor field={field} where={where} onPatch={handleRulePatch} />
+        <DateRuleEditor field={field} where={where} onPatch={handleRulePatch} dateColumns={dateColumns} onFieldChange={onFieldChange} />
       ) : kind === 'number' ? (
         <NumberRuleEditor field={field} where={where} onPatch={handleRulePatch} />
       ) : (
@@ -1708,6 +1742,32 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
     })
     return Array.from(set)
   }, [where])
+
+  // Date-typed columns offered when rebinding a date rule. Columns already
+  // carrying their own filter are excluded so a rebind cannot clobber one.
+  const dateColumnsFor = useCallback((current: string) => {
+    const taken = new Set(activeFields.filter(f => f !== current))
+    return (columnMeta || [])
+      .filter(c => detectKindFromDbType(c.type) === 'date')
+      .map(c => c.name)
+      .filter(n => !taken.has(n))
+  }, [columnMeta, activeFields])
+
+  // Move a filter from one column to another, carrying every operator suffix
+  // (__gte, __date_preset, __op, …) with it. Rebuilt in place so key order —
+  // and therefore the rendered filter order — stays stable.
+  const rebindField = useCallback((from: string, to: string) => {
+    if (!to || to === from) return
+    const next: Record<string, unknown> = {}
+    Object.entries(where).forEach(([k, v]) => {
+      if (!k.startsWith('__') && k.split('__')[0] === from) {
+        next[`${to}${k.slice(from.length)}`] = v
+      } else {
+        next[k] = v
+      }
+    })
+    onChange(next)
+  }, [where, onChange])
 
   const availableFields = columns.filter(c => !activeFields.includes(c))
   const filteredPick = availableFields.filter(c => c.toLowerCase().includes(pickSearch.toLowerCase()))
@@ -1778,6 +1838,8 @@ function FilterEditor({ columns, columnMeta, where, onChange, source, datasource
           where={where as Record<string, any>}
           onWhereChange={w => onChange(w)}
           onRemove={() => removeFilter(field)}
+          dateColumns={dateColumnsFor(field)}
+          onFieldChange={next => rebindField(field, next)}
         />
       ))}
       <button ref={addBtnRef} className="text-2xs text-primary hover:underline flex items-center gap-1" onClick={openPicker}>

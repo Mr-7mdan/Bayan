@@ -69,7 +69,11 @@ fi
 : "${CPU_COUNT:=1}"
 
 KEEP_ALIVE="${KEEP_ALIVE:-75}"
-TIMEOUT="${TIMEOUT:-180}"
+# Ad-hoc analytical SQL from the Execute SQL console routinely runs past 3
+# minutes; gunicorn SIGKILLs the worker at --timeout, which drops the
+# connection mid-query and looks like a crash. Raise the ceiling and let
+# the DB driver timeouts (read/write 7200s, app/db.py) be the real bound.
+TIMEOUT="${TIMEOUT:-300}"
 GRACEFUL_TIMEOUT="${GRACEFUL_TIMEOUT:-30}"
 MAX_REQUESTS="${MAX_REQUESTS:-1000}"
 MAX_REQUESTS_JITTER="${MAX_REQUESTS_JITTER:-100}"

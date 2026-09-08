@@ -271,6 +271,7 @@ def save_dash(payload: DashboardSaveRequest, request: Request, actorId: str | No
         # When enforcing, identity comes only from the authenticated actor;
         # the client-supplied payload.userId is not trusted for ownership.
         owner = actorId if settings.auth_enforce else payload.userId
+        d0 = None
         # Enforce permissions on update: owner or explicit 'rw' permission
         if payload.id:
             d0 = load_dashboard(db, payload.id)
@@ -283,10 +284,20 @@ def save_dash(payload: DashboardSaveRequest, request: Request, actorId: str | No
                 perm = get_share_permission(db, d0.id, actor)
                 if perm != "rw":
                     raise HTTPException(status_code=403, detail="No write permission for this dashboard")
+        # An omitted/blank name on update keeps the stored one. Autosave fires
+        # from layout normalisation that can run before the client has loaded the
+        # real title, and stamping a placeholder over it silently renamed live
+        # dashboards to "New Dashboard".
+        name = (payload.name or "").strip()
+        if not name:
+            if is_update and d0 is not None and (d0.name or "").strip():
+                name = d0.name
+            else:
+                raise HTTPException(status_code=422, detail="name is required when creating a dashboard")
         d: Dashboard = save_dashboard(
             db,
             user_id=owner,
-            name=payload.name,
+            name=name,
             definition=payload.definition.model_dump(),
             dash_id=payload.id,
             actor=actorId,

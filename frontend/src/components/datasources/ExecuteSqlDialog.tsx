@@ -1,12 +1,12 @@
 "use client"
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalFocus } from '@/hooks/useModalFocus'
 import { Api, type DatasourceOut, type TablesOnlyResponse, type IntrospectResponse } from '@/lib/api'
 import CustomQueryEditor from '@/components/builder/CustomQueryEditor'
 import { Select, SelectItem } from '@tremor/react'
-import { RiCloseLine, RiPlayFill, RiDownload2Line } from '@remixicon/react'
+import { RiCloseLine, RiPlayFill, RiDownload2Line, RiFilterOffLine } from '@remixicon/react'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useQuery } from '@tanstack/react-query'
 
@@ -26,6 +26,13 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [columns, setColumns] = useState<string[]>([])
   const [rows, setRows] = useState<any[][]>([])
+  // The grid used to render every returned row. A 30k x 44 result is ~1.4M
+  // <td> nodes, which is what actually pins the tab's memory — the row array
+  // itself is cheap. So page the DOM and keep the full set in JS for Excel.
+  const [page, setPage] = useState(0)
+  // A successful query returning 0 rows used to render the identical "Ready to
+  // query" panel as a query that was never run, so the button looked dead.
+  const [ranSql, setRanSql] = useState<string | null>(null)
 
   // Ensure Tremor Select popovers render above this modal
   useEffect(() => {
@@ -50,6 +57,8 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
       setSourceTable('')
       setColumns([])
       setRows([])
+      setPage(0)
+      setRanSql(null)
       setError(null)
       setLoading(false)
     }
@@ -126,8 +135,11 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
       const res = await Api.query({ sql: finalSql, datasourceId: datasource.id })
       setColumns(res.columns || [])
       setRows(res.rows || [])
+      setPage(0)
+      setRanSql(finalSql)
     } catch (err: any) {
       setError(err.message || 'Failed to execute query')
+      setRanSql(finalSql)
     } finally {
       setLoading(false)
     }
@@ -160,6 +172,20 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
       setError('Failed to download Excel file')
     }
   }
+
+  const PAGE_SIZE = 100
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  // Clamp rather than trust `page`: a new, shorter result can leave the index
+  // past the end before the reset effect runs.
+  const safePage = Math.min(page, pageCount - 1)
+  const pageRows = useMemo(
+    () => rows.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE),
+    [rows, safePage],
+  )
+  const firstRow = rows.length ? safePage * PAGE_SIZE + 1 : 0
+  const lastRow = Math.min(rows.length, (safePage + 1) * PAGE_SIZE)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => { scrollRef.current?.scrollTo({ top: 0 }) }, [safePage])
 
   const formatCell = (val: any) => {
     if (val === null || val === undefined) return ''
@@ -292,7 +318,7 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
                     className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-[hsl(var(--border))] rounded-lg hover:bg-[hsl(var(--muted))] transition-colors font-medium bg-[hsl(var(--background))] shadow-sm"
                   >
                     <RiDownload2Line className="h-3.5 w-3.5" />
-                    Download Excel
+                    Download Excel{rows.length > PAGE_SIZE ? ` (${rows.length.toLocaleString()} rows)` : ''}
                   </button>
                 )}
               </div>
@@ -306,13 +332,26 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
                 </div>
               )}
               
-              {!error && !loading && rows.length === 0 && (
+              {!error && !loading && rows.length === 0 && !ranSql && (
                 <div className="flex flex-col items-center justify-center h-full text-center">
                   <div className="h-14 w-14 rounded-2xl bg-[hsl(var(--muted))]/50 border border-[hsl(var(--border))] flex items-center justify-center mb-4">
                     <RiPlayFill className="h-7 w-7 text-muted-foreground/60 ml-1" />
                   </div>
                   <h3 className="text-sm font-semibold text-foreground">Ready to query</h3>
                   <p className="text-xs text-muted-foreground mt-1.5 max-w-sm leading-relaxed">Write a SQL query or use the visual builder, then click Run Query to see results here.</p>
+                </div>
+              )}
+
+              {!error && !loading && rows.length === 0 && ranSql && (
+                <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                  <div className="h-14 w-14 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center mb-4">
+                    <RiFilterOffLine className="h-7 w-7 text-amber-600 dark:text-amber-500" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">Query ran — 0 rows returned</h3>
+                  <p className="text-xs text-muted-foreground mt-1.5 max-w-md leading-relaxed">
+                    The query executed without error but matched nothing. Widen or remove the WHERE filters and run again.
+                  </p>
+                  <pre className="mt-4 max-w-full overflow-x-auto text-start text-[11px] font-mono leading-relaxed px-3 py-2 rounded-lg bg-[hsl(var(--muted))]/50 border border-[hsl(var(--border))] text-muted-foreground whitespace-pre-wrap">{ranSql}</pre>
                 </div>
               )}
               
@@ -325,7 +364,7 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
               
               {!loading && !error && rows.length > 0 && (
                 <div className="border border-[hsl(var(--border))] rounded-xl bg-[hsl(var(--background))] overflow-hidden absolute inset-4 shadow-sm flex flex-col">
-                  <div className="flex-1 overflow-auto">
+                  <div ref={scrollRef} className="flex-1 overflow-auto">
                     <table className="min-w-full text-[13px] text-start border-collapse">
                       <thead className="bg-[hsl(var(--muted))]/80 sticky top-0 z-10 backdrop-blur-md">
                         <tr>
@@ -335,7 +374,7 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[hsl(var(--border))]">
-                        {rows.map((r, i) => (
+                        {pageRows.map((r, i) => (
                           <tr key={i} className="hover:bg-[hsl(var(--muted))]/50 transition-colors group">
                             {r.map((cell, j) => (
                               <td key={j} className="px-4 py-2 whitespace-nowrap max-w-[300px] truncate text-[hsl(var(--foreground))]/90 group-hover:text-foreground transition-colors" title={formatCell(cell)}>
@@ -346,6 +385,39 @@ export default function ExecuteSqlDialog({ open, onClose, datasource }: Props) {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-2 flex-shrink-0">
+                    <span className="text-[11px] text-muted-foreground tabular-nums">
+                      Showing {firstRow.toLocaleString()}–{lastRow.toLocaleString()} of {rows.length.toLocaleString()} rows
+                      {rows.length > PAGE_SIZE && <> · use Download Excel for the full set</>}
+                    </span>
+                    {pageCount > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setPage(0)}
+                          disabled={safePage === 0}
+                          className="px-2 py-1 rounded-md border border-[hsl(var(--border))] text-[11px] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[hsl(var(--muted))] transition-colors"
+                        >First</button>
+                        <button
+                          onClick={() => setPage(Math.max(0, safePage - 1))}
+                          disabled={safePage === 0}
+                          className="px-2 py-1 rounded-md border border-[hsl(var(--border))] text-[11px] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[hsl(var(--muted))] transition-colors"
+                        >Prev</button>
+                        <span className="px-2 text-[11px] text-muted-foreground tabular-nums">
+                          Page {(safePage + 1).toLocaleString()} / {pageCount.toLocaleString()}
+                        </span>
+                        <button
+                          onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
+                          disabled={safePage >= pageCount - 1}
+                          className="px-2 py-1 rounded-md border border-[hsl(var(--border))] text-[11px] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[hsl(var(--muted))] transition-colors"
+                        >Next</button>
+                        <button
+                          onClick={() => setPage(pageCount - 1)}
+                          disabled={safePage >= pageCount - 1}
+                          className="px-2 py-1 rounded-md border border-[hsl(var(--border))] text-[11px] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[hsl(var(--muted))] transition-colors"
+                        >Last</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

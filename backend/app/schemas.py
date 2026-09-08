@@ -174,8 +174,15 @@ class DashboardDefinition(BaseModel):
 
 
 class DashboardSaveRequest(BaseModel):
+    """Save/update a dashboard.
+
+    `name` is optional on update and means "leave the stored name alone". The
+    builder autosaves continuously, so a client that has not yet loaded the real
+    name (failed fetch, restored tab) must be able to persist layout changes
+    without stamping its placeholder title over the saved one.
+    """
     id: Optional[str] = None
-    name: str
+    name: Optional[str] = None
     userId: Optional[str] = None
     definition: DashboardDefinition
 
@@ -530,6 +537,12 @@ class DatasourceExportItem(BaseModel):
 
 
 class DatasourceImportItem(BaseModel):
+    """Mirror of DatasourceExportItem so an export file imports without edits.
+
+    Export-only fields (createdAt) are declared and ignored rather than left
+    undeclared: silently-dropped keys are what made round-tripping between
+    instances lossy and hard to debug.
+    """
     id: str | None = None
     name: str
     type: str
@@ -537,6 +550,7 @@ class DatasourceImportItem(BaseModel):
     options: Dict[str, Any] | None = None
     userId: str | None = None
     active: bool | None = True
+    createdAt: datetime | None = None
     syncTasks: list["SyncTaskImportItem"] | None = None
 
 
@@ -544,11 +558,26 @@ class DatasourceImportRequest(BaseModel):
     items: list[DatasourceImportItem]
 
 
+class DatasourceImportResult(BaseModel):
+    """Per-item outcome. One row per submitted item, always, so the caller can
+    tell the user exactly what happened instead of inferring it from counts."""
+    sourceName: str
+    name: str
+    status: str  # "created" | "updated" | "failed"
+    id: str | None = None
+    message: str | None = None
+    syncTasksImported: int = 0
+    syncTasksFailed: int = 0
+    warnings: list[str] = []
+
+
 class DatasourceImportResponse(BaseModel):
     created: int
     updated: int
+    failed: int = 0
     items: list[DatasourceOut]
     idMap: Dict[str, str] | None = None
+    results: list[DatasourceImportResult] = []
 
 
 # --- Export / Import: Dashboards ---
@@ -604,7 +633,11 @@ class SyncTaskExportItem(BaseModel):
 
 
 class SyncTaskImportItem(BaseModel):
+    """Mirror of SyncTaskExportItem. datasourceId/groupKey/createdAt are
+    export-only (re-derived on import) but declared so an untouched export
+    file validates instead of failing or silently losing fields."""
     id: str | None = None
+    datasourceId: str | None = None
     sourceSchema: str | None = None
     sourceTable: str
     destTableName: str
@@ -615,6 +648,8 @@ class SyncTaskImportItem(BaseModel):
     batchSize: int | None = 10000
     scheduleCron: str | None = None
     enabled: bool = True
+    groupKey: str | None = None
+    createdAt: datetime | None = None
 
 
 # --- Datasource-level Transforms DSL ---

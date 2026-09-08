@@ -1,0 +1,160 @@
+- main [ref=f9e65]:
+  - generic [ref=f9e66]:
+    - generic [ref=f9e67]:
+      - textbox "Template name" [ref=f9e68]: Untitled Label
+      - generic [ref=f9e69]: Unsaved
+      - generic [ref=f9e70]:
+        - button "Import ZPL" [ref=f9e71] [cursor=pointer]:
+          - img
+          - text: Import ZPL
+        - button "Export ZPL" [ref=f9e72] [cursor=pointer]:
+          - img
+          - text: Export ZPL
+        - combobox [disabled] [ref=f9e73]:
+          - generic: Current
+          - img [ref=f9e74]
+        - button "Validate" [ref=f9e76] [cursor=pointer]:
+          - img
+          - text: Validate
+        - button "Save" [ref=f9e77] [cursor=pointer]:
+          - img
+          - text: Save
+        - generic [ref=f9e78]:
+          - button "Publish" [disabled]:
+            - img
+            - text: Publish
+    - generic [ref=f9e79]:
+      - button "Add Text" [ref=f9e80] [cursor=pointer]:
+        - img
+      - button "Add Barcode" [ref=f9e81] [cursor=pointer]:
+        - img
+      - button "Add Box" [ref=f9e82] [cursor=pointer]:
+        - img
+      - button "Add Line" [ref=f9e83] [cursor=pointer]:
+        - img
+      - button "Add Ellipse" [ref=f9e84] [cursor=pointer]:
+        - img
+      - button "Add Image" [ref=f9e85] [cursor=pointer]:
+        - img
+      - button "Add Table" [ref=f9e86] [cursor=pointer]:
+        - img
+      - button "Add RFID" [ref=f9e87] [cursor=pointer]:
+        - img
+      - button "Undo" [ref=f9e168] [cursor=pointer]:
+        - img
+      - button "Redo" [disabled]:
+        - img
+      - button "Insert via command" [ref=f9e88] [cursor=pointer]:
+        - img
+      - button "Copy" [ref=f9e169] [cursor=pointer]:
+        - img
+      - button "Paste" [ref=f9e89] [cursor=pointer]:
+        - img
+      - button "Duplicate" [ref=f9e170] [cursor=pointer]:
+        - img
+      - button "Bring forward" [ref=f9e171] [cursor=pointer]:
+        - img
+      - button "Send backward" [ref=f9e172] [cursor=pointer]:
+        - img
+      - button "Delete" [ref=f9e173] [cursor=pointer]:
+        - img
+      - generic [ref=f9e90]:
+        - button "Canvas" [ref=f9e91] [cursor=pointer]
+        - button "ZPL" [ref=f9e92] [cursor=pointer]
+    - generic [ref=f9e93]:
+      - generic [ref=f9e174]: Human-readable
+      - combobox [ref=f9e175] [cursor=pointer]:
+        - generic: below
+        - img [ref=f9e176]
+      - generic [ref=f9e178]: Height (mm)
+      - spinbutton "Barcode height (mm)" [ref=f9e179]: "12"
+      - generic [ref=f9e180]: Module (dots)
+      - spinbutton "Narrow bar width (dots)" [ref=f9e181]: "2"
+    - generic [ref=f9e94]:
+      - generic [ref=f9e96]:
+        - tablist [ref=f9e97]:
+          - tab "Data" [selected] [ref=f9e98] [cursor=pointer]
+          - tab "Forms" [ref=f9e99] [cursor=pointer]
+          - tab "Layers" [ref=f9e100] [cursor=pointer]
+          - tab "Label" [ref=f9e101] [cursor=pointer]
+        - tabpanel "Data" [ref=f9e102]:
+          - generic [ref=f9e107]:
+            - generic [ref=f9e108]:
+              - generic [ref=f9e109]:
+                - img [ref=f9e110]
+                - generic [ref=f9e114]: Data source
+              - combobox [ref=f9e116] [cursor=pointer]:
+                - generic: None (use samples)
+                - img [ref=f9e117]
+            - generic [ref=f9e119]:
+              - generic [ref=f9e120]: 0 fields
+              - button "Add field" [ref=f9e121] [cursor=pointer]:
+                - img
+                - text: Add field
+            - paragraph [ref=f9e122]: No data fields yet. Add one to bind objects to data.
+      - separator [ref=f9e123]:
+        - img [ref=f9e125]
+      - generic [ref=f9e164]:
+        - button "Zoom out" [ref=f9e165] [cursor=pointer]: −
+        - button "Fit / reset zoom" [ref=f9e166] [cursor=pointer]: 100%
+        - button "Zoom in" [ref=f9e167] [cursor=pointer]: +
+      - separator [ref=f9e139]:
+        - img [ref=f9e141]
+      - generic [ref=f9e149]:
+        - tablist [ref=f9e150]:
+          - tab "Properties" [selected] [ref=f9e151] [cursor=pointer]
+          - tab "Preview" [ref=f9e152] [cursor=pointer]
+        - tabpanel "Properties" [ref=f9e153]:
+          - generic [ref=f9e154]:
+            - generic [ref=f9e182]:
+              - generic [ref=f9e183]: barcode
+              - generic [ref=f9e184]: barcode_tyvik14
+            - generic [ref=f9e185]:
+              - generic [ref=f9e186]:
+                - text: X (mm)
+                - spinbutton [ref=f9e187]: "5"
+              - generic [ref=f9e188]:
+                - text: Y (mm)
+                - spinbutton [ref=f9e189]: "5"
+              - generic [ref=f9e190]:
+                - text: Rotation
+                - combobox [ref=f9e191] [cursor=pointer]:
+                  - generic: 0°
+                  - img [ref=f9e192]
+              - generic [ref=f9e194]:
+                - text: Z-order
+                - spinbutton [ref=f9e195]: "1"
+            - generic [ref=f9e196]:
+              - text: Visible if (expression)
+              - textbox "always" [ref=f9e197]
+            - generic [ref=f9e198]:
+              - generic [ref=f9e199]: Barcode
+              - generic [ref=f9e200]:
+                - text: Symbology
+                - combobox [active] [ref=f9e201] [cursor=pointer]:
+                  - generic: QR Code
+                  - img [ref=f9e202]
+              - generic [ref=f9e204]:
+                - text: Data
+                - generic [ref=f9e205]:
+                  - combobox [ref=f9e206] [cursor=pointer]:
+                    - generic: Constant
+                    - img [ref=f9e207]
+                  - textbox "value" [ref=f9e209]: "12345678"
+              - generic [ref=f9e278]:
+                - text: Magnification (size)
+                - spinbutton [ref=f9e279]: "3"
+              - paragraph [ref=f9e217]: 2D barcodes are sized by magnification (dots per module) — one knob drives both width and height. Drag a corner to change it.
+              - generic [ref=f9e218]:
+                - text: Human readable
+                - combobox [ref=f9e219] [cursor=pointer]:
+                  - generic: below
+                  - img [ref=f9e220]
+              - generic [ref=f9e222]:
+                - generic [ref=f9e223]: Check digit
+                - switch [ref=f9e224] [cursor=pointer]
+    - generic [ref=f9e155]:
+      - generic [ref=f9e156]: Label 100×50 mm (800×400 dots · 8 dpmm)
+      - generic [ref=f9e157]: 1 object(s)
+      - generic [ref=f9e225]: barcode @ 5,5 mm
+      - generic [ref=f9e158]: 0 field(s) · 0 form(s)

@@ -4,13 +4,15 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { Card, Title, Text, TabGroup, TabList, Tab, TabPanels, TabPanel, Select, SelectItem } from '@tremor/react'
-import { Api, type DatasourceOut, type UserRowOut, type DatasourceShareOut } from '@/lib/api'
+import { Api, type DatasourceOut, type UserRowOut, type DatasourceShareOut,
+  type DatasourceImportItem, type DatasourceImportResponse } from '@/lib/api'
 import * as Popover from '@radix-ui/react-popover'
 import * as Dialog from '@radix-ui/react-dialog'
 import { RiBuildingLine, RiMapPin2Line, RiUserLine, RiMore2Line } from '@remixicon/react'
 import DatasourceDialog, { type DatasourceDialogMode } from '@/components/datasources/DatasourceDialog'
 import DataExplorerDialog from '@/components/builder/DataExplorerDialogV2'
 import ExecuteSqlDialog from '@/components/datasources/ExecuteSqlDialog'
+import ImportDatasourcesWizard from '@/components/datasources/ImportDatasourcesWizard'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useProgressToast } from '@/components/providers/ProgressToastProvider'
 import { Button } from '@/components/ui'
@@ -232,6 +234,8 @@ function MyDatasourcesPageInner() {
   const [dlgInitial, setDlgInitial] = useState<DatasourceOut | undefined>(undefined)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const [busyImport, setBusyImport] = useState(false)
+  const [importParsed, setImportParsed] = useState<DatasourceImportItem[]>([])
+  const [importOpen, setImportOpen] = useState(false)
   const [explorerDs, setExplorerDs] = useState<DatasourceOut | null>(null)
   const [executeSqlDs, setExecuteSqlDs] = useState<DatasourceOut | null>(null)
 
@@ -398,15 +402,21 @@ function MyDatasourcesPageInner() {
               try {
                 const text = await file.text()
                 const json = JSON.parse(text)
-                let items: any[] = []
-                if (Array.isArray(json)) items = json
-                else if (Array.isArray(json?.items)) items = json.items
-                else if (Array.isArray(json?.datasources)) items = json.datasources
-                if (!items.length) { setToast(t('datasources.list.noDatasourcesFound'), 'error'); window.setTimeout(() => setToast(''), 2000); return }
-                await Api.importDatasources(items, user?.id || undefined)
-                const res = await Api.listDatasources(user?.id || undefined, user?.id || undefined)
-                setItems(res || [])
-                setToast(t('datasources.list.toastImported'), 'success'); window.setTimeout(() => setToast(''), 1600)
+                // Accept the bare array /datasources/export returns, plus the
+                // two envelopes older exports used.
+                let parsed: any[] = []
+                if (Array.isArray(json)) parsed = json
+                else if (Array.isArray(json?.items)) parsed = json.items
+                else if (Array.isArray(json?.datasources)) parsed = json.datasources
+                const usable = parsed.filter((it) => it && typeof it.name === 'string' && typeof it.type === 'string')
+                if (!usable.length) { setToast(t('datasources.list.noDatasourcesFound'), 'error'); window.setTimeout(() => setToast(''), 2000); return }
+                if (usable.length < parsed.length) {
+                  setToast(t('datasources.list.importSkippedMalformed', { count: parsed.length - usable.length }), 'error')
+                  window.setTimeout(() => setToast(''), 3000)
+                }
+                // Hand off to the wizard — nothing is written until the user confirms.
+                setImportParsed(usable as DatasourceImportItem[])
+                setImportOpen(true)
               } catch (err: any) {
                 setToast(err?.message || t('datasources.list.importFailed'), 'error'); window.setTimeout(() => setToast(''), 2000)
               } finally {
@@ -501,6 +511,26 @@ function MyDatasourcesPageInner() {
       <DatasourceDialog open={dlgOpen} onOpenChangeAction={setDlgOpen} mode={dlgMode} initial={dlgInitial} onCreatedAction={onCreated} onSavedAction={onSaved} />
       {explorerDs && <DataExplorerDialog open={!!explorerDs} onClose={() => setExplorerDs(null)} datasource={explorerDs} />}
       <ExecuteSqlDialog open={!!executeSqlDs} onClose={() => setExecuteSqlDs(null)} datasource={executeSqlDs} />
+      <ImportDatasourcesWizard
+        open={importOpen}
+        onClose={() => { setImportOpen(false); setImportParsed([]) }}
+        parsed={importParsed}
+        existing={items}
+        actorId={user?.id || undefined}
+        onImported={async (res: DatasourceImportResponse) => {
+          try {
+            const list = await Api.listDatasources(user?.id || undefined, user?.id || undefined)
+            setItems(list || [])
+          } catch {}
+          if (res.failed > 0) {
+            setToast(t('datasources.list.importPartial', { ok: res.created + res.updated, failed: res.failed }), 'error')
+            window.setTimeout(() => setToast(''), 3000)
+          } else {
+            setToast(t('datasources.list.toastImported'), 'success')
+            window.setTimeout(() => setToast(''), 1600)
+          }
+        }}
+      />
     </div>
   )
 }

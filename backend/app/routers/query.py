@@ -2225,12 +2225,16 @@ def run_query(payload: QueryRequest, db: Session = Depends(get_db), actorId: Opt
                         except Exception:
                             pass
                         try:
+                            # Ad-hoc SQL from the Execute SQL console is analytical and
+                            # can legitimately run for minutes; the old hardcoded 120s
+                            # killed it server-side with no way to raise it.
+                            _stmt_ms = int(settings.query_statement_timeout_ms)
                             if is_pg:
-                                conn.execute(text("SET statement_timeout = 120000"))
+                                conn.execute(text(f"SET statement_timeout = {_stmt_ms}"))
                             elif is_mysql:
-                                conn.execute(text("SET SESSION MAX_EXECUTION_TIME=120000"))
+                                conn.execute(text(f"SET SESSION MAX_EXECUTION_TIME={_stmt_ms}"))
                             elif is_mssql:
-                                conn.execute(text("SET LOCK_TIMEOUT 120000"))
+                                conn.execute(text(f"SET LOCK_TIMEOUT {_stmt_ms}"))
                         except Exception:
                             pass
                         result = conn.execution_options(stream_results=True).execute(sql_text, params)

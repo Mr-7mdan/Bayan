@@ -41,7 +41,7 @@ from ..schemas import (
     DatasourceImportItem,
     DatasourceImportRequest,
     DatasourceImportResponse,
-    DatasourceImportResponse,
+    DatasourceImportResult,
     DatasourceTransforms,
     TransformsPreviewRequest,
     PreviewResponse,
@@ -2769,91 +2769,124 @@ def export_single_datasource(ds_id: str, request: Request, includeSyncTasks: boo
 
 
 @router.post("/import", response_model=DatasourceImportResponse)
-def import_datasources(payload: DatasourceImportRequest, request: Request, actorId: str | None = Depends(actor_id_optional), db: Session = Depends(get_db)):
-    if not payload or not isinstance(payload.items, list):
-        raise HTTPException(status_code=400, detail="items array is required")
+def import_datasources(
+    payload: DatasourceImportRequest | list[DatasourceImportItem],
+    request: Request,
+    actorId: str | None = Depends(actor_id_optional),
+    db: Session = Depends(get_db),
+):
+    """Import datasources.
+
+    Accepts BOTH shapes so the file GET /datasources/export produces can be
+    posted back untouched:
+      - a bare array  (exactly what /export returns)
+      - {"items": [...]}  (envelope, kept for existing callers)
+
+    Every submitted item yields exactly one DatasourceImportResult, and a bad
+    item is recorded as failed instead of aborting the batch — a half-applied
+    import that reports success is how datasources went missing before.
+    """
+    items = payload if isinstance(payload, list) else (payload.items if payload else None)
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="Expected an array of datasources, or {items: [...]}")
     created = 0
     updated = 0
+    failed = 0
     out: list[DatasourceOut] = []
     id_map: dict[str, str] = {}
-    for it in payload.items:
+    results: list[DatasourceImportResult] = []
+    actor_is_admin = _actor_is_admin(db, actorId)
+    for it in items:
+        warnings: list[str] = []
+        existing = None
+        ds = None
         # Permission: admin may import for any user; otherwise force to actor
         target_user = (it.userId or actorId or "").strip()
-        if not _actor_is_admin(db, actorId):
+        if not actor_is_admin:
             actor = (actorId or "").strip()
             if not actor:
                 raise HTTPException(status_code=403, detail="Forbidden")
             # If item had userId different from actor, override to actor
             target_user = actor
-        # Upsert by (name, user_id)
-        existing = (
-            db.query(Datasource)
-            .filter(Datasource.name == it.name, Datasource.user_id == (target_user or None))
-            .first()
-        )
-        enc = encrypt_text(it.connectionUri) if it.connectionUri else None
-        if existing:
-            existing.type = it.type
-            existing.connection_encrypted = enc
-            try:
-                existing.active = bool(it.active) if it.active is not None else existing.active
-            except Exception:
-                pass
-            try:
-                existing.options_json = json.dumps(it.options or {})
-            except Exception:
-                existing.options_json = "{}"
-            db.add(existing)
-            db.commit()
-            db.refresh(existing)
-            updated += 1
-            out.append(DatasourceOut.model_validate(existing))
-            if it.id:
-                try:
-                    id_map[str(it.id)] = existing.id
-                except Exception:
-                    pass
-        else:
-            ds = create_datasource(
-                db,
-                NewDatasourceInput(
-                    name=it.name,
-                    type=it.type,
-                    connection_encrypted=enc,
-                    options=it.options,
-                    user_id=target_user or None,
-                ),
-            )
-            try:
-                ds.active = bool(it.active) if it.active is not None else True
-            except Exception:
-                pass
-            db.add(ds)
-            db.commit()
-            db.refresh(ds)
-            created += 1
-            out.append(DatasourceOut.model_validate(ds))
-            if it.id:
-                try:
-                    id_map[str(it.id)] = ds.id
-                except Exception:
-                    pass
-        # Import sync tasks for this datasource if provided
+        elif target_user and target_user != (actorId or "").strip():
+            # An export from ANOTHER instance carries that instance's user ids.
+            # Honouring one blindly created a datasource owned by a user that
+            # does not exist here, so GET /datasources (which filters by owner)
+            # never returned it — the row existed but was invisible.
+            if not db.query(User).filter(User.id == target_user).first():
+                warnings.append(
+                    f"Owner '{target_user}' does not exist on this instance; imported as your own datasource."
+                )
+                target_user = (actorId or "").strip()
         try:
-            if getattr(it, "syncTasks", None):
-                for st in (it.syncTasks or []):  # type: ignore[attr-defined]
-                    # Upsert by dest table name within this datasource
+            # Upsert by (name, user_id)
+            existing = (
+                db.query(Datasource)
+                .filter(Datasource.name == it.name, Datasource.user_id == (target_user or None))
+                .first()
+            )
+            enc = encrypt_text(it.connectionUri) if it.connectionUri else None
+            if existing:
+                existing.type = it.type
+                existing.connection_encrypted = enc
+                if it.active is not None:
+                    existing.active = bool(it.active)
+                try:
+                    existing.options_json = json.dumps(it.options or {})
+                except Exception:
+                    existing.options_json = "{}"
+                    warnings.append("Options were not JSON-serialisable and were reset to empty.")
+                db.add(existing)
+                db.commit()
+                db.refresh(existing)
+                updated += 1
+                target = existing
+                status = "updated"
+            else:
+                ds = create_datasource(
+                    db,
+                    NewDatasourceInput(
+                        name=it.name,
+                        type=it.type,
+                        connection_encrypted=enc,
+                        options=it.options,
+                        user_id=target_user or None,
+                    ),
+                )
+                if it.active is not None:
+                    ds.active = bool(it.active)
+                db.add(ds)
+                db.commit()
+                db.refresh(ds)
+                created += 1
+                target = ds
+                status = "created"
+
+            out.append(DatasourceOut.model_validate(target))
+            if it.id:
+                id_map[str(it.id)] = target.id
+            if not it.connectionUri:
+                warnings.append("No connection string in the file — set it before using this datasource.")
+
+            # Import sync tasks for this datasource if provided. Failures here are
+            # reported per item rather than swallowed: a datasource that arrives
+            # without its sync tasks looks fine but silently never syncs.
+            tasks_ok = 0
+            tasks_bad = 0
+            for st in (it.syncTasks or []):
+                try:
                     dest = (st.destTableName or "").strip()
                     if not dest:
+                        tasks_bad += 1
+                        warnings.append("A sync task was skipped: it has no destination table name.")
                         continue
                     existing_task = (
                         db.query(SyncTask)
-                        .filter(SyncTask.datasource_id == (existing.id if 'existing' in locals() and existing else ds.id), SyncTask.dest_table_name == dest)
+                        .filter(SyncTask.datasource_id == target.id, SyncTask.dest_table_name == dest)
                         .first()
                     )
-                    tgt_ds_id = (existing.id if 'existing' in locals() and existing else ds.id)
                     mode = (st.mode or "snapshot").lower()
-                    group_key = _group_key_for(tgt_ds_id, st.sourceSchema, st.sourceTable, dest)
+                    group_key = _group_key_for(target.id, st.sourceSchema, st.sourceTable, dest)
                     if existing_task:
                         t = existing_task
                         t.source_schema = st.sourceSchema if st.sourceSchema is not None else t.source_schema
@@ -2871,7 +2904,7 @@ def import_datasources(payload: DatasourceImportRequest, request: Request, actor
                     else:
                         t = SyncTask(
                             id=str(uuid4()),
-                            datasource_id=tgt_ds_id,
+                            datasource_id=target.id,
                             source_schema=(st.sourceSchema or None),
                             source_table=st.sourceTable,
                             dest_table_name=dest,
@@ -2886,15 +2919,32 @@ def import_datasources(payload: DatasourceImportRequest, request: Request, actor
                         t.select_columns = st.selectColumns or []
                         db.add(t)
                         # Ensure state row exists
-                        st_row = SyncState(id=str(uuid4()), task_id=t.id, in_progress=False)
-                        db.add(st_row)
-                db.commit()
-        except Exception:
-            # Non-fatal; continue importing core datasources
-            pass
+                        db.add(SyncState(id=str(uuid4()), task_id=t.id, in_progress=False))
+                    db.commit()
+                    tasks_ok += 1
+                except Exception as task_err:
+                    db.rollback()
+                    tasks_bad += 1
+                    warnings.append(f"Sync task '{(st.destTableName or '?')}' failed: {task_err}")
+
+            results.append(DatasourceImportResult(
+                sourceName=it.name, name=target.name, status=status, id=target.id,
+                syncTasksImported=tasks_ok, syncTasksFailed=tasks_bad, warnings=warnings,
+            ))
+        except Exception as item_err:
+            db.rollback()
+            failed += 1
+            logger.warning("datasource import failed for %r", it.name, exc_info=True)
+            results.append(DatasourceImportResult(
+                sourceName=it.name, name=it.name, status="failed",
+                message=str(item_err) or item_err.__class__.__name__, warnings=warnings,
+            ))
     audit("datasource.import", actor_id=actorId, target_type="datasource", request=request,
-          details={"count": len(out)})
-    return DatasourceImportResponse(created=created, updated=updated, items=out, idMap=(id_map or None))
+          details={"count": len(out), "created": created, "updated": updated, "failed": failed})
+    return DatasourceImportResponse(
+        created=created, updated=updated, failed=failed,
+        items=out, idMap=(id_map or None), results=results,
+    )
 
 
 # ---------------------------------------------------------------------------

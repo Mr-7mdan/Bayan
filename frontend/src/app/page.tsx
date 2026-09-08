@@ -55,6 +55,12 @@ export default function HomePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [dashboardId, setDashboardId] = useState<string | null>(null)
   const [dashboardName, setDashboardName] = useState<string>('New Dashboard')
+  // Where the title came from. 'placeholder' means we have NOT loaded the real
+  // one yet, so no save may send it — autosave fires from layout normalisation
+  // that can run before (or instead of) a successful load, and sending the
+  // placeholder renamed live dashboards to "New Dashboard".
+  const [nameSource, setNameSource] = useState<'placeholder' | 'server' | 'user'>('placeholder')
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [createdAt, setCreatedAt] = useState<string | null>(null)
   const [publicId, setPublicId] = useState<string | null>(null)
   // Contextual actions menu state
@@ -408,7 +414,8 @@ export default function HomePage() {
   async function onSave() {
     const payload = {
       id: dashboardId || undefined,
-      name: dashboardName || 'New Dashboard',
+      // An existing dashboard keeps its stored title unless we hold a real one.
+      ...(dashboardId && nameSource === 'placeholder' ? {} : { name: dashboardName || 'New Dashboard' }),
       userId: user?.id || 'dev_user',
       definition: {
         layout: layoutState,
@@ -549,7 +556,7 @@ export default function HomePage() {
           try {
             const res = await Api.getDashboard(lastId, user?.id)
             const def = res.definition
-            setDashboardName(res.name || 'New Dashboard')
+            if (res.name) { setDashboardName(res.name); setNameSource('server') }
             setCreatedAt(res.createdAt || null)
             if (def?.layout && def?.widgets) {
               // Auto-append orphaned widgets (in widgets, missing from layout) on the desktop layout.
@@ -563,8 +570,14 @@ export default function HomePage() {
               loadDashboardOptions((def as any).options)
               try { localStorage.setItem('dashboardDraft', JSON.stringify({ ...def, layout: finalLayout, layouts: layoutsRef.current })) } catch {}
             }
-          } catch { /* ignore */ }
-          setHydrated(true)
+            setLoadError(null)
+            setHydrated(true)
+          } catch (e: any) {
+            // Do NOT hydrate on failure. `hydrated` is what arms autosave, and
+            // an unhydrated-but-armed builder writes placeholder title + draft
+            // content over the real row. Surface it and let the user retry.
+            setLoadError(e?.message || 'Could not load this dashboard')
+          }
         })()
       } else {
         // No dashboard id: use draft if present, else defaults; then create one server-side
@@ -580,7 +593,7 @@ export default function HomePage() {
               definition: { layout: (draft as any)?.layout ?? layoutState, widgets: (draft as any)?.widgets ?? configs, options: (draft as any)?.options ?? dashOptions },
             })
             setDashboardId(res.id)
-            setDashboardName(res.name || dashboardName)
+            if (res.name) { setDashboardName(res.name); setNameSource('server') }
             setCreatedAt(res.createdAt || null)
             try { localStorage.setItem('dashboardId', res.id) } catch {}
             // Ensure per-id publish flags start fresh
@@ -673,7 +686,7 @@ export default function HomePage() {
         }
         layoutsRef.current = merged
         const desktopLayout = merged.desktop ?? activeLayout
-        await Api.saveDashboard({ id: dashboardId, name: dashboardName || 'New Dashboard', userId: user?.id || 'dev_user', definition: { ...(def as any), layout: desktopLayout, layouts: merged, widgets: sanitizedWidgets, options } })
+        await Api.saveDashboard({ id: dashboardId, ...(nameSource === 'placeholder' ? {} : { name: dashboardName }), userId: user?.id || 'dev_user', definition: { ...(def as any), layout: desktopLayout, layouts: merged, widgets: sanitizedWidgets, options } })
         userEditedRef.current = false
         setSaveStatus('saved')
       } catch {
@@ -1366,6 +1379,18 @@ export default function HomePage() {
   return (
     <Suspense fallback={<div className="p-3 text-sm">Loading…</div>}>
     <div className="builder-root min-h-screen">
+      {loadError && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 border-b border-[hsl(var(--danger)/0.35)] bg-[hsl(var(--danger)/0.1)] px-4 py-2 text-sm">
+          <span className="font-medium text-[hsl(var(--danger))]">This dashboard could not be loaded.</span>
+          <span className="text-muted-foreground">
+            Editing and autosave are disabled so nothing overwrites the saved copy. {loadError}
+          </span>
+          <button
+            className="ms-auto rounded-md border border-[hsl(var(--border))] px-2.5 py-1 text-xs font-medium hover:bg-[hsl(var(--muted))] transition-colors"
+            onClick={() => { try { window.location.reload() } catch {} }}
+          >Retry</button>
+        </div>
+      )}
       <TitleBar
         hydrated={hydrated}
         dashboardId={dashboardId}
@@ -1384,6 +1409,7 @@ export default function HomePage() {
         title={dashboardName}
         onTitleChangeAction={(v)=>{ 
           setDashboardName(v)
+          setNameSource('user')
           try { localStorage.setItem('dashboardName', v) } catch {}
           userEditedRef.current = true
           ;(async () => {

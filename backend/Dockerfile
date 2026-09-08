@@ -55,7 +55,7 @@ CMD gunicorn app.main:app \
     --bind ${HOST}:${PORT} \
     --workers ${WEB_CONCURRENCY} \
     --keep-alive 75 \
-    --timeout 180 \
+    --timeout 300 \
     --graceful-timeout 30 \
     --max-requests 1000 \
     --max-requests-jitter 100 \
