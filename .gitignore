@@ -34,3 +34,20 @@ garbage/
 # session/tooling artifacts (keep on disk, never track)
 .data/
 .shared/ui-ux-pro-max/
+
+# Scratch artifacts that keep getting swept up by `git add -A` in the release
+# script: query exports, screenshots, and working notes. A live MT5 export
+# (44k rows of customer trading data) reached the public repo this way.
+*.xlsx
+*.xls
+*.csv
+*.png
+*.md
+
+# …but the ones that are genuinely part of the product stay tracked.
+!README.md
+!frontend/public/**/*.png
+!frontend/public/**/*.md
+!backend/deploy/*.md
+!scripts/*.md
+!frontend/*.md

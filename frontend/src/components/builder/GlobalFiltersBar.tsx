@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useFilters } from '@/components/providers/FiltersProvider'
 import FilterbarControl from '@/components/shared/FilterbarControl'
 import DateFieldMappingDialog from '@/components/builder/DateFieldMappingDialog'
@@ -14,6 +15,20 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
   const t = useTranslations('builder')
   const [showMapping, setShowMapping] = useState(false)
   const [showBreakPanel, setShowBreakPanel] = useState(false)
+
+  // "As of": reproduce the dashboard as it stood on a past day. Lives only in
+  // the URL (?asOf=) so the link is shareable and a later visit is live again.
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const asOf = searchParams.get('asOf') || undefined
+  const setAsOf = (v?: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (v) params.set('asOf', v)
+    else params.delete('asOf')
+    const qs = params.toString()
+    router.replace(`${pathname}${qs ? `?${qs}` : ''}` as any)
+  }
 
   // Use filterPreset from filters context (defaults to 'all' if not set)
   const selectedPreset = filters.filterPreset || 'all'
@@ -163,6 +178,29 @@ export default function GlobalFiltersBar({ widgets, onApplyMappingAction, disabl
         onChange={applyPreset}
         disabled={!!disabled}
       />
+      <div
+        className={`flex items-center gap-2 rounded-md px-1.5 py-0.5 ${asOf ? 'bg-amber-500/15 ring-1 ring-amber-500/40' : ''}`}
+        title={t('filters.asOfHint')}
+      >
+        <label className={`text-[11px] ${asOf ? 'font-semibold text-amber-700 dark:text-amber-400' : 'text-[hsl(var(--muted-foreground))]'}`}>
+          {t('filters.asOf')}
+        </label>
+        <DatePickerField
+          value={asOf}
+          onChangeAction={(v) => setAsOf(v || undefined)}
+          disabled={!!disabled}
+          placeholder={t('filters.asOfLive')}
+          ariaLabel={t('filters.asOfAria')}
+        />
+        {asOf && (
+          <button
+            type="button"
+            className="text-[11px] font-medium text-amber-700 dark:text-amber-400 hover:underline"
+            onClick={() => setAsOf(undefined)}
+            disabled={!!disabled}
+          >{t('filters.asOfBackToLive')}</button>
+        )}
+      </div>
       <div className="flex items-center gap-2">
         <label className="text-[11px] text-[hsl(var(--muted-foreground))]">{t('filters.start')}</label>
         <DatePickerField

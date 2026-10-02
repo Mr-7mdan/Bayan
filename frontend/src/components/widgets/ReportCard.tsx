@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import dynamic from 'next/dynamic'
 import { useQueries } from '@tanstack/react-query'
-import { QueryApi } from '@/lib/api'
+import { QueryApi, asOfNow } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useFilters } from '@/components/providers/FiltersProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
@@ -77,7 +77,7 @@ function resolveDatetimeExprToString(expr: string | PresetConfig): string {
       }
     } catch {}
   }
-  const now = new Date()
+  const now = asOfNow()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const _weekendsEnv = (typeof process !== 'undefined' && (process.env?.NEXT_PUBLIC_WEEKENDS || '')) || 'SAT_SUN'
   const weekendDaysJs = _weekendsEnv.toUpperCase() === 'FRI_SAT' ? [5, 6] : [0, 6]
@@ -798,7 +798,7 @@ export default function ReportCard({
     // Datetime variables (client-side)
     for (const v of variables) {
       if (v.type !== 'datetime') continue
-      const now = new Date()
+      const now = asOfNow()
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
       const expr = v.datetimeExpr || 'now'
 

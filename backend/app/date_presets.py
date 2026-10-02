@@ -505,7 +505,58 @@ _UI_META_KEYS = frozenset({
     "filterPreset", "filter_preset", "_preset", "_meta",
     "startDate", "endDate", "start", "end",
     "__week_start_day", "__weekends", "__eof_skip_weekends",
+    "__as_of",
 })
+
+
+def _shift_window_working_days(gte: datetime, lt: datetime, n: int, weekends_raw: str) -> tuple[datetime, datetime]:
+    """Business-day window [gte, lt) -> capture-date window, captured n working days later.
+
+    The bounds go through the business calendar, not plain day arithmetic: the
+    first business day in the window maps to its capture day, and so does the
+    last. Shifting the raw bounds instead would let a window starting on a
+    weekend pick up the previous Friday's snapshot.
+    """
+    weekend = set(_get_weekend_days(weekends_raw))
+    step = timedelta(days=1)
+
+    def is_wd(d: datetime) -> bool:
+        return d.weekday() not in weekend
+
+    def next_wd(d: datetime) -> datetime:
+        d += step
+        while not is_wd(d):
+            d += step
+        return d
+
+    first = gte
+    while not is_wd(first):
+        first += step
+    last = lt - step
+    while not is_wd(last):
+        last -= step
+    if last < first:  # no business day in the window
+        return gte, gte
+    for _ in range(max(0, n)):
+        first, last = next_wd(first), next_wd(last)
+    return first, last + step
+
+
+def _parse_as_of(raw: Any) -> datetime | None:
+    """`__as_of` = "YYYY-MM-DD": resolve every preset as if *today* were that date.
+
+    This is what lets a dashboard reproduce the numbers it showed on a past day
+    (e.g. "Today" = last working day relative to that date, MTD up to it, and so
+    on). It reproduces the date logic only — rows that arrived or changed in the
+    source afterwards are still visible.
+    """
+    if not raw:
+        return None
+    try:
+        d = datetime.strptime(str(raw).strip()[:10], "%Y-%m-%d")
+    except ValueError:
+        return None
+    return d
 
 
 def resolve_date_presets(
@@ -533,6 +584,8 @@ def resolve_date_presets(
     _weekends_raw = str(
         where.get("__weekends", os.environ.get("WEEKENDS", "SAT_SUN"))
     ).upper().strip()
+    # Reference clock: the dashboard's "As of" date when set, else the real now.
+    _now = _parse_as_of(where.get("__as_of")) or datetime.now()
 
     # Read operator hints BEFORE stripping
     _op_hints: dict[str, str] = {}
@@ -545,6 +598,18 @@ def resolve_date_presets(
     # Strip __op keys
     where = {k: v for k, v in where.items()
              if not (isinstance(k, str) and k.endswith("__op"))} or {}
+
+    # `<field>__shift_wd: N` moves that field's resolved window forward N working
+    # days. For snapshot tables captured the next working morning (a row dated
+    # Wed holds Tue's close), so periods line up with the business day they
+    # describe. Read and removed here so it never reaches SQL as a column filter.
+    _shifts: dict[str, int] = {}
+    for k in [k for k in where if isinstance(k, str) and k.endswith("__shift_wd")]:
+        try:
+            _shifts[k[: -len("__shift_wd")]] = int(where[k])
+        except (TypeError, ValueError):
+            pass
+        del where[k]
 
     # Pre-collect preset bases to skip stale __gte/__lt
     _preset_bases: set[str] = set()
@@ -583,7 +648,7 @@ def resolve_date_presets(
                     m = _LAST_N_DAYS_RE.match(preset_key)
                     if m:
                         n = int(m.group(1))
-                        today = datetime.now().replace(
+                        today = _now.replace(
                             hour=0, minute=0, second=0, microsecond=0
                         )
                         gte = today - timedelta(days=n)
@@ -613,6 +678,7 @@ def resolve_date_presets(
             # Resolve
             gte, lt = resolve_preset(
                 config,
+                now=_now,
                 weekends=_weekends_raw,
                 holidays=holidays,
             )
@@ -620,6 +686,10 @@ def resolve_date_presets(
             # Handle "before last" legacy presets
             if is_before_last:
                 gte, lt = _shift_one_period_back(gte, lt, config["period"])
+
+            # Map a business-day window onto capture dates N working days later.
+            if gte and lt and _shifts.get(base):
+                gte, lt = _shift_window_working_days(gte, lt, _shifts[base], _weekends_raw)
 
             # Apply operator hints
             _bound_op = _op_hints.get(base, "")

@@ -107,7 +107,12 @@
       "this-year": "This year",
       "last-year": "Last year",
       "ytd": "Year to date"
-    }
+    },
+    "asOf": "As of",
+    "asOfAria": "Show the dashboard as of a past date",
+    "asOfLive": "Live",
+    "asOfBackToLive": "Back to live",
+    "asOfHint": "Recalculates every date preset (Today, MTD, YTD…) as if this day were today. Data added or corrected since then is still included."
   },
   "breakpoints": {
     "aria": "Edit layout for breakpoint",

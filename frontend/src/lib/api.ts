@@ -404,6 +404,19 @@ function handleAuthFailure(): void {
   } catch {}
 }
 
+// Dashboard "As of" date (YYYY-MM-DD) or null for live. Set by QueryProvider
+// from the ?asOf= URL parameter; injected into query bodies in http().
+let _queryAsOf: string | null = null
+export function setQueryAsOf(d: string | null): void {
+  _queryAsOf = d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
+}
+// "Now" for client-side date labels: the As-of day (local midnight) or the real clock.
+export function asOfNow(): Date {
+  if (!_queryAsOf) return new Date()
+  const [y, m, d] = _queryAsOf.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
 // Ad-hoc SQL from the Execute SQL console is analytical, not a UI fetch: it can
 // scan millions of rows. The 15s default aborted those client-side long before
 // the server gave up, so the console reported a timeout on a query that was
@@ -451,6 +464,21 @@ async function http<T>(path: string, init?: RequestInit, timeoutMs = 15000): Pro
             const sep = finalPath.includes('?') ? '&' : '?'
             finalPath = `${finalPath}${sep}publicId=${encodeURIComponent(pubId)}${token ? `&token=${encodeURIComponent(token)}` : ''}`
           }
+        }
+      }
+    } catch {}
+    // "As of": every query endpoint carries the reference date in its where, so
+    // date presets (Today, MTD, LYTD, …) resolve as if that day were today.
+    // Done here rather than in each widget because every widget builds its
+    // where differently — this is the one place all of them pass through.
+    try {
+      if (_queryAsOf && /^\/?query(\/|$)/.test(finalPath.replace(/^\//, '')) && typeof restInit.body === 'string') {
+        const body = JSON.parse(restInit.body)
+        const target = body?.spec && typeof body.spec === 'object' ? body.spec : body
+        // Only bodies that already filter: no where means no date presets to shift.
+        if (target && typeof target === 'object' && target.where && typeof target.where === 'object') {
+          target.where = { ...target.where, __as_of: _queryAsOf }
+          restInit.body = JSON.stringify(body)
         }
       }
     } catch {}
