@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import dynamic from 'next/dynamic'
-import { useQueries } from '@tanstack/react-query'
-import { QueryApi, asOfNow } from '@/lib/api'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { QueryApi, asOfNow, getQueryAsOf, type SyncFreshness } from '@/lib/api'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { useFilters } from '@/components/providers/FiltersProvider'
 import type { WidgetConfig, ReportElement, ReportVariable, ReportTableCell } from '@/types/widgets'
@@ -170,7 +170,7 @@ function formatValue(raw: unknown, variable: ReportVariable, formatOverride?: st
 // Uses the same query path as KPI/Chart widgets: y + agg (no x → no GROUP BY)
 function buildVarQueryOptions(variable: ReportVariable, globalFilters: Record<string, any>) {
   return {
-    queryKey: ['report-var', variable.id, variable.datasourceId, variable.source, variable.value?.field, variable.value?.agg, variable.value?.avgDateField, variable.value?.avgNumerator, variable.value?.applyHolidays, JSON.stringify(variable.where), JSON.stringify(globalFilters), variable.multiplyBy, variable.divideBy, variable.roundMode, variable.roundDecimals],
+    queryKey: ['report-var', variable.id, variable.datasourceId, variable.source, variable.value?.field, variable.value?.agg, variable.value?.avgDateField, variable.value?.avgNumerator, variable.value?.applyHolidays, JSON.stringify(variable.where), JSON.stringify(globalFilters), variable.multiplyBy, variable.divideBy, variable.roundMode, variable.roundDecimals, getQueryAsOf()],
     queryFn: async ({ signal }) => {
       if (!variable.source || !variable.value?.field) return null
       await _reportQueryAcquire()
@@ -721,6 +721,28 @@ function ReportElementView({ element, variables, resolvedValues, allWidgets }: {
 }
 
 // Main ReportCard component
+// Snapshot (DuckDB) tables are only as fresh as their last sync. A report's figures
+// for trading day D are final only if the table synced after D closed (midnight
+// after D). Returns the tables that fail that test, with a human reason.
+function lastWorkingDay(ref: Date): Date {
+  const we = ((typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEEKENDS) || 'SAT_SUN').toUpperCase() === 'FRI_SAT' ? [5, 6] : [0, 6]
+  const d = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate())
+  d.setDate(d.getDate() - 1)
+  while (we.includes(d.getDay())) d.setDate(d.getDate() - 1)
+  return d
+}
+function staleSources(fresh: SyncFreshness[] | undefined): { source: string; reason: string }[] {
+  if (!fresh) return []
+  const td = lastWorkingDay(asOfNow())
+  const closedAt = new Date(td.getFullYear(), td.getMonth(), td.getDate() + 1)
+  const tdLabel = td.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
+  return fresh.flatMap(f => {
+    if (!f.lastSuccessAt) return [{ source: f.source, reason: f.hasSyncTask ? 'has never synced successfully' : 'has no sync task' }]
+    const at = new Date(f.lastSuccessAt)
+    return at < closedAt ? [{ source: f.source, reason: `last synced ${at.toLocaleString()}, before trading day ${tdLabel} closed` }] : []
+  })
+}
+
 export default function ReportCard({
   title,
   options,
@@ -764,6 +786,26 @@ export default function ReportCard({
       enabled: !builderActive && !!(v.source && v.value?.field),
     })),
   })
+
+  // Freshness of the local snapshot tables this report reads (live DBs are skipped server-side).
+  const syncItems = useMemo(() => {
+    const m = new Map<string, { datasourceId: string; source: string }>()
+    for (const v of queryVars) if (v.datasourceId && v.source) m.set(`${v.datasourceId}|${v.source}`, { datasourceId: v.datasourceId, source: v.source })
+    return Array.from(m.values())
+  }, [queryVars])
+  const syncKey = JSON.stringify(syncItems)
+  const syncKeyRef = useRef(syncKey)
+  syncKeyRef.current = syncKey
+  const freshnessQ = useQuery({
+    queryKey: ['report-sync-freshness', syncKey],
+    queryFn: () => QueryApi.syncFreshness(syncItems),
+    enabled: !builderActive && syncItems.length > 0,
+    staleTime: 0,
+    refetchInterval: 5 * 60_000,
+  })
+  const stale = staleSources(freshnessQ.data)
+  const queryClient = useQueryClient()
+  const [pdfError, setPdfError] = useState<string | null>(null)
 
   // In snapshot mode, fire widget-data-ready only after all queries have resolved
   const allQueriesDone = queryResults.length === 0 || queryResults.every(q => !q.isLoading && !q.isFetching)
@@ -930,6 +972,22 @@ export default function ReportCard({
       if (wid !== widgetId) return
       const el = gridRef.current
       if (!el) return
+      setPdfError(null)
+
+      // Never export cached figures: refetch every value and the sync freshness,
+      // and refuse to export if any of them fails.
+      let fresh: SyncFreshness[] | undefined
+      try {
+        await queryClient.refetchQueries({ queryKey: ['report-var'], type: 'active' }, { throwOnError: true })
+        await queryClient.refetchQueries({ queryKey: ['report-sync-freshness'], type: 'active' }, { throwOnError: true })
+        fresh = queryClient.getQueryData<SyncFreshness[]>(['report-sync-freshness', syncKeyRef.current])
+      } catch (err) {
+        console.error('[ReportCard] PDF refresh failed', err)
+        setPdfError('PDF not created: some figures could not be recalculated. Check the connection and try again.')
+        return
+      }
+      // Let React paint the refreshed values before capturing.
+      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 
       // Snapshot the widget as shown (live values, As-of) and build the PDF in the
       // browser: no print dialog, no paper-size guessing, nothing clipped.
@@ -937,12 +995,25 @@ export default function ReportCard({
       // scroll* includes elements that overflow the configured grid
       const contentW = Math.max(el.offsetWidth, el.scrollWidth)
       const contentH = Math.max(el.offsetHeight, el.scrollHeight)
+      // Snapshot text renders slightly wider than on screen, so tight nowrap cells
+      // clipped their numbers to "30…". Let cells overflow while capturing.
+      const capStyle = document.createElement('style')
+      capStyle.textContent = '[data-pdf-capture] td{overflow:visible!important;text-overflow:clip!important}'
+      document.head.appendChild(capStyle)
+      el.setAttribute('data-pdf-capture', '')
       let canvas: HTMLCanvasElement
       try {
-        canvas = await toCanvas(el, { width: contentW, height: contentH, pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true })
+        const opts = { width: contentW, height: contentH, pixelRatio: 2, backgroundColor: '#ffffff' }
+        // First pass warms the image/font decode; images (the logo) can be blank on
+        // the first render, notably in Safari — known html-to-image quirk.
+        await toCanvas(el, { ...opts, pixelRatio: 1 })
+        canvas = await toCanvas(el, opts)
       } catch (err) {
         console.error('[ReportCard] PDF snapshot failed', err)
         return
+      } finally {
+        el.removeAttribute('data-pdf-capture')
+        capStyle.remove()
       }
 
       // A4 width for the chosen orientation; page height grows to fit the report.
@@ -950,16 +1021,30 @@ export default function ReportCard({
       const margin = 10
       const imgW = pageW - margin * 2
       const imgH = imgW * (contentH / contentW)
-      const pageH = Math.max(landscape ? 210 : 297, imgH + margin * 2)
+      const staleNow = staleSources(fresh)
+      const top = margin + (staleNow.length ? 6 * staleNow.length + 2 : 0)
+      const footer = 8
+      const pageH = Math.max(landscape ? 210 : 297, top + imgH + footer + margin)
       const pdf = new jsPDF({ unit: 'mm', format: [pageW, pageH], orientation: pageW > pageH ? 'landscape' : 'portrait', compress: true })
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, margin, imgW, imgH)
+      pdf.setFontSize(9)
+      if (staleNow.length) {
+        pdf.setTextColor(185, 28, 28)
+        staleNow.forEach((s, i) => pdf.text(`WARNING — figures may be stale: ${s.source} ${s.reason}.`.replace(/[\u202f\u00a0]/g, ' '), margin, margin + 4 + i * 6))
+      }
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, top, imgW, imgH)
+      pdf.setTextColor(100, 100, 100)
+      pdf.setFontSize(7.5)
+      const asOf = getQueryAsOf()
+      const synced = (fresh || []).map(f => `${f.source} synced ${f.lastSuccessAt ? new Date(f.lastSuccessAt).toLocaleString() : 'never'}`).join(' · ')
+      const t = (x: string) => x.replace(/[\u202f\u00a0]/g, ' ')
+      pdf.text(t(`Generated ${new Date().toLocaleString()} · ${asOf ? `As of ${asOf}` : 'Live'}${synced ? ` · ${synced}` : ''}`), margin, top + imgH + 5)
       const d = asOfNow()
       const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
       pdf.save(`${(title || 'report').replace(/[^\w.-]+/g, '_')}_${stamp}.pdf`)
     }
     window.addEventListener('widget-download-pdf', onDownload)
     return () => window.removeEventListener('widget-download-pdf', onDownload)
-  }, [widgetId, title])
+  }, [widgetId, title, queryClient])
 
   if (!report) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-sm">No report configured. Click the gear icon to open the report builder.</div>
 
@@ -969,6 +1054,13 @@ export default function ReportCard({
 
   return (
     <div className="h-full w-full overflow-auto">
+      {(stale.length > 0 || freshnessQ.isError || pdfError) && (
+        <div role="alert" className="m-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+          {stale.map(s => <div key={s.source}><b>Figures may be stale:</b> {s.source} {s.reason}. Values from this table are not final.</div>)}
+          {freshnessQ.isError && <div><b>Could not verify data freshness.</b> Treat snapshot figures as unverified.</div>}
+          {pdfError && <div>{pdfError}</div>}
+        </div>
+      )}
       <div
         ref={gridRef}
         className="relative"

@@ -410,6 +410,7 @@ let _queryAsOf: string | null = null
 export function setQueryAsOf(d: string | null): void {
   _queryAsOf = d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
 }
+export function getQueryAsOf(): string | null { return _queryAsOf }
 // "Now" for client-side date labels: the As-of day (local midnight) or the real clock.
 export function asOfNow(): Date {
   if (!_queryAsOf) return new Date()
@@ -1227,7 +1228,12 @@ export type QuerySpecRequest = {
   preferLocalDuck?: boolean
 }
 
+export type SyncFreshness = { source: string; hasSyncTask: boolean; lastSuccessAt: string | null; lastRunAt: string | null }
+
 export const QueryApi = {
+  // Last successful sync of the local (DuckDB snapshot) tables a report reads.
+  syncFreshness: (items: { datasourceId: string; source: string }[]) =>
+    http<SyncFreshness[]>(`/datasources/sync-freshness`, { method: 'POST', body: JSON.stringify(items) }),
   querySpec: async (payload: QuerySpecRequest, signal?: AbortSignal) => {
     try {
       const specAny: any = payload?.spec

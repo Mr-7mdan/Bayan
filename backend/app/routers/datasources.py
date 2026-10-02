@@ -88,6 +88,46 @@ def get_db():
         db.close()
 
 
+class SyncFreshnessItem(BaseModel):
+    datasourceId: str
+    source: str
+
+
+@router.post("/sync-freshness")
+def sync_freshness(items: list[SyncFreshnessItem], db: Session = Depends(get_db)) -> list[dict]:
+    """Last successful sync per local (DuckDB) table a report reads.
+
+    Reports flag figures as stale when a snapshot table hasn't synced since the
+    trading day closed. Unauthenticated-safe: only names and times. Only DuckDB sources are returned: live databases are
+    always current. Times are UTC ISO strings; lastSuccessAt is None when the
+    table has no successful run (or no sync task) at all.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for it in items[:200]:
+        ds = db.get(Datasource, it.datasourceId)
+        if not ds or (ds.type or "").lower() != "duckdb":
+            continue
+        table = it.source.split(".")[-1].strip().strip('"')
+        if table.lower() in seen:
+            continue
+        seen.add(table.lower())
+        task_ids = [t.id for t in db.query(SyncTask).filter(SyncTask.dest_table_name.ilike(table)).all()]
+        last_ok = last_run = None
+        if task_ids:
+            ok = (db.query(SyncRun).filter(SyncRun.task_id.in_(task_ids), SyncRun.finished_at.isnot(None),
+                                           or_(SyncRun.error.is_(None), SyncRun.error == ""))
+                  .order_by(SyncRun.finished_at.desc()).first())
+            last = db.query(SyncRun).filter(SyncRun.task_id.in_(task_ids)).order_by(SyncRun.started_at.desc()).first()
+            last_ok = ok.finished_at if ok else None
+            if last:
+                last_run = last.started_at
+        iso = lambda d: d.isoformat() + "Z" if d else None
+        out.append({"source": table, "hasSyncTask": bool(task_ids), "lastSuccessAt": iso(last_ok),
+                    "lastRunAt": iso(last_run)})  # no error text: it carries hosts and file paths
+    return out
+
+
 def _http_for_db_error(e: Exception) -> HTTPException | None:
     try:
         msg = str(e) if e is not None else ""
