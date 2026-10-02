@@ -951,8 +951,16 @@ export default function ReportCard({
       // Page height = scaled content + top/bottom margins + small buffer
       const finalPageH_mm = scaledH_mm + marginMm * 2 + 2
 
-      const pw = window.open('', '_blank', 'width=900,height=700')
-      if (!pw) return
+      // Hidden iframe instead of a popup: no popup blocker, and it survives Safari's
+      // non-blocking print() (the old popup was closed 400ms in, killing the dialog).
+      const frame = document.createElement('iframe')
+      frame.setAttribute('aria-hidden', 'true')
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;'
+      document.body.appendChild(frame)
+      const pw = frame.contentWindow
+      if (!pw) { frame.remove(); return }
+      const cleanup = () => setTimeout(() => frame.remove(), 0)
+      pw.document.open()
       pw.document.write(`<!DOCTYPE html><html class="${htmlClass}"><head><meta charset="utf-8">
 ${styles}
 <style>
@@ -968,8 +976,19 @@ ${styles}
 </div>
 </body></html>`)
       pw.document.close()
-      pw.focus()
-      setTimeout(() => { pw.print(); pw.close() }, 400)
+      // Print once stylesheets/images have loaded, not after a fixed delay.
+      let printed = false
+      const doPrint = () => {
+        if (printed) return
+        printed = true
+        pw.addEventListener('afterprint', cleanup, { once: true })
+        pw.focus()
+        pw.print()
+        setTimeout(cleanup, 60_000) // ponytail: fallback if afterprint never fires
+      }
+      if (pw.document.readyState === 'complete') setTimeout(doPrint, 50)
+      else pw.addEventListener('load', doPrint, { once: true })
+      setTimeout(doPrint, 3000) // load can stall on a slow stylesheet
     }
     window.addEventListener('widget-download-pdf', onDownload)
     return () => window.removeEventListener('widget-download-pdf', onDownload)
