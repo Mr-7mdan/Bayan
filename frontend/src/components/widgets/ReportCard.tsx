@@ -925,74 +925,41 @@ export default function ReportCard({
 
   useEffect(() => {
     if (!widgetId) return
-    function onDownload(e: Event) {
+    async function onDownload(e: Event) {
       const { widgetId: wid, landscape } = (e as CustomEvent).detail || {}
       if (wid !== widgetId) return
       const el = gridRef.current
       if (!el) return
 
-      // Copy current theme class so CSS variables (hsl(var(--border)) etc.) resolve correctly
-      const htmlClass = document.documentElement.className || ''
-      const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-        .map(s => s.outerHTML)
-        .join('\n')
-
-      // A4 dimensions in mm
-      const pageW_mm = landscape ? 297 : 210
-      const marginMm = 10
-      const MM_TO_PX = 96 / 25.4
-      const printableW_px = (pageW_mm - marginMm * 2) * MM_TO_PX
-
-      const contentW = el.offsetWidth
-      const contentH = el.offsetHeight
-      // Scale down to fit page width (never scale up)
-      const scale = Math.min(1, printableW_px / contentW)
-      const scaledH_mm = (contentH * scale) / MM_TO_PX
-      // Page height = scaled content + top/bottom margins + small buffer
-      const finalPageH_mm = scaledH_mm + marginMm * 2 + 2
-
-      // Hidden iframe instead of a popup: no popup blocker, and it survives Safari's
-      // non-blocking print() (the old popup was closed 400ms in, killing the dialog).
-      const frame = document.createElement('iframe')
-      frame.setAttribute('aria-hidden', 'true')
-      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;'
-      document.body.appendChild(frame)
-      const pw = frame.contentWindow
-      if (!pw) { frame.remove(); return }
-      const cleanup = () => setTimeout(() => frame.remove(), 0)
-      pw.document.open()
-      pw.document.write(`<!DOCTYPE html><html class="${htmlClass}"><head><meta charset="utf-8">
-${styles}
-<style>
-  /* margin:0 suppresses browser-added date/URL/page-number headers and footers */
-  @page { size: ${pageW_mm}mm ${finalPageH_mm.toFixed(1)}mm; margin: 0; }
-  html, body { margin: 0; padding: 0; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-</style>
-</head><body>
-<div style="padding:${marginMm}mm;box-sizing:border-box;">
-  <div style="zoom:${scale.toFixed(6)};width:${contentW}px;height:${contentH}px;">
-    ${el.outerHTML}
-  </div>
-</div>
-</body></html>`)
-      pw.document.close()
-      // Print once stylesheets/images have loaded, not after a fixed delay.
-      let printed = false
-      const doPrint = () => {
-        if (printed) return
-        printed = true
-        pw.addEventListener('afterprint', cleanup, { once: true })
-        pw.focus()
-        pw.print()
-        setTimeout(cleanup, 60_000) // ponytail: fallback if afterprint never fires
+      // Snapshot the widget as shown (live values, As-of) and build the PDF in the
+      // browser: no print dialog, no paper-size guessing, nothing clipped.
+      const [{ toCanvas }, { jsPDF }] = await Promise.all([import('html-to-image'), import('jspdf')])
+      // scroll* includes elements that overflow the configured grid
+      const contentW = Math.max(el.offsetWidth, el.scrollWidth)
+      const contentH = Math.max(el.offsetHeight, el.scrollHeight)
+      let canvas: HTMLCanvasElement
+      try {
+        canvas = await toCanvas(el, { width: contentW, height: contentH, pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true })
+      } catch (err) {
+        console.error('[ReportCard] PDF snapshot failed', err)
+        return
       }
-      if (pw.document.readyState === 'complete') setTimeout(doPrint, 50)
-      else pw.addEventListener('load', doPrint, { once: true })
-      setTimeout(doPrint, 3000) // load can stall on a slow stylesheet
+
+      // A4 width for the chosen orientation; page height grows to fit the report.
+      const pageW = landscape ? 297 : 210
+      const margin = 10
+      const imgW = pageW - margin * 2
+      const imgH = imgW * (contentH / contentW)
+      const pageH = Math.max(landscape ? 210 : 297, imgH + margin * 2)
+      const pdf = new jsPDF({ unit: 'mm', format: [pageW, pageH], orientation: pageW > pageH ? 'landscape' : 'portrait', compress: true })
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, margin, imgW, imgH)
+      const d = asOfNow()
+      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+      pdf.save(`${(title || 'report').replace(/[^\w.-]+/g, '_')}_${stamp}.pdf`)
     }
     window.addEventListener('widget-download-pdf', onDownload)
     return () => window.removeEventListener('widget-download-pdf', onDownload)
-  }, [widgetId])
+  }, [widgetId, title])
 
   if (!report) return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-sm">No report configured. Click the gear icon to open the report builder.</div>
 
